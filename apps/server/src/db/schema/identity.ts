@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn, bigint, customType, index, integer, numeric, pgTable,
   primaryKey, text, timestamp, uniqueIndex, uuid,
@@ -55,11 +55,11 @@ export const players = pgTable("players", {
 /** 1:1 with players, kept split for hot-row separation (spec §2.5). */
 export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey().references(() => players.id, { onDelete: "cascade" }),
-  cash: bigint("cash", { mode: "bigint" }).notNull().default(0n),
-  bank: bigint("bank", { mode: "bigint" }).notNull().default(0n),
-  points: bigint("points", { mode: "bigint" }).notNull().default(0n),
-  bullets: bigint("bullets", { mode: "bigint" }).notNull().default(0n),
-  exp: bigint("exp", { mode: "bigint" }).notNull().default(0n),
+  cash: bigint("cash", { mode: "bigint" }).notNull().default(sql`0`),
+  bank: bigint("bank", { mode: "bigint" }).notNull().default(sql`0`),
+  points: bigint("points", { mode: "bigint" }).notNull().default(sql`0`),
+  bullets: bigint("bullets", { mode: "bigint" }).notNull().default(sql`0`),
+  exp: bigint("exp", { mode: "bigint" }).notNull().default(sql`0`),
   health: integer("health").notNull().default(100),
   backfire: integer("backfire").notNull().default(0),
   rankId: uuid("rank_id").references(() => ranks.id, { onDelete: "set null" }),
@@ -98,7 +98,7 @@ export const ranks = pgTable("ranks", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   expRequired: bigint("exp_required", { mode: "bigint" }).notNull(),
-  cashReward: bigint("cash_reward", { mode: "bigint" }).notNull().default(0n),
+  cashReward: bigint("cash_reward", { mode: "bigint" }).notNull().default(sql`0`),
   bulletReward: integer("bullet_reward").notNull().default(0),
   maxHealth: integer("max_health").notNull().default(100),
 }, (t) => ({ expIdx: index("ranks_exp_idx").on(t.expRequired) }));

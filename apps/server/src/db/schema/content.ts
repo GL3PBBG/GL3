@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 export const crimes = pgTable("crimes", {
@@ -9,7 +10,7 @@ export const crimes = pgTable("crimes", {
   maxPayout: bigint("max_payout", { mode: "bigint" }).notNull(),
   minBullets: integer("min_bullets").notNull().default(0),
   maxBullets: integer("max_bullets").notNull().default(0),
-  expReward: bigint("exp_reward", { mode: "bigint" }).notNull().default(0n),
+  expReward: bigint("exp_reward", { mode: "bigint" }).notNull().default(sql`0`),
   minRank: integer("min_rank").notNull().default(0),
   sort: integer("sort").notNull().default(0),
 }, (t) => ({ sortIdx: index("crimes_sort_idx").on(t.sort) }));
@@ -17,10 +18,10 @@ export const crimes = pgTable("crimes", {
 export const locations = pgTable("locations", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
-  travelCost: bigint("travel_cost", { mode: "bigint" }).notNull().default(0n),
+  travelCost: bigint("travel_cost", { mode: "bigint" }).notNull().default(sql`0`),
   travelCooldownSeconds: integer("travel_cooldown_seconds").notNull().default(0),
   bulletStock: integer("bullet_stock").notNull().default(0),
-  bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull().default(0n),
+  bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull().default(sql`0`),
 });
 
 export const cars = pgTable("cars", {

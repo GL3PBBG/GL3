@@ -1,6 +1,8 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDb } from "./helpers/db.js";
+import { players, playerStats } from "../src/db/schema/index.js";
 
 const { db, sql: conn } = testDb();
 
@@ -50,5 +52,37 @@ describe("core schema", () => {
   it("keeps the legacy password columns required by spec §4.3", async () => {
     expect(await columnType("players", "legacy_password_sha256")).toBe("text");
     expect(await columnType("players", "legacy_v2_id")).toBe("integer");
+  });
+
+  /**
+   * Column DDL default was switched from a raw JS `0n` literal to `sql`0`` to work around a
+   * drizzle-kit bug serializing BigInt defaults (see task-4-report.md, fix round 2). Only the
+   * DDL default's *expression* changed — `mode: "bigint"` still governs how the driver reads and
+   * writes the column, so this proves that switch didn't quietly regress into JS `number`
+   * (the exact V2 signed-32-bit ceiling this schema exists to prevent) or a `string`.
+   */
+  it("round-trips player_stats.cash as a JS bigint, not number or string", async () => {
+    const playerId = uuidv7();
+    await db.insert(players).values({ id: playerId, username: `bigint-test-${playerId}` });
+    try {
+      await db.insert(playerStats).values({ playerId });
+      const [defaulted] = await db
+        .select({ cash: playerStats.cash })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, playerId));
+      expect(typeof defaulted?.cash).toBe("bigint");
+      expect(defaulted?.cash).toBe(0n);
+
+      const aboveInt32 = 5_000_000_000n; // > 2^31-1
+      await db.update(playerStats).set({ cash: aboveInt32 }).where(eq(playerStats.playerId, playerId));
+      const [updated] = await db
+        .select({ cash: playerStats.cash })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, playerId));
+      expect(typeof updated?.cash).toBe("bigint");
+      expect(updated?.cash).toBe(aboveInt32);
+    } finally {
+      await db.delete(players).where(eq(players.id, playerId)); // cascades to player_stats
+    }
   });
 });

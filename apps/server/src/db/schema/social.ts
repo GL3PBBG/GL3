@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { players } from "./identity.js";
 import { locations } from "./content.js";
@@ -8,9 +9,9 @@ export const gangs = pgTable("gangs", {
   description: text("description").notNull().default(""),
   info: text("info").notNull().default(""),
   /** V2 kept two balances (G_bank and G_money); both preserved. */
-  bank: bigint("bank", { mode: "bigint" }).notNull().default(0n),
-  cash: bigint("cash", { mode: "bigint" }).notNull().default(0n),
-  bullets: bigint("bullets", { mode: "bigint" }).notNull().default(0n),
+  bank: bigint("bank", { mode: "bigint" }).notNull().default(sql`0`),
+  cash: bigint("cash", { mode: "bigint" }).notNull().default(sql`0`),
+  bullets: bigint("bullets", { mode: "bigint" }).notNull().default(sql`0`),
   level: integer("level").notNull().default(1),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),
   bossPlayerId: uuid("boss_player_id").references((): AnyPgColumn => players.id, { onDelete: "set null" }),
