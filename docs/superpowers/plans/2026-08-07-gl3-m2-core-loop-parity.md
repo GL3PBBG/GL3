@@ -2050,7 +2050,18 @@ import { resetDb, testDb } from "./helpers/db.js";
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 
-beforeEach(async () => { await resetDb(db); await redis.flushdb(); });
+// NEVER `redis.flushdb()`/`flushall()` here. Redis is shared across every test
+// file and every concurrently-running agent; flushing wipes sessions, cooldowns,
+// rate-limit buckets and BullMQ queue state belonging to other files.
+//
+// Leaderboard keys are also GLOBAL, while each test file has its own isolated
+// Postgres database and calls bootTestServer() -> rebuildLeaderboards(). Without
+// namespacing, every file sweeps its own players into the same sorted sets and
+// exact top-N assertions are inherently racy. Leaderboards therefore take a key
+// namespace defaulting to the production names, and bootTestServer() mints a
+// unique prefix per call — the same solution already used for the BullMQ queue
+// name. Clean up only your own namespaced keys.
+beforeEach(async () => { await resetDb(db); await deleteLeaderboardKeys(redis, namespace); });
 afterAll(async () => { await conn.end(); redis.disconnect(); });
 
 const insertPlayer = async (username: string, cash: bigint, exp: bigint): Promise<string> => {
