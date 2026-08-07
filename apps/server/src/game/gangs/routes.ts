@@ -87,6 +87,13 @@ function uniqueViolation(err: unknown): postgres.PostgresError | null {
   return candidate?.code === "23505" ? candidate : null;
 }
 
+function foreignKeyViolation(err: unknown): postgres.PostgresError | null {
+  const candidate = err instanceof postgres.PostgresError ? err
+    : err instanceof Error && err.cause instanceof postgres.PostgresError ? err.cause
+    : null;
+  return candidate?.code === "23503" ? candidate : null;
+}
+
 async function loadGangDto(db: Db, gangId: string): Promise<Record<string, unknown> | null> {
   const [gang] = await db.select().from(gangs).where(eq(gangs.id, gangId));
   if (!gang) return null;
@@ -386,16 +393,34 @@ export function registerGangRoutes(
     if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
     const { gangId } = params.data;
 
+    // Existence before permission: a nonexistent gang must 404, not 403 —
+    // same reasoning as kick, above. GET /api/gangs/:gangId already makes
+    // gang existence public to any authenticated player.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
+
     if (!(await hasGangPermission(db, gangId, requesterId, "grant_permissions"))) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
-    await db.transaction(async (tx) => {
-      await tx.insert(gangPermissions)
-        .values({ gangId, playerId: body.data.playerId, permission: body.data.permission })
-        .onConflictDoNothing();
-      await appendGangLog(tx, gangId, requesterId, `granted ${body.data.permission} to ${body.data.playerId}`);
-    });
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(gangPermissions)
+          .values({ gangId, playerId: body.data.playerId, permission: body.data.permission })
+          .onConflictDoNothing();
+        await appendGangLog(tx, gangId, requesterId, `granted ${body.data.permission} to ${body.data.playerId}`);
+      });
+    } catch (err) {
+      // body.data.playerId is only shape-validated (IdSchema = uuid), not
+      // checked for existence — a syntactically valid but nonexistent
+      // player id hits gang_permissions.player_id's FK and must come back
+      // as a clean 4xx, not an uncaught 500 (NOTES.md: "an unvalidated
+      // UUID param reaches Postgres and 500s instead of returning a clean
+      // 400"). hasGangPermission's membership join above only gates the
+      // *requester*, not this target, so it doesn't intercept this case.
+      if (foreignKeyViolation(err)) return reply.code(404).send({ error: "player_not_found" });
+      throw err;
+    }
     return reply.code(204).send();
   });
 
@@ -405,6 +430,11 @@ export function registerGangRoutes(
     const params = PermissionParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
     const { gangId, playerId: targetId, permission } = params.data;
+
+    // Existence before permission: same reasoning as kick and PUT
+    // /permissions, above.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
 
     if (!(await hasGangPermission(db, gangId, requesterId, "grant_permissions"))) {
       return reply.code(403).send({ error: "forbidden" });
