@@ -1,0 +1,5 @@
+:root { color-scheme: dark; --bg: #101014; --fg: #e6e6ea; --accent: #c8963e; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+button { background: var(--accent); color: #17171c; border: 0; border-radius: 4px; padding: 0.4rem 0.9rem; cursor: pointer; }
+button:disabled { opacity: 0.45; cursor: default; }
+input { background: #17171c; color: var(--fg); border: 1px solid #2a2a30; border-radius: 4px; padding: 0.4rem 0.6rem; }
