@@ -4,6 +4,7 @@ export * from "./events.js";
 export * from "./ws.js";
 export * from "./dto/auth.js";
 export * from "./dto/bank.js";
+export * from "./dto/bullets.js";
 export * from "./dto/crime.js";
 export * from "./dto/jail.js";
 export * from "./dto/rank.js";

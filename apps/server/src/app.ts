@@ -6,6 +6,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { registerBankRoutes } from "./game/bank/routes.js";
+import { registerBulletsRoutes } from "./game/bullets/routes.js";
 import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerRankRoutes } from "./game/ranks/routes.js";
@@ -24,6 +25,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   registerBankRoutes(app, deps.db, deps.redis, requireAuth);
+  registerBulletsRoutes(app, deps.db, deps.redis, requireAuth);
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerRankRoutes(app, deps.db, requireAuth);
