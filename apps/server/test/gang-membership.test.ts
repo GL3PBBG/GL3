@@ -88,6 +88,14 @@ describe("DELETE /api/gangs/:gangId/members/:playerId", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("404s kicking against a nonexistent gang, not 403 — existence is checked before permission", async () => {
+    const res = await app.inject({
+      method: "DELETE", url: "/api/gangs/00000000-0000-0000-0000-000000000000/members/" + memberId,
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
   it("404s kicking a player who belongs to a different gang, and does not clear their real membership", async () => {
     const otherBoss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
     const { token: otherBossToken, playerId: otherBossId } = otherBoss.json();
