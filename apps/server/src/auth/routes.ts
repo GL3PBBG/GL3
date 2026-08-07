@@ -13,6 +13,7 @@ import { createSession, destroySession, readSession } from "./session.js";
 
 declare module "fastify" {
   interface FastifyRequest { playerId?: string }
+  interface FastifyInstance { requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void> }
 }
 
 function bearer(request: FastifyRequest): string | null {

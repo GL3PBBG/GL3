@@ -1,11 +1,18 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
+import { seedCrimes } from "./db/seed.js";
+import { startCrimeWorker } from "./game/crimes/worker.js";
+import { createCrimeQueue } from "./queue/index.js";
 import { createRedis } from "./redis.js";
 
 const config = loadConfig(process.env);
 const { db } = createDb(config.databaseUrl);
 const redis = createRedis(config.redisUrl);
-const app = await buildApp(config, { db, redis });
+
+const crimeQueue = createCrimeQueue(createRedis(config.redisUrl));
+await seedCrimes(db);
+startCrimeWorker({ db, connection: createRedis(config.redisUrl), publisher: createRedis(config.redisUrl) });
+const app = await buildApp(config, { db, redis, crimeQueue });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
