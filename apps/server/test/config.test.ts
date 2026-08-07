@@ -24,4 +24,12 @@ describe("loadConfig", () => {
   it("defaults CORS origins to the vite dev server and never to a wildcard", () => {
     expect(loadConfig(valid).corsOrigins).toEqual(["http://localhost:5173"]);
   });
+
+  it("rejects a bare wildcard CORS_ORIGINS", () => {
+    expect(() => loadConfig({ ...valid, CORS_ORIGINS: "*" })).toThrow(/wildcard/);
+  });
+
+  it("rejects a wildcard mixed into an otherwise valid allowlist", () => {
+    expect(() => loadConfig({ ...valid, CORS_ORIGINS: "http://a.com,*" })).toThrow(/wildcard/);
+  });
 });
