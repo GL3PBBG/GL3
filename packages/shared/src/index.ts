@@ -7,3 +7,4 @@ export * from "./dto/bank.js";
 export * from "./dto/crime.js";
 export * from "./dto/jail.js";
 export * from "./dto/rank.js";
+export * from "./dto/travel.js";

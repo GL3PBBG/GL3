@@ -1,6 +1,6 @@
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.js";
-import { crimes, ranks } from "./schema/index.js";
+import { crimes, locations, ranks } from "./schema/index.js";
 
 export async function seedCrimes(db: Db): Promise<void> {
   const existing = await db.select({ id: crimes.id }).from(crimes).limit(1);
@@ -23,5 +23,16 @@ export async function seedRanks(db: Db): Promise<void> {
     { id: uuidv7(), name: "Capo", expRequired: 500n, cashReward: 2500n, bulletReward: 15, maxHealth: 125 },
     { id: uuidv7(), name: "Underboss", expRequired: 2000n, cashReward: 10000n, bulletReward: 40, maxHealth: 150 },
     { id: uuidv7(), name: "Boss", expRequired: 8000n, cashReward: 50000n, bulletReward: 100, maxHealth: 200 },
+  ]);
+}
+
+export async function seedLocations(db: Db): Promise<void> {
+  const existing = await db.select({ id: locations.id }).from(locations).limit(1);
+  if (existing.length > 0) return;
+
+  await db.insert(locations).values([
+    { id: uuidv7(), name: "New York", travelCost: 0n, travelCooldownSeconds: 30, bulletStock: 1000, bulletCost: 3n },
+    { id: uuidv7(), name: "Chicago", travelCost: 100n, travelCooldownSeconds: 60, bulletStock: 500, bulletCost: 5n },
+    { id: uuidv7(), name: "Miami", travelCost: 250n, travelCooldownSeconds: 120, bulletStock: 300, bulletCost: 8n },
   ]);
 }

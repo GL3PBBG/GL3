@@ -9,6 +9,7 @@ import { registerBankRoutes } from "./game/bank/routes.js";
 import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerRankRoutes } from "./game/ranks/routes.js";
+import { registerTravelRoutes } from "./game/travel/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
@@ -26,6 +27,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerRankRoutes(app, deps.db, requireAuth);
+  registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   return app;
