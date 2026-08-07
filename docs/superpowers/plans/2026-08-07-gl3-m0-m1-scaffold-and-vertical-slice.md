@@ -241,10 +241,16 @@ coverage/
 
 One runner across all workspaces so root `npm test` covers everything.
 
+Vitest resolves **literal** (non-glob) workspace entries eagerly and errors if the
+directory is missing, so `apps/server` cannot be listed until Task 3 creates it —
+otherwise `npm run verify` fails on a fresh clone of this commit, which is exactly
+M0's acceptance criterion. Task 3 adds the entry alongside the package.
+
 ```ts
 import { defineWorkspace } from "vitest/config";
 
-export default defineWorkspace(["packages/*", "apps/server"]);
+// apps/server is appended in Task 3, when that package first exists.
+export default defineWorkspace(["packages/*"]);
 ```
 
 - [ ] **Step 8: Create the `@gl3/shared` package**
@@ -634,7 +640,11 @@ The app factory returns a Fastify instance **without calling `listen`**. That si
 - Create: `apps/server/src/app.ts`
 - Create: `apps/server/src/index.ts`
 - Modify: `tsconfig.json` (add the server project reference)
-- Modify: `vitest.workspace.ts` — no change needed, `apps/server` is already listed
+- Modify: `vitest.workspace.ts` — append `"apps/server"`, which Task 1 deliberately left out because the directory did not exist yet:
+
+```ts
+export default defineWorkspace(["packages/*", "apps/server"]);
+```
 - Test: `apps/server/test/config.test.ts`, `apps/server/test/health.test.ts`
 
 **Interfaces:**
