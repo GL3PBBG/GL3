@@ -769,8 +769,15 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   SESSION_TTL: z.coerce.number().int().positive().default(604800),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  /** Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard. */
-  CORS_ORIGINS: z.string().default("http://localhost:5173"),
+  /**
+   * Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard.
+   * The refine is load-bearing: without it an operator can set CORS_ORIGINS=*
+   * and silently defeat the guardrail. Reject `*` bare or anywhere in the list.
+   */
+  CORS_ORIGINS: z.string().default("http://localhost:5173").refine(
+    (value) => !value.split(",").map((o) => o.trim()).includes("*"),
+    { message: "CORS_ORIGINS must not contain '*' — spec §7 requires a strict allowlist" },
+  ),
 });
 
 export interface Config {
@@ -1738,7 +1745,11 @@ export async function destroySession(redis: Redis, token: string): Promise<void>
 
 - [ ] **Step 3: Write `rate-limit.ts`**
 
-Spec §7 requires a Redis token bucket on auth endpoints. `INCR` + `EXPIRE` on first hit is the cheap correct form — a fixed window, atomic without Lua because `INCR` returning 1 uniquely identifies the window's first request.
+Spec §7 requires a Redis token bucket on auth endpoints.
+
+**Do NOT write `INCR` followed by a conditional `EXPIRE`.** That form has a real lockout bug: if the process dies or the connection drops between the two commands, the key survives with no TTL, and because later requests never re-enter the `hits === 1` branch, nothing ever applies one — that IP is rate-limited on that endpoint *forever*, until someone deletes the key by hand.
+
+Create the key and its TTL atomically with `SET … EX … NX`, then `INCR` unconditionally. If `SET` fails the function throws before `INCR` runs, so no key can exist without a TTL. Two concurrent first-requests still count correctly: one wins the `SET`, the other no-ops, and both `INCR`.
 
 ```ts
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -1754,8 +1765,9 @@ export interface TokenBucketOptions {
 export function tokenBucket(redis: Redis, opts: TokenBucketOptions) {
   return async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const bucketKey = `ratelimit:${opts.name}:${request.ip}`;
+    // Key + TTL created atomically; NX makes this a no-op once the window exists.
+    await redis.set(bucketKey, 0, "EX", opts.windowSeconds, "NX");
     const hits = await redis.incr(bucketKey);
-    if (hits === 1) await redis.expire(bucketKey, opts.windowSeconds);
     if (hits > opts.limit) {
       const ttl = await redis.ttl(bucketKey);
       reply.header("retry-after", String(Math.max(ttl, 1)));
@@ -1958,9 +1970,16 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db,
         });
         await tx.insert(playerStats).values({ playerId });
       });
-    } catch {
-      // Unique index is the real arbiter; the pre-check above only saves a hash round.
-      return reply.code(409).send({ error: "username_taken" });
+    } catch (error) {
+      // The unique index is the real arbiter; the pre-check above only saves a hash round.
+      // Narrow to SQLSTATE 23505 and branch on the constraint — a blanket catch would
+      // report an email conflict as `username_taken` and disguise a DB outage as a 409.
+      // NOTE: drizzle wraps the driver error in DrizzleQueryError with the real
+      // PostgresError at `.cause`, so the guard must check both levels.
+      const violated = uniqueViolationConstraint(error);
+      if (violated === "players_email_unique") return reply.code(409).send({ error: "email_taken" });
+      if (violated === "players_username_unique") return reply.code(409).send({ error: "username_taken" });
+      throw error; // genuine failure — let it surface as a 500
     }
 
     const token = await createSession(redis, playerId, config.sessionTtlSeconds);
@@ -2073,7 +2092,11 @@ Update `apps/server/test/health.test.ts` to pass deps — it currently calls `bu
 - [ ] **Step 8: Run the auth tests to verify they pass**
 
 Run: `npx vitest run apps/server/test/auth.test.ts`
-Expected: PASS, 8 tests. If the two legacy tests fail, re-check that `legacyV2Id` is read from the DB row and not confused with `players.id`.
+Expected: PASS, 7 tests (3 register, 3 legacy login, 1 me). If the two legacy tests fail, re-check that `legacyV2Id` is read from the DB row and not confused with `players.id`.
+
+Two additions the hardening pass proved necessary:
+- `requireAuth`'s `reply` parameter must be typed as Fastify's real `FastifyReply`. The inline structural type `{ code: (n) => { send: (b) => Promise<void> } }` fails strict typecheck on Fastify 5, whose `send()` returns `FastifyReply` rather than `Promise<void>`.
+- Clear the register/login rate-limit buckets in `beforeEach`. Registration is capped at 5/hour, and a test file with more than five registrations will otherwise start 429-ing partway through — a confusing failure that looks like broken auth.
 
 - [ ] **Step 9: Run the full gate and commit**
 
