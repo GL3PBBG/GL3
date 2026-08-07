@@ -2672,7 +2672,11 @@ export async function subscribeToEvents(subscriber: Redis, handler: EventHandler
 
 - [ ] **Step 3: Write the queue registry**
 
-`apps/server/src/queue/index.ts`. `removeOnComplete` keeps Redis from growing without bound; `attempts: 3` is safe precisely because the seed lives in the payload.
+`apps/server/src/queue/index.ts`. `removeOnComplete` keeps Redis from growing without bound.
+
+**Do not reason that `attempts: 3` is safe merely because the seed lives in the payload.** That is false, and it was a real Critical defect in an earlier draft of this plan. Seed-determinism guarantees a retry produces the *same outcome*; it says nothing about whether the side effects of an already-committed attempt are safe to re-run. BullMQ is at-least-once: if the worker commits its transaction and then dies — or merely fails to publish — the retry re-runs the whole handler and credits the payout a **second** time, with duplicate `transactions` and `crime_log` rows.
+
+Any worker that mutates the economy therefore needs an **idempotency key tied to the job**, not just a seed. The pattern used here: `crime_log` carries a `job_id` with a UNIQUE constraint, and the transaction inserts that row *first*; a unique violation means this job already ran, so the handler skips the credit entirely.
 
 ```ts
 import { Queue } from "bullmq";
@@ -2895,7 +2899,11 @@ export function registerCrimeRoutes(
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
-    const { crimeId } = request.params as { crimeId: string };
+    // Route params are an external boundary like any other — a non-UUID id would
+    // otherwise reach Postgres and fail at the driver as a 500 instead of a 400.
+    const params = z.object({ crimeId: IdSchema }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_crime_id" });
+    const { crimeId } = params.data;
 
     // Look the crime up BEFORE claiming the cooldown so a typo costs nothing.
     const [crime] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
@@ -2913,7 +2921,14 @@ export function registerCrimeRoutes(
       const job = await queue.add("commit", { playerId, crimeId, seed: newSeed() });
       return reply.code(202).send({ jobId: job.id ?? "", accepted: true });
     } catch (error) {
-      await releaseCooldown(redis, key); // don't strand the player behind a cooldown
+      // Don't strand the player behind a cooldown they never got to use.
+      // The release is itself best-effort: if Redis is also failing, its exception
+      // must not replace the original error and hide why the enqueue failed.
+      try {
+        await releaseCooldown(redis, key);
+      } catch (releaseError) {
+        request.log.error({ err: releaseError, key }, "failed to release cooldown after enqueue failure");
+      }
       throw error;
     }
   });
