@@ -136,6 +136,41 @@ describe("PUT /api/gangs/:gangId/permissions", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  it("refuses a permission granted to a non-member — a stale/dangling grant confers no authority", async () => {
+    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", password: "hunter2hunter2" } });
+    const { token: outsiderToken, playerId: outsiderId } = outsider.json();
+
+    const grant = await app.inject({
+      method: "PUT", url: `/api/gangs/${gangId}/permissions`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { playerId: outsiderId, permission: "kick" },
+    });
+    expect(grant.statusCode).toBe(204);
+
+    const kick = await app.inject({
+      method: "DELETE", url: `/api/gangs/${gangId}/members/${memberId}`, headers: { authorization: `Bearer ${outsiderToken}` },
+    });
+    expect(kick.statusCode).toBe(403);
+    const [stats] = await db.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, memberId));
+    expect(stats?.gangId).toBe(gangId);
+  });
+
+  it("404s a nonexistent gang, not 403 — existence is checked before permission", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/gangs/00000000-0000-0000-0000-000000000000/permissions",
+      headers: { authorization: `Bearer ${bossToken}` }, payload: { playerId: memberId, permission: "kick" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("4xxs a syntactically valid but nonexistent player id instead of 500ing on the FK violation", async () => {
+    const res = await app.inject({
+      method: "PUT", url: `/api/gangs/${gangId}/permissions`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { playerId: "00000000-0000-0000-0000-000000000000", permission: "kick" },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
+  });
 });
 
 describe("DELETE /api/gangs/:gangId/permissions/:playerId/:permission", () => {
@@ -149,5 +184,13 @@ describe("DELETE /api/gangs/:gangId/permissions/:playerId/:permission", () => {
     });
     expect(res.statusCode).toBe(204);
     expect(await db.select().from(gangPermissions)).toHaveLength(0);
+  });
+
+  it("404s a nonexistent gang, not 403 — existence is checked before permission", async () => {
+    const res = await app.inject({
+      method: "DELETE", url: "/api/gangs/00000000-0000-0000-0000-000000000000/permissions/" + memberId + "/kick",
+      headers: { authorization: `Bearer ${bossToken}` },
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
