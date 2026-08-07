@@ -6,6 +6,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { registerCrimeRoutes } from "./game/crimes/routes.js";
+import { registerJailRoutes } from "./game/jail/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
@@ -20,6 +21,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
+  registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   return app;

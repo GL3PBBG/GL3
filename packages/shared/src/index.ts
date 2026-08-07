@@ -4,3 +4,4 @@ export * from "./events.js";
 export * from "./ws.js";
 export * from "./dto/auth.js";
 export * from "./dto/crime.js";
+export * from "./dto/jail.js";
