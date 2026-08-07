@@ -3,19 +3,28 @@ import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { legacyHash } from "../src/auth/password.js";
+import { loadConfig } from "../src/config.js";
 import { players, playerStats } from "../src/db/schema/index.js";
+import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const redis = createRedis(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 
 beforeEach(async () => {
   await resetDb(db);
+  // This file exercises register/login repeatedly per test; clear their
+  // rate-limit buckets so accumulated hits from earlier tests (or earlier
+  // runs against the same Redis instance) never trip a 429 here. The
+  // limiter's own counting/TTL/429 behaviour has dedicated coverage in
+  // rate-limit.test.ts.
+  await redis.del("ratelimit:register:127.0.0.1", "ratelimit:login:127.0.0.1");
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 });
-afterAll(async () => { await closeServer(); await conn.end(); });
+afterAll(async () => { await closeServer(); await conn.end(); redis.disconnect(); });
 
 describe("POST /api/auth/register", () => {
   it("creates a player with stats and returns a session token", async () => {
@@ -37,6 +46,20 @@ describe("POST /api/auth/register", () => {
     await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
     const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "vito", password: "hunter2hunter2" } });
     expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "username_taken" });
+  });
+
+  it("rejects a duplicate email with email_taken, not username_taken", async () => {
+    await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" },
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Michael", email: "vito@family.test", password: "hunter2hunter2" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "email_taken" });
   });
 
   it("rejects a short password with 400", async () => {
@@ -82,6 +105,26 @@ describe("POST /api/auth/login — legacy V2 upgrade (SPEC §4.3)", () => {
     expect(res.statusCode).toBe(401);
     const [row] = await db.select().from(players).where(sql`${players.id} = ${legacyPlayerId}`);
     expect(row?.legacyPasswordSha256).not.toBeNull();
+  });
+});
+
+describe("POST /api/auth/login — username-enumeration resistance", () => {
+  it("returns byte-identical 401s for an unknown username and a wrong password", async () => {
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
+
+    const unknownUser = await app.inject({
+      method: "POST", url: "/api/auth/login",
+      payload: { username: "NoSuchPlayer", password: "hunter2hunter2" },
+    });
+    const wrongPassword = await app.inject({
+      method: "POST", url: "/api/auth/login",
+      payload: { username: "Vito", password: "wrong-password" },
+    });
+
+    expect(unknownUser.statusCode).toBe(401);
+    expect(wrongPassword.statusCode).toBe(401);
+    expect(unknownUser.statusCode).toBe(wrongPassword.statusCode);
+    expect(unknownUser.body).toBe(wrongPassword.body);
   });
 });
 
