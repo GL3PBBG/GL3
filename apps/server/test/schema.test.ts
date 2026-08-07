@@ -85,4 +85,60 @@ describe("core schema", () => {
       await db.delete(players).where(eq(players.id, playerId)); // cascades to player_stats
     }
   });
+
+  /**
+   * Table/column-existence and data-type checks above would not notice a
+   * migration that silently dropped a foreign key, an index, or downgraded
+   * an ON DELETE rule. Hand-enumerating all ~43 FKs and ~25 indexes would be
+   * unwieldy and would itself need updating every time a later task adds a
+   * table, so this asserts the *counts* (which move only when the schema
+   * genuinely changes) plus a targeted sample of high-value constraints:
+   * one CASCADE FK (players -> player_stats, the hot-row split this schema
+   * exists to support), one SET NULL FK (players.role_id, a nullable
+   * reference that must not take the whole row down with it), and one
+   * leaderboard-shaped index (player_stats.exp, used to rank players).
+   */
+  it("keeps every foreign key and its ON DELETE rule intact", async () => {
+    const rows = await db.execute<{ confdeltype: string; count: string }>(sql`
+      SELECT confdeltype, count(*)::text AS count
+      FROM pg_constraint c
+      JOIN pg_namespace n ON n.oid = c.connamespace
+      WHERE c.contype = 'f' AND n.nspname = 'public'
+      GROUP BY confdeltype
+    `);
+    const byRule = Object.fromEntries(rows.map((r) => [r.confdeltype, Number(r.count)]));
+    const totalForeignKeys = Object.values(byRule).reduce((sum, n) => sum + n, 0);
+
+    expect(totalForeignKeys).toBe(43);
+    expect(byRule["c"]).toBe(27); // ON DELETE CASCADE
+    expect(byRule["n"]).toBe(16); // ON DELETE SET NULL
+
+    const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
+      SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'
+    `);
+    expect(cascadeSample?.confdeltype).toBe("c");
+
+    const [setNullSample] = await db.execute<{ confdeltype: string }>(sql`
+      SELECT confdeltype FROM pg_constraint WHERE conname = 'players_role_id_roles_id_fk'
+    `);
+    expect(setNullSample?.confdeltype).toBe("n");
+  });
+
+  it("keeps every non-primary-key index, including the leaderboard sample", async () => {
+    const [{ count }] = await db.execute<{ count: string }>(sql`
+      SELECT count(*)::text AS count
+      FROM pg_indexes i
+      WHERE i.schemaname = 'public'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.contype = 'p' AND c.conname = i.indexname
+      )
+    `);
+    expect(Number(count)).toBe(25);
+
+    const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
+      SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
+    `);
+    expect(leaderboardIndex?.indexdef).toContain("(exp)");
+  });
 });

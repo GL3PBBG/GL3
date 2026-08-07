@@ -29,8 +29,11 @@ describe("V2 legacy passwords (SPEC §1.1 / §4.3)", () => {
     expect(legacyHash(42, "hunter2")).toBe(expected);
   });
 
-  it("concatenates the id as a string prefix, not as an added number", () => {
-    // Guards against a `legacyV2Id + plaintext` numeric-coercion bug.
+  it("concatenates the id as a string prefix, not as a suffix", () => {
+    // `42 + "hunter2"` string-coerces to the same "42hunter2" the template
+    // literal produces, so numeric-vs-string coercion isn't what this test
+    // guards against — it guards against the id landing on the wrong end of
+    // the string, e.g. a `plaintext + legacyV2Id` ordering bug.
     expect(legacyHash(42, "hunter2")).not.toBe(createHash("sha256").update("hunter242").digest("hex"));
   });
 
