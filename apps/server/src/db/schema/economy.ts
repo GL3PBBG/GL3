@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
 import { balanceKind } from "./enums.js";
 import { players } from "./identity.js";
@@ -38,8 +39,8 @@ export const properties = pgTable("properties", {
   locationId: uuid("location_id").notNull().references(() => locations.id, { onDelete: "cascade" }),
   pluginId: text("plugin_id").notNull(),
   ownerPlayerId: uuid("owner_player_id").references(() => players.id, { onDelete: "set null" }),
-  cost: bigint("cost", { mode: "bigint" }).notNull().default(0n),
-  profit: bigint("profit", { mode: "bigint" }).notNull().default(0n),
+  cost: bigint("cost", { mode: "bigint" }).notNull().default(sql`0`),
+  profit: bigint("profit", { mode: "bigint" }).notNull().default(sql`0`),
 }, (t) => ({ locationIdx: index("properties_location_idx").on(t.locationId) }));
 
 export const crimeLog = pgTable("crime_log", {
@@ -47,6 +48,6 @@ export const crimeLog = pgTable("crime_log", {
   playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
   crimeId: uuid("crime_id").notNull().references(() => crimes.id, { onDelete: "cascade" }),
   success: boolean("success").notNull(),
-  payout: bigint("payout", { mode: "bigint" }).notNull().default(0n),
+  payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ playerIdx: index("crime_log_player_idx").on(t.playerId, t.createdAt) }));
