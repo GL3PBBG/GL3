@@ -2762,11 +2762,15 @@ beforeEach(async () => {
 
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
   crimeId = first!.id;
+  auth = { authorization: `Bearer ${token}` };
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
-const auth = { authorization: `Bearer ${token}` };
+// MUST be `let`, reassigned in beforeEach. A top-level `const` here captures
+// `token` as undefined at module-load time, before beforeEach ever runs, and
+// every request then goes out unauthenticated.
+let auth: { authorization: string };
 
 const waitForEvent = (): Promise<unknown> =>
   new Promise((resolve) => {
@@ -2862,7 +2866,7 @@ export const DEFAULT_CRIME_CHANCE = "35.00";
 
 export function registerCrimeRoutes(
   app: FastifyInstance, db: Db, redis: Redis, queue: Queue<CrimeJobData>,
-  requireAuth: (request: FastifyRequest, reply: never) => Promise<void>,
+  requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
 ): void {
   app.get("/api/crimes", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
@@ -3006,7 +3010,7 @@ export interface AppDeps { db: Db; redis: Redis; crimeQueue: Queue<CrimeJobData>
 and inside `buildApp`, after `registerAuthRoutes(...)`:
 
 ```ts
-const requireAuth = app.requireAuth as (request: FastifyRequest, reply: never) => Promise<void>;
+const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
 registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
 ```
 
