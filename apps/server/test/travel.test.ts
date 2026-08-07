@@ -1,4 +1,3 @@
-import { GameEventSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +8,7 @@ import { AlreadyAtLocationError, LocationNotFoundError, performTravel } from "..
 import { InsufficientFundsError } from "../src/economy/ledger.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -35,14 +35,16 @@ afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconne
 describe("performTravel", () => {
   it("debits the travel cost, moves the player, and publishes player.travelled with a null fromLocationId the first time", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
-    const received = new Promise((resolve) => {
-      subscriber.once("message", (channel, raw) => { if (channel === GAME_EVENTS_CHANNEL) resolve(JSON.parse(raw)); });
-    });
+    // `game:events` is a global channel shared by every test file running in
+    // parallel (e.g. bullets.test.ts also publishes on it) — a bare
+    // `once("message")` resolves on whichever file's event lands first and
+    // can grab someone else's payload. Filter on this test's own actor.
+    const received = awaitOwnEvent(subscriber, playerId);
 
     const result = await performTravel(db, redis, playerId, chicagoId);
     expect(result).toEqual({ locationId: chicagoId, cash: "900" });
 
-    const event = GameEventSchema.parse(await received);
+    const event = await received;
     expect(event.type).toBe("player.travelled");
     if (event.type !== "player.travelled") throw new Error("unreachable");
     expect(event.fromLocationId).toBeNull();

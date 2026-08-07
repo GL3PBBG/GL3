@@ -8,6 +8,7 @@ import { crimes, playerStats, transactions } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -46,23 +47,6 @@ beforeEach(async () => {
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); redis.disconnect(); });
-
-// `game:events` is a global channel shared by every test file running in
-// parallel (e.g. ws.test.ts also commits crimes on it) — a bare
-// `once("message")` here would resolve on whichever file's event lands
-// first and could grab someone else's crime.resolved. Keep listening until
-// one actually names this test's own actor.
-const waitForEvent = (expectedActorId: string): Promise<unknown> =>
-  new Promise((resolve) => {
-    const onMessage = (channel: string, raw: string): void => {
-      if (channel !== GAME_EVENTS_CHANNEL) return;
-      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
-      if (!parsed.success || parsed.data.actorId !== expectedActorId) return;
-      subscriber.off("message", onMessage);
-      resolve(parsed.data);
-    };
-    subscriber.on("message", onMessage);
-  });
 
 describe("GET /api/crimes", () => {
   it("lists crimes with this player's chance and cooldown", async () => {
@@ -110,7 +94,7 @@ describe("POST /api/crimes/:crimeId/commit", () => {
 
   it("resolves in a worker, ledgers the payout, and publishes crime.resolved", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
-    const received = waitForEvent(playerId);
+    const received = awaitOwnEvent(subscriber, playerId);
 
     const res = await app.inject({ method: "POST", url: `/api/crimes/${crimeId}/commit`, headers: auth });
     expect(res.statusCode).toBe(202);
@@ -158,7 +142,15 @@ describe("processCrimeJob — jail and rank-up wiring", () => {
 
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     const events: unknown[] = [];
-    subscriber.on("message", (channel, raw) => { if (channel === GAME_EVENTS_CHANNEL) events.push(JSON.parse(raw)); });
+    // `game:events` is a global channel shared by every test file running in
+    // parallel — filter on this test's own actor, not just channel name, so
+    // a concurrent file's crime.resolved for a different player can't be
+    // mistaken below for this test's own event when matching by type alone.
+    subscriber.on("message", (channel, raw) => {
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.actorId === playerId) events.push(parsed.data);
+    });
 
     // Brute-force a seed that both fails the crime and rolls under its 40%
     // jail chance — deterministic once found, cheap since createRng is a
