@@ -2,6 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import type { Queue } from "bullmq";
+import { IdSchema } from "@gl3/shared";
+import { z } from "zod";
 import type { Db } from "../../db/client.js";
 import { crimes, playerCrimeSkill } from "../../db/schema/index.js";
 import { acquireCooldown, cooldownKey, peekCooldown, releaseCooldown } from "../cooldown.js";
@@ -10,6 +12,8 @@ import type { CrimeJobData } from "../../queue/index.js";
 
 /** V2 shipped a default ladder starting at 35% (spec §1.2 US_crimes default string). */
 export const DEFAULT_CRIME_CHANCE = "35.00";
+
+const CommitCrimeParamsSchema = z.object({ crimeId: IdSchema });
 
 export function registerCrimeRoutes(
   app: FastifyInstance, db: Db, redis: Redis, queue: Queue<CrimeJobData>,
@@ -45,7 +49,9 @@ export function registerCrimeRoutes(
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
-    const { crimeId } = request.params as { crimeId: string };
+    const parsedParams = CommitCrimeParamsSchema.safeParse(request.params);
+    if (!parsedParams.success) return reply.code(400).send({ error: "invalid_request" });
+    const { crimeId } = parsedParams.data;
 
     // Look the crime up BEFORE claiming the cooldown so a typo costs nothing.
     const [crime] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
@@ -63,7 +69,18 @@ export function registerCrimeRoutes(
       const job = await queue.add("commit", { playerId, crimeId, seed: newSeed() });
       return reply.code(202).send({ jobId: job.id ?? "", accepted: true });
     } catch (error) {
-      await releaseCooldown(redis, key); // don't strand the player behind a cooldown
+      try {
+        await releaseCooldown(redis, key); // don't strand the player behind a cooldown
+      } catch (releaseError) {
+        // If the compensating release itself throws, letting it replace `error`
+        // would lose the diagnostic for the real failure AND still leave the
+        // cooldown stuck — the exact outcome this catch exists to prevent.
+        // Log and swallow so the original enqueue error always propagates.
+        request.log.error(
+          { err: releaseError, playerId, crimeId },
+          "failed to release cooldown after enqueue failure",
+        );
+      }
       throw error;
     }
   });

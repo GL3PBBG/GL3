@@ -89,7 +89,7 @@ describe("core schema", () => {
   /**
    * Table/column-existence and data-type checks above would not notice a
    * migration that silently dropped a foreign key, an index, or downgraded
-   * an ON DELETE rule. Hand-enumerating all ~43 FKs and ~25 indexes would be
+   * an ON DELETE rule. Hand-enumerating all ~43 FKs and ~26 indexes would be
    * unwieldy and would itself need updating every time a later task adds a
    * table, so this asserts the *counts* (which move only when the schema
    * genuinely changes) plus a targeted sample of high-value constraints:
@@ -134,7 +134,7 @@ describe("core schema", () => {
         WHERE c.contype = 'p' AND c.conname = i.indexname
       )
     `);
-    expect(Number(count)).toBe(25);
+    expect(Number(count)).toBe(26);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
