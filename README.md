@@ -78,9 +78,23 @@ and nulls `legacy_password_sha256`. Players never notice, and nobody is forced t
 - **M1 Auth + vertical slice** — done: register/login with argon2id, sessions, and the full
   commit-crime slice end to end (HTTP → Redis cooldown → BullMQ → Postgres transaction → pub/sub →
   WebSocket → React live feed), verified manually in a browser.
-- **M2 Core loop parity** and **M3 Social** — not built yet; implementation plans exist under
+- **M2 Core loop parity** — done: jail, exp-driven ranks, bank deposit/withdraw, travel, the
+  bullets shop, and Redis leaderboards. The economy invariant (`sum(ledger) == balance` across
+  1000 randomized ops) is enforced by `apps/server/test/economy-invariant.test.ts`.
+- **M3 Social** — not built yet; a 10-task implementation plan exists under
   `docs/superpowers/plans/`.
-- **M4 Migration CLI** and **M5 Plugin SDK** — not built yet, and not yet planned.
+- **M4 Migration CLI** — not built yet; a 33-task plan exists. Its tests need a MySQL-compatible
+  server for the V2 fixture (see `docs/STATUS.md`).
+- **M5 Plugin SDK** — not built yet, and not yet planned.
+
+Suite: 22 files / 126 tests.
 
 Casino, forum, membership, detectives, bounties, kill/hospital, properties, and car theft have
 schema but no gameplay yet, by design.
+
+## Contributing / picking this up
+
+- `docs/STATUS.md` — where the project stands and how to start the next milestone.
+- `docs/ENGINEERING-NOTES.md` — why the code looks the way it does; the constraints and
+  traps that have already caused real bugs here.
+- `CLAUDE.md` — the short version of both, plus this machine's environment quirks.
