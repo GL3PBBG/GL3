@@ -89,7 +89,7 @@ describe("core schema", () => {
   /**
    * Table/column-existence and data-type checks above would not notice a
    * migration that silently dropped a foreign key, an index, or downgraded
-   * an ON DELETE rule. Hand-enumerating all ~43 FKs and ~26 indexes would be
+   * an ON DELETE rule. Hand-enumerating all ~44 FKs and ~29 indexes would be
    * unwieldy and would itself need updating every time a later task adds a
    * table, so this asserts the *counts* (which move only when the schema
    * genuinely changes) plus a targeted sample of high-value constraints:
@@ -109,8 +109,8 @@ describe("core schema", () => {
     const byRule = Object.fromEntries(rows.map((r) => [r.confdeltype, Number(r.count)]));
     const totalForeignKeys = Object.values(byRule).reduce((sum, n) => sum + n, 0);
 
-    expect(totalForeignKeys).toBe(43);
-    expect(byRule["c"]).toBe(27); // ON DELETE CASCADE
+    expect(totalForeignKeys).toBe(44);
+    expect(byRule["c"]).toBe(28); // ON DELETE CASCADE
     expect(byRule["n"]).toBe(16); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
@@ -134,7 +134,7 @@ describe("core schema", () => {
         WHERE c.contype = 'p' AND c.conname = i.indexname
       )
     `);
-    expect(Number(count)).toBe(26);
+    expect(Number(count)).toBe(29);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

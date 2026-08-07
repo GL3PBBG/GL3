@@ -93,7 +93,7 @@ export default defineWorkspace([
     test: {
       name: "@gl3/server:db-only",
       root: "./apps/server",
-      include: ["test/ledger.test.ts", "test/schema.test.ts"],
+      include: ["test/ledger.test.ts", "test/schema.test.ts", "test/gang-ledger.test.ts"],
       globalSetup,
       setupFiles: [isolatedDb],
       hookTimeout: dbHookTimeout,
