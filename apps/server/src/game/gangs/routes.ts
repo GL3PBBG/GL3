@@ -3,18 +3,20 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { CreateGangRequestSchema, IdSchema, InvitePlayerRequestSchema, type GameEvent } from "@gl3/shared";
+import { CreateGangRequestSchema, GrantPermissionRequestSchema, IdSchema, InvitePlayerRequestSchema, type GameEvent } from "@gl3/shared";
 import { z } from "zod";
 import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
-import { gangInvites, gangLogs, gangMembers, gangs, playerStats, players } from "../../db/schema/index.js";
-import { lockPlayersForUpdate } from "../../economy/ledger.js";
+import { gangInvites, gangLogs, gangMembers, gangPermissions, gangs, playerStats, players } from "../../db/schema/index.js";
+import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { insertNotification } from "../notifications/service.js";
 import { appendGangLog } from "./logs.js";
-import { hasGangPermission } from "./permissions.js";
+import { GANG_PERMISSIONS, hasGangPermission } from "./permissions.js";
 
 export const GangParamsSchema = z.object({ gangId: IdSchema });
 const InviteParamsSchema = z.object({ inviteId: IdSchema });
+const MemberParamsSchema = z.object({ gangId: IdSchema, playerId: IdSchema });
+const PermissionParamsSchema = z.object({ gangId: IdSchema, playerId: IdSchema, permission: z.enum(GANG_PERMISSIONS) });
 
 /**
  * Thrown inside the create-gang transaction when the row-locked recheck
@@ -29,6 +31,52 @@ class AlreadyInGangError extends Error {
   constructor(readonly playerId: string) {
     super(`player ${playerId} already in a gang`);
     this.name = "AlreadyInGangError";
+  }
+}
+
+/** Thrown inside the leave/kick transaction when the target gang doesn't exist. */
+class GangNotFoundError extends Error {
+  constructor() {
+    super("gang not found");
+    this.name = "GangNotFoundError";
+  }
+}
+
+/**
+ * Thrown inside the leave transaction when the row-locked recheck finds the
+ * leaving player is still the boss. Mirrors AlreadyInGangError's shape:
+ * lockPlayersForUpdate on the leaving player first, then re-read
+ * gangs.bossPlayerId under that lock, so a concurrent boss-transfer can't
+ * race this check the way an unlocked pre-check SELECT would (NOTES.md
+ * rule 2).
+ */
+class BossMustTransferError extends Error {
+  constructor() {
+    super("boss must transfer before leaving");
+    this.name = "BossMustTransferError";
+  }
+}
+
+/** Thrown inside the kick transaction when the row-locked recheck finds the target is the boss. */
+class CannotKickBossError extends Error {
+  constructor() {
+    super("cannot kick the boss");
+    this.name = "CannotKickBossError";
+  }
+}
+
+/**
+ * Thrown inside the leave/kick transaction when the row-locked recheck finds
+ * the player's playerStats.gangId does not actually match the gang in the
+ * URL. Without this, removeMember's unconditional
+ * `playerStats.gangId = null` would clear whatever gang the player is
+ * really in — e.g. calling leave/kick with a gangId for a gang the target
+ * isn't a member of would still un-gang them from their real one.
+ */
+class NotAMemberError extends Error {
+  constructor() {
+    super("player is not a member of this gang");
+    this.name = "NotAMemberError";
   }
 }
 
@@ -49,6 +97,29 @@ async function loadGangDto(db: Db, gangId: string): Promise<Record<string, unkno
     bossPlayerId: gang.bossPlayerId, underbossPlayerId: gang.underbossPlayerId,
     memberCount: memberCount?.n ?? 0,
   };
+}
+
+/** Deletes membership + any permission rows and clears playerStats.gangId. Caller must hold the lock via lockPlayersForUpdate first. */
+async function removeMember(tx: Tx, gangId: string, playerId: string, message: string): Promise<void> {
+  await tx.delete(gangMembers).where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, playerId)));
+  await tx.delete(gangPermissions).where(and(eq(gangPermissions.gangId, gangId), eq(gangPermissions.playerId, playerId)));
+  await tx.update(playerStats).set({ gangId: null }).where(eq(playerStats.playerId, playerId));
+  await appendGangLog(tx, gangId, playerId, message);
+}
+
+// events.ts documents gang.memberLeft as "actor = the member who joined /
+// left" — for a kick that's the kicked player, not the kicker, matching
+// gang.memberJoined's actor being the joiner rather than whoever sent the
+// invite. Fallback "unknown" matches gang.created's call site above, not
+// the "" used by the accept-invite call site further down.
+async function publishMemberLeft(redis: Redis, db: Db, gangId: string, playerId: string): Promise<void> {
+  const [actor] = await db.select({ username: players.username }).from(players).where(eq(players.id, playerId));
+  const event: GameEvent = {
+    id: uuidv7(), type: "gang.memberLeft", at: new Date().toISOString(),
+    actorId: playerId, actorName: actor?.username ?? "unknown", audience: { kind: "gang", gangId },
+    gangId,
+  };
+  await publishEvent(redis, event);
 }
 
 export function registerGangRoutes(
@@ -227,6 +298,116 @@ export function registerGangRoutes(
       .returning({ id: gangInvites.id });
 
     if (!deleted) return reply.code(404).send({ error: "invite_not_found" });
+    return reply.code(204).send();
+  });
+
+  app.post("/api/gangs/:gangId/leave", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const { gangId } = params.data;
+
+    try {
+      await db.transaction(async (tx) => {
+        // Lock the leaving player's stats row before rechecking boss status
+        // under it — the same shape as create-gang's AlreadyInGangError
+        // check (NOTES.md rule 2). An unlocked pre-check SELECT here,
+        // followed by the mutation in a later step, would let a concurrent
+        // boss-transfer race this leave.
+        await lockPlayersForUpdate(tx, [playerId]);
+        const [gang] = await tx.select({ boss: gangs.bossPlayerId }).from(gangs).where(eq(gangs.id, gangId));
+        if (!gang) throw new GangNotFoundError();
+        const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, playerId));
+        if (stats?.gangId !== gangId) throw new NotAMemberError();
+        if (gang.boss === playerId) throw new BossMustTransferError();
+        await removeMember(tx, gangId, playerId, "left the gang");
+      });
+    } catch (err) {
+      if (err instanceof GangNotFoundError) return reply.code(404).send({ error: "gang_not_found" });
+      if (err instanceof NotAMemberError) return reply.code(404).send({ error: "not_a_member" });
+      if (err instanceof BossMustTransferError) return reply.code(409).send({ error: "boss_must_transfer_first" });
+      throw err;
+    }
+
+    await publishMemberLeft(redis, db, gangId, playerId);
+    return reply.code(204).send();
+  });
+
+  app.delete("/api/gangs/:gangId/members/:playerId", { preHandler: requireAuth }, async (request, reply) => {
+    const requesterId = request.playerId;
+    if (!requesterId) return reply.code(401).send({ error: "unauthorized" });
+    const params = MemberParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const { gangId, playerId: targetId } = params.data;
+
+    if (!(await hasGangPermission(db, gangId, requesterId, "kick"))) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        // Same lock-then-recheck shape as leave, above: lock the target's
+        // stats row, then re-read gangs.bossPlayerId under it before
+        // mutating, instead of trusting an earlier unlocked read.
+        await lockPlayersForUpdate(tx, [targetId]);
+        const [gang] = await tx.select({ boss: gangs.bossPlayerId }).from(gangs).where(eq(gangs.id, gangId));
+        if (!gang) throw new GangNotFoundError();
+        const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, targetId));
+        if (stats?.gangId !== gangId) throw new NotAMemberError();
+        if (gang.boss === targetId) throw new CannotKickBossError();
+        await removeMember(tx, gangId, targetId, `kicked by ${requesterId === gang.boss ? "the boss" : "a permitted member"}`);
+      });
+    } catch (err) {
+      if (err instanceof GangNotFoundError) return reply.code(404).send({ error: "gang_not_found" });
+      if (err instanceof NotAMemberError) return reply.code(404).send({ error: "not_a_member" });
+      if (err instanceof CannotKickBossError) return reply.code(409).send({ error: "cannot_kick_boss" });
+      throw err;
+    }
+
+    await publishMemberLeft(redis, db, gangId, targetId);
+    return reply.code(204).send();
+  });
+
+  app.put("/api/gangs/:gangId/permissions", { preHandler: requireAuth }, async (request, reply) => {
+    const requesterId = request.playerId;
+    if (!requesterId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const body = GrantPermissionRequestSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
+    const { gangId } = params.data;
+
+    if (!(await hasGangPermission(db, gangId, requesterId, "grant_permissions"))) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.insert(gangPermissions)
+        .values({ gangId, playerId: body.data.playerId, permission: body.data.permission })
+        .onConflictDoNothing();
+      await appendGangLog(tx, gangId, requesterId, `granted ${body.data.permission} to ${body.data.playerId}`);
+    });
+    return reply.code(204).send();
+  });
+
+  app.delete("/api/gangs/:gangId/permissions/:playerId/:permission", { preHandler: requireAuth }, async (request, reply) => {
+    const requesterId = request.playerId;
+    if (!requesterId) return reply.code(401).send({ error: "unauthorized" });
+    const params = PermissionParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const { gangId, playerId: targetId, permission } = params.data;
+
+    if (!(await hasGangPermission(db, gangId, requesterId, "grant_permissions"))) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(gangPermissions).where(and(
+        eq(gangPermissions.gangId, gangId), eq(gangPermissions.playerId, targetId), eq(gangPermissions.permission, permission),
+      ));
+      await appendGangLog(tx, gangId, requesterId, `revoked ${permission} from ${targetId}`);
+    });
     return reply.code(204).send();
   });
 }

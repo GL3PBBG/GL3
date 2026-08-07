@@ -112,6 +112,7 @@ export default defineWorkspace([
         "test/crimes.test.ts",
         "test/economy-invariant.test.ts",
         "test/gang-invites.test.ts",
+        "test/gang-membership.test.ts",
         "test/gangs.test.ts",
         "test/health.test.ts",
         "test/jail.test.ts",
