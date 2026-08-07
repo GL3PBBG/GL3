@@ -11,7 +11,7 @@ import { applyBalanceChange } from "../../economy/ledger.js";
 import { applyExpAndRankUp, type RankUpResult } from "../../economy/ranks.js";
 import { CRIME_QUEUE, type CrimeJobData } from "../../queue/index.js";
 import { sendToJail } from "../jail/status.js";
-import { recordScore } from "../leaderboard/service.js";
+import { DEFAULT_LEADERBOARD_PREFIX, recordScore } from "../leaderboard/service.js";
 import { createRng } from "../rng.js";
 import { DEFAULT_CRIME_CHANCE } from "./routes.js";
 
@@ -21,6 +21,8 @@ export interface CrimeWorkerDeps {
   publisher: Redis;
   /** Overridable so tests can pair a worker with a test-private queue name — see createCrimeQueue. */
   queueName?: string;
+  /** Overridable so tests can pair a worker with a test-private leaderboard namespace — see rebuildLeaderboards. */
+  leaderboardPrefix?: string;
 }
 
 /** The slice of a BullMQ `Job` the processor needs — lets tests drive it directly. */
@@ -45,7 +47,9 @@ function uniqueViolation(err: unknown): postgres.PostgresError | null {
  * `Worker` callback) so tests can invoke it directly with a fixed `job.id`
  * to prove retries can't double-pay — see crime-worker-idempotency.test.ts.
  */
-export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): Promise<void> {
+export async function processCrimeJob(
+  db: Db, publisher: Redis, job: CrimeJob, leaderboardPrefix = DEFAULT_LEADERBOARD_PREFIX,
+): Promise<void> {
   const { playerId, crimeId, seed } = job.data;
 
   const [crime] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
@@ -142,11 +146,11 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   // leaderboard stale until the next boot.
   if (exp > 0n) {
     const [freshExp] = await db.select({ exp: playerStats.exp }).from(playerStats).where(eq(playerStats.playerId, playerId));
-    if (freshExp) await recordScore(publisher, "exp", playerId, freshExp.exp);
+    if (freshExp) await recordScore(publisher, "exp", playerId, freshExp.exp, leaderboardPrefix);
   }
   if (payout > 0n) {
     const [freshCash] = await db.select({ cash: playerStats.cash }).from(playerStats).where(eq(playerStats.playerId, playerId));
-    if (freshCash) await recordScore(publisher, "cash", playerId, freshCash.cash);
+    if (freshCash) await recordScore(publisher, "cash", playerId, freshCash.cash, leaderboardPrefix);
   }
 
   // SPEC §3: events are facts, not commands — published only AFTER the
@@ -220,9 +224,11 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   }
 }
 
-export function startCrimeWorker({ db, connection, publisher, queueName = CRIME_QUEUE }: CrimeWorkerDeps): Worker<CrimeJobData> {
+export function startCrimeWorker(
+  { db, connection, publisher, queueName = CRIME_QUEUE, leaderboardPrefix }: CrimeWorkerDeps,
+): Worker<CrimeJobData> {
   return new Worker<CrimeJobData>(queueName, async (job) => {
     if (job.id === undefined) throw new Error("crime job has no id — cannot guarantee idempotency");
-    await processCrimeJob(db, publisher, { id: job.id, data: job.data });
+    await processCrimeJob(db, publisher, { id: job.id, data: job.data }, leaderboardPrefix);
   }, { connection, concurrency: 5 });
 }

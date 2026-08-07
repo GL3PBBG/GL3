@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -11,11 +12,16 @@ import { resetDb, testDb } from "./helpers/db.js";
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 
-// Redis is one shared instance across every test file (and agent) running in
-// parallel — flushdb() would wipe sessions, cooldowns, rate limits, and
-// BullMQ queue data belonging to whichever other files happen to be running
-// concurrently. Scope the reset to only the keys this file owns instead.
-beforeEach(async () => { await resetDb(db); await redis.del("leaderboard:cash", "leaderboard:bank", "leaderboard:exp"); });
+// leaderboard:* keys are global by design in production (spec §2.2: one
+// Redis, one game), but Redis is one shared instance across every test file
+// (and agent) running in parallel. A per-file namespace — same fix as the
+// private BullMQ queue name in test/helpers/server.ts — keeps this file's
+// exact top-N assertions deterministic without a destructive flushdb() and
+// without deleting keys another file's concurrent bootTestServer() sweep
+// owns.
+const PREFIX = `leaderboard-test-${randomUUID()}`;
+
+beforeEach(async () => { await resetDb(db); await redis.del(`${PREFIX}:cash`, `${PREFIX}:bank`, `${PREFIX}:exp`); });
 afterAll(async () => { await conn.end(); redis.disconnect(); });
 
 const insertPlayer = async (username: string, cash: bigint, exp: bigint): Promise<string> => {
@@ -30,17 +36,17 @@ describe("recordScore / topN", () => {
     const a = await insertPlayer("Alice", 100n, 0n);
     const b = await insertPlayer("Bob", 500n, 0n);
     const c = await insertPlayer("Carol", 250n, 0n);
-    await recordScore(redis, "cash", a, 100n);
-    await recordScore(redis, "cash", b, 500n);
-    await recordScore(redis, "cash", c, 250n);
+    await recordScore(redis, "cash", a, 100n, PREFIX);
+    await recordScore(redis, "cash", b, 500n, PREFIX);
+    await recordScore(redis, "cash", c, 250n, PREFIX);
 
-    const top = await topN(db, redis, "cash", 10);
+    const top = await topN(db, redis, "cash", 10, PREFIX);
     expect(top.map((e) => e.username)).toEqual(["Bob", "Carol", "Alice"]);
     expect(top.map((e) => e.rank)).toEqual([1, 2, 3]);
   });
 
   it("returns an empty list when nobody has a score yet", async () => {
-    expect(await topN(db, redis, "exp", 10)).toEqual([]);
+    expect(await topN(db, redis, "exp", 10, PREFIX)).toEqual([]);
   });
 });
 
@@ -49,14 +55,14 @@ describe("rebuildLeaderboards", () => {
     const a = await insertPlayer("Alice", 100n, 20n);
     const b = await insertPlayer("Bob", 500n, 5n);
 
-    await rebuildLeaderboards(db, redis);
-    await rebuildLeaderboards(db, redis); // second call must not duplicate members or scores
+    await rebuildLeaderboards(db, redis, PREFIX);
+    await rebuildLeaderboards(db, redis, PREFIX); // second call must not duplicate members or scores
 
-    const byCash = await topN(db, redis, "cash", 10);
+    const byCash = await topN(db, redis, "cash", 10, PREFIX);
     expect(byCash).toHaveLength(2);
     expect(byCash[0]?.username).toBe("Bob");
 
-    const byExp = await topN(db, redis, "exp", 10);
+    const byExp = await topN(db, redis, "exp", 10, PREFIX);
     expect(byExp[0]?.username).toBe("Alice");
   });
 });
@@ -67,13 +73,15 @@ describe("GET /api/leaderboard/:kind", () => {
     const { createCrimeQueue } = await import("../src/queue/index.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const app = await buildApp(config, {
+      db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)), leaderboardPrefix: PREFIX,
+    });
 
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Board${Date.now()}`, password: "hunter2hunter2" } });
     const { token, playerId } = reg.json();
     await db.update(playerStats).set({ cash: 1000n }).where(eq(playerStats.playerId, playerId));
 
-    await performBankTransaction(db, redis, playerId, "deposit", 300n);
+    await performBankTransaction(db, redis, playerId, "deposit", 300n, PREFIX);
 
     const res = await app.inject({ method: "GET", url: "/api/leaderboard/cash", headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(200);

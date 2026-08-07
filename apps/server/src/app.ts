@@ -15,7 +15,13 @@ import { registerTravelRoutes } from "./game/travel/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
-export interface AppDeps { db: Db; redis: Redis; crimeQueue: Queue<CrimeJobData> }
+export interface AppDeps {
+  db: Db;
+  redis: Redis;
+  crimeQueue: Queue<CrimeJobData>;
+  /** Overridable so tests can pair a server with a test-private leaderboard namespace — see rebuildLeaderboards. */
+  leaderboardPrefix?: string;
+}
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: config.nodeEnv !== "test" });
@@ -29,7 +35,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerBulletsRoutes(app, deps.db, deps.redis, requireAuth);
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
-  registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth);
+  registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, deps.leaderboardPrefix);
   registerRankRoutes(app, deps.db, requireAuth);
   registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
