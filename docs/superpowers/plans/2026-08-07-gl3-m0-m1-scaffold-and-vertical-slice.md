@@ -674,7 +674,7 @@ export default defineWorkspace(["packages/*", "apps/server"]);
     "@gl3/shared": "*",
     "argon2": "^0.41.1",
     "bullmq": "^5.34.2",
-    "drizzle-orm": "^0.36.4",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.1.0",
     "@fastify/cors": "^10.0.1",
     "ioredis": "^5.4.1",
@@ -685,7 +685,7 @@ export default defineWorkspace(["packages/*", "apps/server"]);
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "drizzle-kit": "^0.28.1",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.2"
   }
 }
@@ -902,6 +902,16 @@ Spec §2.5 verbatim. Every table lands now so M2–M5 only add columns. Only aut
   - `createDb(databaseUrl: string): { db: NodePgDatabase; sql: postgres.Sql }`
   - Every table object exported from `src/db/schema/index.js` — later tasks import e.g. `import { players, playerStats, transactions } from "../db/schema/index.js"`.
   - `resetDb(db): Promise<void>` test helper that truncates all game tables.
+
+**AMENDMENTS (applied during execution — these are now part of the requirements):**
+
+1. **Bigint defaults must be written `` .default(sql`0`) ``, never `.default(0n)`.** drizzle-kit's serialiser crashes on a literal `BigInt` with `TypeError: Do not know how to serialize a BigInt` — a known open upstream bug (drizzle-orm #1879 / #2382 / #3609) unfixed in every stable 0.x. Import `sql` from `drizzle-orm` in each schema file. `mode: "bigint"` governs the read/write mapping, not the DDL default, so the emitted SQL is identical (`DEFAULT 0`) and the V2 signed-32-bit ceiling is not reintroduced. **Never change a column's `mode` to work around a tooling problem** — that is the one mistake this whole schema exists to prevent. 15 columns are affected.
+2. **`drizzle-orm` must be `^0.45.2` or newer** regardless of tooling: versions below that carry high-severity SQL-injection advisory GHSA-gpj5-g38j-94v9.
+3. **Every command in Step 11 needs `REDIS_URL` as well as `DATABASE_URL`**, because `migrate.ts` calls `loadConfig`, which validates the whole environment including Redis.
+4. **Resetting to a clean database must drop BOTH schemas.** Drizzle's bookkeeping table lives in the `drizzle` schema and survives `DROP SCHEMA public CASCADE`, after which the migrator silently no-ops and you test nothing:
+   `DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;`
+5. **drizzle-kit auto-names the generated migration** (e.g. `0000_eminent_red_ghost.sql`). Renaming it to `0000_core_schema.sql` is fine, but `meta/_journal.json`'s `tag` must be updated to match or the migrator will not find it.
+6. **Add a bigint round-trip test** alongside the column-type assertions: insert a `player_stats` row, read the defaulted `cash` back *through the query builder*, and assert `typeof === "bigint"` and `=== 0n` — not `== 0`, which passes for a number. Then update to a value above 2^31-1 and re-assert. Column-type introspection alone does not catch a regressed `mode`.
 
 **Three schema notes that are easy to get wrong:**
 1. **Circular foreign keys.** `players.round_id → rounds`, `player_stats.gang_id → gangs`, and `gangs.boss_player_id → players` form a cycle. Drizzle needs an explicit `AnyPgColumn` return-type annotation on the callback for the back-reference or TS infers `any` — which the no-`any` rule forbids anyway.
@@ -1462,12 +1472,14 @@ describe("core schema", () => {
 - [ ] **Step 11: Bring the services up, apply migrations, run the test**
 
 ```bash
-npm run db:up
-DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3 npm --workspace @gl3/server run db:migrate
-DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3 npx vitest run apps/server/test/schema.test.ts
+npm run db:up   # skip where Docker is unavailable and Postgres 16 / Redis 7 run natively
+export DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3
+export REDIS_URL=redis://localhost:6379
+npm --workspace @gl3/server run db:migrate
+npx vitest run apps/server/test/schema.test.ts
 ```
 
-Expected: migration prints no error; 4 tests PASS. If `citext` errors, Step 8's extension statement is missing or not first.
+Expected: migration prints no error; 5 tests PASS (4 introspection + the bigint round-trip from Amendment 6). If `citext` errors, Step 8's extension statement is missing or not first. If the migrator does nothing on what you believe is a clean database, you dropped only `public` — see Amendment 4.
 
 - [ ] **Step 12: Run the full gate and commit**
 
