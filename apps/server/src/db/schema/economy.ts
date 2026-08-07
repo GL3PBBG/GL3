@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
 import { balanceKind } from "./enums.js";
 import { players } from "./identity.js";
 import { cars, crimes, items, locations } from "./content.js";
@@ -49,5 +49,18 @@ export const crimeLog = pgTable("crime_log", {
   crimeId: uuid("crime_id").notNull().references(() => crimes.id, { onDelete: "cascade" }),
   success: boolean("success").notNull(),
   payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
+  /**
+   * BullMQ job id. Nullable + unique (not unique-and-not-null): Postgres
+   * unique indexes treat NULLs as distinct from one another, so this only
+   * ever rejects a *second* row for the same job — it never collides
+   * legacy/hand-inserted rows that have no job id. The crime worker inserts
+   * this row first, keyed to job.id; a retry of the same job hits the
+   * unique violation and is treated as "already paid", never crediting the
+   * ledger twice (spec §7 idempotency — see game/crimes/worker.ts).
+   */
+  jobId: text("job_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => ({ playerIdx: index("crime_log_player_idx").on(t.playerId, t.createdAt) }));
+}, (t) => ({
+  playerIdx: index("crime_log_player_idx").on(t.playerId, t.createdAt),
+  jobIdUnique: uniqueIndex("crime_log_job_id_unique").on(t.jobId),
+}));
