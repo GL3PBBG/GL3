@@ -7,5 +7,6 @@ export * from "./dto/bank.js";
 export * from "./dto/bullets.js";
 export * from "./dto/crime.js";
 export * from "./dto/jail.js";
+export * from "./dto/leaderboard.js";
 export * from "./dto/rank.js";
 export * from "./dto/travel.js";

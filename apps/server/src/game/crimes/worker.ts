@@ -11,6 +11,7 @@ import { applyBalanceChange } from "../../economy/ledger.js";
 import { applyExpAndRankUp, type RankUpResult } from "../../economy/ranks.js";
 import { CRIME_QUEUE, type CrimeJobData } from "../../queue/index.js";
 import { sendToJail } from "../jail/status.js";
+import { recordScore } from "../leaderboard/service.js";
 import { createRng } from "../rng.js";
 import { DEFAULT_CRIME_CHANCE } from "./routes.js";
 
@@ -124,6 +125,29 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   const [freshStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
     .from(playerStats).where(eq(playerStats.playerId, playerId));
   const effectiveJailedUntil = freshStats?.jailedUntil ?? null;
+
+  // Leaderboard updates happen here, AFTER the transaction commits (or is
+  // recognised as already committed) — same rule as event publishing below.
+  // Redis is not transactional with Postgres, so a leaderboard write can
+  // never be folded into the db.transaction above without either blocking
+  // the crediting on Redis being up, or risking a Redis update for a
+  // transaction that then rolls back. Doing it out here means Postgres
+  // (the source of truth) is never at risk from a Redis hiccup: on a
+  // failure the balance/exp already committed are correct, and the next
+  // `rebuildLeaderboards` boot sweep repairs the index. Deliberately not
+  // wrapped in try/catch — see the "let a publish failure fail the job"
+  // reasoning below; the idempotency guard already makes a BullMQ retry of
+  // this whole handler safe (crime_log_job_id_unique short-circuits
+  // re-crediting), so retrying is preferable to silently leaving the
+  // leaderboard stale until the next boot.
+  if (exp > 0n) {
+    const [freshExp] = await db.select({ exp: playerStats.exp }).from(playerStats).where(eq(playerStats.playerId, playerId));
+    if (freshExp) await recordScore(publisher, "exp", playerId, freshExp.exp);
+  }
+  if (payout > 0n) {
+    const [freshCash] = await db.select({ cash: playerStats.cash }).from(playerStats).where(eq(playerStats.playerId, playerId));
+    if (freshCash) await recordScore(publisher, "cash", playerId, freshCash.cash);
+  }
 
   // SPEC §3: events are facts, not commands — published only AFTER the
   // transaction above commits (or is recognised as already committed).

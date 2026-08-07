@@ -4,6 +4,7 @@ import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { startCrimeWorker } from "../../src/game/crimes/worker.js";
+import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
 import { createCrimeQueue } from "../../src/queue/index.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
@@ -31,6 +32,7 @@ export async function bootTestServer(): Promise<{ app: FastifyInstance; close: (
   const publisher = createRedis(config.redisUrl);
   const worker = startCrimeWorker({ db: workerDb.db, connection: workerConnection, publisher, queueName });
 
+  await rebuildLeaderboards(db, redis);
   const app = await buildApp(config, { db, redis, crimeQueue });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
