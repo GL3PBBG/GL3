@@ -156,10 +156,17 @@ export function registerGangRoutes(
       await appendGangLog(tx, gangId, playerId, `invited ${body.data.username}`);
     });
 
-    const [actor] = await db.select({ username: players.username }).from(players).where(eq(players.id, playerId));
+    // events.ts documents notification.created as "actor = the notified
+    // player" — the invitee, not the inviter — matching every other
+    // privately-audienced event (bank.transacted = the account holder,
+    // player.jailed = the jailed player). awaitOwnEvent(subscriber, actorId)
+    // is the mandated CLAUDE.md rule-4 filter for the shared game:events
+    // channel, so getting this wrong silently breaks any caller waiting on
+    // the invitee's own id.
+    const [invitee] = await db.select({ username: players.username }).from(players).where(eq(players.id, target.id));
     const event: GameEvent = {
       id: uuidv7(), type: "notification.created", at: new Date().toISOString(),
-      actorId: playerId, actorName: actor?.username ?? "", audience: { kind: "player", playerId: target.id },
+      actorId: target.id, actorName: invitee?.username ?? "unknown", audience: { kind: "player", playerId: target.id },
       notificationId, body: `${gang?.name ?? "A gang"} invited you to join.`,
     };
     await publishEvent(redis, event);
