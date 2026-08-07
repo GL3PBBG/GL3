@@ -2500,6 +2500,12 @@ const column = { cash: playerStats.cash, bank: playerStats.bank, points: playerS
  * Lock several players' stat rows in ascending id order.
  * Consistent ordering is what prevents deadlocks when two jobs touch the same
  * pair of players in opposite order (spec §2.3).
+ *
+ * The mechanism that actually delivers this is the SQL `ORDER BY` below —
+ * `EXPLAIN` shows `LockRows -> Sort (Sort Key: id)`, so Postgres sorts before
+ * acquiring locks regardless of the order values appear in the IN-clause.
+ * The JS-side `.sort()` is a redundant belt-and-braces guard; do not remove the
+ * `.orderBy()` believing the `.sort()` covers it, because it does not.
  */
 export async function lockPlayersForUpdate(tx: Tx, playerIds: string[]): Promise<void> {
   const unique = [...new Set(playerIds)].sort();
