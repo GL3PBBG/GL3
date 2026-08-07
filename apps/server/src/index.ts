@@ -4,7 +4,8 @@ import { createDb } from "./db/client.js";
 import { seedCrimes } from "./db/seed.js";
 import { startCrimeWorker } from "./game/crimes/worker.js";
 import { createCrimeQueue } from "./queue/index.js";
-import { createRedis } from "./redis.js";
+import { createRedis, createSubscriber } from "./redis.js";
+import { attachGateway } from "./ws/gateway.js";
 
 const config = loadConfig(process.env);
 const { db } = createDb(config.databaseUrl);
@@ -16,3 +17,4 @@ startCrimeWorker({ db, connection: createRedis(config.redisUrl), publisher: crea
 const app = await buildApp(config, { db, redis, crimeQueue });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
+await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl) });

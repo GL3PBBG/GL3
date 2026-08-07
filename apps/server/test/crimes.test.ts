@@ -44,11 +44,21 @@ beforeEach(async () => {
 
 afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
-const waitForEvent = (): Promise<unknown> =>
+// `game:events` is a global channel shared by every test file running in
+// parallel (e.g. ws.test.ts also commits crimes on it) — a bare
+// `once("message")` here would resolve on whichever file's event lands
+// first and could grab someone else's crime.resolved. Keep listening until
+// one actually names this test's own actor.
+const waitForEvent = (expectedActorId: string): Promise<unknown> =>
   new Promise((resolve) => {
-    subscriber.once("message", (channel, raw) => {
-      if (channel === GAME_EVENTS_CHANNEL) resolve(JSON.parse(raw));
-    });
+    const onMessage = (channel: string, raw: string): void => {
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success || parsed.data.actorId !== expectedActorId) return;
+      subscriber.off("message", onMessage);
+      resolve(parsed.data);
+    };
+    subscriber.on("message", onMessage);
   });
 
 describe("GET /api/crimes", () => {
@@ -97,7 +107,7 @@ describe("POST /api/crimes/:crimeId/commit", () => {
 
   it("resolves in a worker, ledgers the payout, and publishes crime.resolved", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
-    const received = waitForEvent();
+    const received = waitForEvent(playerId);
 
     const res = await app.inject({ method: "POST", url: `/api/crimes/${crimeId}/commit`, headers: auth });
     expect(res.statusCode).toBe(202);
