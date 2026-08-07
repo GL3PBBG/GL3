@@ -1,4 +1,3 @@
-import { GameEventSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +7,7 @@ import { players, playerStats } from "../src/db/schema/index.js";
 import { checkJail, releaseIfExpired } from "../src/game/jail/status.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -51,14 +51,16 @@ describe("releaseIfExpired", () => {
     const past = new Date(Date.now() - 1000);
     await db.update(playerStats).set({ jailedUntil: past }).where(eq(playerStats.playerId, playerId));
 
-    const received = new Promise((resolve) => {
-      subscriber.once("message", (channel, raw) => { if (channel === GAME_EVENTS_CHANNEL) resolve(JSON.parse(raw)); });
-    });
+    // `game:events` is a global channel shared by every test file running in
+    // parallel — a bare `once("message")` resolves on whichever file's event
+    // lands first and can grab someone else's payload. Filter on this test's
+    // own actor.
+    const received = awaitOwnEvent(subscriber, playerId);
 
     const status = await releaseIfExpired(db, redis, playerId);
     expect(status).toEqual({ jailed: false, until: null, remainingSeconds: 0 });
 
-    const event = GameEventSchema.parse(await received);
+    const event = await received;
     expect(event.type).toBe("player.released");
     expect(event.actorId).toBe(playerId);
 
