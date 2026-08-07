@@ -4,11 +4,16 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import { gangInvites, playerStats } from "../src/db/schema/index.js";
+import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
@@ -39,7 +44,7 @@ beforeEach(async () => {
   gangId = gang.json().id;
 });
 
-afterAll(async () => { await closeServer(); await conn.end(); });
+afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
 /**
  * Mints the handshake ticket the way a real client would: an authenticated
@@ -131,6 +136,41 @@ describe("POST /api/gangs/:gangId/invites", () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it("409s inviting a target who is already in a gang", async () => {
+    await app.inject({
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${inviteeToken}` },
+      payload: { name: "Sonny's Crew" },
+    });
+    const res = await app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username: "Sonny" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  // Regression test for a review finding: the event's actorId was the
+  // inviter's, not the invitee's, breaking events.ts's documented contract
+  // ("actor = the notified player") and awaitOwnEvent(subscriber, actorId) —
+  // the mandated NOTES.md rule-4 pattern for the shared game:events
+  // channel — which any caller filtering on the invitee's id would then
+  // never see. The WS test above only proves *a* frame arrives on the
+  // invitee's own socket; it doesn't inspect actorId, so it passed both
+  // before and after this bug existed.
+  it("publishes notification.created with the invitee, not the inviter, as actor", async () => {
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const received = awaitOwnEvent(subscriber, inviteeId);
+
+    const res = await app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username: "Sonny" },
+    });
+    expect(res.statusCode).toBe(201);
+
+    const event = await received;
+    expect(event.type).toBe("notification.created");
+    expect(event.actorId).toBe(inviteeId);
+  });
 });
 
 describe("POST /api/gangs/invites/:inviteId/accept", () => {
@@ -178,6 +218,24 @@ describe("POST /api/gangs/invites/:inviteId/accept", () => {
     });
     expect(res.statusCode).toBe(409);
   });
+
+  it("404s accepting an invite that belongs to a different player", async () => {
+    await app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username: "Sonny" },
+    });
+    const [invite] = await db.select().from(gangInvites).where(eq(gangInvites.invitedPlayerId, inviteeId));
+    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+
+    const res = await app.inject({
+      method: "POST", url: `/api/gangs/invites/${invite!.id}/accept`, headers: { authorization: `Bearer ${bystander.json().token}` },
+    });
+    expect(res.statusCode).toBe(404);
+
+    // Confirms it was rejected, not silently accepted for the wrong player.
+    const [stats] = await db.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, inviteeId));
+    expect(stats?.gangId).toBeNull();
+  });
 });
 
 describe("POST /api/gangs/invites/:inviteId/decline", () => {
@@ -196,5 +254,22 @@ describe("POST /api/gangs/invites/:inviteId/decline", () => {
 
     const [stats] = await db.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, inviteeId));
     expect(stats?.gangId).toBeNull();
+  });
+
+  it("404s declining an invite that belongs to a different player", async () => {
+    await app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username: "Sonny" },
+    });
+    const [invite] = await db.select().from(gangInvites).where(eq(gangInvites.invitedPlayerId, inviteeId));
+    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+
+    const res = await app.inject({
+      method: "POST", url: `/api/gangs/invites/${invite!.id}/decline`, headers: { authorization: `Bearer ${bystander.json().token}` },
+    });
+    expect(res.statusCode).toBe(404);
+
+    // Confirms it was rejected, not silently declined out from under the real invitee.
+    expect(await db.select().from(gangInvites)).toHaveLength(1);
   });
 });
