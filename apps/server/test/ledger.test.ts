@@ -3,8 +3,8 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../src/economy/ledger.js";
-import { players, playerStats, transactions } from "../src/db/schema/index.js";
+import { applyBalanceChange, InsufficientFundsError, lockLocationForUpdate, lockPlayersForUpdate } from "../src/economy/ledger.js";
+import { locations, players, playerStats, transactions } from "../src/db/schema/index.js";
 import * as schema from "../src/db/schema/index.js";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -288,5 +288,22 @@ describe("concurrent double-spend", () => {
     const rows = await db.select().from(transactions).where(eq(transactions.reason, "test.concurrent-debit"));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.amount).toBe(-60n);
+  });
+});
+
+describe("lockLocationForUpdate", () => {
+  it("serializes two concurrent stock decrements against the same location", async () => {
+    const locationId = uuidv7();
+    await db.insert(locations).values({ id: locationId, name: "Testville", bulletStock: 10, bulletCost: 1n });
+
+    const decrement = () => db.transaction(async (tx) => {
+      await lockLocationForUpdate(tx, locationId);
+      const [row] = await tx.select({ bulletStock: locations.bulletStock }).from(locations).where(eq(locations.id, locationId));
+      await tx.update(locations).set({ bulletStock: row!.bulletStock - 5 }).where(eq(locations.id, locationId));
+    });
+
+    await Promise.all([decrement(), decrement()]);
+    const [final] = await db.select({ bulletStock: locations.bulletStock }).from(locations).where(eq(locations.id, locationId));
+    expect(final?.bulletStock).toBe(0); // both decrements applied in sequence, never lost
   });
 });

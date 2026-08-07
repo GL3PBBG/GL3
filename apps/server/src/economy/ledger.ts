@@ -1,7 +1,7 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "../db/client.js";
-import { playerStats, transactions } from "../db/schema/index.js";
+import { locations, playerStats, transactions } from "../db/schema/index.js";
 
 export type BalanceKind = "cash" | "bank" | "points";
 
@@ -73,6 +73,18 @@ export async function applyBalanceChange(tx: Tx, change: BalanceChange): Promise
   });
 
   return next;
+}
+
+/**
+ * Same rationale as lockPlayersForUpdate, for the one shared non-player row
+ * this schema locks: a bullets purchase decrements `locations.bullet_stock`,
+ * a value every buyer at that location contends over. Global Constraints:
+ * always lock the location row before the player's row (called first in
+ * performBulletsPurchase) — a single fixed direction is what rules out a
+ * deadlock against any future code path that might lock a player row first.
+ */
+export async function lockLocationForUpdate(tx: Tx, locationId: string): Promise<void> {
+  await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, locationId)).for("update");
 }
 
 /** Credit exp — not money, but bigint and same overflow concern (spec §1.1). */
