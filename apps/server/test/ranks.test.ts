@@ -74,9 +74,17 @@ describe("GET /api/ranks", () => {
     const { createCrimeQueue } = await import("../src/queue/index.js");
     const { seedRanks } = await import("../src/db/seed.js");
     // beforeEach already inserted its own 2-rank fixture; seedRanks is
-    // idempotent (no-ops when any row exists), so start from an empty
-    // ranks table to get the full 5-rank ladder this test asserts on.
-    await resetDb(db);
+    // idempotent (no-ops when any row exists), so clear just the ranks
+    // table to get the full 5-rank ladder this test asserts on. A targeted
+    // delete instead of the file's resetDb(): resetDb() TRUNCATEs every
+    // game table (players, transactions, crimes, items, ...) CASCADE, which
+    // measured ~2.3s of this test's ~5s budget under load — almost all of
+    // it spent re-clearing tables this test never touches. playerStats.rankId
+    // is `ON DELETE SET NULL` (see schema/identity.ts), so deleting ranks
+    // rows here can't violate any FK; nothing else needs clearing since
+    // beforeEach's playerId/playerStats fixture is untouched (still rankId:
+    // null) and this test registers its own separate player via HTTP.
+    await db.delete(ranks);
     await seedRanks(db);
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
