@@ -7,6 +7,7 @@ import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
+import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps { db: Db; redis: Redis; crimeQueue: Queue<CrimeJobData> }
 
@@ -19,6 +20,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
+  registerWsRoutes(app, deps.redis, requireAuth);
 
   return app;
 }

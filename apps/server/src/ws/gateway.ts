@@ -3,12 +3,12 @@ import { ServerFrameSchema, ClientFrameSchema, type GameEvent, type ServerFrame 
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { WebSocketServer, type WebSocket } from "ws";
-import { readSession } from "../auth/session.js";
+import { consumeTicket } from "../auth/session.js";
 import { subscribeToEvents } from "../bus/subscribe.js";
 import type { Db } from "../db/client.js";
 import { gangMembers } from "../db/schema/index.js";
 
-export interface GatewayDeps { db: Db; redis: Redis; subscriber: Redis }
+export interface GatewayDeps { db: Db; redis: Redis; subscriber: Redis; corsOrigins: string[] }
 export interface GatewayHandle { close(): Promise<void>; connectionCount(): number }
 
 export async function attachGateway(server: Server, deps: GatewayDeps): Promise<GatewayHandle> {
@@ -28,9 +28,29 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
     const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname !== "/ws") return;
 
-    const token = url.searchParams.get("token");
+    // Cross-Site WebSocket Hijacking defense, same allowlist as CORS. A
+    // browser always sends Origin on a WS handshake, so a *present* Origin
+    // outside the allowlist means a malicious page in a victim's browser —
+    // reject before the handshake completes. An *absent* Origin means a
+    // non-browser client (our own tests, a future CLI/service): rejecting
+    // that would block every legitimate non-browser client while adding no
+    // protection, since the attack this defends against is specifically a
+    // page that cannot suppress its own Origin header.
+    const origin = request.headers.origin;
+    if (origin !== undefined && !deps.corsOrigins.includes(origin)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    // SPEC §2.2: the upgrade takes a short-lived, single-use ticket, never
+    // the session token itself — a long-lived credential must never ride in
+    // a URL, since URLs leak into access logs, proxy logs, and Referer
+    // headers. `consumeTicket` invalidates it atomically on first read, so a
+    // captured ticket is worthless to replay even within its ~30s TTL.
+    const ticket = url.searchParams.get("ticket");
     void (async () => {
-      const playerId = token ? await readSession(deps.redis, token) : null;
+      const playerId = ticket ? await consumeTicket(deps.redis, ticket) : null;
       if (!playerId) {
         // Reject before the handshake completes — no half-open authed socket.
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

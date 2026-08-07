@@ -17,4 +17,4 @@ startCrimeWorker({ db, connection: createRedis(config.redisUrl), publisher: crea
 const app = await buildApp(config, { db, redis, crimeQueue });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
-await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl) });
+await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins });

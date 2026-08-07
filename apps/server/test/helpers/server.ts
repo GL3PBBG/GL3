@@ -36,7 +36,9 @@ export async function bootTestServer(): Promise<{ app: FastifyInstance; close: (
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.
   const gatewaySubscriber = createSubscriber(config.redisUrl);
-  const gateway = await attachGateway(app.server, { db, redis, subscriber: gatewaySubscriber });
+  const gateway = await attachGateway(app.server, {
+    db, redis, subscriber: gatewaySubscriber, corsOrigins: config.corsOrigins,
+  });
 
   return {
     app,

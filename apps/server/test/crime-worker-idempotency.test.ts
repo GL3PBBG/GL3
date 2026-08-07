@@ -1,3 +1,4 @@
+import { GameEventSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -44,7 +45,13 @@ describe("processCrimeJob idempotency", () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     const events: unknown[] = [];
     subscriber.on("message", (channel, raw) => {
-      if (channel === GAME_EVENTS_CHANNEL) events.push(JSON.parse(raw));
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      // `game:events` is a global channel shared by every test file running
+      // in parallel — filter on this test's own actor, not just channel
+      // name, so a concurrent file's traffic can't be mistaken for the
+      // events this job caused (see ws.test.ts for the same discipline).
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.actorId === playerId) events.push(parsed.data);
     });
 
     const job = {

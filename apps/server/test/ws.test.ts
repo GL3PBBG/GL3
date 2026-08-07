@@ -38,6 +38,16 @@ beforeEach(async () => {
 
 afterAll(async () => { await closeServer(); await conn.end(); });
 
+/** Mints a handshake ticket the way a real client would: an authenticated POST. */
+const mintTicket = async (authToken: string = token): Promise<string> => {
+  const res = await app.inject({
+    method: "POST", url: "/api/ws/ticket",
+    headers: { authorization: `Bearer ${authToken}` },
+  });
+  expect(res.statusCode).toBe(201);
+  return res.json().ticket;
+};
+
 /**
  * The gateway sends `ready` synchronously on connect (correctly — a client
  * should get it as fast as possible). On loopback that can arrive in the
@@ -51,9 +61,9 @@ afterAll(async () => { await closeServer(); await conn.end(); });
 interface FrameQueue { queue: unknown[]; waiting: ((frame: unknown) => void) | null }
 const frameQueues = new WeakMap<WebSocket, FrameQueue>();
 
-const open = (url: string): Promise<WebSocket> =>
+const open = (url: string, options?: WebSocket.ClientOptions): Promise<WebSocket> =>
   new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, options);
     const state: FrameQueue = { queue: [], waiting: null };
     frameQueues.set(socket, state);
     socket.on("message", (raw) => {
@@ -81,23 +91,68 @@ const nextFrame = (socket: WebSocket): Promise<unknown> => {
 };
 
 describe("/ws gateway", () => {
-  it("rejects a connection with no token", async () => {
+  it("rejects a connection with no ticket", async () => {
     await expect(open(baseUrl)).rejects.toThrow();
   });
 
-  it("rejects a connection with a bogus token", async () => {
-    await expect(open(`${baseUrl}?token=not-a-real-token`)).rejects.toThrow();
+  it("rejects a connection with a bogus ticket", async () => {
+    await expect(open(`${baseUrl}?ticket=not-a-real-ticket`)).rejects.toThrow();
+  });
+
+  it("rejects a connection presenting a raw session token instead of a ticket", async () => {
+    // Proves the old credential path is genuinely closed, not just no
+    // longer minted — a session token dropped straight in where a ticket
+    // is expected must not be accepted as one.
+    await expect(open(`${baseUrl}?ticket=${token}`)).rejects.toThrow();
+  });
+
+  it("rejects a connection from a disallowed Origin", async () => {
+    const ticket = await mintTicket();
+    await expect(
+      open(`${baseUrl}?ticket=${ticket}`, { origin: "http://evil.test" }),
+    ).rejects.toThrow();
+  });
+
+  it("accepts a connection from an allowed Origin", async () => {
+    const ticket = await mintTicket();
+    const socket = await open(`${baseUrl}?ticket=${ticket}`, { origin: "http://localhost:5173" });
+    const frame = ServerFrameSchema.parse(await nextFrame(socket));
+    expect(frame.kind).toBe("ready");
+    socket.close();
+  });
+
+  it("connects successfully with a valid ticket", async () => {
+    const ticket = await mintTicket();
+    const socket = await open(`${baseUrl}?ticket=${ticket}`);
+    const frame = ServerFrameSchema.parse(await nextFrame(socket));
+    expect(frame.kind).toBe("ready");
+    socket.close();
+  });
+
+  it("refuses a ticket reused for a second connection (single-use guarantee)", async () => {
+    const ticket = await mintTicket();
+    const first = await open(`${baseUrl}?ticket=${ticket}`);
+    await nextFrame(first); // ready — first use consumed the ticket
+    await expect(open(`${baseUrl}?ticket=${ticket}`)).rejects.toThrow();
+    first.close();
+  });
+
+  it("returns 401 for POST /api/ws/ticket without authentication", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/ws/ticket" });
+    expect(res.statusCode).toBe(401);
   });
 
   it("sends a ready frame naming the authenticated player", async () => {
-    const socket = await open(`${baseUrl}?token=${token}`);
+    const ticket = await mintTicket();
+    const socket = await open(`${baseUrl}?ticket=${ticket}`);
     const frame = ServerFrameSchema.parse(await nextFrame(socket));
     expect(frame.kind).toBe("ready");
     socket.close();
   });
 
   it("answers ping with pong", async () => {
-    const socket = await open(`${baseUrl}?token=${token}`);
+    const ticket = await mintTicket();
+    const socket = await open(`${baseUrl}?ticket=${ticket}`);
     await nextFrame(socket); // ready
     socket.send(JSON.stringify({ kind: "ping" }));
     const frame = ServerFrameSchema.parse(await nextFrame(socket));
@@ -106,7 +161,8 @@ describe("/ws gateway", () => {
   });
 
   it("delivers crime.resolved to the acting player", async () => {
-    const socket = await open(`${baseUrl}?token=${token}`);
+    const ticket = await mintTicket();
+    const socket = await open(`${baseUrl}?ticket=${ticket}`);
     await nextFrame(socket); // ready
     const incoming = nextFrame(socket);
 
@@ -133,7 +189,8 @@ describe("/ws gateway", () => {
       method: "POST", url: "/api/auth/register",
       payload: { username: "Sonny", password: "hunter2hunter2" },
     });
-    const socket = await open(`${baseUrl}?token=${other.json().token}`);
+    const otherTicket = await mintTicket(other.json().token);
+    const socket = await open(`${baseUrl}?ticket=${otherTicket}`);
     await nextFrame(socket); // ready
 
     let leaked = false;
