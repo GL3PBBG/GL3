@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { Db } from "../../db/client.js";
 import { crimes, playerCrimeSkill } from "../../db/schema/index.js";
 import { acquireCooldown, cooldownKey, peekCooldown, releaseCooldown } from "../cooldown.js";
+import { releaseIfExpired } from "../jail/status.js";
 import { newSeed } from "../rng.js";
 import type { CrimeJobData } from "../../queue/index.js";
 
@@ -48,6 +49,12 @@ export function registerCrimeRoutes(
   app.post("/api/crimes/:crimeId/commit", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const jail = await releaseIfExpired(db, redis, playerId);
+    if (jail.jailed) {
+      reply.header("retry-after", String(jail.remainingSeconds));
+      return reply.code(423).send({ error: "jailed", remainingSeconds: jail.remainingSeconds });
+    }
 
     const parsedParams = CommitCrimeParamsSchema.safeParse(request.params);
     if (!parsedParams.success) return reply.code(400).send({ error: "invalid_request" });
