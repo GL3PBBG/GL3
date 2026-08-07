@@ -3,28 +3,24 @@ import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { legacyHash } from "../src/auth/password.js";
-import { loadConfig } from "../src/config.js";
 import { players, playerStats } from "../src/db/schema/index.js";
-import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
-const redis = createRedis(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 
 beforeEach(async () => {
   await resetDb(db);
-  // This file exercises register/login repeatedly per test; clear their
-  // rate-limit buckets so accumulated hits from earlier tests (or earlier
-  // runs against the same Redis instance) never trip a 429 here. The
-  // limiter's own counting/TTL/429 behaviour has dedicated coverage in
-  // rate-limit.test.ts.
-  await redis.del("ratelimit:register:127.0.0.1", "ratelimit:login:127.0.0.1");
+  // This file exercises register/login repeatedly per test. Their
+  // rate-limit buckets are cleared automatically before every test by
+  // helpers/rate-limit-isolation.setup.ts, so accumulated hits never trip a
+  // 429 here. The limiter's own counting/TTL/429 behaviour has dedicated
+  // coverage in rate-limit.test.ts.
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 });
-afterAll(async () => { await closeServer(); await conn.end(); redis.disconnect(); });
+afterAll(async () => { await closeServer(); await conn.end(); });
 
 describe("POST /api/auth/register", () => {
   it("creates a player with stats and returns a session token", async () => {
