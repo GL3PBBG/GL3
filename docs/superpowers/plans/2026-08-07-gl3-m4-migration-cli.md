@@ -32,7 +32,12 @@ These apply to **every** task in this plan. Do not restate them per task; do not
 - **Not every table needs `id_map`.** `settings` keys its GL3 row identically to its V2 row (the string key itself) — idempotency there comes from `ON CONFLICT (key) DO UPDATE`, no surrogate key needed. Reserve `id_map` for tables that need one.
 - **`--dry-run` performs zero durable writes**, proven by running every statement inside a transaction that is always rolled back (Task 10), not by skipping statements.
 - **The whole run is idempotent.** Migrating a fixture twice produces the same row counts and the same UUIDs on both runs — this is M4's acceptance criterion and gets a dedicated test (Task 30).
-- **`transactions` and `crime_log` are NOT backfilled from V2.** V2 keeps only current balances, no per-transaction history — there is nothing to migrate into an append-only ledger. The ledger starts empty at cutover. This is a deliberate scope limit, stated once here, not a bug to "fix" in a later task.
+- **`crime_log` is NOT backfilled from V2.** V2 keeps no per-crime history; there is nothing to migrate. This is a deliberate scope limit, not a bug to "fix" later.
+- **`transactions` IS seeded with one opening-balance row per migrated player, per non-zero balance kind.** V2 has no per-transaction history, so there is no *history* to migrate — but the ledger cannot simply start empty. SPEC §2.3 requires every balance to be explained by an append-only ledger insert, and M2's acceptance criterion is `sum(ledger) == balance`. A migrated player holding cash with zero ledger rows would violate that invariant permanently: any reconciliation over a migrated game would flag every legacy player as corrupt, and the invariant would hold only for accounts created after cutover.
+
+  So the players migrator writes, inside the same transaction that creates `player_stats`, one `transactions` row per non-zero balance (`cash`, `bank`, `points`) with `reason = "migration.opening_balance"` and `ref_id` null. Zero balances get no row — `sum(∅) = 0` already satisfies the invariant. The rows are idempotent along with everything else: a re-run must not double them, which falls out of the `id_map` guard on the player itself.
+
+  Verify this in the idempotency task (Task 30): after two runs, assert `sum(transactions.amount) == player_stats.<kind>` for every migrated player and every balance kind.
 - **Conventional Commits, one commit per task.**
 
 ## Known unknowns this plan resolves by explicit decision (not guessing silently)
