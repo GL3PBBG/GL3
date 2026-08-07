@@ -873,12 +873,12 @@ await app.listen({ port: config.port, host: "0.0.0.0" });
 - [ ] **Step 11: Run the full gate**
 
 Run: `npm run verify`
-Expected: exits 0, 9 tests passing across both workspaces.
+Expected: exits 0, with tests reported from **both** `packages/shared` and `apps/server`. If no `apps/server` tests appear, the `vitest.workspace.ts` edit above did not take.
 
 - [ ] **Step 12: Commit**
 
 ```bash
-git add apps/server tsconfig.json package-lock.json
+git add apps/server tsconfig.json vitest.workspace.ts package-lock.json
 git commit -m "feat(server): add typed config loader and bootable fastify app"
 ```
 
