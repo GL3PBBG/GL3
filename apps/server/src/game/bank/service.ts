@@ -6,7 +6,7 @@ import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange } from "../../economy/ledger.js";
-import { recordScore } from "../leaderboard/service.js";
+import { DEFAULT_LEADERBOARD_PREFIX, recordScore } from "../leaderboard/service.js";
 
 export type BankDirection = "deposit" | "withdraw";
 export interface BankTransactionResult { cash: bigint; bank: bigint }
@@ -21,6 +21,7 @@ export interface BankTransactionResult { cash: bigint; bank: bigint }
  */
 export async function performBankTransaction(
   db: Db, redis: Redis, playerId: string, direction: BankDirection, amount: bigint,
+  leaderboardPrefix = DEFAULT_LEADERBOARD_PREFIX,
 ): Promise<BankTransactionResult> {
   const result = await db.transaction(async (tx) => {
     if (direction === "deposit") {
@@ -45,8 +46,8 @@ export async function performBankTransaction(
   };
   await publishEvent(redis, event);
 
-  await recordScore(redis, "cash", playerId, result.cash);
-  await recordScore(redis, "bank", playerId, result.bank);
+  await recordScore(redis, "cash", playerId, result.cash, leaderboardPrefix);
+  await recordScore(redis, "bank", playerId, result.bank, leaderboardPrefix);
 
   return result;
 }
