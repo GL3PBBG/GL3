@@ -1,6 +1,6 @@
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.js";
-import { crimes } from "./schema/index.js";
+import { crimes, ranks } from "./schema/index.js";
 
 export async function seedCrimes(db: Db): Promise<void> {
   const existing = await db.select({ id: crimes.id }).from(crimes).limit(1);
@@ -10,5 +10,18 @@ export async function seedCrimes(db: Db): Promise<void> {
     { id: uuidv7(), name: "Pickpocket", description: "Lift a wallet in a crowd.", cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n, minBullets: 0, maxBullets: 0, expReward: 5n, minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0 },
     { id: uuidv7(), name: "Rob a Store", description: "Hold up the corner shop.", cooldownSeconds: 60, minPayout: 200n, maxPayout: 900n, minBullets: 0, maxBullets: 2, expReward: 12n, minRank: 0, sort: 20, jailChancePercent: 25, jailSeconds: 45 },
     { id: uuidv7(), name: "Armoured Van", description: "Take the van on the freeway.", cooldownSeconds: 300, minPayout: 2000n, maxPayout: 9000n, minBullets: 1, maxBullets: 5, expReward: 40n, minRank: 0, sort: 30, jailChancePercent: 40, jailSeconds: 120 },
+  ]);
+}
+
+export async function seedRanks(db: Db): Promise<void> {
+  const existing = await db.select({ id: ranks.id }).from(ranks).limit(1);
+  if (existing.length > 0) return;
+
+  await db.insert(ranks).values([
+    { id: uuidv7(), name: "Associate", expRequired: 0n, cashReward: 0n, bulletReward: 0, maxHealth: 100 },
+    { id: uuidv7(), name: "Soldier", expRequired: 100n, cashReward: 500n, bulletReward: 5, maxHealth: 110 },
+    { id: uuidv7(), name: "Capo", expRequired: 500n, cashReward: 2500n, bulletReward: 15, maxHealth: 125 },
+    { id: uuidv7(), name: "Underboss", expRequired: 2000n, cashReward: 10000n, bulletReward: 40, maxHealth: 150 },
+    { id: uuidv7(), name: "Boss", expRequired: 8000n, cashReward: 50000n, bulletReward: 100, maxHealth: 200 },
   ]);
 }
