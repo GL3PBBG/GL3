@@ -12,7 +12,13 @@ import { CRIME_QUEUE, type CrimeJobData } from "../../queue/index.js";
 import { createRng } from "../rng.js";
 import { DEFAULT_CRIME_CHANCE } from "./routes.js";
 
-export interface CrimeWorkerDeps { db: Db; connection: Redis; publisher: Redis }
+export interface CrimeWorkerDeps {
+  db: Db;
+  connection: Redis;
+  publisher: Redis;
+  /** Overridable so tests can pair a worker with a test-private queue name — see createCrimeQueue. */
+  queueName?: string;
+}
 
 /** The slice of a BullMQ `Job` the processor needs — lets tests drive it directly. */
 export interface CrimeJob { id: string; data: CrimeJobData }
@@ -132,8 +138,8 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   await publishEvent(publisher, event);
 }
 
-export function startCrimeWorker({ db, connection, publisher }: CrimeWorkerDeps): Worker<CrimeJobData> {
-  return new Worker<CrimeJobData>(CRIME_QUEUE, async (job) => {
+export function startCrimeWorker({ db, connection, publisher, queueName = CRIME_QUEUE }: CrimeWorkerDeps): Worker<CrimeJobData> {
+  return new Worker<CrimeJobData>(queueName, async (job) => {
     if (job.id === undefined) throw new Error("crime job has no id — cannot guarantee idempotency");
     await processCrimeJob(db, publisher, { id: job.id, data: job.data });
   }, { connection, concurrency: 5 });
