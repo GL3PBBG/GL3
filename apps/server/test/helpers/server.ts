@@ -5,7 +5,8 @@ import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { startCrimeWorker } from "../../src/game/crimes/worker.js";
 import { createCrimeQueue } from "../../src/queue/index.js";
-import { createRedis } from "../../src/redis.js";
+import { createRedis, createSubscriber } from "../../src/redis.js";
+import { attachGateway } from "../../src/ws/gateway.js";
 
 export async function bootTestServer(): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
   const config = loadConfig({ ...process.env, NODE_ENV: "test" });
@@ -31,14 +32,22 @@ export async function bootTestServer(): Promise<{ app: FastifyInstance; close: (
   const worker = startCrimeWorker({ db: workerDb.db, connection: workerConnection, publisher, queueName });
 
   const app = await buildApp(config, { db, redis, crimeQueue });
+
+  // `attachGateway` only needs `app.server`, which exists before `app.listen` is
+  // called — the WS test's own `beforeAll` performs the actual `listen`.
+  const gatewaySubscriber = createSubscriber(config.redisUrl);
+  const gateway = await attachGateway(app.server, { db, redis, subscriber: gatewaySubscriber });
+
   return {
     app,
     close: async () => {
+      await gateway.close();
       await app.close();
       await worker.close();
       await crimeQueue.close();
       await workerDb.sql.end();
       publisher.disconnect();
+      gatewaySubscriber.disconnect();
       await sql.end();
       redis.disconnect();
     },
