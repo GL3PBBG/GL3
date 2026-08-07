@@ -70,6 +70,28 @@ describe("POST /api/gangs", () => {
     });
     expect(res.statusCode).toBe(409);
   });
+
+  // Guards the fix for the check-then-act race found in review: an unlocked
+  // pre-check SELECT before the transaction let two concurrent creates from
+  // the same player both pass before either committed, producing two gangs
+  // with one permanently orphaned. See routes.ts's AlreadyInGangError.
+  it("under two concurrent creates from the same player, lets exactly one succeed and leaves exactly one gang", async () => {
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${token}` },
+        payload: { name: "The Corleones" },
+      }),
+      app.inject({
+        method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${token}` },
+        payload: { name: "Second Gang" },
+      }),
+    ]);
+    const statusCodes = [a.statusCode, b.statusCode].sort();
+    expect(statusCodes).toEqual([201, 409]);
+
+    const rows = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.bossPlayerId, playerId));
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe("GET /api/gangs/:gangId", () => {
