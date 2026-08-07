@@ -141,4 +141,9 @@ describe("core schema", () => {
     `);
     expect(leaderboardIndex?.indexdef).toContain("(exp)");
   });
+
+  it("gives crimes an explicit jail-on-failure risk (spec: GL3 model addition, see M2 plan Decision 2)", async () => {
+    expect(await columnType("crimes", "jail_chance_percent")).toBe("integer");
+    expect(await columnType("crimes", "jail_seconds")).toBe("integer");
+  });
 });
