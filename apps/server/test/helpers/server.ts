@@ -42,8 +42,18 @@ export async function bootTestServer(): Promise<{ app: FastifyInstance; close: (
   const leaderboardPrefix = `leaderboard-test-${randomUUID()}`;
   const worker = startCrimeWorker({ db: workerDb.db, connection: workerConnection, publisher, queueName, leaderboardPrefix });
 
+  // Same problem, same fix, as queueName and leaderboardPrefix above:
+  // /api/auth/register and /api/auth/login are rate-limited per IP via
+  // ratelimit:<name>:<ip> keys in the same shared Redis, and Fastify's
+  // inject() reports the same default 127.0.0.1 for every test file. Without
+  // a private prefix, one file's registrations count against every other
+  // concurrently-running file's bucket and can trip a false 429 that looks
+  // like an auth bug but isn't (see rate-limit-isolation.setup.ts for the
+  // backstop this still leaves for tests that call buildApp() directly).
+  const rateLimitPrefix = `ratelimit-test-${randomUUID()}`;
+
   await rebuildLeaderboards(db, redis, leaderboardPrefix);
-  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix });
+  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.

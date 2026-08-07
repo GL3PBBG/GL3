@@ -8,7 +8,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import { players, playerStats } from "../db/schema/index.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
-import { tokenBucket } from "./rate-limit.js";
+import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
 import { createSession, destroySession, readSession } from "./session.js";
 
 declare module "fastify" {
@@ -35,7 +35,10 @@ function uniqueViolation(err: unknown): postgres.PostgresError | null {
   return candidate?.code === "23505" ? candidate : null;
 }
 
-export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db, redis: Redis): void {
+export function registerAuthRoutes(
+  app: FastifyInstance, config: Config, db: Db, redis: Redis,
+  rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
+): void {
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const token = bearer(request);
     const playerId = token ? await readSession(redis, token) : null;
@@ -45,7 +48,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db,
   app.decorate("requireAuth", requireAuth);
 
   app.post("/api/auth/register", {
-    preHandler: tokenBucket(redis, { name: "register", limit: 5, windowSeconds: 3600 }),
+    preHandler: tokenBucket(redis, { name: "register", limit: 5, windowSeconds: 3600 }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = RegisterRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
@@ -86,7 +89,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db,
   });
 
   app.post("/api/auth/login", {
-    preHandler: tokenBucket(redis, { name: "login", limit: 10, windowSeconds: 900 }),
+    preHandler: tokenBucket(redis, { name: "login", limit: 10, windowSeconds: 900 }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = LoginRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

@@ -85,7 +85,11 @@ export default defineWorkspace([
       name: "@gl3/server:redis-only",
       root: "./apps/server",
       include: ["test/cooldown.test.ts", "test/rate-limit.test.ts"],
-      setupFiles: [rateLimitIsolation],
+      // No rateLimitIsolation setupFile: neither file boots a server or
+      // exercises the real ratelimit:register:*/ratelimit:login:* keys —
+      // rate-limit.test.ts drives tokenBucket() directly against its own
+      // randomly-named buckets, so the shared-Redis collision this setupFile
+      // guards against doesn't apply here.
     },
     ...sharedAlias,
   },
