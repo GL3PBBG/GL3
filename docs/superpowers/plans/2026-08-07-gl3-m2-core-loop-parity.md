@@ -78,7 +78,7 @@ Files that change together live together. New M2 files follow a `service.ts` (pu
 
 ---
 
-# Task 1: M2 event-schema extensions in `@gl3/shared`
+### Task 1: M2 event-schema extensions in `@gl3/shared`
 
 **Files:**
 - Modify: `packages/shared/src/events.ts`
@@ -221,7 +221,7 @@ git commit -m "feat(shared): add M2 event types (rankedUp, bank.transacted, bull
 
 ---
 
-# Task 2: Migration — `crimes` gains jail-risk columns
+### Task 2: Migration — `crimes` gains jail-risk columns
 
 **Files:**
 - Modify: `apps/server/src/db/schema/content.ts`
@@ -312,7 +312,7 @@ git commit -m "feat(server): add crimes.jail_chance_percent and jail_seconds col
 
 ---
 
-# Task 3: Jail primitives and `GET /api/jail`
+### Task 3: Jail primitives and `GET /api/jail`
 
 **Files:**
 - Create: `packages/shared/src/dto/jail.ts`; Modify: `packages/shared/src/index.ts`
@@ -597,7 +597,7 @@ git commit -m "feat(server): add jail status primitives, lazy release, and GET /
 
 ---
 
-# Task 4: Ranks — exp-driven promotion, rewards, and `GET /api/ranks`
+### Task 4: Ranks — exp-driven promotion, rewards, and `GET /api/ranks`
 
 **Files:**
 - Create: `packages/shared/src/dto/rank.ts`; Modify: `packages/shared/src/index.ts`
@@ -886,7 +886,7 @@ git commit -m "feat(server): add exp-driven rank promotion, ladder seed, and GET
 
 ---
 
-# Task 5: Bank deposit and withdraw
+### Task 5: Bank deposit and withdraw
 
 **Files:**
 - Create: `packages/shared/src/dto/bank.ts`; Modify: `packages/shared/src/index.ts`
@@ -1123,7 +1123,7 @@ git commit -m "feat(server): add bank deposit/withdraw as a synchronous double-l
 
 ---
 
-# Task 6: Wire jail-on-failure and rank-up into the crime worker
+### Task 6: Wire jail-on-failure and rank-up into the crime worker
 
 Chains after Task 2 (jail columns), Task 3 (jail primitives), Task 4 (rank-up). This is the integration point — it does not introduce new primitives, it composes existing ones inside the one file that already owns "what happens when a crime resolves."
 
@@ -1380,7 +1380,7 @@ git commit -m "feat(server): wire jail-on-failure and rank-up into the crime wor
 
 ---
 
-# Task 7: Travel
+### Task 7: Travel
 
 **Files:**
 - Create: `packages/shared/src/dto/travel.ts`; Modify: `packages/shared/src/index.ts`
@@ -1694,7 +1694,7 @@ git commit -m "feat(server): add travel with cooldown gate, jail gate, and synch
 
 ---
 
-# Task 8: Bullets shop
+### Task 8: Bullets shop
 
 Chains after Task 7 (shares `seedLocations` and needs a player to actually be somewhere).
 
@@ -1990,7 +1990,7 @@ git commit -m "feat(server): add the bullets shop with location-row-locked stock
 
 ---
 
-# Task 9: Leaderboards
+### Task 9: Leaderboards
 
 Chains after Task 4 (ranks — exp source), Task 5 (bank — bank score source), Task 6 (crime worker — cash/exp source).
 
@@ -2243,7 +2243,7 @@ git commit -m "feat(server): add Redis sorted-set leaderboards with boot rebuild
 
 ---
 
-# Task 10: Economy invariant test — the milestone's acceptance gate
+### Task 10: Economy invariant test — the milestone's acceptance gate
 
 Depends on every prior task in this plan. This is SPEC §6's literal M2 acceptance criterion: *"economy invariant test: sum(ledger) == balance for 1000 randomized ops."*
 
