@@ -10,8 +10,13 @@ export interface CrimeJobData {
   seed: string;
 }
 
-export function createCrimeQueue(redis: Redis): Queue<CrimeJobData> {
-  return new Queue<CrimeJobData>(CRIME_QUEUE, {
+/**
+ * `queueName` defaults to the production {@link CRIME_QUEUE} name but is
+ * overridable so tests can give each isolated server its own private queue
+ * — see `test/helpers/server.ts` for why that isolation matters.
+ */
+export function createCrimeQueue(redis: Redis, queueName: string = CRIME_QUEUE): Queue<CrimeJobData> {
+  return new Queue<CrimeJobData>(queueName, {
     connection: redis,
     defaultJobOptions: {
       attempts: 3,
