@@ -76,6 +76,16 @@ describe("POST /api/crimes/:crimeId/commit", () => {
     expect(codes).toEqual([202, 429]);
   });
 
+  it("400s for a malformed crime id instead of reaching postgres", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/crimes/not-a-uuid/commit", headers: auth,
+    });
+    expect(res.statusCode).toBe(400);
+    // The malformed id must not have burned the cooldown either.
+    const ok = await app.inject({ method: "POST", url: `/api/crimes/${crimeId}/commit`, headers: auth });
+    expect(ok.statusCode).toBe(202);
+  });
+
   it("404s for an unknown crime and does not burn the cooldown", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/crimes/018f8e2a-0000-7000-8000-0000000000ff/commit", headers: auth,
