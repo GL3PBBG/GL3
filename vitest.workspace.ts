@@ -7,14 +7,21 @@ export default defineWorkspace([
     test: {
       name: "@gl3/server",
       root: "./apps/server",
+      // Runs once for the whole run, before any test file starts: builds
+      // (or reuses) the migrated template database that every file's
+      // isolated-db.setup.ts clones from. Doing the actual migration once
+      // here — instead of once per file — is what keeps per-file setup cost
+      // flat as the suite grows across M2–M5 (see global-setup.ts).
+      globalSetup: ["./test/helpers/global-setup.ts"],
       // Run once per test file (Vitest re-executes setupFiles per file even
       // when it reuses a worker process — see the files themselves for why
-      // this exists): gives each file its own migrated Postgres database
-      // (test/helpers/isolated-db.setup.ts) and auto-clears the shared
-      // register/login Redis rate-limit buckets before every test
-      // (test/helpers/rate-limit-isolation.setup.ts). Together these let
-      // Vitest's default parallel file execution run safely — no test file
-      // needs `--no-file-parallelism` or its own isolation workarounds.
+      // this exists): gives each test file its own Postgres database cloned
+      // from the template (test/helpers/isolated-db.setup.ts) and
+      // auto-clears the shared register/login Redis rate-limit buckets
+      // before every test (test/helpers/rate-limit-isolation.setup.ts).
+      // Together these let Vitest's default parallel file execution run
+      // safely — no test file needs `--no-file-parallelism` or its own
+      // isolation workarounds.
       setupFiles: [
         "./test/helpers/isolated-db.setup.ts",
         "./test/helpers/rate-limit-isolation.setup.ts",
