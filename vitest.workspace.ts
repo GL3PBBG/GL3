@@ -114,6 +114,7 @@ export default defineWorkspace([
         "test/health.test.ts",
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
+        "test/notifications.test.ts",
         "test/ranks.test.ts",
         "test/travel.test.ts",
         "test/ws.test.ts",
