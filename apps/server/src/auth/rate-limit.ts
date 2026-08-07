@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 
+export const DEFAULT_RATE_LIMIT_PREFIX = "ratelimit";
+
 export interface TokenBucketOptions {
   /** Bucket name, e.g. "login". */
   name: string;
@@ -8,9 +10,14 @@ export interface TokenBucketOptions {
   windowSeconds: number;
 }
 
-export function tokenBucket(redis: Redis, opts: TokenBucketOptions) {
+// `prefix` defaults to the real "ratelimit" key space used in production —
+// one Redis, one game, keys global by design. Tests share that same Redis
+// instance across every file and worker, so bootTestServer() overrides this
+// to a per-call random prefix (see server.ts), the same seam
+// leaderboardPrefix already uses for the same reason.
+export function tokenBucket(redis: Redis, opts: TokenBucketOptions, prefix = DEFAULT_RATE_LIMIT_PREFIX) {
   return async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const bucketKey = `ratelimit:${opts.name}:${request.ip}`;
+    const bucketKey = `${prefix}:${opts.name}:${request.ip}`;
     // SET ... NX EX creates the key and assigns its TTL as a single atomic
     // op, so a crash or dropped connection between "key created" and "TTL
     // assigned" can no longer leave a persistent, un-expiring key — which

@@ -23,6 +23,8 @@ export interface AppDeps {
   crimeQueue: Queue<CrimeJobData>;
   /** Overridable so tests can pair a server with a test-private leaderboard namespace — see rebuildLeaderboards. */
   leaderboardPrefix?: string;
+  /** Overridable so tests can pair a server with a test-private rate-limit namespace — see bootTestServer. */
+  rateLimitPrefix?: string;
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
@@ -30,7 +32,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   await app.register(cors, { origin: config.corsOrigins, credentials: true });
 
   app.get("/health", async () => ({ status: "ok" }));
-  registerAuthRoutes(app, config, deps.db, deps.redis);
+  registerAuthRoutes(app, config, deps.db, deps.redis, deps.rateLimitPrefix);
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   registerBankRoutes(app, deps.db, deps.redis, requireAuth);
