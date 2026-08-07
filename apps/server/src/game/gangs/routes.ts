@@ -277,7 +277,7 @@ export function registerGangRoutes(
     const [actor] = await db.select({ username: players.username }).from(players).where(eq(players.id, playerId));
     const event: GameEvent = {
       id: uuidv7(), type: "gang.memberJoined", at: new Date().toISOString(),
-      actorId: playerId, actorName: actor?.username ?? "", audience: { kind: "gang", gangId: invite.gangId },
+      actorId: playerId, actorName: actor?.username ?? "unknown", audience: { kind: "gang", gangId: invite.gangId },
       gangId: invite.gangId,
     };
     await publishEvent(redis, event);
@@ -340,6 +340,14 @@ export function registerGangRoutes(
     const params = MemberParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
     const { gangId, playerId: targetId } = params.data;
+
+    // Existence before permission: a nonexistent gang must 404, not 403 —
+    // GET /api/gangs/:gangId already makes gang existence public to any
+    // authenticated player, so checking it first here leaks nothing new.
+    // This pre-check is only ever the value used to answer 404; the boss
+    // comparison below still trusts only the row re-read under the lock.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
 
     if (!(await hasGangPermission(db, gangId, requesterId, "kick"))) {
       return reply.code(403).send({ error: "forbidden" });
