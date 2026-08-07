@@ -28,7 +28,10 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   // actor = the jailed player.
   z.object({ ...base, type: z.literal("player.jailed"), until: TimestampSchema, reason: z.string() }),
   z.object({ ...base, type: z.literal("player.released") }),
-  z.object({ ...base, type: z.literal("player.travelled"), fromLocationId: IdSchema, toLocationId: IdSchema }),
+  // fromLocationId is null the first time a player ever travels (no prior
+  // location — playerStats.location_id starts null and M2 does not backfill
+  // a "home" location at registration, see M2 plan Task 7).
+  z.object({ ...base, type: z.literal("player.travelled"), fromLocationId: IdSchema.nullable(), toLocationId: IdSchema, cost: MoneySchema }),
   // actor = the attacker.
   z.object({ ...base, type: z.literal("player.attacked"), targetId: IdSchema, targetName: z.string(), damage: z.number().int().nonnegative() }),
   // actor = the killer, or the victim when the kill has no human killer.
@@ -52,6 +55,21 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("chat.message"), body: z.string() }),
   // actor = the player who just joined.
   z.object({ ...base, type: z.literal("player.joined") }),
+  // actor = the player who ranked up.
+  z.object({
+    ...base, type: z.literal("player.rankedUp"),
+    rankId: IdSchema, rankName: z.string(), cashReward: MoneySchema, bulletReward: MoneySchema, maxHealth: z.number().int().positive(),
+  }),
+  // actor = the account holder. Private audience — bank state is not broadcast.
+  z.object({
+    ...base, type: z.literal("bank.transacted"),
+    direction: z.enum(["deposit", "withdraw"]), amount: MoneySchema, cash: MoneySchema, bank: MoneySchema,
+  }),
+  // actor = the buyer.
+  z.object({
+    ...base, type: z.literal("bullets.purchased"),
+    locationId: IdSchema, quantity: z.number().int().positive(), cost: MoneySchema, cash: MoneySchema, bullets: MoneySchema,
+  }),
 ]);
 
 export type GameEvent = z.infer<typeof GameEventSchema>;
