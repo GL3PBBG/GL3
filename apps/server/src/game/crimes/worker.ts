@@ -6,9 +6,11 @@ import { uuidv7 } from "uuidv7";
 import type { GameEvent } from "@gl3/shared";
 import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
-import { crimeLog, crimes, playerCrimeSkill, players } from "../../db/schema/index.js";
-import { addExp, applyBalanceChange } from "../../economy/ledger.js";
+import { crimeLog, crimes, playerCrimeSkill, players, playerStats } from "../../db/schema/index.js";
+import { applyBalanceChange } from "../../economy/ledger.js";
+import { applyExpAndRankUp, type RankUpResult } from "../../economy/ranks.js";
 import { CRIME_QUEUE, type CrimeJobData } from "../../queue/index.js";
+import { sendToJail } from "../jail/status.js";
 import { createRng } from "../rng.js";
 import { DEFAULT_CRIME_CHANCE } from "./routes.js";
 
@@ -69,16 +71,31 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   const bullets = success ? BigInt(rng.int(crime.minBullets, crime.maxBullets + 1)) : 0n;
   const exp = success ? crime.expReward : 0n;
 
+  // A second, independent draw from the SAME seeded stream — deterministic
+  // per job, so a retry re-derives the identical jail outcome instead of
+  // re-rolling a luckier one (spec §7). Only a failed crime carries jail
+  // risk (M2 plan Decision 2 — GL3 model addition, not audited from V2).
+  const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
+  const jailed = jailRoll < crime.jailChancePercent;
+
+  let rankUp: RankUpResult | null = null;
   let alreadyProcessed = false;
   try {
-    await db.transaction(async (tx) => {
+    // Returned from the callback (rather than assigned to the outer `rankUp`
+    // from inside it) so the result flows back through `db.transaction`'s own
+    // return type — TS can't carry a flow-narrowed type for a `let` mutated
+    // inside a nested async closure back out to this scope, and reading it
+    // that way type-checks as always `null` here.
+    rankUp = await db.transaction(async (tx) => {
       // Insert the idempotency marker FIRST, keyed to job.id. A BullMQ retry
       // re-runs this whole handler with the same job.id; the unique index
       // on crime_log.job_id rejects the second insert, the error propagates
       // out of this callback, and drizzle rolls the transaction back before
       // any crediting below ever runs. Doing the insert last would let the
-      // retry's payout/exp commit and only the log row collide — the
-      // double-pay this exists to prevent.
+      // retry's payout/exp/jail/rank-reward commit and only the log row
+      // collide — the double-pay this exists to prevent. Everything this
+      // task adds (jail, exp, rank-up and its cash reward) therefore lives
+      // in this same transaction, after this insert.
       await tx.insert(crimeLog).values({
         id: uuidv7(), playerId, crimeId, success, payout, jobId: job.id,
       });
@@ -87,30 +104,41 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
           playerId, amount: payout, kind: "cash", reason: "crime.payout", refId: crimeId,
         });
       }
-      if (exp > 0n) await addExp(tx, playerId, exp);
+      let promotion: RankUpResult | null = null;
+      if (exp > 0n) promotion = await applyExpAndRankUp(tx, playerId, exp);
+      if (jailed) await sendToJail(tx, playerId, crime.jailSeconds);
+      return promotion;
     });
   } catch (err) {
     if (uniqueViolation(err)?.constraint_name === "crime_log_job_id_unique") {
-      alreadyProcessed = true; // this job.id already paid out — do not credit again
+      alreadyProcessed = true; // this job.id already paid out — do not re-credit, re-jail, or re-promote
     } else {
       throw err;
     }
   }
 
+  // Re-read jail state after the transaction rather than trust this
+  // invocation's local `jailed` flag: on an idempotent replay, the actual
+  // jail (if any) was written by the ORIGINAL attempt, not this call, and
+  // crime.resolved must still report the player's real state either way.
+  const [freshStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
+    .from(playerStats).where(eq(playerStats.playerId, playerId));
+  const effectiveJailedUntil = freshStats?.jailedUntil ?? null;
+
   // SPEC §3: events are facts, not commands — published only AFTER the
   // transaction above commits (or is recognised as already committed).
   // Never publish inside db.transaction(...).
   //
-  // Decision 1: publish on the "already processed" path too, not just on a
-  // fresh success. The retry that lands here almost always exists BECAUSE
-  // the first attempt committed its transaction and then died before (or
-  // during) publishEvent — that's the whole reason this job was retried.
-  // Staying silent on this path would leave a client waiting forever for an
-  // event that already happened. The one cost is a possible duplicate event
-  // if the retry was for some unrelated reason after a publish that actually
-  // succeeded; a client double-toast is far cheaper than a client that never
-  // learns its crime resolved, and downstream consumers can dedupe on
-  // `event.id` if this ever matters.
+  // Decision 1: publish crime.resolved on the "already processed" path too,
+  // not just on a fresh success. The retry that lands here almost always
+  // exists BECAUSE the first attempt committed its transaction and then
+  // died before (or during) publishEvent — that's the whole reason this job
+  // was retried. Staying silent on this path would leave a client waiting
+  // forever for an event that already happened. The one cost is a possible
+  // duplicate event if the retry was for some unrelated reason after a
+  // publish that actually succeeded; a client double-toast is far cheaper
+  // than a client that never learns its crime resolved, and downstream
+  // consumers can dedupe on `event.id` if this ever matters.
   const event: GameEvent = {
     id: uuidv7(),
     type: "crime.resolved",
@@ -124,7 +152,7 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
     payout: payout.toString(),
     bullets: bullets.toString(),
     exp: exp.toString(),
-    jailedUntil: null, // jail lands in M2
+    jailedUntil: effectiveJailedUntil ? effectiveJailedUntil.toISOString() : null,
   };
 
   // Decision 2: let a publish failure fail the job (no try/catch here). With
@@ -136,6 +164,36 @@ export async function processCrimeJob(db: Db, publisher: Redis, job: CrimeJob): 
   // the job lands in BullMQ's failed set (removeOnFail keeps it around) —
   // an inspectable trace, not a silently swallowed event.
   await publishEvent(publisher, event);
+
+  // player.jailed and player.rankedUp are supplementary notifications, not
+  // the primary fact (crime.resolved already carries jailedUntil above, and
+  // GET /api/ranks already reflects a promotion) — published only on the
+  // fresh path, and only AFTER crime.resolved, so a client that reacts to
+  // player.jailed can already cross-reference the crime that caused it.
+  // Unlike crime.resolved, deliberately NOT republished on an idempotent
+  // replay: reconstructing "did THIS attempt newly cross a rank threshold"
+  // from a cold read after the fact isn't cheaply knowable, and a client
+  // that already holds crime.resolved's jailedUntil has the essential fact
+  // regardless (M2 plan Task 6).
+  if (!alreadyProcessed && jailed) {
+    const jailedEvent: GameEvent = {
+      id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
+      actorId: playerId, actorName: actor.username,
+      audience: { kind: "player", playerId },
+      until: effectiveJailedUntil!.toISOString(), reason: "crime.failed",
+    };
+    await publishEvent(publisher, jailedEvent);
+  }
+  if (!alreadyProcessed && rankUp) {
+    const rankedUpEvent: GameEvent = {
+      id: uuidv7(), type: "player.rankedUp", at: new Date().toISOString(),
+      actorId: playerId, actorName: actor.username,
+      audience: { kind: "player", playerId },
+      rankId: rankUp.rankId, rankName: rankUp.rankName,
+      cashReward: rankUp.cashReward.toString(), bulletReward: rankUp.bulletReward.toString(), maxHealth: rankUp.maxHealth,
+    };
+    await publishEvent(publisher, rankedUpEvent);
+  }
 }
 
 export function startCrimeWorker({ db, connection, publisher, queueName = CRIME_QUEUE }: CrimeWorkerDeps): Worker<CrimeJobData> {

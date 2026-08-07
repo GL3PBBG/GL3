@@ -1,5 +1,5 @@
 import { GameEventSchema } from "@gl3/shared";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -84,5 +84,66 @@ describe("processCrimeJob idempotency", () => {
     // a moment to deliver both messages.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(events).toHaveLength(2);
+  });
+});
+
+// Task 6: jail-on-failure and rank-up now live inside the same guarded
+// transaction as the payout — prove a retry can't double-apply either.
+describe("processCrimeJob idempotency — jail and rank-up (Task 6)", () => {
+  it("does not double-jail on a retried job that fails and rolls jail", async () => {
+    // Force a guaranteed jail regardless of the RNG seed: 0% success (so the
+    // crime always fails) and a 100% jail chance on that failure.
+    await db.update(playerCrimeSkill).set({ chance: "0.00" })
+      .where(and(eq(playerCrimeSkill.playerId, playerId), eq(playerCrimeSkill.crimeId, crimeId)));
+    await db.update(crimes).set({ jailChancePercent: 100 }).where(eq(crimes.id, crimeId));
+
+    const job = { id: "retry-jail-job-1", data: { playerId, crimeId, seed: "fixed-seed-for-jail-idempotency" } };
+
+    await processCrimeJob(db, publisher, job);
+    const [firstStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(firstStats?.jailedUntil).not.toBeNull();
+    const firstUntil = firstStats!.jailedUntil!.getTime();
+
+    // Retry: same job.id, same seed — must NOT re-jail (which would extend
+    // or reset the sentence past what the original attempt set).
+    await processCrimeJob(db, publisher, job);
+    const [secondStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(secondStats?.jailedUntil?.getTime()).toBe(firstUntil);
+
+    const logs = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));
+    expect(logs).toHaveLength(1); // one attempt recorded, not two
+  });
+
+  it("does not double-promote or double-pay the rank cash reward on a retried job", async () => {
+    const { seedRanks } = await import("../src/db/seed.js");
+    await seedRanks(db);
+
+    // beforeEach already forced this player's chance on `crimeId` to 100%.
+    // Bump the crime's exp reward so a single successful commit crosses
+    // straight from Associate (0 exp) to Soldier (100 exp, 500 cash reward).
+    await db.update(crimes).set({ expReward: 150n }).where(eq(crimes.id, crimeId));
+
+    const job = { id: "retry-rank-job-1", data: { playerId, crimeId, seed: "fixed-seed-for-rank-idempotency" } };
+
+    await processCrimeJob(db, publisher, job);
+    const [firstStats] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(firstStats?.rankId).not.toBeNull(); // promoted past the default null rank
+
+    // Retry: same job.id, same seed — must NOT re-promote or re-pay the
+    // rank's cash reward a second time.
+    await processCrimeJob(db, publisher, job);
+    const [secondStats] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(secondStats?.rankId).toBe(firstStats?.rankId);
+    expect(secondStats?.cash).toBe(firstStats?.cash);
+
+    // Exactly one rank.reward ledger row (the crime's own payout is a
+    // separate "crime.payout" row) — never doubled by the replay.
+    const rankLedger = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, playerId), eq(transactions.reason, "rank.reward")));
+    expect(rankLedger).toHaveLength(1);
   });
 });
