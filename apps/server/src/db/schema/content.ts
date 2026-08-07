@@ -13,6 +13,15 @@ export const crimes = pgTable("crimes", {
   expReward: bigint("exp_reward", { mode: "bigint" }).notNull().default(sql`0`),
   minRank: integer("min_rank").notNull().default(0),
   sort: integer("sort").notNull().default(0),
+  /**
+   * GL3 model addition, not present in V2's audited `crimes` columns (spec
+   * §1.2 lists only C_cooldown/C_money/C_maxMoney/C_bullets/C_maxBullets/
+   * C_exp/C_level) — V2's jail module clearly exists but the audit doesn't
+   * say what decides which failed crimes jail you, so this is made explicit
+   * rather than assumed. 0 means "never jails on failure."
+   */
+  jailChancePercent: integer("jail_chance_percent").notNull().default(0),
+  jailSeconds: integer("jail_seconds").notNull().default(0),
 }, (t) => ({ sortIdx: index("crimes_sort_idx").on(t.sort) }));
 
 export const locations = pgTable("locations", {
