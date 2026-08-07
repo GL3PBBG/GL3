@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
+import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { LoginRequestSchema, RegisterRequestSchema } from "@gl3/shared";
 import type { Config } from "../config.js";
@@ -18,6 +19,19 @@ function bearer(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
   if (!header?.startsWith("Bearer ")) return null;
   return header.slice("Bearer ".length).trim() || null;
+}
+
+/**
+ * PostgreSQL SQLSTATE 23505 = unique_violation. drizzle-orm wraps the raw
+ * driver error in its own `DrizzleQueryError`, with the real `PostgresError`
+ * attached as `.cause` — so the unique-violation check has to look one level
+ * down the `Error.cause` chain, not just at the thrown error itself.
+ */
+function uniqueViolation(err: unknown): postgres.PostgresError | null {
+  const candidate = err instanceof postgres.PostgresError ? err
+    : err instanceof Error && err.cause instanceof postgres.PostgresError ? err.cause
+    : null;
+  return candidate?.code === "23505" ? candidate : null;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db, redis: Redis): void {
@@ -51,9 +65,19 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db,
         });
         await tx.insert(playerStats).values({ playerId });
       });
-    } catch {
+    } catch (err) {
       // Unique index is the real arbiter; the pre-check above only saves a hash round.
-      return reply.code(409).send({ error: "username_taken" });
+      // Only a genuine unique-constraint violation is a client error (409) — anything
+      // else (connection loss, constraint we don't recognise, etc.) is a real failure
+      // and must surface as one, not be misreported as "username taken".
+      const violation = uniqueViolation(err);
+      if (violation?.constraint_name === "players_username_unique") {
+        return reply.code(409).send({ error: "username_taken" });
+      }
+      if (violation?.constraint_name === "players_email_unique") {
+        return reply.code(409).send({ error: "email_taken" });
+      }
+      throw err;
     }
 
     const token = await createSession(redis, playerId, config.sessionTtlSeconds);
