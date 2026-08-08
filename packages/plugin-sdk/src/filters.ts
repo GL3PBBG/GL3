@@ -58,8 +58,18 @@ export function on<T>(point: FilterPoint<T>, fn: FilterFn<T>, order = 100): Filt
     pointName: point.name,
     order,
     async run(ctx: PluginCtx, value: unknown): Promise<unknown> {
-      // `value` re-enters as T: runFilterChain only ever routes a point's own
-      // value here, and the chain's public signature is what enforces that.
+      // `value` re-enters as T. What backs that cast is constructor discipline,
+      // not the signature: `runFilterChain` routes by the name *string*, and
+      // `filterPoint()` is the only sanctioned way to mint a point, so within one
+      // `@gl3/plugin-sdk` module instance its duplicate-name `Set` makes a name
+      // map to exactly one `T`.
+      //
+      // Both halves of that are escapable, and neither is checked. `_type` is
+      // optional, so a bare `{ name: "crimes.beforeResolve" }` literal inhabits
+      // `FilterPoint<Gang>` without ever calling `filterPoint()` — it never meets
+      // the `Set`, type-checks clean, and routes a `Gang` into a `Crime`
+      // subscriber, which this cast then launders. Two copies of the package in
+      // one process would break it the same way, each with its own `Set`.
       return await fn(ctx, value as T);
     },
   };
@@ -81,5 +91,8 @@ export async function runFilterChain<T>(
     .sort((a, b) => a.order - b.order);
   let current: unknown = value;
   for (const subscription of chain) current = await subscription.run(ctx, current);
+  // Same cast, same backing as `on`'s above: a subscriber for this point is
+  // typed to return `T`, so the threaded value is still `T` — given the
+  // constructor discipline described there, and no stronger than it.
   return current as T;
 }
