@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FilterPoint, FilterSubscription } from "./filters.js";
 
 export const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const SEMVER_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -29,8 +30,8 @@ export interface PluginManifestInput {
   pages?: unknown[];
   events?: unknown[];
   jobs?: Record<string, unknown>;
-  provides?: unknown[];
-  filters?: unknown[];
+  provides?: FilterPoint<unknown>[];
+  filters?: FilterSubscription[];
 }
 
 /** The normalised manifest every consumer sees: no field is ever `undefined`. */
@@ -44,8 +45,8 @@ export interface PluginManifest {
   pages: unknown[];
   events: unknown[];
   jobs: Record<string, unknown>;
-  provides: unknown[];
-  filters: unknown[];
+  provides: FilterPoint<unknown>[];
+  filters: FilterSubscription[];
 }
 
 /**
@@ -56,6 +57,12 @@ export interface PluginManifest {
  * Function-bearing fields are `z.unknown()`: their shape is enforced by the
  * TypeScript types, and a zod schema over a function would only assert
  * `typeof === "function"`. `.strict()` is what rejects unknown fields.
+ *
+ * `provides` and `filters` use `z.custom<T>()` rather than `z.unknown()`. Both
+ * accept every value at runtime — the difference is only that `z.custom` carries
+ * the element type through to `result.data`, which is what the manifest is built
+ * from. A `FilterPoint` is a token and a `FilterSubscription` holds a closure;
+ * neither has a shape zod can check, so the type is the whole guarantee.
  */
 const InputSchema = z
   .object({
@@ -74,8 +81,8 @@ const InputSchema = z
     pages: z.array(z.unknown()).optional(),
     events: z.array(z.unknown()).optional(),
     jobs: z.record(z.unknown()).optional(),
-    provides: z.array(z.unknown()).optional(),
-    filters: z.array(z.unknown()).optional(),
+    provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
+    filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
   .strict();
 
