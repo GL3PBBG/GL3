@@ -92,6 +92,25 @@ describe("POST /api/gangs", () => {
     const rows = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.bossPlayerId, playerId));
     expect(rows).toHaveLength(1);
   });
+
+  // Postgres `text` columns reject an embedded NUL byte outright (SQLSTATE
+  // 22021); z.string() alone doesn't, so an otherwise-legal request 500s
+  // instead of a clean 400. See packages/shared/src/primitives.ts#noNulByte.
+  it("400s a NUL byte in description instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${token}` },
+      payload: { name: "The Corleones", description: `Family${String.fromCharCode(0)}business` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a NUL byte in info instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${token}` },
+      payload: { name: "The Corleones", info: `Some${String.fromCharCode(0)}info` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe("GET /api/gangs/:gangId", () => {

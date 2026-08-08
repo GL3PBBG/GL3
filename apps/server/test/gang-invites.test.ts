@@ -137,6 +137,18 @@ describe("POST /api/gangs/:gangId/invites", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  // `username` here isn't persisted, but reaches Postgres as an
+  // `eq(players.username, ...)` lookup parameter — Postgres rejects an
+  // embedded NUL in any text parameter, not just one being written
+  // (SQLSTATE 22021), so this 500ed before noNulByte guarded it.
+  it("400s a NUL byte in username instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username: `Sonny${String.fromCharCode(0)}` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("409s inviting a target who is already in a gang", async () => {
     await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${inviteeToken}` },
