@@ -1,7 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-07, after M2 completion.
-Branch: `feat/m0-m1-scaffold-and-vertical-slice` (58 commits ahead of `main`).
+Last updated: 2026-08-08, after M3 completion.
+Branch: `feat/m0-m1-scaffold-and-vertical-slice` (79 commits ahead of `main`, at
+`c4d2b41`).
 
 ---
 
@@ -12,12 +13,12 @@ Branch: `feat/m0-m1-scaffold-and-vertical-slice` (58 commits ahead of `main`).
 | **M0 Scaffold** | ✅ complete | Monorepo, CI, docker-compose, all 32 tables migrated |
 | **M1 Auth + vertical slice** | ✅ complete | Acceptance criterion proven end to end |
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
-| **M3 Social** | 📋 planned, not started | 10 tasks — **ready to execute now** |
+| **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | ❌ not planned | Now unblocked; refactors M2's bank into a plugin |
 
-**Suite: 22 files / 126 tests**, verified green across four consecutive
-back-to-back runs on a loaded machine.
+**Suite: 33 files / 220 tests**, green. Count verified by the controller's own
+`npm run verify` run, not taken from an agent report.
 
 ---
 
@@ -38,47 +39,85 @@ They can also bank cash, travel between locations (paying a fare), and buy bulle
 from a location's shared stock. Leaderboards are Redis sorted sets rebuilt from
 Postgres on boot. Jailed players are blocked from crimes and travel.
 
+They can found a gang and run it: invite players (the invitee is notified live over
+the WebSocket), accept or decline, leave, be kicked, and hold granular permissions
+granted by the boss. The gang has its own bank — deposits and withdrawals move money
+between a player and the gang, both sides ledgered in one transaction. Every
+membership change appends a gang log row.
+
+They can also send threaded mail, read and mark notifications, view any player's
+public profile, and read game news.
+
 Every balance movement anywhere is an append-only ledger row inside the same
 transaction as the balance update.
 
+**Every path touching a (gang, player) pair takes both rows through
+`lockGangAndPlayerForUpdate`**, which orders them by UUID string comparison. That is
+the single global lock order, and it is not optional: the membership routes
+originally locked `player_stats` first and reached the `gangs` row implicitly (the
+`FOR KEY SHARE` Postgres takes when a `gang_logs` or `gang_members` FK is checked),
+which inverted the bank routes' order and deadlocked them — `40P01`, surfacing as an
+HTTP 500 on a well-formed request. `test/gang-lock-order.test.ts` is the regression
+test. `POST /api/gangs` is the one documented exemption, and only because it INSERTs
+its own `gangs` row in the same transaction under a fresh uuidv7, so no other
+transaction can want a lock on a row it cannot see.
+
 ---
 
-## Starting M3
+## What M3 shipped
 
-The plan is written and ready: `docs/superpowers/plans/2026-08-07-gl3-m3-social.md`
-(10 tasks). M3 covers gangs (create / invite / roles / bank / logs), mail,
-notifications, profile, and game news.
+All 10 tasks of `docs/superpowers/plans/2026-08-07-gl3-m3-social.md` are complete:
+gangs (create / invite / roles / bank / logs), mail, notifications, profile, and
+game news.
 
-**Acceptance criterion (SPEC §6):** gang bank transfers ledgered; WS notifies
-invitees live.
+**Acceptance criterion (SPEC §6) — met.** `test/acceptance/m3-acceptance.test.ts`
+proves both halves in one flow: a gang is founded, the invitee is notified live over
+the WebSocket, the invite is accepted, and a bank deposit and withdrawal reconcile
+`sum(transactions) == gangs.bank` at the property level rather than trusting the
+HTTP response body. Both assertions were demonstrated failing against deliberately
+broken code before being accepted.
 
-Before dispatching anything, read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md`.
+## Starting M4
+
+Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
+install below.
 
 Extract a task brief with:
 
 ```bash
 .claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/\
 subagent-driven-development/scripts/task-brief \
-  docs/superpowers/plans/2026-08-07-gl3-m3-social.md 1
+  docs/superpowers/plans/2026-08-07-gl3-m4-migration-cli.md 1
 ```
 
-### Things M3 will hit that are worth knowing in advance
+### What M3 established that later work must not undo
 
+- **Lock ordering is per row-pair, not one global rule for the whole app.** There
+  are two orders and they do not conflict: gang↔player goes through
+  `lockGangAndPlayerForUpdate` (UUID comparison); location↔player is the bullets
+  shop's **location before player**. Travel is the mirror of bullets (player first,
+  then `FOR KEY SHARE` on `locations` via the `location_id` update) and is inert
+  only because it rejects destination == current before touching that row. Adding a
+  path that locks a location and a player in a new order, or a gang and a player
+  outside the helper, reintroduces SPEC §2.3's deadlock class.
+- **An implicit FK lock counts as a lock.** Inserting a row whose FK references a
+  locked row takes `FOR KEY SHARE` on it, which conflicts with `FOR UPDATE`. This is
+  invisible in the code — no lock call appears — and it is what caused the M3
+  deadlock. When reasoning about lock order, read the FKs, not just the lock calls.
+- **`gang_permissions` rows are masked, not trusted.** `hasGangPermission` inner-joins
+  `gang_members`, so a row for a non-member confers nothing. Three layers keep it
+  that way: the grant route refuses a non-member target, accept-invite deletes rows
+  that exist anyway, and the join denies whatever survives. Any future code path that
+  inserts a `gang_members` row must delete the matching permission rows first.
 - **Gangs have two balances** (`gangs.bank` and `gangs.cash`), preserved from V2's
   `G_bank` / `G_money`.
-- **Gang bank transfers move money between a player and a gang.** That is a
-  two-party mutation, so lock rows in a consistent order — and note the ordering
-  precedent already set: the bullets shop locks **location before player**. Keep any
-  new ordering consistent with that, or SPEC §2.3's deadlock guarantee breaks.
-- **`gang_permissions` has a real `gang_id`** in GL3; V2's `gangPermissions` had
-  none and implied the gang from the member's `US_gang`.
-- **The `gang` audience already exists** in the WS gateway and resolves members via
-  `gang_members`. Use it rather than adding game rules to the gateway — the gateway
-  routes purely on `event.audience` and knows nothing about features.
-- **The event names already exist** in `GameEventSchema`: `gang.created`,
-  `gang.memberJoined`, `gang.memberLeft`, `mail.received`, `notification.created`,
-  `news.posted`. Wire them up; don't invent new names.
+- **The `gang` audience** in the WS gateway resolves members via `gang_members`. The
+  gateway routes purely on `event.audience` and knows nothing about features — keep
+  game rules out of it.
 - Mail is threaded (V2's `M_parent` → `thread_id`).
+- **New test files must be added to `vitest.workspace.ts`.** The `include` lists are
+  explicit; an unlisted file is silently never run and looks exactly like a green
+  suite.
 
 ---
 
@@ -107,6 +146,28 @@ cutover tool.
 
 **Open, deliberately deferred:**
 
+- **The spare databases `gl3_a`..`gl3_d` are NOT migrated past `0002`.** Anything
+  touching an M3 table fails there with `42703 column "gang_id" does not exist`.
+  They are fine for M0–M2 probes and useless for anything newer. Migrate them before
+  relying on one.
+- **`GET /api/mail` and `GET /api/notifications` are unbounded and unpaginated.**
+  Mail is the larger problem of the two: it returns full message bodies (up to 5000
+  chars each), and mail volume will outgrow notification volume. Bound both before
+  any real deployment.
+- **Only kick × deposit has deadlock-regression coverage.** Leave, accept-invite and
+  `PUT /permissions` were fixed in the same commit and are sound by the same
+  argument, but no test proves them. If you edit those lock lines, that is the gap.
+- **No unique constraint on `gang_invites (gang_id, invited_player_id)`.** Duplicate
+  invites produce duplicate rows and duplicate notifications. Inert today because
+  accepting clears all of the invitee's pending invites.
+- **The public profile route is the only unauthenticated, un-rate-limited route in
+  the app**, and it runs a four-table join per anonymous hit. Reviewed and accepted:
+  the join is keyed on a primary key with at most one result row, so the exposure is
+  amplification at request rate, not enumeration. Revisit before deployment.
+- **`RegisterRequestSchema.email` has no explicit `noNulByte` guard.** It is safe
+  only *incidentally*, because zod's `.email()` regex happens to reject NUL — verified
+  independently across local-part, domain, leading and trailing positions. Fragile
+  against a zod bump that loosens the regex.
 - **Leaderboard scores above 2^53.** Redis sorted-set scores are IEEE doubles;
   balances are deliberately `bigint` because V2's signed-32-bit ceiling was a real
   problem in long-running games. Documented but *not enforced* — no GL3 value

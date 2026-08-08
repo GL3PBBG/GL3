@@ -12,10 +12,10 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 
 ## Current state
 
-M0, M1 and M2 are complete. M3 is planned and ready to execute.
-Suite: **22 files / 126 tests**, green across repeated back-to-back runs.
+M0, M1, M2 and M3 are complete. M4 is planned and blocked on a MariaDB install.
+Suite: **33 files / 220 tests**, green across repeated back-to-back runs.
 
-Full detail, including how to start M3, is in `docs/STATUS.md`.
+Full detail, including how to start M4, is in `docs/STATUS.md`.
 
 ---
 
@@ -31,7 +31,9 @@ export REDIS_URL=redis://localhost:6379
 npm run verify          # typecheck + full suite
 ```
 
-- Spare databases `gl3_a`..`gl3_d` exist and are migrated, for concurrent agents.
+- Spare databases `gl3_a`..`gl3_d` exist for concurrent agents, but are **only
+  migrated through `0002`** — anything touching an M3 table fails there with
+  `42703 column "gang_id" does not exist`. Migrate one before relying on it.
 - **This box has 32 CPUs but only ~3.8 GB RAM.** `maxWorkers` is capped at 6 in
   `vitest.config.ts` for that reason. Do not raise it.
 - **Never run two full test suites at once** — including your own verification run
@@ -45,7 +47,7 @@ npm run verify          # typecheck + full suite
 
 ---
 
-## The five rules that have each already caused a real bug here
+## The six rules that have each already caused a real bug here
 
 1. **BullMQ is at-least-once.** Any worker that mutates the economy needs an
    idempotency key tied to `job.id`, inserted **first** inside the transaction. A
@@ -68,6 +70,21 @@ npm run verify          # typecheck + full suite
 
 5. **Publish events only after the transaction commits.** Events are facts, not
    commands — never publish inside `db.transaction(...)`.
+
+6. **A foreign key is a lock.** Inserting a row whose FK references another row
+   takes `FOR KEY SHARE` on it, which conflicts with `FOR UPDATE`. No lock call
+   appears in the code, so lock-order bugs here are invisible to a reader checking
+   only the explicit locks — read the FKs too. M3 shipped a deadlock (`40P01`,
+   surfacing as HTTP 500 on a well-formed request) because the membership routes
+   locked `player_stats` first and reached `gangs` implicitly through a `gang_logs`
+   insert, inverting the bank routes' order. Every gang↔player path now goes through
+   `lockGangAndPlayerForUpdate` (`economy/ledger.ts`); regression test:
+   `test/gang-lock-order.test.ts`.
+
+   Corollary for tests: a concurrency test whose participants all acquire locks via
+   the same helper proves only the case that was already safe. The pre-existing
+   deadlock test agreed on ordering *by construction* and stayed green through this
+   bug for that reason.
 
 ---
 
