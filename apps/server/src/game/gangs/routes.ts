@@ -3,12 +3,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { CreateGangRequestSchema, GrantPermissionRequestSchema, IdSchema, InvitePlayerRequestSchema, type GameEvent } from "@gl3/shared";
+import {
+  CreateGangRequestSchema, GangBankTransferRequestSchema, GrantPermissionRequestSchema, IdSchema,
+  InvitePlayerRequestSchema, type GameEvent,
+} from "@gl3/shared";
 import { z } from "zod";
 import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { gangInvites, gangLogs, gangMembers, gangPermissions, gangs, playerStats, players } from "../../db/schema/index.js";
-import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
+import {
+  applyBalanceChange, applyGangBalanceChange, InsufficientFundsError, InsufficientGangFundsError,
+  lockGangAndPlayerForUpdate, lockPlayersForUpdate, type Tx,
+} from "../../economy/ledger.js";
 import { insertNotification } from "../notifications/service.js";
 import { appendGangLog } from "./logs.js";
 import { GANG_PERMISSIONS, hasGangPermission } from "./permissions.js";
@@ -447,5 +453,76 @@ export function registerGangRoutes(
       await appendGangLog(tx, gangId, requesterId, `revoked ${permission} from ${targetId}`);
     });
     return reply.code(204).send();
+  });
+
+  app.post("/api/gangs/:gangId/bank/deposit", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const body = GangBankTransferRequestSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
+    const { gangId } = params.data;
+    const amount = BigInt(body.data.amount);
+
+    // Existence before permission: same reasoning as kick and PUT
+    // /permissions, above. A nonexistent gang must 404, not 403 — GET
+    // /api/gangs/:gangId already makes gang existence public to any
+    // authenticated player, so checking it first here leaks nothing new.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
+
+    const [membership] = await db.select({ gangId: gangMembers.gangId }).from(gangMembers)
+      .where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, playerId)));
+    if (!membership) return reply.code(403).send({ error: "not_a_member" });
+
+    try {
+      const bank = await db.transaction(async (tx) => {
+        await lockGangAndPlayerForUpdate(tx, gangId, playerId);
+        await applyBalanceChange(tx, { playerId, amount: -amount, kind: "cash", reason: "gang.bank.deposit", refId: gangId });
+        const next = await applyGangBalanceChange(tx, { gangId, amount, kind: "bank", reason: "gang.bank.deposit", refId: playerId });
+        await appendGangLog(tx, gangId, playerId, `deposited ${amount} to the gang bank`);
+        return next;
+      });
+      return reply.send({ bank: bank.toString() });
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) return reply.code(400).send({ error: "insufficient_cash" });
+      throw err;
+    }
+  });
+
+  app.post("/api/gangs/:gangId/bank/withdraw", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const body = GangBankTransferRequestSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
+    const { gangId } = params.data;
+    const amount = BigInt(body.data.amount);
+
+    // Existence before permission: same reasoning as kick and PUT
+    // /permissions, above. hasGangPermission returns false for a
+    // nonexistent gang, which would otherwise mask a 404 as a 403.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
+
+    if (!(await hasGangPermission(db, gangId, playerId, "bank.withdraw"))) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+
+    try {
+      const bank = await db.transaction(async (tx) => {
+        await lockGangAndPlayerForUpdate(tx, gangId, playerId);
+        const next = await applyGangBalanceChange(tx, { gangId, amount: -amount, kind: "bank", reason: "gang.bank.withdraw", refId: playerId });
+        await applyBalanceChange(tx, { playerId, amount, kind: "cash", reason: "gang.bank.withdraw", refId: gangId });
+        await appendGangLog(tx, gangId, playerId, `withdrew ${amount} from the gang bank`);
+        return next;
+      });
+      return reply.send({ bank: bank.toString() });
+    } catch (err) {
+      if (err instanceof InsufficientGangFundsError) return reply.code(400).send({ error: "insufficient_gang_funds" });
+      throw err;
+    }
   });
 }
