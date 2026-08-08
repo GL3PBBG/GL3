@@ -1,8 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-08, after M3 completion.
-Branch: `feat/m0-m1-scaffold-and-vertical-slice` (79 commits ahead of `main`, at
-`c4d2b41`).
+Last updated: 2026-08-08, container build added.
+Branch: `feat/container-images` (forked from `main` at `f6e1a66`).
 
 ---
 
@@ -139,6 +138,27 @@ sudo apt-get install -y mariadb-server mariadb-client && sudo service mariadb st
 `apps/migrate` package, and MariaDB only ever hosts a throwaway test fixture. The
 data flow is one-way — V2 MySQL → GL3 Postgres — and the migrator is a one-shot
 cutover tool.
+
+---
+
+## Container images
+
+Two images build in CI (`ci.yml`, `images` job) and publish to GHCR on push to
+`main`; on PRs they build only (`push: false`), which is the check that the
+Dockerfiles compile. They cannot be built locally — Docker is unavailable here
+(see CLAUDE.md), so CI is the only place the image is proven.
+
+| Image | Dockerfile | Serves | Runtime env |
+|---|---|---|---|
+| `ghcr.io/rondlite/gl3-server` | `Dockerfile.server` | API + WS gateway (`apps/server/dist/index.js`) | `DATABASE_URL`, `REDIS_URL` (required — `loadConfig` throws), `PORT` (default 3000), `CORS_ORIGINS` (default is localhost; **must be a real origin**, the schema rejects `*`) |
+| `ghcr.io/rondlite/gl3-web` | `Dockerfile.web` | The built Vite bundle via `apps/web/serve.mjs` | `PORT` (default 8080) |
+
+Both are `node:22-alpine`, `linux/amd64`, multi-stage, and run as the `node` user.
+`argon2` resolves its musl prebuild, so no build toolchain is needed. **Migrations
+are not in the images** — `dist/db/migrate.js` exists as build output but is not
+wired to the server CMD; schema changes remain an external operation. Ingress
+(Rancher) terminates TLS and routes `/api` and `/ws` to the server image, so the
+web image serves only the SPA's own assets.
 
 ---
 
