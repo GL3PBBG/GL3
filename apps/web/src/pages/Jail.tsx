@@ -10,9 +10,9 @@ export function Jail(): JSX.Element {
   const jail = useJail();
   const { remaining, seed } = useCountdowns();
 
-  // The poll is every 2s; the display should tick every 1s. seed() no-ops while
-  // a timer is already running, so the poll only re-seeds after the local clock
-  // has drained — which is also when a still-jailed player needs a fresh number.
+  // The poll is every 2s; the display ticks every 1s. Each poll re-anchors the
+  // local clock, which is what stops a throttled or suspended tab showing a
+  // sentence that expired minutes ago (see lib/countdown.ts).
   useEffect(() => {
     seed("jail", jail.data?.remainingSeconds ?? 0);
   }, [jail.data, seed]);
