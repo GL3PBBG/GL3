@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { ServerFrameSchema } from "@gl3/shared";
+import { GangInviteListResponseSchema, ServerFrameSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
@@ -297,5 +298,138 @@ describe("POST /api/gangs/invites/:inviteId/decline", () => {
 
     // Confirms it was rejected, not silently declined out from under the real invitee.
     expect(await db.select().from(gangInvites)).toHaveLength(1);
+  });
+});
+
+describe("GET /api/gangs/invites", () => {
+  const invite = (username: string) =>
+    app.inject({
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { username },
+    });
+
+  it("lists the requester's pending invites with the gang and inviter named", async () => {
+    await invite("Sonny");
+
+    const res = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(res.statusCode).toBe(200);
+
+    const { invites } = GangInviteListResponseSchema.parse(res.json());
+    expect(invites).toHaveLength(1);
+    // The notification the invitee receives is prose with no id in it, so
+    // these fields are the only way a client can call accept or decline.
+    expect(invites[0]?.gangId).toBe(gangId);
+    expect(invites[0]?.gangName).toBe("The Corleones");
+    expect(invites[0]?.invitedByPlayerId).toBe(bossId);
+    expect(invites[0]?.invitedByUsername).toBe("Vito");
+
+    // The point of the endpoint: the id it reports is one accept will take.
+    const accepted = await app.inject({
+      method: "POST", url: `/api/gangs/invites/${invites[0]!.id}/accept`, headers: { authorization: `Bearer ${inviteeToken}` },
+    });
+    expect(accepted.statusCode).toBe(200);
+  });
+
+  // Shares a prefix with GET /api/gangs/:gangId. find-my-way prefers the
+  // static segment, but "invites" reaching the :gangId handler would answer
+  // 400 invalid_request and break the join loop silently, so pin it.
+  it("is not shadowed by GET /api/gangs/:gangId", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ invites: [] });
+  });
+
+  it("shows only the requester's own invites", async () => {
+    await invite("Sonny");
+    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+
+    const theirs = await app.inject({
+      method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${bystander.json().token}` },
+    });
+    expect(GangInviteListResponseSchema.parse(theirs.json()).invites).toHaveLength(0);
+
+    // Both halves, so an endpoint that returned nothing at all could not
+    // pass this by satisfying only the first.
+    const mine = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(GangInviteListResponseSchema.parse(mine.json()).invites).toHaveLength(1);
+  });
+
+  it("drops an invite once it is declined", async () => {
+    await invite("Sonny");
+    const [row] = await db.select().from(gangInvites).where(eq(gangInvites.invitedPlayerId, inviteeId));
+    await app.inject({
+      method: "POST", url: `/api/gangs/invites/${row!.id}/decline`, headers: { authorization: `Bearer ${inviteeToken}` },
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(GangInviteListResponseSchema.parse(res.json()).invites).toHaveLength(0);
+  });
+
+  // Accepting deletes every invite the joiner holds (the accept route's
+  // `delete(gangInvites).where(invitedPlayerId = ...)`), so a competing
+  // gang's invite disappears too rather than lingering as a dead entry.
+  it("empties once any invite is accepted, including other gangs' invites", async () => {
+    await invite("Sonny");
+
+    const rival = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
+    const rivalToken: string = rival.json().token;
+    const rivalGang = await app.inject({
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${rivalToken}` }, payload: { name: "The Tattaglias" },
+    });
+    await app.inject({
+      method: "POST", url: `/api/gangs/${rivalGang.json().id}/invites`, headers: { authorization: `Bearer ${rivalToken}` },
+      payload: { username: "Sonny" },
+    });
+
+    const before = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(GangInviteListResponseSchema.parse(before.json()).invites).toHaveLength(2);
+
+    const [corleone] = await db.select().from(gangInvites).where(eq(gangInvites.gangId, gangId));
+    await app.inject({
+      method: "POST", url: `/api/gangs/invites/${corleone!.id}/accept`, headers: { authorization: `Bearer ${inviteeToken}` },
+    });
+
+    const after = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    expect(GangInviteListResponseSchema.parse(after.json()).invites).toHaveLength(0);
+  });
+
+  // The one shape that survives that cleanup: the invite route reads the
+  // target's gang_id unlocked, so an insert can land just after an accept's
+  // delete. Inserted directly here because no pair of requests can be
+  // interleaved to order on demand. The list must report it — the accept
+  // route is the authority on whether an invite still works, and filtering
+  // it out would leave the invitee holding a notification for an invite
+  // that appears nowhere.
+  it("lists a raced invite that would now 409 on accept", async () => {
+    await invite("Sonny");
+    const [corleone] = await db.select().from(gangInvites).where(eq(gangInvites.gangId, gangId));
+    await app.inject({
+      method: "POST", url: `/api/gangs/invites/${corleone!.id}/accept`, headers: { authorization: `Bearer ${inviteeToken}` },
+    });
+
+    const rival = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
+    const rivalToken: string = rival.json().token;
+    const rivalGang = await app.inject({
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${rivalToken}` }, payload: { name: "The Tattaglias" },
+    });
+    await db.insert(gangInvites).values({
+      id: randomUUID(), gangId: rivalGang.json().id,
+      invitedPlayerId: inviteeId, invitedByPlayerId: rival.json().playerId,
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });
+    const { invites } = GangInviteListResponseSchema.parse(res.json());
+    expect(invites).toHaveLength(1);
+    expect(invites[0]?.gangName).toBe("The Tattaglias");
+
+    const stale = await app.inject({
+      method: "POST", url: `/api/gangs/invites/${invites[0]!.id}/accept`, headers: { authorization: `Bearer ${inviteeToken}` },
+    });
+    expect(stale.statusCode).toBe(409);
+  });
+
+  it("401s without a token", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/gangs/invites" });
+    expect(res.statusCode).toBe(401);
   });
 });
