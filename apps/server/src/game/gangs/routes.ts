@@ -86,6 +86,39 @@ class NotAMemberError extends Error {
   }
 }
 
+/**
+ * Thrown inside the deposit transaction when the row-locked recheck finds
+ * the depositor is no longer a gang member. The unlocked membership check
+ * above the transaction can race a concurrent kick/leave, which commits
+ * without contending for the gang/player rows this transaction holds — see
+ * lockGangAndPlayerForUpdate. Lower stakes than withdraw (money moving into
+ * the gang, and a kicked player depositing isn't an attack), but rechecked
+ * for consistency: a route that's racy here and safe there is worse than
+ * either choice made consistently.
+ */
+class MembershipRevokedError extends Error {
+  constructor(playerId: string) {
+    super(`player ${playerId} is no longer a member`);
+    this.name = "MembershipRevokedError";
+  }
+}
+
+/**
+ * Thrown inside the withdraw transaction when the row-locked recheck finds
+ * the withdrawer no longer holds bank.withdraw. The unlocked
+ * hasGangPermission pre-check above the transaction can race a concurrent
+ * DELETE /permissions, which only touches gang_permissions (and gang_logs,
+ * via appendGangLog) — neither of which lockGangAndPlayerForUpdate locks —
+ * so it commits freely in the gap and would otherwise let money move for a
+ * player who had no permission at the instant it moved.
+ */
+class PermissionRevokedError extends Error {
+  constructor(playerId: string) {
+    super(`player ${playerId}'s permission was revoked`);
+    this.name = "PermissionRevokedError";
+  }
+}
+
 function uniqueViolation(err: unknown): postgres.PostgresError | null {
   const candidate = err instanceof postgres.PostgresError ? err
     : err instanceof Error && err.cause instanceof postgres.PostgresError ? err.cause
@@ -479,6 +512,13 @@ export function registerGangRoutes(
     try {
       const bank = await db.transaction(async (tx) => {
         await lockGangAndPlayerForUpdate(tx, gangId, playerId);
+        // Recheck under the lock: the unlocked membership check above can
+        // race a concurrent kick/leave, which commits without contending
+        // for the gang/player rows this transaction holds (see
+        // MembershipRevokedError).
+        const [stillMember] = await tx.select({ gangId: gangMembers.gangId }).from(gangMembers)
+          .where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, playerId)));
+        if (!stillMember) throw new MembershipRevokedError(playerId);
         await applyBalanceChange(tx, { playerId, amount: -amount, kind: "cash", reason: "gang.bank.deposit", refId: gangId });
         const next = await applyGangBalanceChange(tx, { gangId, amount, kind: "bank", reason: "gang.bank.deposit", refId: playerId });
         await appendGangLog(tx, gangId, playerId, `deposited ${amount} to the gang bank`);
@@ -487,6 +527,7 @@ export function registerGangRoutes(
       return reply.send({ bank: bank.toString() });
     } catch (err) {
       if (err instanceof InsufficientFundsError) return reply.code(400).send({ error: "insufficient_cash" });
+      if (err instanceof MembershipRevokedError) return reply.code(403).send({ error: "not_a_member" });
       throw err;
     }
   });
@@ -514,6 +555,14 @@ export function registerGangRoutes(
     try {
       const bank = await db.transaction(async (tx) => {
         await lockGangAndPlayerForUpdate(tx, gangId, playerId);
+        // Recheck under the lock: the unlocked hasGangPermission pre-check
+        // above can race a concurrent DELETE /permissions, which commits
+        // without contending for the gang/player rows this transaction
+        // holds (see PermissionRevokedError). Passing `tx` here — not
+        // `db` — is what makes this read the post-lock, post-commit state.
+        if (!(await hasGangPermission(tx, gangId, playerId, "bank.withdraw"))) {
+          throw new PermissionRevokedError(playerId);
+        }
         const next = await applyGangBalanceChange(tx, { gangId, amount: -amount, kind: "bank", reason: "gang.bank.withdraw", refId: playerId });
         await applyBalanceChange(tx, { playerId, amount, kind: "cash", reason: "gang.bank.withdraw", refId: gangId });
         await appendGangLog(tx, gangId, playerId, `withdrew ${amount} from the gang bank`);
@@ -522,6 +571,7 @@ export function registerGangRoutes(
       return reply.send({ bank: bank.toString() });
     } catch (err) {
       if (err instanceof InsufficientGangFundsError) return reply.code(400).send({ error: "insufficient_gang_funds" });
+      if (err instanceof PermissionRevokedError) return reply.code(403).send({ error: "forbidden" });
       throw err;
     }
   });
