@@ -14,15 +14,28 @@ export type GangPermission = typeof GANG_PERMISSIONS[number];
  *
  * The row-based branch requires a matching gang_members row for the same
  * (gangId, playerId) before a gang_permissions row counts. Without this, a
- * permission row granted to a player who was never a member — or who was a
- * member and later left — would confer real authority to someone who isn't
- * actually in the gang: PUT /api/gangs/:gangId/permissions never checked
- * the target's membership before inserting, and removeMember never deletes
- * gang_permissions rows for a member kicked or leaving a *different* gang
- * from the one the row names. Enforcing membership here, centrally, closes
- * both the dangling-grant and the stale-row-after-leaving cases for every
- * caller at once, without having to duplicate a membership check at each
- * call site.
+ * permission row for a player who is not actually in the gang would confer
+ * real authority to an outsider.
+ *
+ * This is the last of three layers, and it is a *mask*, not a delete —
+ * knowing which is which matters, because an earlier version of this comment
+ * claimed it "closed" the dangling-grant case and it does not:
+ *
+ *   1. PUT /api/gangs/:gangId/permissions refuses a target who is not a
+ *      member (routes.ts), so no route can create a dangling row.
+ *   2. Rows nonetheless present at join time — pre-dating layer 1, or
+ *      written out of band — are deleted inside the accept-invite
+ *      transaction, mirroring removeMember, which deletes them on the way
+ *      out (so leaving or being kicked genuinely clears them, and rejoining
+ *      does not restore them).
+ *   3. This join, which denies any row that survives the two above. It
+ *      still earns its place: removeMember only clears rows naming the gang
+ *      the player left, so a stale row naming a *different* gang would
+ *      otherwise linger, and a row is masked the instant membership ends
+ *      rather than whenever a cleanup path happens to run.
+ *
+ * Enforcing membership here, centrally, gives every caller that last layer
+ * at once, without duplicating a membership check at each call site.
  */
 export async function hasGangPermission(
   db: Db | Tx, gangId: string, playerId: string, permission: GangPermission,

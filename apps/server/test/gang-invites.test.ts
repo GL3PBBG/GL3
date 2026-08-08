@@ -129,6 +129,20 @@ describe("POST /api/gangs/:gangId/invites", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  // The invite route was the last gangId route calling hasGangPermission
+  // without an existence check first. hasGangPermission returns false for a
+  // missing gang, so a nonexistent gangId came back 403 while kick, both
+  // permission routes and both bank routes all answer 404 for the same
+  // input. GET /api/gangs/:gangId already makes gang existence visible to
+  // any authenticated player, so answering 404 here leaks nothing new.
+  it("404s a nonexistent gang, not 403 — existence is checked before permission", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/gangs/00000000-0000-0000-0000-000000000000/invites",
+      headers: { authorization: `Bearer ${bossToken}` }, payload: { username: "Sonny" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
   it("404s an unknown username", async () => {
     const res = await app.inject({
       method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },

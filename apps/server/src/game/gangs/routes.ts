@@ -51,10 +51,10 @@ class GangNotFoundError extends Error {
 /**
  * Thrown inside the leave transaction when the row-locked recheck finds the
  * leaving player is still the boss. Mirrors AlreadyInGangError's shape:
- * lockPlayersForUpdate on the leaving player first, then re-read
- * gangs.bossPlayerId under that lock, so a concurrent boss-transfer can't
- * race this check the way an unlocked pre-check SELECT would (CLAUDE.md
- * rule 2).
+ * lockGangAndPlayerForUpdate on the gang and the leaving player first, then
+ * re-read gangs.bossPlayerId under those locks, so a concurrent
+ * boss-transfer can't race this check the way an unlocked pre-check SELECT
+ * would (CLAUDE.md rule 2).
  */
 class BossMustTransferError extends Error {
   constructor() {
@@ -78,6 +78,10 @@ class CannotKickBossError extends Error {
  * `playerStats.gangId = null` would clear whatever gang the player is
  * really in — e.g. calling leave/kick with a gangId for a gang the target
  * isn't a member of would still un-gang them from their real one.
+ *
+ * Also thrown inside the PUT /permissions transaction, for the related
+ * reason that a grant to a non-member would otherwise be stored dormant and
+ * activate the moment that player joined — see the call site.
  */
 class NotAMemberError extends Error {
   constructor() {
@@ -145,7 +149,7 @@ async function loadGangDto(db: Db, gangId: string): Promise<Record<string, unkno
   };
 }
 
-/** Deletes membership + any permission rows and clears playerStats.gangId. Caller must hold the lock via lockPlayersForUpdate first. */
+/** Deletes membership + any permission rows and clears playerStats.gangId. Caller must hold both locks via lockGangAndPlayerForUpdate first. */
 async function removeMember(tx: Tx, gangId: string, playerId: string, message: string): Promise<void> {
   await tx.delete(gangMembers).where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, playerId)));
   await tx.delete(gangPermissions).where(and(eq(gangPermissions.gangId, gangId), eq(gangPermissions.playerId, playerId)));
@@ -185,6 +189,14 @@ export function registerGangRoutes(
         // Lock this player's stats row first, then recheck under that lock —
         // the window between an unlocked pre-check and this transaction's
         // commit is exactly what let two concurrent requests both pass.
+        //
+        // This is the one membership path that does NOT go through
+        // lockGangAndPlayerForUpdate, and it is exempt for a structural
+        // reason rather than an oversight: the gangs row it goes on to touch
+        // (implicitly, via gang_members' and gang_logs' foreign keys) is one
+        // it INSERTs in this same transaction under a freshly-minted uuidv7.
+        // No other transaction can hold or want a lock on a row it cannot
+        // see, so this path can never be one leg of a lock cycle.
         await lockPlayersForUpdate(tx, [playerId]);
         const [existing] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, playerId));
         if (existing?.gangId) throw new AlreadyInGangError(playerId);
@@ -250,6 +262,13 @@ export function registerGangRoutes(
     if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
     const { gangId } = params.data;
 
+    // Existence before permission: same reasoning as kick and the permission
+    // routes below. hasGangPermission returns false for a nonexistent gang,
+    // which would otherwise mask a 404 as a 403 — this route was the last
+    // gangId route in the file not doing the check.
+    const [gangExists] = await db.select({ id: gangs.id }).from(gangs).where(eq(gangs.id, gangId));
+    if (!gangExists) return reply.code(404).send({ error: "gang_not_found" });
+
     if (!(await hasGangPermission(db, gangId, playerId, "invite"))) {
       return reply.code(403).send({ error: "forbidden" });
     }
@@ -306,12 +325,35 @@ export function registerGangRoutes(
         // Locks this player's stats row before checking gangId — closes the
         // race where the same player accepts two invites concurrently. Same
         // primitive and same shape as the create-gang check above.
-        await lockPlayersForUpdate(tx, [playerId]);
+        //
+        // Both rows go through lockGangAndPlayerForUpdate rather than
+        // lockPlayersForUpdate alone. This transaction touches the gangs row
+        // regardless — Postgres takes FOR KEY SHARE on it when the
+        // player_stats.gang_id update, the gang_members insert and
+        // appendGangLog each check their foreign key — so taking
+        // player_stats first put this path in the opposite order from the
+        // bank routes, which take the gangs row first whenever
+        // gangId < playerId. That inversion is a real cycle: it deadlocked
+        // Postgres (40P01) and surfaced as a 500 on a legal request. See
+        // test/gang-lock-order.test.ts.
+        await lockGangAndPlayerForUpdate(tx, invite.gangId, playerId);
         const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, playerId));
         if (stats?.gangId) throw new AlreadyInGangError(playerId);
 
         await tx.update(playerStats).set({ gangId: invite.gangId }).where(eq(playerStats.playerId, playerId));
         await tx.insert(gangMembers).values({ gangId: invite.gangId, playerId });
+        // Joining is the moment a dormant gang_permissions row for this
+        // (gang, player) would silently become live, because
+        // hasGangPermission only masks such a row while there is no
+        // gang_members row to join against. PUT /permissions now refuses a
+        // non-member target, so no route can plant one — but rows predating
+        // that fix, or created by an ops write or a future import path,
+        // would still activate here. Clearing them is the mirror of
+        // removeMember, which already clears them on the way out. Any future
+        // path that inserts a gang_members row must do the same.
+        await tx.delete(gangPermissions).where(and(
+          eq(gangPermissions.gangId, invite.gangId), eq(gangPermissions.playerId, playerId),
+        ));
         await tx.delete(gangInvites).where(eq(gangInvites.invitedPlayerId, playerId));
         await appendGangLog(tx, invite.gangId, playerId, "joined the gang");
       });
@@ -356,12 +398,18 @@ export function registerGangRoutes(
 
     try {
       await db.transaction(async (tx) => {
-        // Lock the leaving player's stats row before rechecking boss status
-        // under it — the same shape as create-gang's AlreadyInGangError
-        // check (CLAUDE.md rule 2). An unlocked pre-check SELECT here,
-        // followed by the mutation in a later step, would let a concurrent
-        // boss-transfer race this leave.
-        await lockPlayersForUpdate(tx, [playerId]);
+        // Lock the gang row and the leaving player's stats row before
+        // rechecking boss status under them — the same shape as create-gang's
+        // AlreadyInGangError check (CLAUDE.md rule 2). An unlocked pre-check
+        // SELECT here, followed by the mutation in a later step, would let a
+        // concurrent boss-transfer race this leave.
+        //
+        // lockGangAndPlayerForUpdate, not lockPlayersForUpdate: removeMember
+        // ends in appendGangLog, whose gang_logs insert makes Postgres take
+        // FOR KEY SHARE on this gangs row anyway. Taking player_stats first
+        // and the gangs row second inverted the bank routes' order and
+        // deadlocked them (40P01 → HTTP 500). See test/gang-lock-order.test.ts.
+        await lockGangAndPlayerForUpdate(tx, gangId, playerId);
         const [gang] = await tx.select({ boss: gangs.bossPlayerId }).from(gangs).where(eq(gangs.id, gangId));
         if (!gang) throw new GangNotFoundError();
         const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, playerId));
@@ -401,10 +449,12 @@ export function registerGangRoutes(
 
     try {
       await db.transaction(async (tx) => {
-        // Same lock-then-recheck shape as leave, above: lock the target's
-        // stats row, then re-read gangs.bossPlayerId under it before
-        // mutating, instead of trusting an earlier unlocked read.
-        await lockPlayersForUpdate(tx, [targetId]);
+        // Same lock-then-recheck shape as leave, above, and the same reason
+        // for locking through lockGangAndPlayerForUpdate: lock the gang row
+        // and the target's stats row in the one global order every path
+        // sharing this pair uses, then re-read gangs.bossPlayerId under those
+        // locks before mutating, instead of trusting an earlier unlocked read.
+        await lockGangAndPlayerForUpdate(tx, gangId, targetId);
         const [gang] = await tx.select({ boss: gangs.bossPlayerId }).from(gangs).where(eq(gangs.id, gangId));
         if (!gang) throw new GangNotFoundError();
         const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, targetId));
@@ -444,19 +494,42 @@ export function registerGangRoutes(
 
     try {
       await db.transaction(async (tx) => {
+        // Same global lock order as every other path touching this
+        // (gang, player) pair — the appendGangLog below takes FOR KEY SHARE
+        // on the gangs row regardless, and the membership recheck that
+        // follows is only meaningful if a concurrent kick/leave cannot
+        // commit between it and the insert. Both of those want the pair
+        // locked, and lockGangAndPlayerForUpdate is the one ordering that
+        // does not deadlock against the bank routes.
+        await lockGangAndPlayerForUpdate(tx, gangId, body.data.playerId);
+        // Granting to a non-member used to be accepted and stored. The row
+        // conferred nothing while the target was outside the gang, because
+        // hasGangPermission inner-joins gang_members — but nothing deleted
+        // it, so it lay dormant and went live the moment they joined, which
+        // is a backdoor-planting primitive for anyone holding
+        // grant_permissions. Refusing the grant means no dormant row is ever
+        // created; accept-invite's cleanup handles rows this check cannot
+        // (pre-existing, or written out of band). 404 not_a_member is what
+        // kick and leave already answer for the identical condition.
+        const [member] = await tx.select({ gangId: gangMembers.gangId }).from(gangMembers)
+          .where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, body.data.playerId)));
+        if (!member) throw new NotAMemberError();
+
         await tx.insert(gangPermissions)
           .values({ gangId, playerId: body.data.playerId, permission: body.data.permission })
           .onConflictDoNothing();
         await appendGangLog(tx, gangId, requesterId, `granted ${body.data.permission} to ${body.data.playerId}`);
       });
     } catch (err) {
+      if (err instanceof NotAMemberError) return reply.code(404).send({ error: "not_a_member" });
       // body.data.playerId is only shape-validated (IdSchema = uuid), not
-      // checked for existence — a syntactically valid but nonexistent
-      // player id hits gang_permissions.player_id's FK and must come back
-      // as a clean 4xx, not an uncaught 500 (CLAUDE.md: "an unvalidated
-      // UUID param reaches Postgres and 500s instead of returning a clean
-      // 400"). hasGangPermission's membership join above only gates the
-      // *requester*, not this target, so it doesn't intercept this case.
+      // checked for existence. The membership check above now intercepts a
+      // nonexistent player id before it can reach
+      // gang_permissions.player_id's FK — a player with no gang_members row
+      // cannot be granted anything — but this stays as a backstop so that
+      // any future relaxation of that check still returns a clean 4xx rather
+      // than an uncaught 500 (CLAUDE.md: "an unvalidated UUID param reaches
+      // Postgres and 500s instead of returning a clean 400").
       if (foreignKeyViolation(err)) return reply.code(404).send({ error: "player_not_found" });
       throw err;
     }
