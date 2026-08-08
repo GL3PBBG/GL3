@@ -34,6 +34,26 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const app = Fastify({ logger: config.nodeEnv !== "test" });
   await app.register(cors, { origin: config.corsOrigins, credentials: true });
 
+  // Several POST routes take no body (commit a crime, mint a WS ticket, travel,
+  // accept/decline/leave a gang, mark read, logout). The web client sends them
+  // with no content-type, which Fastify handles fine. But a reverse proxy can
+  // *inject* a content-type on a bodyless POST (a common one is
+  // application/x-www-form-urlencoded), and Fastify's default parser set has no
+  // handler for that media type, so it returns 415
+  // (FST_ERR_CTP_INVALID_MEDIA_TYPE) before the route ever runs. Register a
+  // catch-all parser for every other content-type that yields an empty body for
+  // an empty payload and a best-effort object otherwise — these routes never
+  // read request.body, so an empty object is exactly correct, and the
+  // JSON-content routes above are unaffected because Fastify only calls the
+  // catch-all for types that have no more specific parser.
+  app.addContentTypeParser(
+    "*", // every media type without its own parser
+    { parseAs: "string" },
+    (_req, body, done) => {
+      done(null, body.length === 0 ? {} : { raw: body.toString() });
+    },
+  );
+
   app.get("/health", async () => ({ status: "ok" }));
   registerAuthRoutes(app, config, deps.db, deps.redis, deps.rateLimitPrefix);
 
