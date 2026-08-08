@@ -17,9 +17,6 @@
 **/*.test.ts
 coverage
 
-# Migrations are out of the image by decision (see Dockerfile.server header).
-apps/server/drizzle
-
 docs
 docker-compose.yml
 SPEC.md
