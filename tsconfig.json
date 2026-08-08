@@ -1,4 +1,9 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/shared" }, { "path": "./apps/server" }, { "path": "./apps/web" }]
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/plugin-sdk" },
+    { "path": "./apps/server" },
+    { "path": "./apps/web" }
+  ]
 }
