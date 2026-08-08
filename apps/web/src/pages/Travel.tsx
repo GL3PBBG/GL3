@@ -1,0 +1,75 @@
+import { useEffect } from "react";
+import { ApiError } from "../api/client.js";
+import { useJail, useLocations, useMe, useTravel } from "../api/queries.js";
+import { useCountdowns } from "../hooks/useCountdowns.js";
+import { canAfford } from "../lib/money.js";
+import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import styles from "./pages.module.css";
+
+/** Same shape as crimes: `cooldown:travel:<playerId>` is one key per player. */
+const COOLDOWN_ID = "travel";
+
+export function Travel(): JSX.Element {
+  const me = useMe();
+  const jail = useJail();
+  const locations = useLocations();
+  const travel = useTravel();
+  const { remaining, seed, start } = useCountdowns();
+
+  const jailed = jail.data?.jailed === true;
+  const cooldown = remaining[COOLDOWN_ID] ?? 0;
+
+  useEffect(() => {
+    const rows = locations.data?.locations ?? [];
+    seed(COOLDOWN_ID, rows.reduce((max, row) => Math.max(max, row.cooldownRemaining), 0));
+  }, [locations.data, seed]);
+
+  if (locations.isLoading || !me.data) return <Loading what="locations" />;
+  const cash = me.data.cash;
+
+  return (
+    <Panel title="Travel">
+      {jailed ? <p className={styles.bad}>You can't travel from jail.</p> : null}
+      <ul className={styles.rows}>
+        {locations.data?.locations.map((location) => {
+          const affordable = canAfford(cash, location.travelCost);
+          return (
+            <li
+              key={location.id}
+              className={location.current ? `${styles.row} ${styles.rowCurrent}` : styles.row}
+            >
+              <div>
+                <strong>{location.name}</strong>
+                {location.current ? <span className={styles.meta}> · you are here</span> : null}
+                <div className={styles.meta}>
+                  <Money value={location.travelCost} /> · {location.travelCooldownSeconds}s cooldown ·
+                  bullets <Money value={location.bulletCost} /> ({location.bulletStock} in stock)
+                </div>
+              </div>
+              {location.current ? (
+                <button type="button" disabled>Here</button>
+              ) : (
+                <CooldownButton
+                  label={affordable ? "Travel" : "Too poor"}
+                  seconds={cooldown}
+                  disabled={jailed || !affordable || travel.isPending}
+                  onClick={() => {
+                    start(COOLDOWN_ID, location.travelCooldownSeconds);
+                    travel.mutate(location.id, {
+                      onError: (error) => {
+                        if (!(error instanceof ApiError)) return;
+                        if (error.retryAfter !== undefined) start(COOLDOWN_ID, error.retryAfter);
+                        void jail.refetch();
+                      },
+                    });
+                  }}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <ErrorText error={travel.error} />
+    </Panel>
+  );
+}

@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc --build --force",
     "test": "vitest run",
-    "test:nodb": "vitest run --project @gl3/server:unit --project @gl3/shared",
+    "test:nodb": "vitest run --project @gl3/server:unit --project @gl3/shared --project @gl3/web",
     "verify": "npm run typecheck && npm run test",
     "verify:ci": "npm run typecheck && npm run test:nodb",
     "db:up": "docker compose up -d --wait",
