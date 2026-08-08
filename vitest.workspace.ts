@@ -73,6 +73,19 @@ const dbHookTimeout = 30000;
 export default defineWorkspace([
   "packages/*",
   {
+    // Pure client modules only — money/rank/error formatting and the
+    // event→cache-key map. No jsdom and no component rendering: everything
+    // here is a function of its arguments, which is why it needs neither a
+    // DOM nor a new dependency. Anything needing a rendered component belongs
+    // in the manual walkthrough until this project grows a DOM environment.
+    test: {
+      name: "@gl3/web",
+      root: "./apps/web",
+      include: ["test/**/*.test.ts"],
+    },
+    ...sharedAlias,
+  },
+  {
     test: {
       name: "@gl3/server:unit",
       root: "./apps/server",

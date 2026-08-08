@@ -1,0 +1,12 @@
+.form {
+  max-width: 320px;
+  margin: 12vh auto;
+  display: grid;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.brand { margin: 0 0 0.5rem; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.toggle { background: transparent; color: var(--muted); border: 1px solid var(--line); }

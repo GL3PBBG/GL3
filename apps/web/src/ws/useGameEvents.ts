@@ -4,6 +4,7 @@ import { ServerFrameSchema } from "@gl3/shared";
 import { z } from "zod";
 import { api } from "../api/client.js";
 import { eventStore } from "../store/events.js";
+import { invalidationKeys } from "./invalidation.js";
 
 const TicketResponseSchema = z.object({ ticket: z.string() });
 
@@ -60,10 +61,12 @@ export function useGameEvents(playerId: string | undefined): void {
         const parsed = ServerFrameSchema.safeParse(JSON.parse(message.data as string));
         if (!parsed.success || parsed.data.kind !== "event") return;
         eventStore.push(parsed.data.event);
-        // A resolved crime changed cash and cooldowns — pull the fresh numbers.
-        if (parsed.data.event.type === "crime.resolved") {
-          void queryClient.invalidateQueries({ queryKey: ["me"] });
-          void queryClient.invalidateQueries({ queryKey: ["crimes"] });
+        // BullMQ is at-least-once, so a retried job can deliver the same event
+        // twice. Invalidation is idempotent, so a duplicate costs one refetch
+        // and nothing else — the feed's own dedupe is what stops it showing up
+        // as two crimes.
+        for (const key of invalidationKeys(parsed.data.event)) {
+          void queryClient.invalidateQueries({ queryKey: key });
         }
       });
 

@@ -1,0 +1,79 @@
+import { Link } from "react-router-dom";
+import { useJail, useLocations, useMe, useRanks } from "../api/queries.js";
+import { formatAmount } from "../lib/money.js";
+import { formatDuration } from "../lib/errors.js";
+import { progressToNextRank } from "../lib/ranks.js";
+import { Amount, Loading, Money, Panel } from "../components/ui.js";
+import styles from "./pages.module.css";
+
+export function Dashboard(): JSX.Element {
+  const me = useMe();
+  const jail = useJail();
+  const ranks = useRanks();
+  const locations = useLocations();
+
+  if (!me.data) return <Loading />;
+
+  const progress = progressToNextRank(me.data.exp, ranks.data?.ranks ?? []);
+  const here = locations.data?.locations.find((location) => location.current);
+
+  return (
+    <>
+      <Panel title={me.data.username}>
+        <p className={styles.big}>
+          <Money value={me.data.cash} /> <span className={styles.meta}>on hand</span>
+        </p>
+        <p className={styles.meta}>
+          Bank <Money value={me.data.bank} /> · Bullets <Amount value={me.data.bullets} /> · Exp{" "}
+          <Amount value={me.data.exp} />
+        </p>
+      </Panel>
+
+      <Panel title="Rank">
+        <p style={{ margin: 0 }}>
+          {progress.current?.name ?? "Unranked"}
+          {progress.next !== null ? ` → ${progress.next.name}` : " — top of the ladder"}
+        </p>
+        <div className={styles.bar}>
+          <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
+        </div>
+        <p className={styles.meta}>
+          {progress.next === null
+            ? `${progress.pct.toFixed(0)}%`
+            : `${progress.pct.toFixed(1)}% — ${formatAmount(
+                (BigInt(progress.next.expRequired) - BigInt(me.data.exp)).toString(),
+              )} exp to go`}
+        </p>
+      </Panel>
+
+      <Panel title="Where you are">
+        {here === undefined ? (
+          <p className={styles.meta}>
+            Nowhere yet. <Link to="/travel">Travel</Link> somewhere to unlock the bullet shop.
+          </p>
+        ) : (
+          <p style={{ margin: 0 }}>
+            {here.name} — bullets at <Money value={here.bulletCost} /> each,{" "}
+            {here.bulletStock} in stock. <Link to="/bullets">Buy</Link>
+          </p>
+        )}
+      </Panel>
+
+      {jail.data?.jailed === true ? (
+        <Panel title="Jail">
+          <p className={styles.bad} style={{ margin: 0 }}>
+            Locked up for another {formatDuration(jail.data.remainingSeconds)}.{" "}
+            <Link to="/jail">Watch the clock</Link>
+          </p>
+        </Panel>
+      ) : (
+        <Panel title="Next">
+          <p style={{ margin: 0 }}>
+            <Link to="/crimes">Commit a crime</Link> · <Link to="/bank">Bank your cash</Link> ·{" "}
+            <Link to="/leaderboards">See who's winning</Link>
+          </p>
+        </Panel>
+      )}
+    </>
+  );
+}

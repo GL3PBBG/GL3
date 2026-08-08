@@ -1,0 +1,41 @@
+.shell { max-width: 1180px; margin: 0 auto; padding: 1rem; }
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.75rem;
+}
+.brand { margin: 0; font-size: 1.15rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.hud { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; }
+.stat { display: inline-flex; gap: 0.35rem; align-items: baseline; }
+.statLabel { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.nav { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
+.navLink {
+  color: var(--fg);
+  text-decoration: none;
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+.navLink:hover { border-color: var(--line); }
+.navActive { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+
+.jailBanner {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+}
+
+.body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 1fr); gap: 1.5rem; padding-top: 1.25rem; align-items: start; }
+.content { display: grid; gap: 1.25rem; min-width: 0; }
+
+@media (max-width: 860px) {
+  .body { grid-template-columns: 1fr; }
+}
