@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+#
+# Web image: the built Vite bundle served by apps/web/serve.mjs (a
+# zero-dependency Node static server).
+#
+# Vite resolves `@gl3/shared` through its package.json exports map, which
+# points at packages/shared/dist — NOT at TypeScript source (the src alias
+# is a vitest-only concern; see vitest.workspace.ts). So shared MUST be built
+# before the web build, unlike the server where tsc does both at once.
+
+ARG NODE_VERSION=22
+FROM node:${NODE_VERSION}-alpine AS builder
+
+WORKDIR /app
+
+# All four manifests: web's build needs @gl3/shared, and npm ci validates the
+# whole workspace lockfile.
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+
+RUN npm ci
+
+COPY tsconfig.json tsconfig.base.json ./
+COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
+COPY packages/shared/src packages/shared/src
+COPY apps/web/ apps/web/
+
+# Build shared first so Vite finds @gl3/shared/dist, then build the web bundle.
+# `npm run build -w @gl3/shared` emits packages/shared/dist; the web build
+# then produces apps/web/dist and typechecks the web sources (tsc --build,
+# noEmit) as a side effect of its own build script.
+RUN npm run build -w @gl3/shared
+RUN npm run build -w @gl3/web
+
+# --- runtime stage -----------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS runtime
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+# serve.mjs uses only node: built-ins (http, fs, path, url) — no node_modules.
+COPY --from=builder /app/apps/web/dist apps/web/dist
+COPY --from=builder /app/apps/web/serve.mjs apps/web/serve.mjs
+
+USER node
+EXPOSE 8080
+CMD ["node", "apps/web/serve.mjs"]
