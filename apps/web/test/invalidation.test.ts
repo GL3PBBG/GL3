@@ -3,11 +3,15 @@ import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import { keys } from "../src/api/keys.js";
 import { invalidationKeys } from "../src/ws/invalidation.js";
 
+const VIEWER = "00000000-0000-7000-8000-000000000002";
+const GANG = "00000000-0000-7000-8000-000000000003";
+
 /**
- * invalidationKeys reads only `event.type`, so a fixture needs nothing else.
- * The cast is confined to this helper rather than sprayed over each case.
+ * Most cases read only `event.type`; the gang ones also read `gangId`, which
+ * `extra` supplies. The cast is confined to this helper rather than sprayed
+ * over each case.
  */
-function event(type: GameEvent["type"]): GameEvent {
+function event(type: GameEvent["type"], extra: Record<string, unknown> = {}): GameEvent {
   return {
     id: "00000000-0000-7000-8000-000000000000",
     at: "2026-08-08T00:00:00.000Z",
@@ -15,6 +19,7 @@ function event(type: GameEvent["type"]): GameEvent {
     actorName: "tester",
     audience: "global",
     type,
+    ...extra,
   } as unknown as GameEvent;
 }
 
@@ -25,7 +30,8 @@ describe("invalidationKeys", () => {
   it("answers for every event type the server can publish", () => {
     expect(ALL_TYPES.length).toBeGreaterThan(0);
     for (const type of ALL_TYPES) {
-      expect(invalidationKeys(event(type)), `no answer for ${type}`).toBeInstanceOf(Array);
+      expect(invalidationKeys(event(type, { gangId: GANG }), VIEWER), `no answer for ${type}`)
+        .toBeInstanceOf(Array);
     }
   });
 
@@ -33,35 +39,74 @@ describe("invalidationKeys", () => {
     // crime.resolved carries jailedUntil, so it is the authoritative jail
     // signal — dropping keys.jail() here is what leaves a jailed player
     // looking free until they navigate.
-    expect(invalidationKeys(event("crime.resolved"))).toEqual([
+    expect(invalidationKeys(event("crime.resolved"), VIEWER)).toEqual([
       keys.me(), keys.crimes(), keys.jail(),
     ]);
   });
 
   it("refreshes the shop's stock after a purchase, not just the wallet", () => {
-    expect(invalidationKeys(event("bullets.purchased"))).toEqual([keys.me(), keys.locations()]);
+    expect(invalidationKeys(event("bullets.purchased"), VIEWER)).toEqual([keys.me(), keys.locations()]);
   });
 
   it("refreshes the wallet and locations on travel", () => {
-    expect(invalidationKeys(event("player.travelled"))).toEqual([keys.me(), keys.locations()]);
+    expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([keys.me(), keys.locations()]);
   });
 
   it("refreshes only the wallet on a bank transaction", () => {
-    expect(invalidationKeys(event("bank.transacted"))).toEqual([keys.me()]);
+    expect(invalidationKeys(event("bank.transacted"), VIEWER)).toEqual([keys.me()]);
   });
 
   it("refreshes jail and crimes on both jail transitions", () => {
-    expect(invalidationKeys(event("player.jailed"))).toEqual([keys.jail(), keys.crimes()]);
-    expect(invalidationKeys(event("player.released"))).toEqual([keys.jail(), keys.crimes()]);
+    expect(invalidationKeys(event("player.jailed"), VIEWER)).toEqual([keys.jail(), keys.crimes()]);
+    expect(invalidationKeys(event("player.released"), VIEWER)).toEqual([keys.jail(), keys.crimes()]);
   });
 
   it("refreshes the ladder on a rank up", () => {
-    expect(invalidationKeys(event("player.rankedUp"))).toEqual([keys.me(), keys.ranks()]);
+    expect(invalidationKeys(event("player.rankedUp"), VIEWER)).toEqual([keys.me(), keys.ranks()]);
   });
 
-  it("invalidates nothing for Pass 2 surfaces that have no page yet", () => {
-    for (const type of ["mail.received", "notification.created", "news.posted", "chat.message"] as const) {
-      expect(invalidationKeys(event(type))).toEqual([]);
+  // The viewer's gang membership is on their profile, not on /api/auth/me, so
+  // a gang event that did not name the profile would leave the Gang page
+  // showing the create form to someone who is now in a gang.
+  it("refreshes the viewer's profile and the new gang when one is founded", () => {
+    expect(invalidationKeys(event("gang.created", { gangId: GANG }), VIEWER)).toEqual([
+      keys.profile(VIEWER), keys.gang(GANG),
+    ]);
+  });
+
+  it("refreshes roster, log, gang and profile on both membership transitions", () => {
+    const expected = [
+      keys.gangMembers(GANG), keys.gangLogs(GANG), keys.gang(GANG), keys.profile(VIEWER),
+    ];
+    expect(invalidationKeys(event("gang.memberJoined", { gangId: GANG }), VIEWER)).toEqual(expected);
+    expect(invalidationKeys(event("gang.memberLeft", { gangId: GANG }), VIEWER)).toEqual(expected);
+  });
+
+  it("keys gang invalidation off the event's gang, not the viewer's", () => {
+    const other = "00000000-0000-7000-8000-00000000000f";
+    expect(invalidationKeys(event("gang.memberJoined", { gangId: other }), VIEWER))
+      .toContainEqual(keys.gangMembers(other));
+  });
+
+  it("refreshes the inbox on new mail", () => {
+    expect(invalidationKeys(event("mail.received"), VIEWER)).toEqual([keys.mail()]);
+  });
+
+  // An invite reaches the invitee as a notification and nothing else — there
+  // is no invite event — so this is the only signal the invite list has.
+  it("refreshes notifications and gang invites together", () => {
+    expect(invalidationKeys(event("notification.created"), VIEWER)).toEqual([
+      keys.notifications(), keys.gangInvites(),
+    ]);
+  });
+
+  it("refreshes the news feed on a post", () => {
+    expect(invalidationKeys(event("news.posted"), VIEWER)).toEqual([keys.news()]);
+  });
+
+  it("invalidates nothing for surfaces that have no server routes at all", () => {
+    for (const type of ["chat.message", "bounty.placed", "bounty.claimed", "player.joined"] as const) {
+      expect(invalidationKeys(event(type), VIEWER)).toEqual([]);
     }
   });
 });

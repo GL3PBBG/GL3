@@ -25,6 +25,16 @@
 .navLink:hover { border-color: var(--line); }
 .navActive { background: var(--panel); border-color: var(--accent); color: var(--accent); }
 
+.badge {
+  margin-left: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .jailBanner {
   margin: 0.75rem 0 0;
   padding: 0.6rem 0.9rem;

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { useJail, useLocations, useLogout, useMe, useRanks } from "../api/queries.js";
+import {
+  useJail, useLocations, useLogout, useMail, useMe, useNotifications, useRanks,
+} from "../api/queries.js";
 import { formatDuration } from "../lib/errors.js";
+import { unreadCount } from "../lib/mail.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
 import { Amount, Money } from "./ui.js";
@@ -16,6 +19,11 @@ const LINKS: ReadonlyArray<readonly [string, string]> = [
   ["/bullets", "Bullets"],
   ["/ranks", "Ranks"],
   ["/leaderboards", "Leaderboards"],
+  ["/gang", "Gang"],
+  ["/mail", "Mail"],
+  ["/notifications", "Alerts"],
+  ["/news", "News"],
+  ["/profile", "Profile"],
 ];
 
 function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
@@ -33,11 +41,23 @@ export function Shell(): JSX.Element {
   const ranks = useRanks();
   const locations = useLocations();
   const logout = useLogout();
+  const mail = useMail();
+  const notifications = useNotifications();
 
   // /api/auth/me carries neither rank nor location; both are derived from the
   // list endpoints, which is why the HUD depends on three queries.
   const rank = me.data ? progressToNextRank(me.data.exp, ranks.data?.ranks ?? []) : null;
   const here = locations.data?.locations.find((location) => location.current);
+
+  // Neither endpoint reports a count, so both lists are counted here. They are
+  // held by the shell rather than the pages so a badge moves on the WS
+  // invalidation while the player is somewhere else entirely — which is the
+  // only reason to have a badge at all.
+  const badges: Readonly<Record<string, number>> = {
+    "/mail": unreadCount(mail.data?.mail ?? []),
+    "/notifications": (notifications.data?.notifications ?? [])
+      .filter((notification) => notification.readAt === null).length,
+  };
 
   return (
     <div className={styles.shell}>
@@ -58,18 +78,22 @@ export function Shell(): JSX.Element {
       </header>
 
       <nav className={styles.nav}>
-        {LINKS.map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            className={({ isActive }) =>
-              isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
+        {LINKS.map(([to, label]) => {
+          const unread = badges[to] ?? 0;
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              className={({ isActive }) =>
+                isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+              }
+            >
+              {label}
+              {unread > 0 ? <span className={styles.badge}>{unread}</span> : null}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {jail.data?.jailed === true ? (
