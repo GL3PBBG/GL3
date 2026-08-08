@@ -1,0 +1,26 @@
+# Keep the build context small and prevent host artifacts from leaking in.
+# Host node_modules (built for the host kernel/ABI, not alpine) and host
+# dist/ (possibly stale) would both corrupt the image if copied.
+
+**/node_modules
+**/dist
+**/.tsbuildinfo
+*.tsbuildinfo
+
+.git
+.github
+.claude
+.superpowers
+
+# Test sources are not runtime code; nothing in either image imports them.
+**/test
+**/*.test.ts
+coverage
+
+# Migrations are out of the image by decision (see Dockerfile.server header).
+apps/server/drizzle
+
+docs
+docker-compose.yml
+SPEC.md
+*.md

@@ -25,17 +25,28 @@ Full detail, including how to start M4, is in `docs/STATUS.md`.
 system services. `docker-compose.yml` stays in the repo as the documented path for
 machines that do have Docker, but do not try to use it here.
 
+**Container images are built in CI only.** `Dockerfile.server` and
+`Dockerfile.web` (plus `apps/web/serve.mjs`, the zero-dep static server the web
+image runs) cannot be built or validated on this machine — Docker Desktop's WSL
+integration is off. The CI `images` job (`ci.yml`) builds both on every PR
+(push disabled) and publishes them to GHCR on push to `main`. Every Dockerfile
+change costs a CI round trip; `npm run typecheck` + `node apps/server/dist/index.js`
+locally cover everything the image does *except* the container build itself.
+
 ```bash
 export DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3
 export REDIS_URL=redis://localhost:6379
 npm run verify          # typecheck + full suite — run this LOCALLY before committing
 ```
 
-**GitHub CI does not run the integration suite.** It runs `npm run verify:ci`
-(typecheck + the `@gl3/server:unit` and `@gl3/shared` projects) with no Postgres
-or Redis service containers. A green build proves the tree typechecks and the
-no-DB tests pass — it is **not** evidence that the integration suite passes.
-That check only exists on your machine, and it is on you to run it.
+**GitHub CI does not run the integration suite.** Its `verify` job runs
+`npm run verify:ci` (typecheck + the `@gl3/server:unit` and `@gl3/shared`
+projects) with no Postgres or Redis service containers. A green build proves the
+tree typechecks and the no-DB tests pass — it is **not** evidence that the
+integration suite passes. That check only exists on your machine, and it is on
+you to run it. CI's second job, `images`, builds and (on `main`) pushes the two
+container images — the one check that *cannot* run locally, since Docker is
+unavailable here.
 
 - Spare databases `gl3_a`..`gl3_d` exist for concurrent agents, but are **only
   migrated through `0002`** — anything touching an M3 table fails there with

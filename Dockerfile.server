@@ -1,0 +1,69 @@
+# syntax=docker/dockerfile:1
+#
+# Server image: API + WebSocket gateway. Built from compiled TypeScript.
+#
+# The builder runs `tsc --build` against @gl3/server, which follows its
+# tsconfig reference to @gl3/shared and emits BOTH packages/shared/dist and
+# apps/server/dist in one step — so no separate `build -w @gl3/shared` is
+# needed here (unlike Dockerfile.web, where Vite — not tsc — resolves
+# @gl3/shared and needs dist present before the web build starts).
+#
+# argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
+# build toolchain (no python/make/g++).
+#
+# Migrations are intentionally NOT in this image. `dist/db/migrate.js` exists
+# as build output but is not wired to the CMD; schema changes are an external
+# operation (see docs/STATUS.md).
+
+ARG NODE_VERSION=22
+FROM node:${NODE_VERSION}-alpine AS builder
+
+WORKDIR /app
+
+# Copy manifests first for the install layer. npm ci validates the workspace
+# layout, so all four package.json files must be present.
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/package.json apps/server/
+
+RUN npm ci
+
+# Copy the TypeScript sources and tsconfigs that the build reads.
+COPY tsconfig.json tsconfig.base.json ./
+COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
+COPY packages/shared/src packages/shared/src
+COPY apps/server/tsconfig.json apps/server/tsconfig.json
+COPY apps/server/src apps/server/src
+
+# --force matches `npm run typecheck` locally: rebuilds shared + server from
+# scratch regardless of cached .tsbuildinfo (which .dockerignore excluded).
+RUN npx tsc --build --force
+
+# --- runtime stage -----------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS runtime
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Same manifests as the builder, then a production-only install. This recreates
+# the node_modules/@gl3/shared workspace symlink, which is how the runtime
+# resolves `@gl3/shared` through its package.json exports map.
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/package.json apps/server/
+
+RUN npm ci --omit=dev
+
+# Compiled output from the builder. drizzle/ is deliberately not copied.
+COPY --from=builder /app/packages/shared/dist packages/shared/dist
+COPY --from=builder /app/apps/server/dist apps/server/dist
+
+USER node
+EXPOSE 3000
+
+# /health is registered in src/app.ts and covered by test/health.test.ts.
+# wget is present in the alpine base; curl is not.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+
+CMD ["node", "apps/server/dist/index.js"]

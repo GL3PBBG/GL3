@@ -5,8 +5,12 @@ name: CI
 # run it. Standing up service containers to run the integration suite on a
 # shared runner bought flaky red builds, not signal.
 #
-# What CI covers: the whole tree typechecks, and every test that genuinely
-# needs no database or Redis (@gl3/server:unit, @gl3/shared) passes.
+# What CI covers:
+#   verify  — the whole tree typechecks, and every no-DB test
+#             (@gl3/server:unit, @gl3/shared) passes.
+#   images  — both container images (server, web) BUILD. On a push to main
+#             they are also PUSHED to GHCR; on a pull request they build only
+#             (push: false), which is the check.
 #
 # What CI does NOT cover, and where it has to happen instead: the full
 # integration suite, run LOCALLY before you commit —
@@ -15,10 +19,20 @@ name: CI
 #     export REDIS_URL=redis://localhost:6379
 #     npm run verify
 #
+# And the image build is the opposite: it CANNOT be run locally on this
+# machine (Docker Desktop's WSL integration is off), so CI is the ONLY place
+# the Dockerfiles are proven. That is the cost of the environment, not a sign
+# a green run missed something.
+#
 # A green build here is NOT evidence that the integration suite passes.
 on:
   push: { branches: [main] }
   pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -28,3 +42,64 @@ jobs:
         with: { node-version: "22", cache: "npm" }
       - run: npm ci
       - run: npm run verify:ci
+
+  images:
+    needs: verify
+    runs-on: ubuntu-latest
+    # Build on PRs and pushes; push to GHCR only on pushes to main. PR builds
+    # prove the Dockerfiles compile (including argon2's musl prebuild) without
+    # publishing from an unmerged branch.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Server image metadata
+        id: server-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/rondlite/gl3-server
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.server
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.server-meta.outputs.tags }}
+          labels: ${{ steps.server-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Web image metadata
+        id: web-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/rondlite/gl3-web
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.web
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.web-meta.outputs.tags }}
+          labels: ${{ steps.web-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
