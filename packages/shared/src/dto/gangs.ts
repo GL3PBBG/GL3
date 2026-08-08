@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { IdSchema, MoneySchema, TimestampSchema } from "../primitives.js";
+import { IdSchema, MoneySchema, noNulByte, TimestampSchema } from "../primitives.js";
 
 export const CreateGangRequestSchema = z.object({
+  // The regex allowlist already excludes NUL (not in the character class),
+  // so `name` doesn't need noNulByte on top of it.
   name: z.string().min(3).max(50).regex(/^[A-Za-z0-9 _'-]+$/, "letters, digits, spaces, _ - ' only"),
-  description: z.string().max(500).optional(),
-  info: z.string().max(2000).optional(),
+  description: noNulByte(z.string().max(500)).optional(),
+  info: noNulByte(z.string().max(2000)).optional(),
 });
 export type CreateGangRequest = z.infer<typeof CreateGangRequestSchema>;
 
@@ -32,7 +34,10 @@ export type GangLogDto = z.infer<typeof GangLogDtoSchema>;
 
 export const GangLogListResponseSchema = z.object({ logs: z.array(GangLogDtoSchema) });
 
-export const InvitePlayerRequestSchema = z.object({ username: z.string().min(3).max(30) });
+// Not persisted, but reaches Postgres as an `eq(players.username, ...)`
+// lookup parameter — Postgres rejects an embedded NUL in any text
+// parameter, not just one being written, so this needs noNulByte too.
+export const InvitePlayerRequestSchema = z.object({ username: noNulByte(z.string().min(3).max(30)) });
 export type InvitePlayerRequest = z.infer<typeof InvitePlayerRequestSchema>;
 
 export const GrantPermissionRequestSchema = z.object({

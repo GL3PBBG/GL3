@@ -1,3 +1,4 @@
+import { ProfileDtoSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -40,11 +41,17 @@ describe("GET /api/players/:playerId/profile", () => {
   it("returns exactly the ProfileDtoSchema keys and no others (locks out credential/balance columns AND any future unreviewed field)", async () => {
     const res = await app.inject({ method: "GET", url: `/api/players/${playerId}/profile` });
     const body = res.json() as Record<string, unknown>;
-    // An exact-key comparison, not a curated blocklist: a blocklist only
-    // catches columns someone thought to name (email was missed here on
-    // the first pass) and can never catch a field added later that nobody
-    // thought to block. This fails on ANY key outside the reviewed DTO
-    // surface, present or future.
+    // Parsed through the real, exported `ProfileDtoSchema.strict()` — not a
+    // hand-copied literal that can drift out of sync with the schema it's
+    // supposed to be checking. `.strict()` fails on any extra key (the
+    // credential/balance-column leak this test exists for), and parsing
+    // through the schema also checks VALUES, not just keys: `exp` must
+    // actually be a MoneySchema-shaped decimal string and `createdAt` a
+    // valid TimestampSchema, not merely present.
+    expect(() => ProfileDtoSchema.strict().parse(body)).not.toThrow();
+    // Kept alongside as an independent oracle: this literal is what fails
+    // first, with a readable diff, if a column is ever added without
+    // updating ProfileDtoSchema to match.
     expect(Object.keys(body).sort()).toEqual(
       ["playerId", "username", "bio", "avatarUrl", "gangId", "gangName", "exp", "rankName", "createdAt"].sort(),
     );
@@ -108,6 +115,69 @@ describe("PUT /api/profile", () => {
     const res = await app.inject({
       method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
       payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  // Postgres `text` columns reject an embedded NUL byte outright (SQLSTATE
+  // 22021), which `z.string()` alone has no opinion on — a legal,
+  // well-formed JSON string carrying "\u0000" passes zod, reaches drizzle,
+  // and comes back from Postgres as an uncaught PostgresError: a 500 with
+  // the raw DB error in the body, for what should be a clean 400.
+  it("400s a NUL byte in bio instead of 500ing (Postgres text rejects it, SQLSTATE 22021)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { bio: `Family${String.fromCharCode(0)}man.` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a NUL byte in avatarUrl instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: `https://example.com/${String.fromCharCode(0)}pic.png` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("stores the normalized avatarUrl, not the client's raw string (leading/trailing whitespace stripped)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: " https://example.com/vito.png \n" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const [row] = await db.select({ avatarUrl: playerStats.avatarUrl }).from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.avatarUrl).toBe("https://example.com/vito.png");
+  });
+
+  it("rejects a schemeless avatarUrl that a browser would resolve against a scheme (https:evil.com)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: "https:evil.com" },
+    });
+    // WHATWG URL resolves this to https://evil.com/ — a valid http(s) URL,
+    // so this 200s. What matters is that the PERSISTED value is the
+    // canonical, re-parseable form, not the ambiguous original string.
+    expect(res.statusCode).toBe(200);
+    const [row] = await db.select({ avatarUrl: playerStats.avatarUrl }).from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.avatarUrl).toBe("https://evil.com/");
+  });
+
+  it("rejects an avatarUrl with embedded credentials (phishing shape, e.g. https://paypal.com@evil.com/logo.png)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: "https://paypal.com@evil.com/logo.png" },
+    });
+    expect(res.statusCode).toBe(400);
+    const [row] = await db.select({ avatarUrl: playerStats.avatarUrl }).from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.avatarUrl).toBeNull();
+  });
+
+  it("rejects an avatarUrl with a bare embedded password (https://user:pass@evil.com/x.png)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: "https://user:pass@evil.com/x.png" },
     });
     expect(res.statusCode).toBe(400);
   });

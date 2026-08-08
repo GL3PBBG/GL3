@@ -115,6 +115,34 @@ describe("POST /api/mail", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  // Postgres `text` columns (subject, body) and text parameters
+  // (recipientUsername, in an `eq(players.username, ...)` lookup) all
+  // reject an embedded NUL byte outright (SQLSTATE 22021); z.string() alone
+  // doesn't, so each of these 500ed before noNulByte guarded them.
+  it("400s a NUL byte in subject instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
+      payload: { recipientUsername: "Sonny", subject: `Business${String.fromCharCode(0)}`, body: "We need to talk." },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a NUL byte in body instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
+      payload: { recipientUsername: "Sonny", subject: "Business", body: `We need${String.fromCharCode(0)}to talk.` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a NUL byte in recipientUsername instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
+      payload: { recipientUsername: `Sonny${String.fromCharCode(0)}`, subject: "Business", body: "We need to talk." },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("continues a thread when threadId is supplied", async () => {
     const first = await app.inject({
       method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },

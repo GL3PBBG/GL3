@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { IdSchema, TimestampSchema } from "../primitives.js";
+import { IdSchema, noNulByte, TimestampSchema } from "../primitives.js";
 
 export const PostNewsRequestSchema = z.object({
-  title: z.string().min(1).max(200),
-  body: z.string().min(1).max(10_000),
+  title: noNulByte(z.string().min(1).max(200)),
+  body: noNulByte(z.string().min(1).max(10_000)),
 });
 export type PostNewsRequest = z.infer<typeof PostNewsRequestSchema>;
 

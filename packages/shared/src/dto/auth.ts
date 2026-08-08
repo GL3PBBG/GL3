@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdSchema } from "../primitives.js";
+import { IdSchema, noNulByte } from "../primitives.js";
 
 /** V2 capped usernames at 30 chars (SPEC §1.2 users.U_name); GL3 keeps that ceiling. */
 export const RegisterRequestSchema = z.object({
@@ -9,8 +9,19 @@ export const RegisterRequestSchema = z.object({
 });
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
 
+/**
+ * Unlike `RegisterRequestSchema.username`, login's username isn't
+ * regex-restricted — it just needs to match whatever was already
+ * registered. That means it's not persisted, but it does reach Postgres
+ * verbatim as an `eq(players.username, ...)` query parameter, and Postgres
+ * rejects an embedded NUL byte in ANY text parameter — a value being
+ * compared, not just one being written — with the same SQLSTATE 22021 this
+ * repo's other noNulByte call sites guard against. `noNulByte` here closes
+ * that, not because the value is stored, but because it reaches the
+ * database at all.
+ */
 export const LoginRequestSchema = z.object({
-  username: z.string().min(1).max(30),
+  username: noNulByte(z.string().min(1).max(30)),
   password: z.string().min(1).max(200),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;

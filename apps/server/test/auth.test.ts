@@ -124,6 +124,20 @@ describe("POST /api/auth/login — username-enumeration resistance", () => {
   });
 });
 
+describe("POST /api/auth/login — NUL byte handling", () => {
+  // Login's username isn't persisted, but reaches Postgres as an
+  // `eq(players.username, ...)` lookup parameter — Postgres rejects an
+  // embedded NUL in any text parameter, not just one being written
+  // (SQLSTATE 22021), so this 500ed before noNulByte guarded it.
+  it("400s a NUL byte in username instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/login",
+      payload: { username: `Vito${String.fromCharCode(0)}`, password: "hunter2hunter2" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("GET /api/auth/me", () => {
   it("returns the player behind a bearer token and 401 without one", async () => {
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });

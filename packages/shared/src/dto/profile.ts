@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdSchema, MoneySchema, TimestampSchema } from "../primitives.js";
+import { IdSchema, MoneySchema, noNulByte, TimestampSchema } from "../primitives.js";
 
 /**
  * avatarUrl is attacker-controlled, persisted server-side, and served to
@@ -14,26 +14,48 @@ import { IdSchema, MoneySchema, TimestampSchema } from "../primitives.js";
 const ALLOWED_AVATAR_PROTOCOLS = new Set(["http:", "https:"]);
 
 /**
- * `.url()` marks a failing ZodString check *dirty*, not *aborted* — the
- * chained `.refine()` still runs against the original (unparseable) input
- * even after `.url()` has already failed it. `new URL(value)` therefore
- * must be assumed reachable with ANY string, so this predicate must never
- * throw: a `try/catch` makes it total, returning `false` instead of
- * propagating a `TypeError` out of `safeParse` (which is documented to
- * never throw) and crashing the request with an uncaught 500.
+ * Validates AND normalizes in one pass, and — critically — the value that
+ * gets STORED is the normalized value, not the client's raw string. Round
+ * 1 validated `new URL(value).protocol` but persisted `value` unmodified,
+ * so a leading space, a trailing newline, or a schemeless `https:evil.com`
+ * (which a browser resolves to `https://evil.com`) all passed the scheme
+ * check and then persisted exactly as submitted — meaning any downstream
+ * re-parse (a CSP allowlist, a thumbnail proxy) could legitimately
+ * disagree with this handler about what URL it actually is. `new
+ * URL(value).toString()` is the canonical form; storing that instead
+ * closes that gap. It also happens to close the NUL-byte-in-the-path case
+ * on its own (the WHATWG URL parser percent-encodes it to a literal
+ * "%00"), but `noNulByte` below still runs first — the persisted-text
+ * guard should not depend on incidental behaviour of an unrelated parser.
+ *
+ * Also rejects non-empty userinfo (`url.username`/`url.password`).
+ * `https://paypal.com@evil.com/logo.png` is the classic phishing shape: as
+ * an `<img src>` it triggers a credentialed cross-origin fetch to
+ * evil.com; as an `href` it reads as one host and navigates to another.
  */
-function isHttpUrl(value: string): boolean {
+const avatarUrlSchema = noNulByte(z.string().max(500)).transform((value, ctx) => {
+  let parsed: URL;
   try {
-    return ALLOWED_AVATAR_PROTOCOLS.has(new URL(value).protocol);
+    parsed = new URL(value);
   } catch {
-    return false;
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "avatarUrl must be a valid URL" });
+    return z.NEVER;
   }
-}
+  if (!ALLOWED_AVATAR_PROTOCOLS.has(parsed.protocol)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "avatarUrl must be an http(s) URL" });
+    return z.NEVER;
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "avatarUrl must not contain embedded credentials" });
+    return z.NEVER;
+  }
+  return parsed.toString();
+});
 
 export const UpdateProfileRequestSchema = z
   .object({
-    bio: z.string().max(1000).optional(),
-    avatarUrl: z.string().max(500).refine(isHttpUrl, { message: "avatarUrl must be an http(s) URL" }).optional(),
+    bio: noNulByte(z.string().max(1000)).optional(),
+    avatarUrl: avatarUrlSchema.optional(),
   })
   // Both fields are optional, so `{}` parses successfully; that in turn
   // leaves the route's conditional spread with nothing to set, and

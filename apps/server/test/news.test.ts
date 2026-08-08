@@ -99,6 +99,25 @@ describe("POST /api/news", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  // Postgres `text` columns reject an embedded NUL byte outright (SQLSTATE
+  // 22021); z.string() alone doesn't, so an otherwise-legal post 500ed
+  // before noNulByte guarded title/body.
+  it("400s a NUL byte in title instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${staffToken}` },
+      payload: { title: `Round 2${String.fromCharCode(0)}begins`, body: "Good luck out there." },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a NUL byte in body instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${staffToken}` },
+      payload: { title: "Round 2 begins", body: `Good luck${String.fromCharCode(0)}out there.` },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   // A role's wildcard module key ("*") is the V2-preserved admin grant
   // (roleAccess RA_module='*') — it must satisfy any module, not just an
   // exact "news" match.

@@ -1,10 +1,13 @@
 import { z } from "zod";
-import { IdSchema, TimestampSchema } from "../primitives.js";
+import { IdSchema, noNulByte, TimestampSchema } from "../primitives.js";
 
 export const SendMailRequestSchema = z.object({
-  recipientUsername: z.string().min(3).max(30),
-  subject: z.string().min(1).max(200),
-  body: z.string().min(1).max(5000),
+  // Not persisted, but reaches Postgres as an `eq(players.username, ...)`
+  // lookup parameter — Postgres rejects an embedded NUL in any text
+  // parameter, not just one being written, so this needs noNulByte too.
+  recipientUsername: noNulByte(z.string().min(3).max(30)),
+  subject: noNulByte(z.string().min(1).max(200)),
+  body: noNulByte(z.string().min(1).max(5000)),
   /** Reply within an existing thread; omit to start a new one. */
   threadId: IdSchema.optional(),
 });
