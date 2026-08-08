@@ -37,12 +37,17 @@ describe("GET /api/players/:playerId/profile", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("never leaks credential or balance columns", async () => {
+  it("returns exactly the ProfileDtoSchema keys and no others (locks out credential/balance columns AND any future unreviewed field)", async () => {
     const res = await app.inject({ method: "GET", url: `/api/players/${playerId}/profile` });
     const body = res.json() as Record<string, unknown>;
-    for (const forbidden of ["passwordHash", "legacyPasswordSha256", "legacyV2Id", "cash", "bank", "points"]) {
-      expect(body).not.toHaveProperty(forbidden);
-    }
+    // An exact-key comparison, not a curated blocklist: a blocklist only
+    // catches columns someone thought to name (email was missed here on
+    // the first pass) and can never catch a field added later that nobody
+    // thought to block. This fails on ANY key outside the reviewed DTO
+    // surface, present or future.
+    expect(Object.keys(body).sort()).toEqual(
+      ["playerId", "username", "bio", "avatarUrl", "gangId", "gangName", "exp", "rankName", "createdAt"].sort(),
+    );
   });
 });
 
@@ -79,6 +84,30 @@ describe("PUT /api/profile", () => {
     const res = await app.inject({
       method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
       payload: { avatarUrl: "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a schemeless avatarUrl instead of 500ing (URL constructor throws on unparseable input)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: "example.com/pic.png" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s an empty-string avatarUrl instead of 500ing", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: { avatarUrl: "" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a body with no recognized fields instead of 500ing (drizzle .set({}) throws)", async () => {
+    const res = await app.inject({
+      method: "PUT", url: "/api/profile", headers: { authorization: `Bearer ${token}` },
+      payload: {},
     });
     expect(res.statusCode).toBe(400);
   });
