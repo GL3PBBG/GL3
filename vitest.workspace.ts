@@ -123,6 +123,7 @@ export default defineWorkspace([
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
+        "test/news.test.ts",
         "test/notifications.test.ts",
         "test/ranks.test.ts",
         "test/travel.test.ts",
