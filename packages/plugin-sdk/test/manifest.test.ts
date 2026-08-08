@@ -35,4 +35,18 @@ describe("definePlugin", () => {
   it("names the plugin in the error message", () => {
     expect(() => definePlugin({ ...valid, version: "x" })).toThrow(/bounties/);
   });
+
+  // The schema is `.strict()` because the M5 boot sequence requires a manifest to
+  // reject unknown fields rather than silently ignore them: the typo'd key below
+  // would otherwise leave the plugin quietly registering no routes at all.
+  // Naming the offending key in the assertion is what stops `.strict()` being
+  // dropped in a refactor without the suite noticing.
+  //
+  // Bound to a variable first, not passed as a fresh literal: excess-property
+  // checking would reject the literal at compile time, and the point here is the
+  // runtime guard against manifests TypeScript never saw.
+  it("rejects an unknown top-level field, naming the offending key", () => {
+    const typoed = { ...valid, rotues: [] };
+    expect(() => definePlugin(typoed)).toThrow(/'rotues'/);
+  });
 });
