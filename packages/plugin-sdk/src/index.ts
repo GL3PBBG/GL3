@@ -9,6 +9,14 @@ export {
 } from "./filters.js";
 export type { PluginCtx } from "./ctx.js";
 export {
+  PageSchemaSchema,
+  ViewNodeSchema,
+  MenuEntrySchema,
+  type PageSchema,
+  type ViewNode,
+  type MenuEntry,
+} from "./pages.js";
+export {
   definePlugin,
   PLUGIN_ID_PATTERN,
   SEMVER_PATTERN,
