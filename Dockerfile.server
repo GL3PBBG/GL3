@@ -11,9 +11,13 @@
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
 # build toolchain (no python/make/g++).
 #
-# Migrations are intentionally NOT in this image. `dist/db/migrate.js` exists
-# as build output but is not wired to the CMD; schema changes are an external
-# operation (see docs/STATUS.md).
+# Schema bootstrap: the server CMD (index.js) does NOT run migrations. For a
+# fresh database, run `node apps/server/dist/db/migrate.js` as a Rancher
+# initContainer before the server starts. The image ships the compiled
+# migrator and the drizzle/ SQL so that entrypoint works from this image
+# alone — no separate migration tooling. Migrations are idempotent (drizzle
+# tracks applied files in the __drizzle_migrations table), so re-running on
+# an already-bootstrapped database is a no-op.
 
 ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-alpine AS builder
@@ -34,6 +38,9 @@ COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
 COPY packages/shared/src packages/shared/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
+# Migrations are TS-adjacent SQL, not compiled; copy the source dir so the
+# runtime stage can serve them to the compiled migrator.
+COPY apps/server/drizzle apps/server/drizzle
 
 # Point at the server project directly rather than the root tsconfig.json.
 # The root tsconfig references all three projects (shared, server, web), but
@@ -59,9 +66,12 @@ COPY apps/server/package.json apps/server/
 
 RUN npm ci --omit=dev
 
-# Compiled output from the builder. drizzle/ is deliberately not copied.
+# Compiled output from the builder. drizzle/ ships too so the migrator
+# entrypoint (dist/db/migrate.js) can find its SQL — it resolves
+# ../../drizzle relative to dist/db/, i.e. apps/server/drizzle.
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
+COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 
 USER node
 EXPOSE 3000
