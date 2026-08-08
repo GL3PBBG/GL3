@@ -6,8 +6,35 @@ import type { PluginCtx } from "./ctx.js";
  * makes cross-plugin filters type-safe without a global registry (spec:
  * Filters). The phantom `_type` field exists only to make `FilterPoint<Crime>`
  * and `FilterPoint<Gang>` structurally distinct to the compiler.
+ *
+ * The parameter is `never`, not `T`, to make the phantom *covariant*. Under
+ * `strictFunctionTypes` a property-position `(value: T) => T` is checked
+ * contravariantly in its parameter, which would make `FilterPoint<Crime>`
+ * unassignable to `FilterPoint<unknown>` — the type `PluginManifest.provides`
+ * holds — so no plugin could declare a point it owns. `never` is the bottom
+ * type and so satisfies contravariance from anything, while the return position
+ * still keeps two distinct `T`s mutually unassignable.
+ *
+ * With `never` in the parameter, all of the variance is carried by the return
+ * position — the parameter deliberately contributes nothing. That is the point:
+ * it makes the phantom's behaviour independent of `strictFunctionTypes` and of
+ * property-vs-method declaration quirks.
  */
-export interface FilterPoint<T> { readonly name: string; readonly _type?: (value: T) => T }
+export interface FilterPoint<T> { readonly name: string; readonly _type?: (value: never) => T }
+
+// Compile-time guards for the phantom's variance (see `_type` above). These
+// are types only — nothing is emitted. Both are verified to fail, each on a
+// different regression: revert `never` to `T` and _Concrete fails; delete the
+// `_type` field and _Distinct fails.
+//
+// Note that rewriting `_type` as a method (`_type?(value: T): T`) fails
+// neither, and that is correct rather than a gap — distinctness comes from the
+// return position, which a method shorthand keeps, and bivariance only relaxes
+// the parameter, which is already inert. The method form is not a wrong answer
+// here; `never` is preferred only because it states that intent outright.
+type _Assert<T extends true> = T;
+type _Concrete = _Assert<FilterPoint<{ a: 1 }> extends FilterPoint<unknown> ? true : false>;
+type _Distinct = _Assert<FilterPoint<{ a: 1 }> extends FilterPoint<{ b: 2 }> ? false : true>;
 
 export type FilterFn<T> = (ctx: PluginCtx, value: T) => T | Promise<T>;
 
