@@ -5,7 +5,7 @@ import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import {
   CreateGangRequestSchema, GangBankTransferRequestSchema, GrantPermissionRequestSchema, IdSchema,
-  InvitePlayerRequestSchema, type GameEvent,
+  InvitePlayerRequestSchema, TransferBossRequestSchema, type GameEvent,
 } from "@gl3/shared";
 import { z } from "zod";
 import { publishEvent } from "../../bus/publish.js";
@@ -60,6 +60,29 @@ class BossMustTransferError extends Error {
   constructor() {
     super("boss must transfer before leaving");
     this.name = "BossMustTransferError";
+  }
+}
+
+/**
+ * Thrown inside the transfer transaction when the row-locked recheck finds
+ * the requester is not (or is no longer) the boss. Unlike kick and the
+ * permission routes, transfer has no hasGangPermission pre-check to answer
+ * 403 from: bossness is not a gang_permissions row, and the only reading of
+ * it that can be trusted is the one taken under the lock this transaction
+ * already holds.
+ */
+class NotBossError extends Error {
+  constructor() {
+    super("only the boss can transfer the gang");
+    this.name = "NotBossError";
+  }
+}
+
+/** Thrown inside the transfer transaction when the target is already the boss. */
+class AlreadyBossError extends Error {
+  constructor() {
+    super("target is already the boss");
+    this.name = "AlreadyBossError";
   }
 }
 
@@ -252,6 +275,97 @@ export function registerGangRoutes(
     });
   });
 
+  app.get("/api/gangs/:gangId/members", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const { gangId } = params.data;
+
+    const [gang] = await db.select({ boss: gangs.bossPlayerId, underboss: gangs.underbossPlayerId })
+      .from(gangs).where(eq(gangs.id, gangId));
+    if (!gang) return reply.code(404).send({ error: "gang_not_found" });
+
+    // Members only. GET /api/gangs/:gangId is public to any authenticated
+    // player, but this roster carries each member's permission grants — a
+    // map of who can kick and who can empty the bank — and gangs are
+    // invite-only, so no non-member has a use for it.
+    const [membership] = await db.select({ gangId: gangMembers.gangId }).from(gangMembers)
+      .where(and(eq(gangMembers.gangId, gangId), eq(gangMembers.playerId, playerId)));
+    if (!membership) return reply.code(403).send({ error: "not_a_member" });
+
+    const rows = await db.select({
+      playerId: gangMembers.playerId, username: players.username, joinedAt: gangMembers.joinedAt,
+    }).from(gangMembers).innerJoin(players, eq(players.id, gangMembers.playerId))
+      .where(eq(gangMembers.gangId, gangId))
+      .orderBy(gangMembers.joinedAt);
+
+    // Permissions are attached by joining in memory against the member list,
+    // which reproduces hasGangPermission's membership requirement: a
+    // gang_permissions row naming someone with no gang_members row confers
+    // nothing there and must not appear here either.
+    const grants = await db.select({ playerId: gangPermissions.playerId, permission: gangPermissions.permission })
+      .from(gangPermissions).where(eq(gangPermissions.gangId, gangId));
+    const byPlayer = new Map<string, string[]>();
+    for (const g of grants) {
+      const list = byPlayer.get(g.playerId);
+      if (list) list.push(g.permission);
+      else byPlayer.set(g.playerId, [g.permission]);
+    }
+
+    const rank = (id: string): number => (id === gang.boss ? 0 : id === gang.underboss ? 1 : 2);
+    const members = rows
+      .map((m) => ({
+        playerId: m.playerId,
+        username: m.username,
+        role: m.playerId === gang.boss ? "boss" : m.playerId === gang.underboss ? "underboss" : "member",
+        // Leadership holds every permission implicitly (hasGangPermission's
+        // boss/underboss bypass), and holds no gang_permissions rows to
+        // report, so send the whole set rather than an empty array a client
+        // would read as "can do nothing".
+        permissions: m.playerId === gang.boss || m.playerId === gang.underboss
+          ? [...GANG_PERMISSIONS]
+          : byPlayer.get(m.playerId) ?? [],
+        joinedAt: m.joinedAt.toISOString(),
+      }))
+      // Array.prototype.sort is stable, so equal-rank members keep the
+      // joinedAt ordering the query above established.
+      .sort((a, b) => rank(a.playerId) - rank(b.playerId));
+
+    return reply.send({ members });
+  });
+
+  // Registered alongside the other invite routes; find-my-way prefers the
+  // static "invites" segment over :gangId, so this does not shadow — nor is
+  // it shadowed by — GET /api/gangs/:gangId. gang-invites.test.ts pins that.
+  app.get("/api/gangs/invites", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const rows = await db.select({
+      id: gangInvites.id, gangId: gangInvites.gangId, gangName: gangs.name,
+      invitedByPlayerId: gangInvites.invitedByPlayerId, invitedByUsername: players.username,
+      createdAt: gangInvites.createdAt,
+    }).from(gangInvites)
+      .innerJoin(gangs, eq(gangs.id, gangInvites.gangId))
+      .innerJoin(players, eq(players.id, gangInvites.invitedByPlayerId))
+      .where(eq(gangInvites.invitedPlayerId, playerId))
+      .orderBy(desc(gangInvites.createdAt))
+      .limit(50);
+
+    // No player_stats.gang_id filter. Accepting clears every invite the
+    // joiner holds, and the invite route refuses a target already in a gang,
+    // so an invite that would 409 already_in_a_gang normally cannot exist —
+    // but it can be raced into being (the invite route reads the target's
+    // gang_id unlocked, so an insert can land just after an accept's
+    // delete). Listing it is deliberate: the accept route is the authority
+    // on whether an invite still works, and filtering here would leave the
+    // invitee looking at a notification for an invite that is nowhere.
+    return reply.send({
+      invites: rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    });
+  });
+
   app.post("/api/gangs/:gangId/invites", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
@@ -425,6 +539,79 @@ export function registerGangRoutes(
     }
 
     await publishMemberLeft(redis, db, gangId, playerId);
+    return reply.code(204).send();
+  });
+
+  app.post("/api/gangs/:gangId/transfer", { preHandler: requireAuth }, async (request, reply) => {
+    const requesterId = request.playerId;
+    if (!requesterId) return reply.code(401).send({ error: "unauthorized" });
+    const params = GangParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const body = TransferBossRequestSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request", issues: body.error.issues });
+    const { gangId } = params.data;
+    const targetId = body.data.playerId;
+
+    const notificationId = uuidv7();
+    let gangName = "";
+    try {
+      await db.transaction(async (tx) => {
+        // Same (gang, target-player) pair and same helper as leave and kick —
+        // the appendGangLog below takes FOR KEY SHARE on the gangs row
+        // regardless, so any other ordering re-opens the 40P01 deadlock M3
+        // shipped (NOTES.md rule 6, test/gang-lock-order.test.ts).
+        //
+        // Every check below reads under these locks rather than from an
+        // earlier unlocked SELECT: this route is precisely the concurrent
+        // writer that leave's BossMustTransferError check defends against, so
+        // it must not itself act on a stale boss id.
+        await lockGangAndPlayerForUpdate(tx, gangId, targetId);
+        const [gang] = await tx.select({ boss: gangs.bossPlayerId, underboss: gangs.underbossPlayerId, name: gangs.name })
+          .from(gangs).where(eq(gangs.id, gangId));
+        if (!gang) throw new GangNotFoundError();
+        if (gang.boss !== requesterId) throw new NotBossError();
+        if (targetId === gang.boss) throw new AlreadyBossError();
+        const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats).where(eq(playerStats.playerId, targetId));
+        if (stats?.gangId !== gangId) throw new NotAMemberError();
+        gangName = gang.name;
+
+        await tx.update(gangs)
+          // Promoting the underboss would otherwise leave one player holding
+          // both offices, and hasGangPermission's bypass reads either field —
+          // harmless today, but it makes "demote the underboss" unable to
+          // remove their bypass. Clear it in the same statement.
+          .set(gang.underboss === targetId ? { bossPlayerId: targetId, underbossPlayerId: null } : { bossPlayerId: targetId })
+          .where(eq(gangs.id, gangId));
+
+        const [target] = await tx.select({ username: players.username }).from(players).where(eq(players.id, targetId));
+        await appendGangLog(tx, gangId, requesterId, `transferred leadership to ${target?.username ?? targetId}`);
+        await insertNotification(tx, {
+          id: notificationId, playerId: targetId,
+          body: `You are now the boss of ${gang.name}.`,
+        });
+      });
+    } catch (err) {
+      if (err instanceof GangNotFoundError) return reply.code(404).send({ error: "gang_not_found" });
+      if (err instanceof NotBossError) return reply.code(403).send({ error: "forbidden" });
+      if (err instanceof AlreadyBossError) return reply.code(409).send({ error: "already_boss" });
+      if (err instanceof NotAMemberError) return reply.code(404).send({ error: "not_a_member" });
+      throw err;
+    }
+
+    // notification.created, not a new gang.* event type: GameEventSchema is
+    // consumed by exhaustive switches in the web client (EventFeed's
+    // describe(), invalidationKeys()), so a new type is a client change too —
+    // and the new boss learning of it privately is exactly what a
+    // notification is for. Actor is the notified player, matching the invite
+    // route and NOTES.md rule 4's awaitOwnEvent filter.
+    const [target] = await db.select({ username: players.username }).from(players).where(eq(players.id, targetId));
+    const event: GameEvent = {
+      id: uuidv7(), type: "notification.created", at: new Date().toISOString(),
+      actorId: targetId, actorName: target?.username ?? "unknown", audience: { kind: "player", playerId: targetId },
+      notificationId, body: `You are now the boss of ${gangName}.`,
+    };
+    await publishEvent(redis, event);
+
     return reply.code(204).send();
   });
 
