@@ -1,56 +1,53 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type Deadlines, pruneExpired, secondsLeft, seedDeadline, startDeadline,
+} from "../lib/countdown.js";
 
 /**
- * Live, per-id second-countdown for crime cooldowns.
+ * Live, per-id second-countdown for crime cooldowns and the jail sentence.
  *
- * The server returns `cooldownRemaining` as a point-in-time snapshot from
- * `peekCooldown` (a Redis TTL read, see server game/cooldown.ts). Without a
- * client-side tick that number is frozen on screen until the next fetch —
- * the button reads "30s" forever even as the real cooldown drains. This hook
- * owns the draining.
+ * The server returns `cooldownRemaining` / `remainingSeconds` as a
+ * point-in-time snapshot (`peekCooldown`, a Redis TTL read, see server
+ * game/cooldown.ts; a `jailed_until` diff for jail). Without a client-side tick
+ * that number is frozen on screen until the next fetch — the button reads "30s"
+ * forever even as the real cooldown drains. This hook owns the draining.
  *
- * Seeds from the fetched snapshot (so a page load mid-cooldown starts ticking
- * correctly) and lets a caller `start(id, seconds)` a fresh timer when a crime
- * is committed. One interval drives every active id; ids that reach 0 are
- * dropped from state so the button re-enables.
+ * State is absolute deadlines, not a number this hook ticks downward itself;
+ * lib/countdown.ts explains why (throttled tabs and sleep drop ticks, and the
+ * drift was permanent). The interval below only forces a re-render, so missed
+ * ticks cost display latency and never correctness, and `seed()` re-anchors a
+ * *running* timer whenever the server's snapshot disagrees with it.
  */
 export function useCountdowns() {
-  const [remaining, setRemaining] = useState<Record<string, number>>({});
-  // setRemaining inside the interval closure reads a stale `remaining` unless we
-  // route through a ref — the functional-updater form below avoids that without
-  // resubscribing the interval every tick.
-  const remainingRef = useRef(remaining);
-  remainingRef.current = remaining;
+  const [deadlines, setDeadlines] = useState<Deadlines>({});
+  // Not derived from `deadlines`: a passing second changes every displayed
+  // number without changing any deadline, so the tick needs its own state to
+  // drive the re-render.
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const tick = window.setInterval(() => {
-      setRemaining((prev) => {
-        let changed = false;
-        const next: Record<string, number> = {};
-        for (const [id, seconds] of Object.entries(prev)) {
-          if (seconds > 1) {
-            next[id] = seconds - 1;
-            changed = true;
-          } else {
-            changed = true; // dropping a finished timer re-enables the button
-          }
-        }
-        return changed ? next : prev;
-      });
+      const current = Date.now();
+      setNow(current);
+      setDeadlines((prev) => pruneExpired(prev, current));
     }, 1000);
     return () => window.clearInterval(tick);
   }, []);
 
-  /** Seed remaining seconds for an id from a fresh snapshot (no-op if 0/free). */
+  const remaining = useMemo(() => {
+    const seconds: Record<string, number> = {};
+    for (const [id, deadline] of Object.entries(deadlines)) seconds[id] = secondsLeft(deadline, now);
+    return seconds;
+  }, [deadlines, now]);
+
+  /** Re-anchor an id to a fresh server snapshot (ignores 0 / free). */
   const seed = useCallback((id: string, seconds: number) => {
-    if (seconds > 0) {
-      setRemaining((prev) => (prev[id] === undefined ? { ...prev, [id]: seconds } : prev));
-    }
+    setDeadlines((prev) => seedDeadline(prev, id, seconds, Date.now()));
   }, []);
 
   /** Start a fresh countdown for an id (e.g. when its crime is committed). */
   const start = useCallback((id: string, seconds: number) => {
-    setRemaining((prev) => ({ ...prev, [id]: seconds }));
+    setDeadlines((prev) => startDeadline(prev, id, seconds, Date.now()));
   }, []);
 
   return { remaining, seed, start };

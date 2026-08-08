@@ -22,9 +22,10 @@ export function Crimes(): JSX.Element {
   const jailed = jail.data?.jailed === true;
   const cooldown = remaining[COOLDOWN_ID] ?? 0;
 
-  // Seed from the server's point-in-time snapshot on every refetch. seed()
-  // ignores an id already ticking locally, so a refetch can't reset a timer we
-  // started on commit. Any row carries the value; take the largest to be safe.
+  // Re-anchor to the server's point-in-time snapshot on every refetch. seed()
+  // ignores a 0, so the pre-commit snapshot still in flight can't unlock the
+  // timer we started on commit, but a real disagreement wins — the server owns
+  // the cooldown. Any row carries the value; take the largest to be safe.
   useEffect(() => {
     const rows = crimes.data?.crimes ?? [];
     const snapshot = rows.reduce((max, crime) => Math.max(max, crime.cooldownRemaining), 0);
