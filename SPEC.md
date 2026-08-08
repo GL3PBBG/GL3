@@ -110,7 +110,38 @@ gl3/
 ### 2.2 Server (`apps/server`)
 
 - **Runtime:** Node 22 LTS, ESM, TypeScript strict, `tsx` for dev, `tsc` build.
-- **HTTP:** Fastify 5. **WS:** `ws` attached to the Fastify server on `/ws` (auth v    avatar_url, bio, jailed_until timestamptz, hospital_until timestamptz
+- **HTTP:** Fastify 5. **WS:** `ws` attached to the Fastify server on `/ws`. Auth uses a **short-lived, single-use handshake ticket**, not the session token: the client calls an authenticated endpoint (`POST /api/ws/ticket`) which mints a ticket in Redis (`wsticket:<ticket>` → player id, ~30s TTL), and passes that ticket in the upgrade query string. The gateway consumes it atomically and invalidates it on first use. *(Amended 2026-08-07: the original design put the session token itself in the query string; a security review flagged that URLs leak into access logs, reverse-proxy logs and `Referer` headers, so a long-lived credential must never appear in one. A ticket that dies in 30 seconds and cannot be replayed is safe to leak.)* The gateway must also validate the `Origin` header against the CORS allowlist to prevent Cross-Site WebSocket Hijacking — rejecting a *present but disallowed* origin, while allowing an absent one, since browsers always send `Origin` and non-browser clients never do.
+- **DB:** Drizzle ORM + `postgres` driver. Migrations via drizzle-kit, committed to the repo.
+- **Auth:** argon2id via the `argon2` package. Sessions = opaque tokens in Redis (`session:<token>` → player id, 7-day TTL). Legacy verification path per §4.3.
+- **Queue:** BullMQ. Every mutating game action is an HTTP request that validates + acquires cooldown, then enqueues a job; a worker resolves the outcome in a Postgres transaction and publishes a typed event. **BullMQ is at-least-once**, so any worker that mutates the economy needs an idempotency key tied to the job id — a seed alone guarantees a reproducible *outcome*, not safe re-execution of already-committed side effects.
+- **Message bus:** Redis pub/sub channel `game:events`, payloads validated by the shared zod `GameEventSchema` on both ends. WS gateway subscribes and fans out to sockets. This makes multi-instance deployment work with zero extra code.
+- **Cooldowns/timers:** Redis `SET key value NX EX <ttl>` for atomic acquisition; Postgres `players.jailed_until`-style columns remain source of truth for long timers (jail, hospital) so a Redis flush can't free prisoners.
+- **Leaderboards:** Redis sorted sets (`leaderboard:respect`, `leaderboard:cash`), rebuilt from Postgres on boot (idempotent `ZADD` sweep).
+
+### 2.3 Economy invariants (non-negotiable)
+
+- All cash/bank/points mutations go through an append-only `transactions` ledger insert + balance update **in one Postgres transaction**.
+- All balances `bigint`. No floating point anywhere in the economy.
+- Any job that mutates two players (kill payouts, bounty claims, gang bank) locks rows with `SELECT … FOR UPDATE` in consistent id order to prevent deadlocks and dupes.
+
+### 2.4 Client (`apps/web`)
+
+React 18 + Vite, TypeScript strict. State: TanStack Query for REST + a thin WS hook feeding a event store. Vite dev proxy: `/api` and `/ws` → server. No CSS framework mandated; keep a single dark theme, CSS modules.
+
+### 2.5 GL3 core schema (Postgres, Drizzle)
+
+Naming: snake_case, UUIDv7 PKs (`id`), real FKs with `ON DELETE` rules, `timestamptz` columns, indexes on every FK and every leaderboard/sort column.
+
+```
+players            id, username(unique, citext), email(unique, citext, nullable),
+                   password_hash(nullable), legacy_password_sha256(nullable),
+                   legacy_v2_id(int, nullable, unique), role_id FK,
+                   round_id FK, created_at, last_seen_at
+player_stats       player_id PK/FK, cash bigint, bank bigint, points bigint,
+                   bullets bigint, exp bigint, health int, backfire int,
+                   rank_id FK, gang_id FK nullable, location_id FK,
+                   weapon_item_id FK nullable, armor_item_id FK nullable,
+                   avatar_url, bio, jailed_until timestamptz, hospital_until timestamptz
 player_timers      (player_id, key) PK, expires_at timestamptz   -- open-ended, mirrors userTimers
 player_crime_skill (player_id, crime_id) PK, chance numeric(5,2) -- exploded US_crimes
 transactions       id, player_id FK, amount bigint (signed), balance_kind enum(cash|bank|points),
@@ -211,7 +242,9 @@ v1 requirement: the SDK types + loader + the **core modules themselves implement
 
 ## 6. Milestones — build in this order, each independently verifiable
 
-- **M0 Scaffold.** Monorepo, dockeerboards. ✔ economy invariant test: sum(ledger) == balance for 1000 randomized ops.
+- **M0 Scaffold.** Monorepo, docker-compose, CI (typecheck + test), drizzle migrations apply clean. ✔ `npm run verify` green on fresh clone.
+- **M1 Auth + vertical slice.** Register/login (argon2id), sessions, commit-crime slice end-to-end: HTTP → Redis cooldown → BullMQ → Postgres tx → pub/sub → WS → React live feed. ✔ integration test: two concurrent commits, exactly one accepted; WS client receives `crime.resolved`.
+- **M2 Core loop parity.** Jail, ranks/exp, bank (deposit/withdraw with ledger), travel, bullets shop, leaderboards. ✔ economy invariant test: sum(ledger) == balance for 1000 randomized ops.
 - **M3 Social.** Gangs (create/invite/roles/bank/logs), mail, notifications, profile, game news. ✔ gang bank transfers ledgered; WS notifies invitees live.
 - **M4 Migration CLI.** Full §4 behaviour against a seeded V2 database (build a fixture from `install/schema.sql` + `install/data.sql` + generated players). ✔ migrate → boot GL3 → legacy user logs in with old password → hash upgraded; re-run migrator → zero duplicates.
 - **M5 Plugin SDK.** Loader + ctx API; crimes and bank refactored to be plugins; example third-party plugin in `examples/`. ✔ engine boots with the example plugin adding a menu entry and a working page.

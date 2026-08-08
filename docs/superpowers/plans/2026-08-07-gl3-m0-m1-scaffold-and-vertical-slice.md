@@ -241,10 +241,16 @@ coverage/
 
 One runner across all workspaces so root `npm test` covers everything.
 
+Vitest resolves **literal** (non-glob) workspace entries eagerly and errors if the
+directory is missing, so `apps/server` cannot be listed until Task 3 creates it —
+otherwise `npm run verify` fails on a fresh clone of this commit, which is exactly
+M0's acceptance criterion. Task 3 adds the entry alongside the package.
+
 ```ts
 import { defineWorkspace } from "vitest/config";
 
-export default defineWorkspace(["packages/*", "apps/server"]);
+// apps/server is appended in Task 3, when that package first exists.
+export default defineWorkspace(["packages/*"]);
 ```
 
 - [ ] **Step 8: Create the `@gl3/shared` package**
@@ -634,7 +640,11 @@ The app factory returns a Fastify instance **without calling `listen`**. That si
 - Create: `apps/server/src/app.ts`
 - Create: `apps/server/src/index.ts`
 - Modify: `tsconfig.json` (add the server project reference)
-- Modify: `vitest.workspace.ts` — no change needed, `apps/server` is already listed
+- Modify: `vitest.workspace.ts` — append `"apps/server"`, which Task 1 deliberately left out because the directory did not exist yet:
+
+```ts
+export default defineWorkspace(["packages/*", "apps/server"]);
+```
 - Test: `apps/server/test/config.test.ts`, `apps/server/test/health.test.ts`
 
 **Interfaces:**
@@ -664,7 +674,7 @@ The app factory returns a Fastify instance **without calling `listen`**. That si
     "@gl3/shared": "*",
     "argon2": "^0.41.1",
     "bullmq": "^5.34.2",
-    "drizzle-orm": "^0.36.4",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.1.0",
     "@fastify/cors": "^10.0.1",
     "ioredis": "^5.4.1",
@@ -675,7 +685,7 @@ The app factory returns a Fastify instance **without calling `listen`**. That si
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "drizzle-kit": "^0.28.1",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.2"
   }
 }
@@ -759,8 +769,15 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   SESSION_TTL: z.coerce.number().int().positive().default(604800),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  /** Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard. */
-  CORS_ORIGINS: z.string().default("http://localhost:5173"),
+  /**
+   * Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard.
+   * The refine is load-bearing: without it an operator can set CORS_ORIGINS=*
+   * and silently defeat the guardrail. Reject `*` bare or anywhere in the list.
+   */
+  CORS_ORIGINS: z.string().default("http://localhost:5173").refine(
+    (value) => !value.split(",").map((o) => o.trim()).includes("*"),
+    { message: "CORS_ORIGINS must not contain '*' — spec §7 requires a strict allowlist" },
+  ),
 });
 
 export interface Config {
@@ -863,12 +880,12 @@ await app.listen({ port: config.port, host: "0.0.0.0" });
 - [ ] **Step 11: Run the full gate**
 
 Run: `npm run verify`
-Expected: exits 0, 9 tests passing across both workspaces.
+Expected: exits 0, with tests reported from **both** `packages/shared` and `apps/server`. If no `apps/server` tests appear, the `vitest.workspace.ts` edit above did not take.
 
 - [ ] **Step 12: Commit**
 
 ```bash
-git add apps/server tsconfig.json package-lock.json
+git add apps/server tsconfig.json vitest.workspace.ts package-lock.json
 git commit -m "feat(server): add typed config loader and bootable fastify app"
 ```
 
@@ -892,6 +909,16 @@ Spec §2.5 verbatim. Every table lands now so M2–M5 only add columns. Only aut
   - `createDb(databaseUrl: string): { db: NodePgDatabase; sql: postgres.Sql }`
   - Every table object exported from `src/db/schema/index.js` — later tasks import e.g. `import { players, playerStats, transactions } from "../db/schema/index.js"`.
   - `resetDb(db): Promise<void>` test helper that truncates all game tables.
+
+**AMENDMENTS (applied during execution — these are now part of the requirements):**
+
+1. **Bigint defaults must be written `` .default(sql`0`) ``, never `.default(0n)`.** drizzle-kit's serialiser crashes on a literal `BigInt` with `TypeError: Do not know how to serialize a BigInt` — a known open upstream bug (drizzle-orm #1879 / #2382 / #3609) unfixed in every stable 0.x. Import `sql` from `drizzle-orm` in each schema file. `mode: "bigint"` governs the read/write mapping, not the DDL default, so the emitted SQL is identical (`DEFAULT 0`) and the V2 signed-32-bit ceiling is not reintroduced. **Never change a column's `mode` to work around a tooling problem** — that is the one mistake this whole schema exists to prevent. 15 columns are affected.
+2. **`drizzle-orm` must be `^0.45.2` or newer** regardless of tooling: versions below that carry high-severity SQL-injection advisory GHSA-gpj5-g38j-94v9.
+3. **Every command in Step 11 needs `REDIS_URL` as well as `DATABASE_URL`**, because `migrate.ts` calls `loadConfig`, which validates the whole environment including Redis.
+4. **Resetting to a clean database must drop BOTH schemas.** Drizzle's bookkeeping table lives in the `drizzle` schema and survives `DROP SCHEMA public CASCADE`, after which the migrator silently no-ops and you test nothing:
+   `DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;`
+5. **drizzle-kit auto-names the generated migration** (e.g. `0000_eminent_red_ghost.sql`). Renaming it to `0000_core_schema.sql` is fine, but `meta/_journal.json`'s `tag` must be updated to match or the migrator will not find it.
+6. **Add a bigint round-trip test** alongside the column-type assertions: insert a `player_stats` row, read the defaulted `cash` back *through the query builder*, and assert `typeof === "bigint"` and `=== 0n` — not `== 0`, which passes for a number. Then update to a value above 2^31-1 and re-assert. Column-type introspection alone does not catch a regressed `mode`.
 
 **Three schema notes that are easy to get wrong:**
 1. **Circular foreign keys.** `players.round_id → rounds`, `player_stats.gang_id → gangs`, and `gangs.boss_player_id → players` form a cycle. Drizzle needs an explicit `AnyPgColumn` return-type annotation on the callback for the back-reference or TS infers `any` — which the no-`any` rule forbids anyway.
@@ -1452,12 +1479,14 @@ describe("core schema", () => {
 - [ ] **Step 11: Bring the services up, apply migrations, run the test**
 
 ```bash
-npm run db:up
-DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3 npm --workspace @gl3/server run db:migrate
-DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3 npx vitest run apps/server/test/schema.test.ts
+npm run db:up   # skip where Docker is unavailable and Postgres 16 / Redis 7 run natively
+export DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3
+export REDIS_URL=redis://localhost:6379
+npm --workspace @gl3/server run db:migrate
+npx vitest run apps/server/test/schema.test.ts
 ```
 
-Expected: migration prints no error; 4 tests PASS. If `citext` errors, Step 8's extension statement is missing or not first.
+Expected: migration prints no error; 5 tests PASS (4 introspection + the bigint round-trip from Amendment 6). If `citext` errors, Step 8's extension statement is missing or not first. If the migrator does nothing on what you believe is a clean database, you dropped only `public` — see Amendment 4.
 
 - [ ] **Step 12: Run the full gate and commit**
 
@@ -1716,7 +1745,11 @@ export async function destroySession(redis: Redis, token: string): Promise<void>
 
 - [ ] **Step 3: Write `rate-limit.ts`**
 
-Spec §7 requires a Redis token bucket on auth endpoints. `INCR` + `EXPIRE` on first hit is the cheap correct form — a fixed window, atomic without Lua because `INCR` returning 1 uniquely identifies the window's first request.
+Spec §7 requires a Redis token bucket on auth endpoints.
+
+**Do NOT write `INCR` followed by a conditional `EXPIRE`.** That form has a real lockout bug: if the process dies or the connection drops between the two commands, the key survives with no TTL, and because later requests never re-enter the `hits === 1` branch, nothing ever applies one — that IP is rate-limited on that endpoint *forever*, until someone deletes the key by hand.
+
+Create the key and its TTL atomically with `SET … EX … NX`, then `INCR` unconditionally. If `SET` fails the function throws before `INCR` runs, so no key can exist without a TTL. Two concurrent first-requests still count correctly: one wins the `SET`, the other no-ops, and both `INCR`.
 
 ```ts
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -1732,8 +1765,9 @@ export interface TokenBucketOptions {
 export function tokenBucket(redis: Redis, opts: TokenBucketOptions) {
   return async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const bucketKey = `ratelimit:${opts.name}:${request.ip}`;
+    // Key + TTL created atomically; NX makes this a no-op once the window exists.
+    await redis.set(bucketKey, 0, "EX", opts.windowSeconds, "NX");
     const hits = await redis.incr(bucketKey);
-    if (hits === 1) await redis.expire(bucketKey, opts.windowSeconds);
     if (hits > opts.limit) {
       const ttl = await redis.ttl(bucketKey);
       reply.header("retry-after", String(Math.max(ttl, 1)));
@@ -1936,9 +1970,16 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config, db: Db,
         });
         await tx.insert(playerStats).values({ playerId });
       });
-    } catch {
-      // Unique index is the real arbiter; the pre-check above only saves a hash round.
-      return reply.code(409).send({ error: "username_taken" });
+    } catch (error) {
+      // The unique index is the real arbiter; the pre-check above only saves a hash round.
+      // Narrow to SQLSTATE 23505 and branch on the constraint — a blanket catch would
+      // report an email conflict as `username_taken` and disguise a DB outage as a 409.
+      // NOTE: drizzle wraps the driver error in DrizzleQueryError with the real
+      // PostgresError at `.cause`, so the guard must check both levels.
+      const violated = uniqueViolationConstraint(error);
+      if (violated === "players_email_unique") return reply.code(409).send({ error: "email_taken" });
+      if (violated === "players_username_unique") return reply.code(409).send({ error: "username_taken" });
+      throw error; // genuine failure — let it surface as a 500
     }
 
     const token = await createSession(redis, playerId, config.sessionTtlSeconds);
@@ -2051,7 +2092,11 @@ Update `apps/server/test/health.test.ts` to pass deps — it currently calls `bu
 - [ ] **Step 8: Run the auth tests to verify they pass**
 
 Run: `npx vitest run apps/server/test/auth.test.ts`
-Expected: PASS, 8 tests. If the two legacy tests fail, re-check that `legacyV2Id` is read from the DB row and not confused with `players.id`.
+Expected: PASS, 7 tests (3 register, 3 legacy login, 1 me). If the two legacy tests fail, re-check that `legacyV2Id` is read from the DB row and not confused with `players.id`.
+
+Two additions the hardening pass proved necessary:
+- `requireAuth`'s `reply` parameter must be typed as Fastify's real `FastifyReply`. The inline structural type `{ code: (n) => { send: (b) => Promise<void> } }` fails strict typecheck on Fastify 5, whose `send()` returns `FastifyReply` rather than `Promise<void>`.
+- Clear the register/login rate-limit buckets in `beforeEach`. Registration is capped at 5/hour, and a test file with more than five registrations will otherwise start 429-ing partway through — a confusing failure that looks like broken auth.
 
 - [ ] **Step 9: Run the full gate and commit**
 
@@ -2455,6 +2500,12 @@ const column = { cash: playerStats.cash, bank: playerStats.bank, points: playerS
  * Lock several players' stat rows in ascending id order.
  * Consistent ordering is what prevents deadlocks when two jobs touch the same
  * pair of players in opposite order (spec §2.3).
+ *
+ * The mechanism that actually delivers this is the SQL `ORDER BY` below —
+ * `EXPLAIN` shows `LockRows -> Sort (Sort Key: id)`, so Postgres sorts before
+ * acquiring locks regardless of the order values appear in the IN-clause.
+ * The JS-side `.sort()` is a redundant belt-and-braces guard; do not remove the
+ * `.orderBy()` believing the `.sort()` covers it, because it does not.
  */
 export async function lockPlayersForUpdate(tx: Tx, playerIds: string[]): Promise<void> {
   const unique = [...new Set(playerIds)].sort();
@@ -2627,7 +2678,11 @@ export async function subscribeToEvents(subscriber: Redis, handler: EventHandler
 
 - [ ] **Step 3: Write the queue registry**
 
-`apps/server/src/queue/index.ts`. `removeOnComplete` keeps Redis from growing without bound; `attempts: 3` is safe precisely because the seed lives in the payload.
+`apps/server/src/queue/index.ts`. `removeOnComplete` keeps Redis from growing without bound.
+
+**Do not reason that `attempts: 3` is safe merely because the seed lives in the payload.** That is false, and it was a real Critical defect in an earlier draft of this plan. Seed-determinism guarantees a retry produces the *same outcome*; it says nothing about whether the side effects of an already-committed attempt are safe to re-run. BullMQ is at-least-once: if the worker commits its transaction and then dies — or merely fails to publish — the retry re-runs the whole handler and credits the payout a **second** time, with duplicate `transactions` and `crime_log` rows.
+
+Any worker that mutates the economy therefore needs an **idempotency key tied to the job**, not just a seed. The pattern used here: `crime_log` carries a `job_id` with a UNIQUE constraint, and the transaction inserts that row *first*; a unique violation means this job already ran, so the handler skips the credit entirely.
 
 ```ts
 import { Queue } from "bullmq";
@@ -2717,11 +2772,15 @@ beforeEach(async () => {
 
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
   crimeId = first!.id;
+  auth = { authorization: `Bearer ${token}` };
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
-const auth = { authorization: `Bearer ${token}` };
+// MUST be `let`, reassigned in beforeEach. A top-level `const` here captures
+// `token` as undefined at module-load time, before beforeEach ever runs, and
+// every request then goes out unauthenticated.
+let auth: { authorization: string };
 
 const waitForEvent = (): Promise<unknown> =>
   new Promise((resolve) => {
@@ -2817,7 +2876,7 @@ export const DEFAULT_CRIME_CHANCE = "35.00";
 
 export function registerCrimeRoutes(
   app: FastifyInstance, db: Db, redis: Redis, queue: Queue<CrimeJobData>,
-  requireAuth: (request: FastifyRequest, reply: never) => Promise<void>,
+  requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
 ): void {
   app.get("/api/crimes", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
@@ -2846,7 +2905,11 @@ export function registerCrimeRoutes(
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
-    const { crimeId } = request.params as { crimeId: string };
+    // Route params are an external boundary like any other — a non-UUID id would
+    // otherwise reach Postgres and fail at the driver as a 500 instead of a 400.
+    const params = z.object({ crimeId: IdSchema }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_crime_id" });
+    const { crimeId } = params.data;
 
     // Look the crime up BEFORE claiming the cooldown so a typo costs nothing.
     const [crime] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
@@ -2864,7 +2927,14 @@ export function registerCrimeRoutes(
       const job = await queue.add("commit", { playerId, crimeId, seed: newSeed() });
       return reply.code(202).send({ jobId: job.id ?? "", accepted: true });
     } catch (error) {
-      await releaseCooldown(redis, key); // don't strand the player behind a cooldown
+      // Don't strand the player behind a cooldown they never got to use.
+      // The release is itself best-effort: if Redis is also failing, its exception
+      // must not replace the original error and hide why the enqueue failed.
+      try {
+        await releaseCooldown(redis, key);
+      } catch (releaseError) {
+        request.log.error({ err: releaseError, key }, "failed to release cooldown after enqueue failure");
+      }
       throw error;
     }
   });
@@ -2961,7 +3031,7 @@ export interface AppDeps { db: Db; redis: Redis; crimeQueue: Queue<CrimeJobData>
 and inside `buildApp`, after `registerAuthRoutes(...)`:
 
 ```ts
-const requireAuth = app.requireAuth as (request: FastifyRequest, reply: never) => Promise<void>;
+const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
 registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
 ```
 
