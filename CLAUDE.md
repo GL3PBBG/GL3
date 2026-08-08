@@ -28,8 +28,14 @@ machines that do have Docker, but do not try to use it here.
 ```bash
 export DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3
 export REDIS_URL=redis://localhost:6379
-npm run verify          # typecheck + full suite
+npm run verify          # typecheck + full suite — run this LOCALLY before committing
 ```
+
+**GitHub CI does not run the integration suite.** It runs `npm run verify:ci`
+(typecheck + the `@gl3/server:unit` and `@gl3/shared` projects) with no Postgres
+or Redis service containers. A green build proves the tree typechecks and the
+no-DB tests pass — it is **not** evidence that the integration suite passes.
+That check only exists on your machine, and it is on you to run it.
 
 - Spare databases `gl3_a`..`gl3_d` exist for concurrent agents, but are **only
   migrated through `0002`** — anything touching an M3 table fails there with
