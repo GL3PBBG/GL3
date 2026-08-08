@@ -79,25 +79,43 @@ const InputSchema = z
   })
   .strict();
 
+/**
+ * The id to blame in a validation failure. A manifest that fails to parse may
+ * not be an object at all — it can arrive from a plugin loaded as plain JS or
+ * from JSON — so reading `.id` off it needs a guard: without one the author
+ * gets a TypeError instead of a message naming the manifest that is broken.
+ */
+function describeId(input: unknown): string {
+  if (typeof input === "object" && input !== null && "id" in input) {
+    const { id } = input;
+    if (typeof id === "string") return id;
+  }
+  return "<unknown>";
+}
+
 export function definePlugin(input: PluginManifestInput): PluginManifest {
   const result = InputSchema.safeParse(input);
   if (!result.success) {
     const detail = result.error.issues
       .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("; ");
-    throw new Error(`invalid plugin manifest for "${String(input.id)}" — ${detail}`);
+    throw new Error(`invalid plugin manifest for "${describeId(input)}" — ${detail}`);
   }
+  // Built from `result.data`, never from `input`: the parser's output is what
+  // carries any `.default()`, `.transform()` or coercion the field schemas
+  // grow later, and reading `input` here would silently discard all of it.
+  const parsed = result.data;
   return {
-    id: input.id,
-    version: input.version,
-    basePaths: input.basePaths,
-    tables: input.tables ?? {},
-    migrations: input.migrations ?? [],
-    routes: input.routes ?? [],
-    pages: input.pages ?? [],
-    events: input.events ?? [],
-    jobs: input.jobs ?? {},
-    provides: input.provides ?? [],
-    filters: input.filters ?? [],
+    id: parsed.id,
+    version: parsed.version,
+    basePaths: parsed.basePaths,
+    tables: parsed.tables ?? {},
+    migrations: parsed.migrations ?? [],
+    routes: parsed.routes ?? [],
+    pages: parsed.pages ?? [],
+    events: parsed.events ?? [],
+    jobs: parsed.jobs ?? {},
+    provides: parsed.provides ?? [],
+    filters: parsed.filters ?? [],
   };
 }

@@ -49,4 +49,38 @@ describe("definePlugin", () => {
     const typoed = { ...valid, rotues: [] };
     expect(() => definePlugin(typoed)).toThrow(/'rotues'/);
   });
+
+  // The manifest must be built from the schema's output rather than the raw
+  // input, so that any `.default()`, `.transform()` or coercion a later task
+  // adds to a field schema actually reaches consumers instead of being parsed
+  // and thrown away. No such transform exists yet, so the observable proxy is
+  // zod returning fresh containers: a manifest built from `input` aliases the
+  // caller's arrays, one built from the parse result does not.
+  it("returns the parsed output, not the caller's own collections", () => {
+    const src = { ...valid, migrations: [{ name: "0001_init", sql: "select 1" }] };
+    const manifest = definePlugin(src);
+
+    src.migrations.push({ name: "0002_late", sql: "select 2" });
+
+    expect(manifest.migrations).toHaveLength(1);
+    expect(manifest.basePaths).not.toBe(src.basePaths);
+  });
+
+  // A manifest can arrive from outside the type system entirely — a plugin
+  // loaded from JS, or parsed from JSON — which is the same caller the strict
+  // check above exists for. Reading `.id` off it to build the error message is
+  // only safe behind a guard; without one these throw a TypeError and the
+  // author never learns which manifest was malformed.
+  //
+  // These calls deliberately pass values `definePlugin`'s signature forbids:
+  // that is the point of the guard, and it cannot be reached any other way.
+  it("reports a non-object input as an invalid manifest rather than a TypeError", () => {
+    for (const notAManifest of [null, undefined, 42, "bounties", []]) {
+      expect(() => definePlugin(notAManifest)).toThrow(/invalid plugin manifest/);
+    }
+  });
+
+  it("still reports an invalid manifest when id is present but not a string", () => {
+    expect(() => definePlugin({ ...valid, id: 7 })).toThrow(/invalid plugin manifest/);
+  });
 });
