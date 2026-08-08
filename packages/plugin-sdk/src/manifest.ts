@@ -16,9 +16,9 @@ const MigrationSchema = z.object({ name: z.string().min(1), sql: z.string().min(
  * on `PluginManifest`; normalising once in `definePlugin` is what stops every
  * downstream consumer from writing `?? []` under `exactOptionalPropertyTypes`.
  *
- * The collection element types are `unknown` for now — Tasks 2, 3, 4 and 10
- * replace each with its real type (filters, pages, events, routes) as it is
- * defined.
+ * The remaining `unknown` element types are placeholders — Tasks 3, 4 and 10
+ * replace each with its real type (pages, events, routes) as it is defined.
+ * Task 2 has already done so for `provides` and `filters`.
  */
 export interface PluginManifestInput {
   id: string;
@@ -61,8 +61,14 @@ export interface PluginManifest {
  * `provides` and `filters` use `z.custom<T>()` rather than `z.unknown()`. Both
  * accept every value at runtime — the difference is only that `z.custom` carries
  * the element type through to `result.data`, which is what the manifest is built
- * from. A `FilterPoint` is a token and a `FilterSubscription` holds a closure;
- * neither has a shape zod can check, so the type is the whole guarantee.
+ * from.
+ *
+ * Neither is validated at runtime, and that is a deferred gap rather than an
+ * impossibility: `FilterPoint` is `{ name: string }` and `FilterSubscription` is
+ * `{ pointName: string; order: number; run: fn }`, all of which zod could check.
+ * Today `filters: [{}]` or `filters: ["nonsense"]` passes `.strict()` here and
+ * crashes later at `subscription.run is not a function`. Until that is closed,
+ * the TypeScript types are the only guarantee on these two fields.
  */
 const InputSchema = z
   .object({

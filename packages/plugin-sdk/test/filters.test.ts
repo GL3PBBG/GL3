@@ -43,9 +43,17 @@ describe("runFilterChain", () => {
   });
 
   it("awaits async subscribers", async () => {
-    const subs = [on(beforeResolve, async (_c, crime) => ({ ...crime, cooldownSeconds: 7 }))];
+    // Two subscribers, the second reading what the first wrote. One is not
+    // enough: `runFilterChain` is itself async, so a missing `await` in its loop
+    // leaves `current` a Promise that the outer promise unwraps on return, and a
+    // single-subscriber assertion still sees 7. Chaining puts the Promise where
+    // the next subscriber reads `.cooldownSeconds` off it, yielding NaN.
+    const subs = [
+      on(beforeResolve, async (_c, crime) => ({ ...crime, cooldownSeconds: 7 })),
+      on(beforeResolve, async (_c, crime) => ({ ...crime, cooldownSeconds: crime.cooldownSeconds * 3 })),
+    ];
     const out = await runFilterChain(subs, beforeResolve, ctx, { name: "P", cooldownSeconds: 30 });
-    expect(out.cooldownSeconds).toBe(7);
+    expect(out.cooldownSeconds).toBe(21);
   });
 
   it("rejects two points sharing a name", () => {
