@@ -37,14 +37,19 @@
 .rowStack { display: grid; gap: 0.25rem; min-width: 0; }
 .actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+/* Also worn by <button> for the editable permission chips, so it has to undo
+   theme.css's solid-accent button fill — muted text on that fill is unreadable
+   and .chipOn's accent text on it is invisible. Same shape as Login's .toggle. */
 .chip {
+  font: inherit;
   font-size: 0.75rem;
   padding: 0.1rem 0.4rem;
+  background: transparent;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
 }
-.chipOn { border-color: var(--accent); color: var(--accent); }
+.chipOn { border-color: var(--accent); color: var(--accent); background: rgb(200 150 62 / 0.15); }
 .unread { border-color: var(--accent); }
 .link { color: var(--accent); text-decoration: none; }
 .link:hover { text-decoration: underline; }
