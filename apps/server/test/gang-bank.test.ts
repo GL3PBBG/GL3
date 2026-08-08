@@ -2,6 +2,8 @@ import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { gangInvites, gangs, playerStats, transactions } from "../src/db/schema/index.js";
+import { lockGangAndPlayerForUpdate } from "../src/economy/ledger.js";
+import { hasGangPermission } from "../src/game/gangs/permissions.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -77,6 +79,14 @@ describe("POST /api/gangs/:gangId/bank/deposit", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  it("404s a deposit to a nonexistent gang", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/gangs/018f8e2a-0000-7000-8000-0000000000ff/bank/deposit",
+      headers: { authorization: `Bearer ${memberToken}` }, payload: { amount: "10" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe("POST /api/gangs/:gangId/bank/withdraw", () => {
@@ -121,6 +131,105 @@ describe("POST /api/gangs/:gangId/bank/withdraw", () => {
       payload: { amount: "1" },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("404s a withdrawal from a nonexistent gang", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/gangs/018f8e2a-0000-7000-8000-0000000000ff/bank/withdraw",
+      headers: { authorization: `Bearer ${memberToken}` }, payload: { amount: "10" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// Guards the fix for the TOCTOU race found in review: both bank routes read
+// membership/permission with an unlocked query *before* db.transaction opens,
+// and (pre-fix) never rechecked once lockGangAndPlayerForUpdate held the row
+// locks. Concretely for withdraw: hasGangPermission(db, ...) reads true, then
+// a concurrent DELETE /permissions — which touches only gang_permissions, not
+// gangs or player_stats — commits in the gap because it never contends for
+// the locks this transaction holds, and the withdrawal would go through for
+// a player who had no permission at the instant the money moved. This does
+// NOT break sum(ledger) == balance (each side's ledger row still matches its
+// own delta), which is exactly why the 100-op invariant test above can't
+// catch it either.
+//
+// Two approaches were tried and rejected before this one:
+//
+// 1. A true HTTP-level Promise.all race (the shape gangs.test.ts uses for
+//    the create-gang race). Unlike create-gang, where both concurrent
+//    requests contend for the SAME locked player_stats row and so serialize
+//    deterministically, deposit/withdraw's unlocked pre-check and DELETE
+//    /permissions touch disjoint tables. Whichever side "wins" a Promise.all
+//    race is externally indistinguishable from a legitimate outcome — no
+//    black-box timing control forces the interleaving that would actually
+//    distinguish "recheck caught it" from "recheck got lucky". Pure flake,
+//    not proof — the asymmetry Task 3's note (progress.md) already flags
+//    for this class of disjoint-table race.
+//
+// 2. Driving a real DELETE /permissions request *inside* an open
+//    `db.transaction` that already holds lockGangAndPlayerForUpdate's locks
+//    (i.e. literally reproducing "commits inside the lock window"). This
+//    deadlocks every time — proven by running it: it hung until the 5s test
+//    timeout, then cascaded into a 30s hook timeout on the next test. Root
+//    cause is structural, not flaky: DELETE /permissions calls
+//    appendGangLog, which INSERTs into gang_logs, and gang_logs.gang_id has
+//    a FK to gangs.id. Postgres takes an implicit FOR KEY SHARE lock on the
+//    referenced gangs row for that INSERT, and FOR KEY SHARE conflicts with
+//    the FOR UPDATE lockGangAndPlayerForUpdate already holds on that same
+//    row. So DELETE /permissions can never actually commit *while* a
+//    withdraw holds the lock — it blocks until the withdraw's transaction
+//    ends. This incidentally proves the real vulnerable window is narrower
+//    than "any time before the recheck": it is specifically the gap between
+//    the unlocked pre-check and the moment the FOR UPDATE lock is granted,
+//    not the interval the lock is held.
+//
+// What follows instead is a deterministic, non-blocking reproduction of that
+// narrower window, using the exact same primitives and call order the
+// withdraw route uses: capture what the unlocked pre-check would have read
+// (hasGangPermission(db, ...), no transaction open), then fully commit a
+// real revoke through the actual DELETE route, then open a transaction, take
+// the lock, and call hasGangPermission(tx, ...) — the withdraw route's
+// recheck, verbatim — at the point right before the balance mutation would
+// happen. Postgres's READ COMMITTED isolation guarantees each of these is a
+// fresh read of latest-committed state at the time it runs, so the assertion
+// directly demonstrates the bug the fix closes: the value the pre-check
+// captured is stale (true) by the time the transaction would mutate money,
+// while the recheck correctly observes the revoke (false).
+describe("gang bank TOCTOU recheck", () => {
+  it("a permission revoked after the unlocked pre-check but before the in-transaction recheck is observed by the recheck, not the stale pre-check value", async () => {
+    await app.inject({
+      method: "PUT", url: `/api/gangs/${gangId}/permissions`, headers: { authorization: `Bearer ${bossToken}` },
+      payload: { playerId: memberId, permission: "bank.withdraw" },
+    });
+
+    // What the withdraw route's unlocked pre-check reads, before any
+    // transaction opens.
+    const preCheck = await hasGangPermission(db, gangId, memberId, "bank.withdraw");
+    expect(preCheck).toBe(true);
+
+    // The window the fix defends against: a real, fully-committed revoke
+    // landing after the pre-check ran. DELETE /permissions never takes
+    // lockGangAndPlayerForUpdate's locks, so nothing here contends with an
+    // in-flight withdraw that hasn't yet acquired them.
+    const revoke = await app.inject({
+      method: "DELETE", url: `/api/gangs/${gangId}/permissions/${memberId}/bank.withdraw`,
+      headers: { authorization: `Bearer ${bossToken}` },
+    });
+    expect(revoke.statusCode).toBe(204);
+
+    // The withdraw route's actual recheck, verbatim: lockGangAndPlayerForUpdate,
+    // then hasGangPermission called with `tx`, at the point right before the
+    // balance mutation would happen.
+    const recheck = await db.transaction(async (tx) => {
+      await lockGangAndPlayerForUpdate(tx, gangId, memberId);
+      return hasGangPermission(tx, gangId, memberId, "bank.withdraw");
+    });
+
+    // A route that authorized off `preCheck` alone (the pre-fix bug) would
+    // have moved money for a player who, by the time of the mutation, no
+    // longer had permission. The recheck must not repeat that mistake.
+    expect(recheck).toBe(false);
   });
 });
 
