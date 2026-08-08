@@ -27,5 +27,28 @@
 .table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.85rem; padding: 0.3rem 0.5rem; }
 .table td { padding: 0.35rem 0.5rem; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .self { color: var(--accent); }
+
+/* Player-written text (mail bodies, bios, news). pre-wrap keeps the author's
+   line breaks; break-word stops a 5000-character unbroken string from
+   widening the whole layout. */
+.prose { white-space: pre-wrap; overflow-wrap: break-word; margin: 0.5rem 0 0; }
+
+.stack { display: grid; gap: 1rem; }
+.rowStack { display: grid; gap: 0.25rem; min-width: 0; }
+.actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.chip {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.chipOn { border-color: var(--accent); color: var(--accent); }
+.unread { border-color: var(--accent); }
+.link { color: var(--accent); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.field { display: grid; gap: 0.25rem; }
+.field textarea { min-height: 6rem; resize: vertical; font: inherit; }
 .ok { color: var(--success); }
 .bad { color: var(--danger); }

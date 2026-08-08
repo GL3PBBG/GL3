@@ -14,3 +14,12 @@
 .money { font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .error { color: var(--danger); margin: 0.5rem 0 0; }
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}

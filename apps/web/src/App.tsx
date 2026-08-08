@@ -6,10 +6,17 @@ import { Bank } from "./pages/Bank.js";
 import { Bullets } from "./pages/Bullets.js";
 import { Crimes } from "./pages/Crimes.js";
 import { Dashboard } from "./pages/Dashboard.js";
+import { Gang } from "./pages/Gang.js";
 import { Jail } from "./pages/Jail.js";
 import { Leaderboards } from "./pages/Leaderboards.js";
 import { Login } from "./pages/Login.js";
+import { Mail } from "./pages/Mail.js";
+import { MailThread } from "./pages/MailThread.js";
+import { News } from "./pages/News.js";
 import { NotFound } from "./pages/NotFound.js";
+import { Notifications } from "./pages/Notifications.js";
+import { PlayerProfile } from "./pages/PlayerProfile.js";
+import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
 import { Travel } from "./pages/Travel.js";
 import { useGameEvents } from "./ws/useGameEvents.js";
@@ -37,6 +44,13 @@ export function App(): JSX.Element {
           <Route path="bullets" element={<Bullets />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
+          <Route path="gang" element={<Gang />} />
+          <Route path="mail" element={<Mail />} />
+          <Route path="mail/:threadId" element={<MailThread />} />
+          <Route path="notifications" element={<Notifications />} />
+          <Route path="news" element={<News />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="players/:playerId" element={<PlayerProfile />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

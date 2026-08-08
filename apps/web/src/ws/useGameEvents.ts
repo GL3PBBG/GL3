@@ -65,7 +65,7 @@ export function useGameEvents(playerId: string | undefined): void {
         // twice. Invalidation is idempotent, so a duplicate costs one refetch
         // and nothing else — the feed's own dedupe is what stops it showing up
         // as two crimes.
-        for (const key of invalidationKeys(parsed.data.event)) {
+        for (const key of invalidationKeys(parsed.data.event, playerId)) {
           void queryClient.invalidateQueries({ queryKey: key });
         }
       });
