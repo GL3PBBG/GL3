@@ -14,6 +14,7 @@ import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { registerMailRoutes } from "./game/mail/routes.js";
 import { registerNewsRoutes } from "./game/news/routes.js";
 import { registerNotificationRoutes } from "./game/notifications/routes.js";
+import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerRankRoutes } from "./game/ranks/routes.js";
 import { registerTravelRoutes } from "./game/travel/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
@@ -46,6 +47,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerMailRoutes(app, deps.db, deps.redis, requireAuth);
   registerNewsRoutes(app, deps.db, deps.redis, requireAuth);
   registerNotificationRoutes(app, deps.db, requireAuth);
+  registerProfileRoutes(app, deps.db, requireAuth);
   registerRankRoutes(app, deps.db, requireAuth);
   registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
