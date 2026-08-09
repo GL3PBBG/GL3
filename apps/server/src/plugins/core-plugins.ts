@@ -1,4 +1,5 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
+import notificationsPlugin from "@gl3/plugin-notifications";
 import rankPlugin from "@gl3/plugin-ranks";
 
 /**
@@ -15,4 +16,4 @@ import rankPlugin from "@gl3/plugin-ranks";
  * plugin route despite calling `buildApp` directly, with no test-boot
  * change of its own.
  */
-export const CORE_PLUGINS: readonly PluginManifest[] = [rankPlugin];
+export const CORE_PLUGINS: readonly PluginManifest[] = [rankPlugin, notificationsPlugin];
