@@ -192,4 +192,42 @@ describe("validatePlugins view-action containment", () => {
     const { default: hello } = await import("@gl3/hello-plugin");
     expect(() => validatePlugins([hello])).not.toThrow();
   });
+
+  // `VIEW_ACTION_RE` permits `.` in a path — it only fixes the shape, not the
+  // segments — so `containedIn` was being asked whether the raw string
+  // "/api/hello/../bank/withdraw" starts with "/api/hello/", which it does.
+  // The browser's URL parser resolves the `..` before `fetch` sends anything,
+  // so the request that actually leaves the page targets
+  // "/api/bank/withdraw" — a path the raw check never saw. Rejecting outright
+  // (rather than normalising and re-checking containment) means a page author
+  // gets a traversal-shaped error message instead of a confusing "outside
+  // basePaths" one, and it means the last case below fails even though a
+  // normalised read of it would land back inside the basePath: this
+  // vocabulary's endpoints are RPC verbs a plugin author writes literally, so
+  // there is never a legitimate reason to route through a `..` segment, and a
+  // blanket reject is simpler to reason about than "reject unless it
+  // resolves back inside."
+  it("rejects a `..` traversal that escapes the basePath, naming the plugin, page and action", () => {
+    const manifest = withPage({
+      kind: "button",
+      label: "Rob",
+      action: "POST /api/hello/../bank/withdraw",
+    });
+    expect(() => validatePlugins([manifest])).toThrow(
+      /plugin "hello".*page "hello\.index".*POST \/api\/hello\/\.\.\/bank\/withdraw/s,
+    );
+  });
+
+  it("rejects a single-dot segment the same way", () => {
+    const manifest = withPage({ kind: "button", label: "X", action: "POST /api/hello/./greet" });
+    expect(() => validatePlugins([manifest])).toThrow(/POST \/api\/hello\/\.\/greet/);
+  });
+
+  // Even a traversal that resolves back inside the plugin's own basePath is
+  // rejected — see the comment above the first traversal test for why this
+  // suite chose reject-outright over normalise-then-check.
+  it("rejects a traversal that would land back inside the basePath", () => {
+    const manifest = withPage({ kind: "button", label: "X", action: "POST /api/hello/x/../y" });
+    expect(() => validatePlugins([manifest])).toThrow(/POST \/api\/hello\/x\/\.\.\/y/);
+  });
 });
