@@ -49,10 +49,19 @@ export const COOLDOWN_ACTION_RE = /^[a-z][a-z0-9_-]*$/;
 export const MAX_VIEW_DEPTH = 16;
 export const MAX_VIEW_NODES = 512;
 
+// Every array-of-objects field the ten-kind vocabulary has: `panel.children`
+// and `list.items` nest actual view nodes; `keyValue.rows` and `form.fields`
+// nest plain leaf objects, not `ViewNode`s, but each one is still a parsed
+// object the bound exists to cap — a form is not exempt from MAX_VIEW_NODES
+// just because its fields aren't independently renderable. `text`, `money`,
+// `error`, `link`, `button` and `cooldownButton` carry no array field and are
+// correctly left out.
 function childrenOf(node: unknown): readonly unknown[] {
   if (typeof node !== "object" || node === null) return [];
   if ("children" in node && Array.isArray(node.children)) return node.children;
   if ("items" in node && Array.isArray(node.items)) return node.items;
+  if ("rows" in node && Array.isArray(node.rows)) return node.rows;
+  if ("fields" in node && Array.isArray(node.fields)) return node.fields;
   return [];
 }
 

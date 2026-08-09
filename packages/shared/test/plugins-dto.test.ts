@@ -173,6 +173,26 @@ describe("PluginsPayloadSchema view size bounds", () => {
       .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
   });
 
+  // `childrenOf` (the bound walk's traversal) has to look inside `form.fields`
+  // as well as `children`/`items`, or a form can carry an unbounded number of
+  // fields past MAX_VIEW_NODES with nothing to stop it — the same class of gap
+  // `fanOut` above covers for `panel.children`.
+  function formWithFields(width: number): unknown {
+    return {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: Array.from({ length: width }, (_, i) => ({
+        name: `f${i}`, label: `F${i}`, type: "text",
+      })),
+    };
+  }
+
+  it("rejects a form with more fields than the node-count bound", () => {
+    expect(() => PluginsPayloadSchema.parse(pageWithView(formWithFields(MAX_VIEW_NODES))))
+      .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
+  });
+
   // Enqueueing children with `push(...children)` throws a RangeError past V8's
   // argument limit (~124k) before the bound is ever consulted, so the wide case
   // needs a payload far past the bound, not one node over it.
