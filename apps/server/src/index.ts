@@ -6,7 +6,7 @@ import { createDb } from "./db/client.js";
 import { seedCrimes, seedLocations, seedRanks } from "./db/seed.js";
 import { startCrimeWorker } from "./game/crimes/worker.js";
 import { rebuildLeaderboards } from "./game/leaderboard/service.js";
-import { CORE_PLUGINS } from "./plugins/core-plugins.js";
+import { withCorePlugins } from "./plugins/core-plugins.js";
 import { loadPlugins } from "./plugins/loader.js";
 import { createCrimeQueue } from "./queue/index.js";
 import { createRedis, createSubscriber } from "./redis.js";
@@ -41,18 +41,7 @@ const optionalManifests = config.pluginIds.map((id) => {
   return manifest;
 });
 
-// A ported core module is never optional (spec) — CORE_PLUGINS always loads,
-// and PLUGIN_IDS only adds to it. De-duplicated by id so a core module's id
-// also named in PLUGIN_IDS doesn't load twice.
-const seenIds = new Set(CORE_PLUGINS.map((m) => m.id));
-const manifests: PluginManifest[] = [
-  ...CORE_PLUGINS,
-  ...optionalManifests.filter((m) => {
-    if (seenIds.has(m.id)) return false;
-    seenIds.add(m.id);
-    return true;
-  }),
-];
+const manifests: PluginManifest[] = withCorePlugins(optionalManifests);
 
 const loadedPlugins = await loadPlugins({ db, redis, settings: {} }, manifests);
 

@@ -109,7 +109,27 @@ export interface PluginTx {
     addExp(playerId: string, amount: bigint): Promise<void>;
     applyExpAndRankUp(playerId: string, expGain: bigint): Promise<RankUpResult | null>;
   };
+  /**
+   * `sendToJail` takes a player lock internally (ascending id order, same as
+   * `economy.applyBalanceChange`), so a transaction that also moves money is
+   * already safe — the two touch player rows in the same fixed order no
+   * matter which one a plugin calls first.
+   */
   readonly jail: { sendToJail(playerId: string, seconds: number): Promise<Date> };
+  /**
+   * The lock-ordering contract every multi-row transaction in this game must
+   * follow, to rule out deadlocks (`40P01`) against core and other plugins
+   * touching the same rows in a different order:
+   * - Several players: `player`, never manual `SELECT ... FOR UPDATE` — it
+   *   sorts the given ids before locking them.
+   * - A gang and a player together: `gangAndPlayer`, never `player` and a
+   *   gang lock taken separately — it fixes the one order every gang↔player
+   *   path (including core's bank and membership routes) agrees on.
+   * - A location alongside a player: `location` first, then the player —
+   *   the direction core's bullets purchase locks in.
+   * - Jailing a player needs no separate call here: `jail.sendToJail` takes
+   *   the player lock itself, in the same order as `economy.applyBalanceChange`.
+   */
   readonly locks: {
     player(playerIds: string[]): Promise<void>;
     gangAndPlayer(gangId: string, playerId: string): Promise<void>;
