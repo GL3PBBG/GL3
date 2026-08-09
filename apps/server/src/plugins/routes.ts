@@ -69,16 +69,17 @@ function collectFilters(manifests: readonly PluginManifest[]) {
 }
 
 /**
- * Reads `cash`, `bank`, `jailedUntil`, `gangId` from `player_stats` (not
- * `players` — that table has no balance columns). `level` is set to 0 as a
- * placeholder: there is no canonical player level in the schema, only `exp`
- * (bigint) and `rankId`. Nothing consumes `.level` today; 0 until a port
- * needs it.
+ * Reads `username` from `players`; `cash`, `bank`, `jailedUntil`, `gangId`
+ * from `player_stats` (not `players` — that table has no balance columns).
+ * `level` is set to 0 as a placeholder: there is no canonical player level in
+ * the schema, only `exp` (bigint) and `rankId`. Nothing consumes `.level`
+ * today; 0 until a port needs it.
  */
 async function loadSnapshot(deps: PluginCtxDeps, playerId: string): Promise<PlayerSnapshot | null> {
   const [row] = await deps.db
     .select({
       id: players.id,
+      username: players.username,
       cash: playerStats.cash,
       bank: playerStats.bank,
       jailedUntil: playerStats.jailedUntil,
@@ -90,6 +91,7 @@ async function loadSnapshot(deps: PluginCtxDeps, playerId: string): Promise<Play
   if (row === undefined) return null;
   return {
     id: row.id,
+    username: row.username,
     cash: row.cash,
     bank: row.bank,
     level: 0,

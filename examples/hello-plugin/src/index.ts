@@ -40,7 +40,7 @@ export default definePlugin({
           await tx.events.publish({
             name: "greeted",
             actorId: player.id,
-            actorName: "player",
+            actorName: player.username,
             audience: { kind: "global" },
             payload: { count: String(total) },
           });

@@ -1,11 +1,10 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { Queue, Worker } from "bullmq";
-import type { Redis } from "ioredis";
 import { buildPluginsPayload, type PluginsPayload } from "./manifest-endpoint.js";
 import { createPluginQueues, createPluginWorkers } from "./jobs.js";
 import { runPluginMigrations } from "./migrate.js";
 import { validatePlugins } from "./validate.js";
-import type { Db } from "../db/client.js";
+import type { PluginCtxDeps } from "./ctx.js";
 
 export interface LoadedPlugins {
   manifests: readonly PluginManifest[];
@@ -14,11 +13,13 @@ export interface LoadedPlugins {
   workers: Worker[];
 }
 
-export interface LoadPluginsDeps {
-  db: Db;
-  redis: Redis;
-  settings: Record<string, string>;
-}
+/**
+ * The loader needs everything a plugin ctx needs except the queues, which the
+ * loader itself creates. Derived from `PluginCtxDeps` so a future field added
+ * to the ctx propagates here automatically rather than rotting into a second
+ * copy that drifts.
+ */
+export type LoadPluginsDeps = Omit<PluginCtxDeps, "queues">;
 
 /**
  * Boot sequence steps 2-6 (spec). Step 1 — resolving ids to packages — is the
