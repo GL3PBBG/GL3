@@ -1,15 +1,22 @@
 import type { AddressInfo } from "node:net";
-import { ServerFrameSchema } from "@gl3/shared";
+import { ServerFrameSchema, type GameEvent } from "@gl3/shared";
 import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { publishEvent } from "../../src/bus/publish.js";
+import { loadConfig } from "../../src/config.js";
 import { gangInvites, gangs, playerStats, players, roleModuleAccess, roles, transactions } from "../../src/db/schema/index.js";
+import { createRedis } from "../../src/redis.js";
 import { uuidv7 } from "uuidv7";
 import { resetDb, testDb } from "../helpers/db.js";
 import { bootTestServer } from "../helpers/server.js";
 
 const { db, sql: conn } = testDb();
+// Used only to publish a synthetic interfering `news.posted` event onto the
+// shared `game:events` channel below — see "an unrelated global event does
+// not derail the invitee's own wait".
+const redis = createRedis(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
@@ -24,7 +31,7 @@ beforeEach(async () => {
   }
 });
 
-afterAll(async () => { await closeServer(); await conn.end(); });
+afterAll(async () => { await closeServer(); await conn.end(); redis.disconnect(); });
 
 /**
  * Mints the handshake ticket the way a real client would: an authenticated
@@ -71,14 +78,43 @@ const open = (url: string): Promise<WebSocket> =>
     socket.once("error", reject);
   });
 
-const nextFrame = (socket: WebSocket): Promise<unknown> => {
+/**
+ * Resolves with the next frame matching `predicate` (default: any frame),
+ * silently discarding anything else along the way.
+ *
+ * `game:events` is a single Redis channel shared by every test file running
+ * concurrently, and the gateway broadcasts every `global`-audience event
+ * (e.g. `news.posted`) to *every* connected socket regardless of who it's
+ * "for" (gateway.ts's `route`, "global" case) — so an unfiltered `nextFrame`
+ * can consume a stranger's frame instead of the one this test is actually
+ * waiting for. This is the WS-socket-level equivalent of CLAUDE.md rule 4
+ * ("tests asserting on `game:events` must filter by their own actorId") —
+ * see `test/helpers/events.ts`'s `awaitOwnEvent`, which does the same thing
+ * one layer down, directly on the Redis subscription. Bounded by the same
+ * 4000ms so a genuinely missing frame still fails loudly instead of hanging.
+ */
+const nextFrame = (socket: WebSocket, predicate: (frame: unknown) => boolean = () => true): Promise<unknown> => {
   const state = frameQueues.get(socket);
   if (!state) throw new Error("socket was not opened via open()");
-  if (state.queue.length > 0) return Promise.resolve(state.queue.shift());
+  while (state.queue.length > 0) {
+    const frame = state.queue.shift();
+    if (predicate(frame)) return Promise.resolve(frame);
+  }
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("nextFrame: no frame within 4000ms")), 4000);
-    state.waiting = (frame) => { clearTimeout(timer); resolve(frame); };
+    const timer = setTimeout(() => reject(new Error("nextFrame: no matching frame within 4000ms")), 4000);
+    const waitForMatch = (frame: unknown): void => {
+      if (predicate(frame)) { clearTimeout(timer); resolve(frame); return; }
+      state.waiting = waitForMatch;
+    };
+    state.waiting = waitForMatch;
   });
+};
+
+/** Matches a `notification.created` server frame whose actor is `actorId` — see nextFrame's predicate. */
+const isNotificationFor = (actorId: string) => (frame: unknown): boolean => {
+  const parsed = ServerFrameSchema.safeParse(frame);
+  return parsed.success && parsed.data.kind === "event"
+    && parsed.data.event.type === "notification.created" && parsed.data.event.actorId === actorId;
 };
 
 /** sum(transactions.amount) for a WHERE clause, as a bigint, the same shape gang-bank.test.ts's invariant test uses. */
@@ -106,7 +142,21 @@ describe("M3 acceptance: gangs, mail, notifications, profile, news", () => {
     const recruitTicket = await mintTicket(recruitToken);
     const recruitSocket = await open(`${baseUrl}?ticket=${recruitTicket}`);
     await nextFrame(recruitSocket); // ready
-    const invited = nextFrame(recruitSocket);
+    const invited = nextFrame(recruitSocket, isNotificationFor(recruitId));
+
+    // Proves the filter above actually filters: a `global`-audience event
+    // (the only kind the gateway broadcasts to every socket regardless of
+    // audience — see nextFrame's comment) published on the shared channel
+    // right before the real invite must not be the frame `invited` resolves
+    // with. Published synchronously ahead of the invite request below, so
+    // delivery to recruitSocket — a single ordered pub/sub connection — is
+    // guaranteed to precede the invite's own later publish, not a race.
+    const interference: GameEvent = {
+      id: uuidv7(), type: "news.posted", at: new Date().toISOString(),
+      actorId: bossId, actorName: "Vito", audience: { kind: "global" },
+      newsId: uuidv7(), title: "an unrelated concurrent test's news",
+    };
+    await publishEvent(redis, interference);
 
     const inviteRes = await app.inject({
       method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },

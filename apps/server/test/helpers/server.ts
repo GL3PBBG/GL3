@@ -6,6 +6,7 @@ import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { startCrimeWorker } from "../../src/game/crimes/worker.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
+import { withCorePlugins } from "../../src/plugins/core-plugins.js";
 import { loadPlugins } from "../../src/plugins/loader.js";
 import { createCrimeQueue } from "../../src/queue/index.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
@@ -60,13 +61,17 @@ export async function bootTestServer(
 
   // When plugins are provided, run the full boot sequence (validate → migrate →
   // queues/workers) the same way production does, so a test exercises the real
-  // loader path. The random queue prefix isolates plugin BullMQ queues from
-  // each other and from other test files' queues in the same shared Redis —
-  // same reason `crime-test-<uuid>` exists above.
+  // loader path. `withCorePlugins` is what makes that true: a ported core
+  // module is never optional, so production always loads CORE_PLUGINS
+  // alongside whatever optional manifests it selects, and a with-plugins boot
+  // here must do the same rather than silently dropping the ported routes.
+  // The random queue prefix isolates plugin BullMQ queues from each other and
+  // from other test files' queues in the same shared Redis — same reason
+  // `crime-test-<uuid>` exists above.
   const loadedPlugins = options?.plugins !== undefined
     ? await loadPlugins(
         { db, redis, settings: {} },
-        options.plugins,
+        withCorePlugins(options.plugins),
         `plugin-test-${randomUUID()}:`,
       )
     : undefined;

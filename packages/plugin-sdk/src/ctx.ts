@@ -87,18 +87,56 @@ export interface PluginEventInput {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Mirrors core's `RankUpResult` (`economy/ranks.ts`) field for field — the
+ * promotion details `applyExpAndRankUp` returns on a fresh rank-up, or
+ * `null` when nothing changed (no exp gained, or already at the qualifying
+ * rank).
+ */
+export interface RankUpResult {
+  rankId: string;
+  rankName: string;
+  cashReward: bigint;
+  bulletReward: number;
+  maxHealth: number;
+}
+
 export interface PluginTx {
   readonly db: PluginDbTx;
   readonly economy: {
     applyBalanceChange(change: PluginBalanceChange): Promise<bigint>;
     applyGangBalanceChange(change: PluginGangBalanceChange): Promise<bigint>;
     addExp(playerId: string, amount: bigint): Promise<void>;
+    applyExpAndRankUp(playerId: string, expGain: bigint): Promise<RankUpResult | null>;
   };
+  /**
+   * `sendToJail` takes a player lock internally (ascending id order, same as
+   * `economy.applyBalanceChange`), so a transaction that also moves money is
+   * already safe — the two touch player rows in the same fixed order no
+   * matter which one a plugin calls first.
+   */
+  readonly jail: { sendToJail(playerId: string, seconds: number): Promise<Date> };
+  /**
+   * The lock-ordering contract every multi-row transaction in this game must
+   * follow, to rule out deadlocks (`40P01`) against core and other plugins
+   * touching the same rows in a different order:
+   * - Several players: `player`, never manual `SELECT ... FOR UPDATE` — it
+   *   sorts the given ids before locking them.
+   * - A gang and a player together: `gangAndPlayer`, never `player` and a
+   *   gang lock taken separately — it fixes the one order every gang↔player
+   *   path (including core's bank and membership routes) agrees on.
+   * - A location alongside a player: `location` first, then the player —
+   *   the direction core's bullets purchase locks in.
+   * - Jailing a player needs no separate call here: `jail.sendToJail` takes
+   *   the player lock itself, in the same order as `economy.applyBalanceChange`.
+   */
   readonly locks: {
     player(playerIds: string[]): Promise<void>;
     gangAndPlayer(gangId: string, playerId: string): Promise<void>;
+    location(locationId: string): Promise<void>;
   };
   gangLog(entry: GangLogEntry): Promise<void>;
+  notify(playerId: string, body: string): Promise<void>;
   /**
    * Buffers the event. The loader publishes after commit and discards on
    * rollback, which makes CLAUDE.md rule 5 unrepresentable rather than merely

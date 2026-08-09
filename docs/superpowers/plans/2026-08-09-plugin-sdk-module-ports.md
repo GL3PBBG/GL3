@@ -1,5 +1,17 @@
 # Plugin SDK — Twelve Module Ports (M5 Stage 3) Implementation Plan
 
+> **Completion note (2026-08-10):** Execution stopped after two of the twelve
+> ports. Landed: Task 0 (ctx prereqs, `3abfa90`), Task 1 (`ranks`, `357c203`),
+> Task 4 (`notifications`, `ca06091`, fixed by `cefa3af`). Deferred: seven
+> modules (`news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) on
+> the event-envelope blocker described below in "The central design tension";
+> `profile` stays core to avoid duplicating its stored-XSS `avatarUrl` guard
+> into a plugin or leaking a game DTO into the SDK. `leaderboard` and `jail`
+> were already deliberate non-ports per this plan. Full account:
+> `docs/STATUS.md`'s M5 section and
+> `.superpowers/sdd/2026-08-09-plugin-sdk-module-ports/progress.md`. The plan
+> body below is left as the historical record of what was intended.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Port all twelve `apps/server/src/game/*` modules into workspace packages under `packages/plugins/<id>/`, built on `@gl3/plugin-sdk`. After the last port, delete the old `game/*` wiring.

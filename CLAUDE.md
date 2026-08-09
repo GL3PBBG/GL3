@@ -13,9 +13,12 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; the `game/*`
-module ports are pending. M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **65 files / 557 tests**, green across repeated
+(SDK + loader + example) and the web page renderer have shipped; two of the
+twelve `game/*` module ports have shipped (`ranks`, `notifications`), and the
+remaining seven event-publishing modules are blocked on an event-envelope
+design decision (`profile`, `leaderboard`, `jail` are deliberate non-ports —
+see `docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
+MariaDB install. Suite: **66 files / 558 tests**, green across repeated
 back-to-back runs.
 
 Full detail, including how to start M4, is in `docs/STATUS.md`.
