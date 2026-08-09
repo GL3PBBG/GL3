@@ -61,4 +61,24 @@ describe("shouldServeIndex", () => {
     expect(shouldServeIndex("/plugins/some.plugin.page")).toBe(true);
     expect(shouldServeIndex("/players/user.name")).toBe(true);
   });
+
+  it("falls back for a plugin page whose id ends in a known asset extension", () => {
+    // The residual case of the bug above. Page ids are `z.string().min(1)` in
+    // both PageSchemaSchema and PagePayloadSchema, so nothing stops a plugin
+    // from declaring `city.map` or `data.json` — and the extension test alone
+    // would classify those as assets and 404 them. Nothing under /plugins/ is
+    // ever a file this server can serve, so the namespace decides it outright.
+    expect(shouldServeIndex("/plugins/city.map")).toBe(true);
+    expect(shouldServeIndex("/plugins/data.json")).toBe(true);
+    expect(shouldServeIndex("/plugins/tiles.png")).toBe(true);
+  });
+
+  it("still 404s a missing asset outside /plugins/", () => {
+    // The /plugins/ rule is a namespace exception, not a weakening of the
+    // policy: everywhere else a known extension still means "asset", so a
+    // missing one gets an honest 404 rather than index.html.
+    expect(shouldServeIndex("/assets/x.map")).toBe(false);
+    expect(shouldServeIndex("/api/foo.json")).toBe(false);
+    expect(shouldServeIndex("/pluginsomething/x.json")).toBe(false);
+  });
 });
