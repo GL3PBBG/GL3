@@ -1,16 +1,26 @@
 import { fileURLToPath } from "node:url";
 import { defineWorkspace } from "vitest/config";
 
-// Resolve @gl3/shared to its TypeScript source, not packages/shared/dist —
-// dist is a build artifact that can go stale relative to src (it only
-// rebuilds via `tsc --build`, which `npx vitest` never triggers), so
+// Resolve the workspace packages to their TypeScript sources, not their
+// dist/ — dist is a build artifact that can go stale relative to src (it
+// only rebuilds via `tsc --build`, which `npx vitest` never triggers), so
 // resolving to dist here would let a stale build pass tests with a false
 // green. Runtime (apps/server/src/index.ts, the built server) is
-// unaffected: this alias only applies inside these vitest projects.
-const sharedAlias = {
+// unaffected: these aliases only apply inside these vitest projects.
+//
+// Both packages ship a populated dist/, so a missing entry here does not
+// fail loudly — it silently grades the last `tsc --build`. Every workspace
+// package a test can import therefore needs a key, and they must all live
+// in this one object: spreading two `{ resolve: { alias } }` objects into a
+// project would have the second `resolve` replace the first wholesale, and
+// the lost aliases would again fall back to dist without erroring.
+const srcAliases = {
   resolve: {
     alias: {
       "@gl3/shared": fileURLToPath(new URL("./packages/shared/src/index.ts", import.meta.url)),
+      "@gl3/plugin-sdk": fileURLToPath(
+        new URL("./packages/plugin-sdk/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -83,15 +93,20 @@ export default defineWorkspace([
       root: "./apps/web",
       include: ["test/**/*.test.ts"],
     },
-    ...sharedAlias,
+    ...srcAliases,
   },
   {
     test: {
       name: "@gl3/server:unit",
       root: "./apps/server",
-      include: ["test/config.test.ts", "test/password.test.ts", "test/rng.test.ts"],
+      include: [
+        "test/config.test.ts",
+        "test/password.test.ts",
+        "test/plugin-validate.test.ts",
+        "test/rng.test.ts",
+      ],
     },
-    ...sharedAlias,
+    ...srcAliases,
   },
   {
     test: {
@@ -104,7 +119,7 @@ export default defineWorkspace([
       // randomly-named buckets, so the shared-Redis collision this setupFile
       // guards against doesn't apply here.
     },
-    ...sharedAlias,
+    ...srcAliases,
   },
   {
     test: {
@@ -120,7 +135,7 @@ export default defineWorkspace([
       setupFiles: [isolatedDb],
       hookTimeout: dbHookTimeout,
     },
-    ...sharedAlias,
+    ...srcAliases,
   },
   {
     test: {
@@ -156,6 +171,6 @@ export default defineWorkspace([
       setupFiles: [isolatedDb, rateLimitIsolation],
       hookTimeout: dbHookTimeout,
     },
-    ...sharedAlias,
+    ...srcAliases,
   },
 ]);
