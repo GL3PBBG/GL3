@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import type { GameEvent, JailStatus } from "@gl3/shared";
 import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
-import type { Tx } from "../../economy/ledger.js";
+import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { playerStats, players } from "../../db/schema/index.js";
 
 const FREE: JailStatus = { jailed: false, until: null, remainingSeconds: 0 };
@@ -67,8 +67,19 @@ export async function releaseIfExpired(db: Db, redis: Redis, playerId: string): 
   return FREE;
 }
 
-/** Called inside the crime worker's transaction (Task 6) — takes `tx`, not `db`. */
+/**
+ * Called inside the crime worker's transaction (Task 6) — takes `tx`, not `db`.
+ *
+ * Locks through `lockPlayersForUpdate` first, same as `applyBalanceChange`,
+ * for the uniform lock ordering CLAUDE.md rule 6 requires. In the crime-worker
+ * path the lock is already held on this player, so the call is a no-op there
+ * — but plugins can reach this as `tx.jail.sendToJail`, and a plugin
+ * transaction may touch several players. Without the lock here, a plugin
+ * doing `applyBalanceChange(A); sendToJail(B)` can deadlock (`40P01`) against
+ * one doing `applyBalanceChange(B); sendToJail(A)` in the opposite order.
+ */
 export async function sendToJail(tx: Tx, playerId: string, seconds: number): Promise<Date> {
+  await lockPlayersForUpdate(tx, [playerId]);
   const until = new Date(Date.now() + seconds * 1000);
   await tx.update(playerStats).set({ jailedUntil: until }).where(eq(playerStats.playerId, playerId));
   return until;

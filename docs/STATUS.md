@@ -130,10 +130,11 @@ check stays compiler-enforceable.
 
 ### Module ports (Plan 3) — what shipped and what didn't
 
-Branch `feat/plugin-sdk-module-ports`, four commits on top of `b26c68a`:
-`3abfa90` (ctx prereqs), `357c203` (ranks port), `ca06091` (notifications
-port), `cefa3af` (fix: missing `vitest.workspace.ts` `srcAliases` entry, see
-below).
+Branch `feat/plugin-sdk-module-ports`, five commits on top of `b26c68a` as of
+the port work itself: `3abfa90` (ctx prereqs), `357c203` (ranks port),
+`ca06091` (notifications port), `cefa3af` (fix: missing
+`vitest.workspace.ts` `srcAliases` entry, see below), `7bba8fd` (this doc).
+A final-review fix commit lands on top of those.
 
 **Shipped:**
 

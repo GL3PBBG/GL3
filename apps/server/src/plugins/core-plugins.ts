@@ -17,3 +17,21 @@ import rankPlugin from "@gl3/plugin-ranks";
  * change of its own.
  */
 export const CORE_PLUGINS: readonly PluginManifest[] = [rankPlugin, notificationsPlugin];
+
+/**
+ * A ported core module is never optional (spec) — CORE_PLUGINS always loads,
+ * and the caller's optional manifests only add to it. De-duplicated by id so
+ * a core module's id also named among the optional manifests doesn't load
+ * twice.
+ */
+export function withCorePlugins(optional: readonly PluginManifest[]): PluginManifest[] {
+  const seenIds = new Set(CORE_PLUGINS.map((m) => m.id));
+  return [
+    ...CORE_PLUGINS,
+    ...optional.filter((m) => {
+      if (seenIds.has(m.id)) return false;
+      seenIds.add(m.id);
+      return true;
+    }),
+  ];
+}
