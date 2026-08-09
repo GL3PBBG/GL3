@@ -112,7 +112,7 @@ export default defineWorkspace([
     test: {
       name: "@gl3/server:redis-only",
       root: "./apps/server",
-      include: ["test/cooldown.test.ts", "test/rate-limit.test.ts"],
+      include: ["test/cooldown.test.ts", "test/plugin-ctx-cooldown.test.ts", "test/rate-limit.test.ts"],
       // No rateLimitIsolation setupFile: neither file boots a server or
       // exercises the real ratelimit:register:*/ratelimit:login:* keys —
       // rate-limit.test.ts drives tokenBucket() directly against its own
