@@ -58,6 +58,9 @@ describe("PluginsPayloadSchema view sink constraints", () => {
     ["a javascript: URI", "javascript:alert(1)"],
     ["an absolute http URL", "https://evil.example/steal"],
     ["a protocol-relative URL", "//evil.example/steal"],
+    // `\` is `/` in WHATWG's relative-slash state, so this resolves
+    // cross-origin exactly like `//evil.example` does.
+    ["a backslash-relative URL", "/\\evil.example/steal"],
   ])("rejects a link.to that is %s", (_label, to) => {
     expect(() => PluginsPayloadSchema.parse(payloadWith({ kind: "link", label: "L", to })))
       .toThrow(/link\.to must be an app-internal absolute path/);
@@ -66,6 +69,7 @@ describe("PluginsPayloadSchema view sink constraints", () => {
   it.each([
     ["a bare path with no method", "/api/hello/go"],
     ["an absolute URL", "POST https://evil.example/steal"],
+    ["a backslash-relative target", "POST /\\evil.example/steal"],
   ])("rejects a button action that is %s", (_label, action) => {
     expect(() => PluginsPayloadSchema.parse(payloadWith({ kind: "button", label: "B", action })))
       .toThrow(/action must be `METHOD \/absolute\/path`/);
@@ -126,12 +130,32 @@ describe("PluginsPayloadSchema view size bounds", () => {
       .toThrow(new RegExp(`view nests deeper than ${MAX_VIEW_DEPTH} levels`));
   });
 
-  it("rejects a view over the node-count bound", () => {
-    const wide = {
+  function fanOut(width: number): unknown {
+    return {
       kind: "panel", title: "wide",
-      children: Array.from({ length: MAX_VIEW_NODES }, () => ({ kind: "text", value: "leaf" })),
+      children: Array.from({ length: width }, () => ({ kind: "text", value: "leaf" })),
     };
-    expect(() => PluginsPayloadSchema.parse(pageWithView(wide)))
+  }
+
+  it("rejects a view over the node-count bound", () => {
+    expect(() => PluginsPayloadSchema.parse(pageWithView(fanOut(MAX_VIEW_NODES))))
       .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
+  });
+
+  // Enqueueing children with `push(...children)` throws a RangeError past V8's
+  // argument limit (~124k) before the bound is ever consulted, so the wide case
+  // needs a payload far past the bound, not one node over it.
+  it("rejects a pathologically wide view without overflowing the stack", () => {
+    expect(() => PluginsPayloadSchema.parse(pageWithView(fanOut(200_000))))
+      .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
+  });
+
+  it("rejects a menu path that is not an app-internal absolute path", () => {
+    const bad = {
+      pages: [], events: [],
+      menu: [{ pageId: "hello.index", path: "//evil.example", label: "Hello", order: 1 }],
+    };
+    expect(() => PluginsPayloadSchema.parse(bad))
+      .toThrow(/menu path must be an app-internal absolute path/);
   });
 });

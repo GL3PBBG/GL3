@@ -14,14 +14,20 @@ import { z } from "zod";
 /**
  * `link.to` reaches the renderer as an `href` and `*.action` reaches it as a
  * `fetch` target, so both are sinks and neither may be a free string. A leading
- * `/` that is not `//` rejects `javascript:`, `data:`, absolute `http(s)://`
- * and protocol-relative `//evil.example` in one test — the same posture
+ * `/` followed by neither `/` nor `\` rejects `javascript:`, `data:`, absolute
+ * `http(s)://` and protocol-relative `//evil.example` — the same posture
  * `avatarUrl` already takes, and the same one `PageSchemaSchema.path` takes in
  * the SDK. Exported because `@gl3/plugin-sdk` applies them to the authoring
  * schema too: a bad view should fail at boot, not at the browser.
+ *
+ * The backslash is not decoration. WHATWG treats `\` as `/` in the
+ * relative-slash state for special schemes, so `/\evil.example` is another
+ * spelling of `//evil.example` and resolves cross-origin; it is barred in the
+ * first position and in the body, since a later `\` reaches the same state
+ * through a segment that only looks relative.
  */
-export const INTERNAL_PATH_RE = /^\/(?!\/)\S*$/;
-export const VIEW_ACTION_RE = /^(GET|POST|PUT|PATCH|DELETE) \/(?!\/)\S*$/;
+export const INTERNAL_PATH_RE = /^\/(?![/\\])[^\s\\]*$/;
+export const VIEW_ACTION_RE = /^(GET|POST|PUT|PATCH|DELETE) \/(?![/\\])[^\s\\]*$/;
 
 /**
  * `cooldownAction` is not an HTTP action — it is the middle segment of
@@ -70,7 +76,11 @@ export function checkViewBounds(value: unknown, ctx: z.RefinementCtx): void {
         });
         return;
       }
-      next.push(...childrenOf(node));
+      // One at a time, not `push(...children)`: the spread passes every child
+      // as an argument and blows V8's argument limit at ~124k, throwing a
+      // RangeError long before the node bound is consulted — the crash this
+      // function exists to turn into a validation error.
+      for (const child of childrenOf(node)) next.push(child);
     }
     level = next;
   }
@@ -146,7 +156,10 @@ export const BoundedViewNodeDtoSchema: z.ZodType<unknown, z.ZodTypeDef, unknown>
 
 export const MenuItemSchema = z.object({
   pageId: z.string().min(1),
-  path: z.string().min(1),
+  // The same value as the page's own `path` (manifest-endpoint.ts copies it)
+  // and the same sink — the nav renders it as an `href`, so it carries the
+  // same rule rather than relying on the page copy to fail first.
+  path: z.string().regex(INTERNAL_PATH_RE, "menu path must be an app-internal absolute path"),
   label: z.string().min(1),
   order: z.number().int(),
 }).strict();
