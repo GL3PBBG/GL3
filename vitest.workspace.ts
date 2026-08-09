@@ -164,6 +164,7 @@ export default defineWorkspace([
         "test/notifications.test.ts",
         "test/plugin-ctx-transaction.test.ts",
         "test/plugin-jobs.test.ts",
+        "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
