@@ -3,10 +3,18 @@
 # Server image: API + WebSocket gateway. Built from compiled TypeScript.
 #
 # The builder runs `tsc --build` against @gl3/server, which follows its
-# tsconfig reference to @gl3/shared and emits BOTH packages/shared/dist and
-# apps/server/dist in one step — so no separate `build -w @gl3/shared` is
-# needed here (unlike Dockerfile.web, where Vite — not tsc — resolves
-# @gl3/shared and needs dist present before the web build starts).
+# tsconfig references to @gl3/shared, @gl3/plugin-sdk and @gl3/hello-plugin and
+# emits all four dist/ dirs in one step — so no separate `build -w` is needed
+# here (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
+# needs dist present before the web build starts).
+#
+# Every project apps/server/tsconfig.json references must be copied in, sources
+# and tsconfig both: tsc reads the referenced tsconfig even for a type-only
+# import and fails with TS5083 if it is missing. @gl3/hello-plugin is also a
+# RUNTIME requirement — src/index.ts imports it statically for the plugin import
+# map (a dynamic import(pluginId) is deliberately not used, so the
+# dependency-direction check stays compiler-enforceable). Without it in the
+# runtime stage the server cannot boot even with PLUGIN_IDS empty.
 #
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
 # build toolchain (no python/make/g++).
@@ -24,11 +32,15 @@ FROM node:${NODE_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# Copy manifests first for the install layer. npm ci validates the workspace
-# layout, so all four package.json files must be present.
+# Copy manifests first for the install layer. Each workspace whose package.json
+# is present here gets linked into node_modules/@gl3/*; a workspace left out is
+# simply absent (the root globs tolerate it), which is how apps/web stays out of
+# this image.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY apps/server/package.json apps/server/
+COPY examples/hello-plugin/package.json examples/hello-plugin/
 
 RUN npm ci
 
@@ -36,18 +48,22 @@ RUN npm ci
 COPY tsconfig.json tsconfig.base.json ./
 COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
 COPY packages/shared/src packages/shared/src
+COPY packages/plugin-sdk/tsconfig.json packages/plugin-sdk/tsconfig.json
+COPY packages/plugin-sdk/src packages/plugin-sdk/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
+COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
+COPY examples/hello-plugin/src examples/hello-plugin/src
 # Migrations are TS-adjacent SQL, not compiled; copy the source dir so the
 # runtime stage can serve them to the compiled migrator.
 COPY apps/server/drizzle apps/server/drizzle
 
 # Point at the server project directly rather than the root tsconfig.json.
-# The root tsconfig references all three projects (shared, server, web), but
-# only shared + server are copied into this image — web is not, so building
-# from root fails with TS5083 (Cannot read apps/web/tsconfig.json). The server
-# project's own references pull in packages/shared, so both dist/ dirs are
-# produced; `--force` matches `npm run typecheck` (rebuild from scratch, since
+# The root tsconfig also references apps/web, which is not copied into this
+# image, so building from root fails with TS5083 (Cannot read
+# apps/web/tsconfig.json). The server project's own references pull in shared,
+# plugin-sdk and hello-plugin, so every dist/ this image needs is produced;
+# `--force` matches `npm run typecheck` (rebuild from scratch, since
 # .dockerignore excluded any cached .tsbuildinfo).
 RUN npx tsc --build --force apps/server/tsconfig.json
 
@@ -58,11 +74,14 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Same manifests as the builder, then a production-only install. This recreates
-# the node_modules/@gl3/shared workspace symlink, which is how the runtime
-# resolves `@gl3/shared` through its package.json exports map.
+# the node_modules/@gl3/* workspace symlinks, which is how the runtime resolves
+# `@gl3/shared`, `@gl3/plugin-sdk` and `@gl3/hello-plugin` through their
+# package.json exports maps.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY apps/server/package.json apps/server/
+COPY examples/hello-plugin/package.json examples/hello-plugin/
 
 RUN npm ci --omit=dev
 
@@ -70,8 +89,10 @@ RUN npm ci --omit=dev
 # entrypoint (dist/db/migrate.js) can find its SQL — it resolves
 # ../../drizzle relative to dist/db/, i.e. apps/server/drizzle.
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
+COPY --from=builder /app/packages/plugin-sdk/dist packages/plugin-sdk/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
+COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist
 
 USER node
 EXPOSE 3000
