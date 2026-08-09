@@ -60,9 +60,14 @@ export interface PluginManifest {
  * schema over a function would only assert `typeof === "function"`.
  * `.strict()` is what rejects unknown fields.
  *
- * `pages` is the exception: page schemas are pure data, so `PageSchemaSchema`
- * checks them for real here, and a malformed view node fails at definition time
- * rather than at render.
+ * Two fields are not function-bearing and so do not follow that rule. `pages`
+ * holds pure data, so `PageSchemaSchema` checks it for real here and a malformed
+ * view node fails at definition time rather than at render. `tables` maps a
+ * plugin's own key to the SQL name of one of its tables — data too, and today
+ * just a string — but its value type is left `unknown` because the plan defers
+ * the final shape (a drizzle-table accessor) to the port that proves it end to
+ * end. Until then `z.record(z.unknown())` checks only that it is an object, and
+ * the loader is what reads the names out of it.
  *
  * `provides` and `filters` use `z.custom<T>()` rather than `z.unknown()`. Both
  * accept every value at runtime — the difference is only that `z.custom` carries
