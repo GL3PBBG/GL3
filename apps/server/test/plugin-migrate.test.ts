@@ -33,6 +33,10 @@ describe("runPluginMigrations", () => {
     await db.execute(sql`select 1 from p_m1_things limit 1`);
   });
 
+  // Doubles as the complement of definePlugin's within-a-plugin uniqueness
+  // refinement: "alpha" and "zeta" both declare a migration named "0001", and
+  // both must apply, because the tracking PK is (plugin_id, name). A guard that
+  // rejected the name globally would fail here.
   it("applies migrations in plugin-id order, then declaration order", async () => {
     const applied = await runPluginMigrations(db, [
       plugin("zeta", [{ name: "0001", sql: "CREATE TABLE p_zeta_a (id text)" }]),

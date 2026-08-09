@@ -104,7 +104,36 @@ const InputSchema = z
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
-  .strict();
+  .strict()
+  // Migration names must be unique *within* a plugin, and nothing downstream can
+  // recover this. The runner claims each `(plugin_id, name)` with
+  // `onConflictDoNothing()`, which cannot tell "already applied on a previous
+  // boot" from "declared twice in this very call": the first copy applies, the
+  // second's insert conflicts, and its DDL is silently skipped. Boot succeeds and
+  // the omission surfaces much later as `relation "p_foo_bar" does not exist`.
+  //
+  // Checked here rather than in the loader's validation pass because it is an
+  // intra-manifest invariant — like the id, version and basePath patterns above,
+  // it needs no knowledge of any other plugin, which is what that pass exists for.
+  // Refining at definition time also catches it for every consumer, not only the
+  // boot path.
+  .superRefine((manifest, ctx) => {
+    const seen = new Set<string>();
+    manifest.migrations?.forEach((migration, index) => {
+      if (seen.has(migration.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          // The thrown message is assembled as
+          // `invalid plugin manifest for "<id>" — migrations.<i>: <message>`, so
+          // the plugin is already named by the wrapper; repeating it here would
+          // only stutter.
+          path: ["migrations", index],
+          message: `duplicate migration name "${migration.name}"`,
+        });
+      }
+      seen.add(migration.name);
+    });
+  });
 
 /**
  * The id to blame in a validation failure. A manifest that fails to parse may
