@@ -19,6 +19,7 @@ import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
 import { Travel } from "./pages/Travel.js";
+import { PluginPage } from "./plugins/PluginPage.js";
 import { useGameEvents } from "./ws/useGameEvents.js";
 
 export function App(): JSX.Element {
@@ -51,6 +52,15 @@ export function App(): JSX.Element {
           <Route path="news" element={<News />} />
           <Route path="profile" element={<Profile />} />
           <Route path="players/:playerId" element={<PlayerProfile />} />
+          {/*
+            Every plugin page lives under one namespaced route rather than at the
+            `path` it declares. The loader validates a plugin's basePath against
+            the server's own prefixes, but nothing validates a page's *frontend*
+            path against these core routes — so a top-level registration could
+            let a plugin shadow /bank. The declared `path` stays advisory in v1;
+            top-level registration waits on a collision check.
+          */}
+          <Route path="plugins/:pageId" element={<PluginPage />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
