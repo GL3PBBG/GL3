@@ -78,15 +78,30 @@ function safePath(urlPath) {
  * 404: `extname("/plugins/hello.index")` returns ".index", so every plugin page
  * — ids are dotted by convention, and v1 routing serves all of them from
  * /plugins/:pageId — was classified as a missing asset. The rule is now
- * membership in CONTENT_TYPES, the set of extensions this server can actually
- * produce a response for. Anything outside it was never an asset this server
- * could have served, so index.html is the only sensible answer.
+ * membership in CONTENT_TYPES, the set of extensions this server has an
+ * explicit type for. That is narrower than "could have served": the serving
+ * path below falls back to application/octet-stream, so an unlisted extension
+ * sitting in dist/ is still returned. The classifier only runs when no file
+ * matched, so the two never disagree in practice — but note the coupling.
+ * CONTENT_TYPES now does double duty as MIME map *and* asset classifier, so
+ * adding a new asset type to the bundle without adding it here silently
+ * changes the missing-file answer from an honest 404 to index.html plus a MIME
+ * error.
+ *
+ * /plugins/ is exempt unconditionally, because extension membership does not
+ * settle the question for client routes. Plugin page ids are unconstrained
+ * (`z.string().min(1)` in both PageSchemaSchema and PagePayloadSchema), so a
+ * page id ending `.map` or `.json` would land back in the same production 404
+ * this function exists to fix. Nothing under /plugins/ is ever a file: this
+ * server serves apps/web/dist only, and Vite emits every bundle asset under
+ * /assets/. The namespace is a client route, full stop.
  *
  * Lowercased before the lookup because extname preserves case: without it
  * `/assets/APP.JS` misses the map and gets index.html, which is the MIME-error
  * failure above in its harder-to-spot direction.
  */
 export function shouldServeIndex(urlPath) {
+  if (urlPath === "/plugins" || urlPath.startsWith("/plugins/")) return true;
   const ext = extname(urlPath).toLowerCase();
   if (ext === "") return true;
   return !CONTENT_TYPES.has(ext);
