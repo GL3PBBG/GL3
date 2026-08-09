@@ -181,6 +181,7 @@ export default defineWorkspace([
         "test/gang-membership.test.ts",
         "test/gang-transfer.test.ts",
         "test/gangs.test.ts",
+        "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
