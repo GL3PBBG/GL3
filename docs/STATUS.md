@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-08, container build added.
-Branch: `feat/container-images` (forked from `main` at `f6e1a66`).
+Last updated: 2026-08-10, M5 stage 3 (module ports) outcome recorded.
+Branch: `feat/plugin-sdk-module-ports` (forked from `main` at `b26c68a`).
 
 ---
 
@@ -14,10 +14,10 @@ Branch: `feat/container-images` (forked from `main` at `f6e1a66`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. Module ports pending |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. Two of twelve module ports shipped (`ranks`, `notifications`); seven blocked on an event-envelope design decision; `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 65 files / 557 tests**, green. Count verified by the controller's own
-`npm run verify` run, not taken from an agent report.
+**Suite: 66 files / 558 tests**, green. Count verified by the controller's own
+`npm run verify` run (161s), not taken from an agent report.
 
 ---
 
@@ -128,25 +128,72 @@ check stays compiler-enforceable.
 - **`apps/web/serve.mjs`** falls back to `index.html` for client routes, so a
   direct load of `/plugins/<id>` works in the container image.
 
-### What is pending
+### Module ports (Plan 3) — what shipped and what didn't
 
-- **Twelve `game/*` module ports** (Plan 3): porting the existing hardcoded
-  modules onto the SDK, one per task (strangler — old wiring deleted last).
-  Spec port order: read-mostly first (`ranks`, `leaderboard`, `news`,
-  `notifications`, `profile`), then `bank`/`bullets`/`travel`, then
-  `jail`/`crimes`, then `mail`/`gangs` last (owns rule 6's regression test).
-  Acceptance: M5 changes no HTTP response; the integration suite passes
-  unmodified per port.
+Branch `feat/plugin-sdk-module-ports`, four commits on top of `b26c68a`:
+`3abfa90` (ctx prereqs), `357c203` (ranks port), `ca06091` (notifications
+port), `cefa3af` (fix: missing `vitest.workspace.ts` `srcAliases` entry, see
+below).
 
-### Carry-forward from the foundation review
+**Shipped:**
 
-Two SDK gaps to close before the module ports begin:
+- **Task 0 (`3abfa90`)** — four ctx capabilities the ports needed:
+  `tx.jail.sendToJail`, `tx.notify`, `tx.locks.location`,
+  `tx.economy.applyExpAndRankUp`, plus a `RankUpResult` type exported from
+  `@gl3/plugin-sdk`. **None of the four has a caller yet** — all four were
+  built for the ports that shipped after them (`ranks`, `notifications`) or
+  for the seven that are now deferred, and neither shipped port ends up
+  calling any of them (`ranks` and `notifications` are read-mostly; the
+  modules that would call `sendToJail`/`applyExpAndRankUp`/`locks.location`
+  — crimes, travel, bullets — are among the deferred seven).
+- **Task 1 (`357c203`)** — `ranks` ported to `packages/plugins/ranks`.
+  Introduced `apps/server/src/plugins/core-plugins.ts` (`CORE_PLUGINS`):
+  `buildApp` now default-loads it when a caller passes no `plugins`,
+  registers an `onClose` teardown for only what it loaded, and throws at
+  boot if a core plugin declares `jobs` (that path has no queue-name prefix,
+  and shared BullMQ queue names have already caused a real cross-talk bug
+  here — see CLAUDE.md rule 1's neighbors).
+- **Task 4 (`ca06091`, fixed by `cefa3af`)** — `notifications` routes ported
+  to `packages/plugins/notifications`. `notifications/service.ts`
+  (`insertNotification`) stayed in core — it's consumed by other modules and
+  reaches plugins as `tx.notify`. The follow-up fix: `vitest.workspace.ts`'s
+  `srcAliases` object was missing a `@gl3/plugin-notifications` entry, so the
+  specifier resolved to the gitignored `dist/` — a src-only edit was graded
+  against the last `tsc --build` (a false green), and a clean tree failed at
+  collection. **Every new workspace package a test can import needs a
+  `srcAliases` entry in `vitest.workspace.ts`**, alongside that file's
+  existing warning (below) that new test *files* need the explicit
+  `include` lists. Both failure modes are silent.
 
-- **`PlayerSnapshot` has no `username`.** Every core event emitter includes
-  `actorName`; ported modules cannot publish real-name events without it.
-  One-line fix in two files (`ctx.ts` type + `routes.ts` `loadSnapshot`).
-- **`LoadPluginsDeps` is not derived from `PluginCtxDeps`.** A one-line
-  `Omit<PluginCtxDeps, "queues">` prevents a future field-add maintenance miss.
+**Deferred, and why:**
+
+1. **Seven modules blocked on the plugin event envelope.** `news`, `bank`,
+   `bullets`, `travel`, `crimes`, `mail` and `gangs` all publish **core
+   typed** events (`news.posted`, `bank.transacted`, `bullets.purchased`,
+   `player.travelled`, `crime.resolved`, `player.jailed`, `player.rankedUp`,
+   `mail.received`, `gang.*`). A plugin's `tx.events.publish` wraps
+   everything in the `plugin.event` envelope (`packages/shared/src/events.ts`).
+   Porting any of them as-is would change the event type on the wire,
+   breaking both `awaitOwnEvent` assertions and the web client — violating
+   this plan's own "M5 changes no HTTP response" constraint. Needs an event
+   design decision (a core-event publish capability, or a client that
+   understands both shapes) that was out of scope for these ports.
+2. **`profile` not ported.** `PUT /api/profile` validates `avatarUrl` with a
+   stored-XSS guard living in `@gl3/shared` (`dto/profile.ts` — scheme
+   allowlist, embedded-credential rejection, URL normalization). A plugin
+   may not import `@gl3/shared`, so every option was bad: duplicate a
+   security control into the plugin, or leak a game-specific DTO into the
+   generic SDK. It would also have dropped the `issues` array from the PUT's
+   400 body. Left in core, deliberately.
+3. **`leaderboard` and the `jail` route were already deliberate non-ports**
+   in the plan (Redis-backed read aggregation; the central jail gate the
+   route loader itself depends on). Their *capabilities* reach plugins via
+   ctx (`tx.jail.sendToJail`) or the loader's `accessInJail` handling.
+
+The two SDK gaps that used to be listed here as carry-forward work
+(`PlayerSnapshot` lacking `username`; `LoadPluginsDeps` not derived from
+`PluginCtxDeps`) are both closed — see `packages/plugin-sdk/src/ctx.ts` and
+`apps/server/src/plugins/loader.ts`'s `LoadPluginsDeps` respectively.
 
 ## Starting M4
 
@@ -238,6 +285,27 @@ web image serves only the SPA's own assets.
 
 **Open, deliberately deferred:**
 
+- **`CORE_PLUGINS` grows a silent-drop surface.** A `buildApp` caller that passes
+  an explicit `plugins` array gets *only* those plugins — every core plugin's
+  routes are absent for that boot. `bootTestServer({ plugins: [...] })` is used by
+  `plugin-manifest-endpoint.test.ts`, `plugin-routes.test.ts` and
+  `plugin-loader.test.ts`. No test hits `/api/ranks` or `/api/notifications`
+  under such a boot today, so nothing is broken — but each new core plugin widens
+  the surface, and the failure mode is a silent 404 rather than an error.
+- **Every core plugin must declare no `menu`, no `pages`, no `events`.**
+  `plugin-manifest-endpoint.test.ts:87` asserts that a no-arg boot answers
+  `GET /api/plugins` with exactly `{ menu: [], pages: [], events: [] }`. Since
+  `buildApp` now default-loads `CORE_PLUGINS` on that path, the assertion holds
+  only because the ported plugins (`ranks`, `notifications`) contribute nothing
+  to the payload. That is a real constraint on future ports, currently enforced
+  by nothing but this note and that test.
+- **Ported GET routes open a transaction where the legacy route ran a bare
+  SELECT.** No behaviour change; inherited from the ranks port's pattern and
+  carried into notifications. A property of the ported-read pattern, to be
+  decided once for all ports rather than per port.
+- **The plugin loader's `loadSnapshot` inner-joins `player_stats`**, so a player
+  row without a stats row would 401 where the legacy route returned 200/404.
+  Unreachable today because registration writes both rows together.
 - **The spare databases `gl3_a`..`gl3_d` are NOT migrated past `0002`.** Anything
   touching an M3 table fails there with `42703 column "gang_id" does not exist`.
   They are fine for M0–M2 probes and useless for anything newer. Migrate them before
