@@ -14,9 +14,9 @@ Branch: `feat/container-images` (forked from `main` at `f6e1a66`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | ❌ not planned | Now unblocked; refactors M2's bank into a plugin |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation shipped — SDK, loader, example. Renderer + module ports pending |
 
-**Suite: 33 files / 220 tests**, green. Count verified by the controller's own
+**Suite: 57 files / 420 tests**, green. Count verified by the controller's own
 `npm run verify` run, not taken from an agent report.
 
 ---
@@ -75,6 +75,59 @@ the WebSocket, the invite is accepted, and a bank deposit and withdrawal reconci
 `sum(transactions) == gangs.bank` at the property level rather than trusting the
 HTTP response body. Both assertions were demonstrated failing against deliberately
 broken code before being accepted.
+
+## M5 Plugin SDK — in progress
+
+The plugin SDK lets gameplay modules be built *on* it rather than refactored into
+it later. Design: `docs/superpowers/specs/2026-08-09-plugin-sdk-design.md`.
+
+### What has shipped (foundation)
+
+- **`packages/plugin-sdk/`** — `definePlugin`, `route`, `PluginError`, the `ctx`
+  interfaces (`PluginCtx`/`PluginTx`), filter system (`filterPoint`/`on`), page
+  schema types, event declarations. **Schema isolation is type-enforced**:
+  `PluginDbTx` omits Drizzle's `query`, so a plugin physically cannot reach
+  `players` or `transactions` (the `_NoRelationalQuery` compile-time guard).
+- **`apps/server/src/plugins/`** — the loader (`validate → migrate → queues/
+  workers → payload`), route registration (auth, jail-gate, zod params+body),
+  job workers (seeded RNG, `plugin_job_runs` run-once idempotency),
+  `GET /api/plugins`, and the migration runner (idempotent, tracked in
+  `plugin_migrations`).
+- **`examples/hello-plugin/`** — a third-party plugin that adds a table, route,
+  page, and event, importing only `@gl3/plugin-sdk`. This is the M5 acceptance
+  criterion, compiler-enforced.
+- **All six CLAUDE.md rules are structural** in the ctx — a plugin cannot
+  violate them by construction. See `packages/plugin-sdk/README.md`.
+- **Schema:** migration `0004_plugin_runtime.sql` (`plugin_job_runs`,
+  `plugin_migrations`).
+
+Plugins load only when `PLUGIN_IDS` is set (comma-separated ids; default empty
+= core-only boot, unchanged). Boot is a static import map in `index.ts` — a
+dynamic `import(pluginId)` is deliberately not used so the dependency-direction
+check stays compiler-enforceable.
+
+### What is pending
+
+- **Web renderer + override registry** (Plan 2): `GET /api/plugins` is served
+  but no client consumes it. A generic page-schema renderer and a core-page
+  override map are the next build.
+- **Twelve `game/*` module ports** (Plan 3): porting the existing hardcoded
+  modules onto the SDK, one per task (strangler — old wiring deleted last).
+  Spec port order: read-mostly first (`ranks`, `leaderboard`, `news`,
+  `notifications`, `profile`), then `bank`/`bullets`/`travel`, then
+  `jail`/`crimes`, then `mail`/`gangs` last (owns rule 6's regression test).
+  Acceptance: M5 changes no HTTP response; the integration suite passes
+  unmodified per port.
+
+### Carry-forward from the foundation review
+
+Two SDK gaps to close before the module ports begin:
+
+- **`PlayerSnapshot` has no `username`.** Every core event emitter includes
+  `actorName`; ported modules cannot publish real-name events without it.
+  One-line fix in two files (`ctx.ts` type + `routes.ts` `loadSnapshot`).
+- **`LoadPluginsDeps` is not derived from `PluginCtxDeps`.** A one-line
+  `Omit<PluginCtxDeps, "queues">` prevents a future field-add maintenance miss.
 
 ## Starting M4
 

@@ -12,8 +12,11 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 
 ## Current state
 
-M0, M1, M2 and M3 are complete. M4 is planned and blocked on a MariaDB install.
-Suite: **33 files / 220 tests**, green across repeated back-to-back runs.
+M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
+(SDK + loader + example) shipped; the web renderer and the twelve `game/*`
+module ports are pending. M4 (migration CLI) is planned and blocked on a
+MariaDB install. Suite: **57 files / 420 tests**, green across repeated
+back-to-back runs.
 
 Full detail, including how to start M4, is in `docs/STATUS.md`.
 
