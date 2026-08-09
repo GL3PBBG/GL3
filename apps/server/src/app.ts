@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import type { Queue } from "bullmq";
+import type { PluginManifest } from "@gl3/plugin-sdk";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -17,6 +18,7 @@ import { registerNotificationRoutes } from "./game/notifications/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerRankRoutes } from "./game/ranks/routes.js";
 import { registerTravelRoutes } from "./game/travel/routes.js";
+import { registerPluginRoutes } from "./plugins/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
@@ -28,6 +30,8 @@ export interface AppDeps {
   leaderboardPrefix?: string;
   /** Overridable so tests can pair a server with a test-private rate-limit namespace — see bootTestServer. */
   rateLimitPrefix?: string;
+  /** Plugin manifests whose routes get registered onto the Fastify instance. */
+  plugins?: readonly PluginManifest[];
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
@@ -71,6 +75,16 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerRankRoutes(app, deps.db, requireAuth);
   registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
+
+  // Strangler seam: plugin routes register on the same Fastify instance while
+  // app.ts keeps registering un-ported modules directly (spec: Sequencing).
+  // Both paths coexist for the length of M5 and the old one is deleted last.
+  registerPluginRoutes(app, deps.plugins ?? [], {
+    db: deps.db,
+    redis: deps.redis,
+    queues: new Map(),
+    settings: {},
+  });
 
   return app;
 }

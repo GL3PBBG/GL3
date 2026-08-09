@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
@@ -9,7 +10,9 @@ import { createCrimeQueue } from "../../src/queue/index.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
 
-export async function bootTestServer(): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
+export async function bootTestServer(
+  options?: { plugins?: readonly PluginManifest[] },
+): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
   const config = loadConfig({ ...process.env, NODE_ENV: "test" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
@@ -53,7 +56,7 @@ export async function bootTestServer(): Promise<{ app: FastifyInstance; close: (
   const rateLimitPrefix = `ratelimit-test-${randomUUID()}`;
 
   await rebuildLeaderboards(db, redis, leaderboardPrefix);
-  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix });
+  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix, plugins: options?.plugins });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.
