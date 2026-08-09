@@ -59,6 +59,14 @@ describe("describeEvent", () => {
     expect(describeEvent(pluginEvent(), metasOther)).toBe("Ron: hello.greeted");
   });
 
+  // The other half of the same predicate. A plugin declaring both "greeted"
+  // and "insulted" must not get the first meta's template for the second
+  // event: that renders confidently wrong copy with no error anywhere.
+  it("does not match a different event from the same plugin", () => {
+    expect(describeEvent(pluginEvent({ name: "insulted" }), metas))
+      .toBe("Ron: hello.insulted");
+  });
+
   // Security property: `payload` is z.record(z.unknown()) and may carry
   // player-supplied strings, so the envelope's authoritative actorName has to
   // win. If the spread ran the other way this renders "Mallory greeted ...".
