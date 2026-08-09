@@ -32,6 +32,40 @@ describe("definePlugin", () => {
     expect(() => definePlugin({ ...valid, basePaths: [] })).toThrow();
   });
 
+  // A duplicate name is unrecoverable downstream: the runner claims each
+  // (plugin_id, name) with onConflictDoNothing(), so the second copy's insert
+  // conflicts and its DDL is skipped in silence — a boot that succeeds while
+  // leaving a table uncreated.
+  //
+  // Built by spreading `valid` and replacing only `migrations`: a manifest that
+  // is invalid for some *other* reason would satisfy the assertion without the
+  // refinement existing at all. And the whole message is anchored with ^…$
+  // rather than matched on a fragment, so a later rule whose message merely
+  // contains "duplicate" cannot satisfy it either.
+  it("rejects two migrations with the same name, naming the plugin and the name", () => {
+    const duplicated = {
+      ...valid,
+      migrations: [
+        { name: "0001_init", sql: "CREATE TABLE p_bounties_a (id text)" },
+        { name: "0001_init", sql: "CREATE TABLE p_bounties_b (id text)" },
+      ],
+    };
+    expect(() => definePlugin(duplicated)).toThrow(
+      /^invalid plugin manifest for "bounties" — migrations\.1: duplicate migration name "0001_init"$/,
+    );
+  });
+
+  it("accepts distinct migration names", () => {
+    const manifest = definePlugin({
+      ...valid,
+      migrations: [
+        { name: "0001_init", sql: "CREATE TABLE p_bounties_a (id text)" },
+        { name: "0002_more", sql: "CREATE TABLE p_bounties_b (id text)" },
+      ],
+    });
+    expect(manifest.migrations.map((m) => m.name)).toEqual(["0001_init", "0002_more"]);
+  });
+
   it("names the plugin in the error message", () => {
     expect(() => definePlugin({ ...valid, version: "x" })).toThrow(/bounties/);
   });
