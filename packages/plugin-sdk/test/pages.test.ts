@@ -95,12 +95,6 @@ describe("PageSchemaSchema", () => {
     expect(() => PageSchemaSchema.parse(bad)).toThrow(/Invalid discriminator value/);
   });
 
-  it("rejects a page whose path is not absolute", () => {
-    expect(() => PageSchemaSchema.parse({ ...page, path: "hello" })).toThrow(
-      /page path must be absolute/,
-    );
-  });
-
   it("makes menu optional so a page can exist without a nav entry", () => {
     const { menu: _menu, ...noMenu } = page;
     expect(PageSchemaSchema.parse(noMenu).menu).toBeUndefined();
@@ -218,6 +212,10 @@ describe("view sink constraints", () => {
     ["a javascript: URI", "javascript:alert(1)"],
     ["an absolute http URL", "https://evil.example/steal"],
     ["a protocol-relative URL", "//evil.example/steal"],
+    // `\` is `/` in WHATWG's relative-slash state, so these two resolve
+    // cross-origin exactly like `//evil.example` does.
+    ["a backslash-relative URL", "/\\evil.example/steal"],
+    ["a backslash-then-slash URL", "/\\/evil.example"],
     ["a relative path", "hello"],
   ])("rejects a link.to that is %s", (_label, to) => {
     expect(() => PageSchemaSchema.parse(withNode({ kind: "link", label: "L", to }))).toThrow(
@@ -235,6 +233,7 @@ describe("view sink constraints", () => {
     ["a bare path with no method", "/api/hello/go"],
     ["an absolute URL", "POST https://evil.example/steal"],
     ["a protocol-relative target", "POST //evil.example/steal"],
+    ["a backslash-relative target", "POST /\\evil.example/steal"],
     ["an unknown method", "TRACE /api/hello/go"],
   ])("rejects a button action that is %s", (_label, action) => {
     expect(() => PageSchemaSchema.parse(withNode({ kind: "button", label: "B", action }))).toThrow(
@@ -318,6 +317,41 @@ describe("view size bounds", () => {
   it("rejects a pathologically deep view without overflowing the stack", () => {
     expect(() => PageSchemaSchema.parse({ ...page, view: nest(50_000) })).toThrow(
       new RegExp(`view nests deeper than ${MAX_VIEW_DEPTH} levels`),
+    );
+  });
+
+  // Same failure mode in the other direction, and it is not the recursive
+  // schema that is at risk: enqueueing children with `push(...children)` throws
+  // a RangeError past V8's argument limit (~124k), before the node bound is
+  // ever consulted. The 513-child case above is three orders of magnitude too
+  // small to reach it.
+  it("rejects a pathologically wide view without overflowing the stack", () => {
+    expect(() => PageSchemaSchema.parse({ ...page, view: fanOut(200_000) })).toThrow(
+      new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`),
+    );
+  });
+});
+
+/**
+ * A page path the DTO rejects would boot here and then break the client, where
+ * one bad page fails the parse of the whole `/api/plugins` payload. The two
+ * rules therefore have to nest: whatever this schema accepts, the DTO accepts.
+ */
+describe("page path constraints", () => {
+  it.each([
+    ["is protocol-relative", "//evil.example"],
+    ["is backslash-relative", "/\\evil.example"],
+    ["is an absolute URL", "https://evil.example"],
+    ["is relative", "hello"],
+  ])("rejects a page path that %s", (_label, path) => {
+    expect(() => PageSchemaSchema.parse({ ...page, path })).toThrow(
+      /page path must be an app-internal absolute path/,
+    );
+  });
+
+  it("still rejects an uppercase page path", () => {
+    expect(() => PageSchemaSchema.parse({ ...page, path: "/Hello" })).toThrow(
+      /page path must be lowercase/,
     );
   });
 });

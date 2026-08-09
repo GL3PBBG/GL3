@@ -124,7 +124,17 @@ export const BoundedViewNodeSchema: z.ZodType<ViewNode, z.ZodTypeDef, unknown> =
 export const PageSchemaSchema = z
   .object({
     id: z.string().min(1),
-    path: z.string().regex(/^\/[a-z0-9\-/:]*$/, "page path must be absolute"),
+    /**
+     * Two rules, both load-bearing. `INTERNAL_PATH_RE` is the DTO's rule, so a
+     * path that boots here also parses on the client — the strict object over
+     * `pages[]` means one path the DTO rejects takes down parsing of the whole
+     * payload, in the browser, which is the failure this schema exists to move
+     * to boot time. The charset is the narrower SDK-only rule on top.
+     */
+    path: z
+      .string()
+      .regex(INTERNAL_PATH_RE, "page path must be an app-internal absolute path")
+      .regex(/^[a-z0-9\-/:]*$/, "page path must be lowercase"),
     menu: MenuEntrySchema.optional(),
     view: BoundedViewNodeSchema,
   })
