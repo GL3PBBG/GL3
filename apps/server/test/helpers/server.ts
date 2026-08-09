@@ -6,6 +6,7 @@ import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { startCrimeWorker } from "../../src/game/crimes/worker.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
+import { loadPlugins } from "../../src/plugins/loader.js";
 import { createCrimeQueue } from "../../src/queue/index.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
@@ -56,7 +57,21 @@ export async function bootTestServer(
   const rateLimitPrefix = `ratelimit-test-${randomUUID()}`;
 
   await rebuildLeaderboards(db, redis, leaderboardPrefix);
-  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix, plugins: options?.plugins });
+
+  // When plugins are provided, run the full boot sequence (validate → migrate →
+  // queues/workers) the same way production does, so a test exercises the real
+  // loader path. The random queue prefix isolates plugin BullMQ queues from
+  // each other and from other test files' queues in the same shared Redis —
+  // same reason `crime-test-<uuid>` exists above.
+  const loadedPlugins = options?.plugins !== undefined
+    ? await loadPlugins(
+        { db, redis, settings: {} },
+        options.plugins,
+        `plugin-test-${randomUUID()}:`,
+      )
+    : undefined;
+
+  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.
@@ -68,6 +83,10 @@ export async function bootTestServer(
   return {
     app,
     close: async () => {
+      if (loadedPlugins !== undefined) {
+        for (const w of loadedPlugins.workers) await w.close();
+        for (const q of loadedPlugins.queues.values()) await q.close();
+      }
       await gateway.close();
       await app.close();
       await worker.close();

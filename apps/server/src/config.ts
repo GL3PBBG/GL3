@@ -11,6 +11,8 @@ const EnvSchema = z.object({
     (value) => !value.split(",").map((o) => o.trim()).includes("*"),
     { message: "CORS_ORIGINS must not contain a wildcard \"*\" — spec §7 requires a strict allowlist" },
   ),
+  /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
+  PLUGIN_IDS: z.string().default(""),
 });
 
 export interface Config {
@@ -20,6 +22,7 @@ export interface Config {
   sessionTtlSeconds: number;
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
+  pluginIds: string[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -31,5 +34,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     sessionTtlSeconds: parsed.SESSION_TTL,
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     nodeEnv: parsed.NODE_ENV,
+    pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
   };
 }
