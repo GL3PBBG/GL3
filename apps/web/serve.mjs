@@ -17,7 +17,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("./dist", import.meta.url)));
 const PORT = Number(process.env.PORT ?? 8080);
@@ -64,6 +64,34 @@ function safePath(urlPath) {
   return candidate;
 }
 
+/**
+ * True when a path that matched no file should fall back to index.html (it is a
+ * client-side route), false when it should 404 (it is a missing asset).
+ *
+ * The policy is unchanged and still the point: a missing *asset* must 404
+ * honestly, because serving index.html in its place answers a script request
+ * with HTML and turns a broken build into a blank page with a MIME error
+ * instead of a legible missing-file error.
+ *
+ * What changed is the classifier. "Carries an extension" is not the same
+ * question as "is an asset", and the gap between them is a real production
+ * 404: `extname("/plugins/hello.index")` returns ".index", so every plugin page
+ * — ids are dotted by convention, and v1 routing serves all of them from
+ * /plugins/:pageId — was classified as a missing asset. The rule is now
+ * membership in CONTENT_TYPES, the set of extensions this server can actually
+ * produce a response for. Anything outside it was never an asset this server
+ * could have served, so index.html is the only sensible answer.
+ *
+ * Lowercased before the lookup because extname preserves case: without it
+ * `/assets/APP.JS` misses the map and gets index.html, which is the MIME-error
+ * failure above in its harder-to-spot direction.
+ */
+export function shouldServeIndex(urlPath) {
+  const ext = extname(urlPath).toLowerCase();
+  if (ext === "") return true;
+  return !CONTENT_TYPES.has(ext);
+}
+
 function send(res, status, headers, stream) {
   res.writeHead(status, headers);
   if (stream) stream.pipe(res);
@@ -102,11 +130,10 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // SPA fallback, but only for what looks like a client-side route. A request
-  // for a missing *asset* (anything carrying an extension) must 404 — serving
-  // index.html in its place turns a broken build into a blank page with a MIME
-  // error instead of an honest missing-file error.
-  if (extname(urlPath) === "") {
+  // SPA fallback, but only for what looks like a client-side route — see
+  // shouldServeIndex for what "looks like" means and why an extension alone
+  // does not decide it.
+  if (shouldServeIndex(urlPath)) {
     const indexPath = join(ROOT, "index.html");
     const index = await stat(indexPath).catch(() => null);
     if (index?.isFile()) {
@@ -122,10 +149,29 @@ const server = createServer(async (req, res) => {
   send(res, 404, { "content-type": "text/plain; charset=utf-8" });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`web: serving ${ROOT} on 0.0.0.0:${PORT}`);
-});
+/**
+ * Bind only when run as a program, not when imported. `shouldServeIndex` is
+ * unit-tested (test/serve-spa-fallback.test.ts), and without this guard the
+ * import would start a listener on PORT inside the test worker — which either
+ * collides with a real server or leaves the run hanging on an open handle.
+ *
+ * `createServer` above is left unguarded on purpose: it allocates an object and
+ * binds nothing, so it costs an import nothing.
+ *
+ * The container's CMD runs this file directly, so argv[1] is this file and the
+ * guard is true there. If it were ever wrong the web process would start,
+ * serve nothing and exit 0 — silent, and worse than the bug this file was
+ * changed to fix — so it is checked by hand against `node apps/web/serve.mjs`.
+ */
+const isMain =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-for (const signal of ["SIGTERM", "SIGINT"]) {
-  process.on(signal, () => { server.close(() => process.exit(0)); });
+if (isMain) {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`web: serving ${ROOT} on 0.0.0.0:${PORT}`);
+  });
+
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => { server.close(() => process.exit(0)); });
+  }
 }
