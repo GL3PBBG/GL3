@@ -162,6 +162,7 @@ export default defineWorkspace([
         "test/mail.test.ts",
         "test/news.test.ts",
         "test/notifications.test.ts",
+        "test/plugin-ctx-transaction.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/travel.test.ts",
