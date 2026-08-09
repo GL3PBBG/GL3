@@ -11,12 +11,15 @@ import type { Db } from "../db/client.js";
 import { pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange,
-  lockGangAndPlayerForUpdate, lockPlayersForUpdate,
+  lockGangAndPlayerForUpdate, lockLocationForUpdate, lockPlayersForUpdate,
 } from "../economy/ledger.js";
+import { applyExpAndRankUp } from "../economy/ranks.js";
 import { appendGangLog } from "../game/gangs/logs.js";
 import {
   acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
 } from "../game/cooldown.js";
+import { sendToJail } from "../game/jail/status.js";
+import { insertNotification } from "../game/notifications/service.js";
 import { newSeed } from "../game/rng.js";
 
 export interface PluginCtxDeps {
@@ -66,12 +69,16 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             applyBalanceChange: (change) => applyBalanceChange(tx, change),
             applyGangBalanceChange: (change) => applyGangBalanceChange(tx, change),
             addExp: (playerId, amount) => addExp(tx, playerId, amount),
+            applyExpAndRankUp: (playerId, expGain) => applyExpAndRankUp(tx, playerId, expGain),
           },
+          jail: { sendToJail: (playerId, seconds) => sendToJail(tx, playerId, seconds) },
           locks: {
             player: (playerIds) => lockPlayersForUpdate(tx, playerIds),
             gangAndPlayer: (gangId, playerId) => lockGangAndPlayerForUpdate(tx, gangId, playerId),
+            location: (locationId) => lockLocationForUpdate(tx, locationId),
           },
           gangLog: (entry) => appendGangLog(tx, entry.gangId, entry.playerId, entry.message),
+          notify: (playerId, body) => insertNotification(tx, { id: uuidv7(), playerId, body }),
           events: {
             publish: async (event) => { buffered.push(event); },
           },
