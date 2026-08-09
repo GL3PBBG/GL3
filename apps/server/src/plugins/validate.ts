@@ -40,6 +40,35 @@ function actionPath(action: string): string {
 }
 
 /**
+ * True if `path` has a `.` or `..` path segment.
+ *
+ * `containedIn` decides containment with `startsWith`, against the literal
+ * string the plugin wrote — but that is not the string that ends up on the
+ * wire. The web client fires an action's path through the browser's `fetch`,
+ * whose URL parser resolves `..` (and drops a redundant `.`) before the
+ * request leaves the page, so `"/api/hello/../bank/withdraw"` is
+ * `startsWith`-contained in `/api/hello` while the request it actually
+ * produces targets `/api/bank/withdraw`. Checked as its own pass, run before
+ * `containedIn`, so a traversal fails with a message about the traversal
+ * rather than a confusing "outside basePaths" — the path was never really
+ * outside the basePath by the string comparison, only by what a URL parser
+ * does to it first.
+ *
+ * Only the two literal dot segments are barred, not every `.`: a plugin's
+ * routable surface in this vocabulary is RPC verbs written by the author
+ * (`/api/hello/greet`), not filenames, so there is no legitimate action whose
+ * final segment needs a literal dot, and this does not reach for banning one.
+ *
+ * Deliberately blind to where a `..` would resolve to — `/api/hello/x/../y`
+ * resolves back inside `/api/hello`, but it is rejected anyway. A plugin
+ * author never has a reason to route through `..`, so there is no case worth
+ * complicating this into "reject unless it resolves back inside."
+ */
+function hasDotSegment(path: string): boolean {
+  return path.split("/").some((segment) => segment === "." || segment === "..");
+}
+
+/**
  * Every HTTP endpoint a page's view can drive.
  *
  * Three of the ten node kinds carry one: `button`, `cooldownButton` and `form`.
@@ -179,7 +208,13 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     // plugin touches — the route half of the same manifest has never allowed it.
     for (const page of manifest.pages) {
       for (const action of viewActions(page.view)) {
-        if (!containedIn(actionPath(action), manifest.basePaths)) {
+        const path = actionPath(action);
+        if (hasDotSegment(path)) {
+          fail(
+            `plugin "${manifest.id}" page "${page.id}" declares action "${action}", whose path contains a "." or ".." segment`,
+          );
+        }
+        if (!containedIn(path, manifest.basePaths)) {
           fail(
             `plugin "${manifest.id}" page "${page.id}" declares action "${action}", outside ${scope}`,
           );
