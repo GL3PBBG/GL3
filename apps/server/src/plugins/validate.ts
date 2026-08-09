@@ -1,4 +1,4 @@
-import type { PluginManifest } from "@gl3/plugin-sdk";
+import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
 
 /** Core owns these; a plugin claiming one is a hard boot failure (spec: Routes). */
 export const RESERVED_BASE_PATHS = ["/api/auth", "/api/ws", "/api/plugins", "/health"] as const;
@@ -10,6 +10,73 @@ function fail(message: string): never {
 /** `/api/hello` overlaps `/api/hello/world` and itself, but not `/api/helloworld`. */
 function overlaps(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+/**
+ * Containment, not overlap: `/api/hello` contains `/api/hello` and
+ * `/api/hello/greet`, but not `/api/helloworld` and not `/api` — the parent is
+ * the one direction `overlaps` above admits and this must not.
+ *
+ * Shared by the route check and the view-action check so the two halves of a
+ * manifest cannot drift apart on what "inside the plugin" means; a second copy
+ * is how they got out of step in the first place.
+ */
+function containedIn(path: string, basePaths: readonly string[]): boolean {
+  return basePaths.some((base) => path === base || path.startsWith(`${base}/`));
+}
+
+/**
+ * The endpoint half of a `"METHOD /path"` view action. `VIEW_ACTION_RE`
+ * (`@gl3/shared`) already fixed the shape at definition time — `definePlugin`
+ * parses every page through `PageSchemaSchema` — so the space is always present
+ * and the remainder always starts with `/`. Split on the first space rather than
+ * `split(" ")` so a path that somehow carried one still yields the whole path,
+ * which then fails containment rather than being silently truncated to something
+ * that passes it.
+ */
+function actionPath(action: string): string {
+  const space = action.indexOf(" ");
+  return space === -1 ? action : action.slice(space + 1);
+}
+
+/**
+ * Every HTTP endpoint a page's view can drive.
+ *
+ * Three of the ten node kinds carry one: `button`, `cooldownButton` and `form`.
+ * The two other path-shaped fields are deliberately not here. `link.to` is an
+ * app-internal *client* route (`/plugins/:pageId` under v1 routing), governed by
+ * `INTERNAL_PATH_RE` — containing it would forbid a plugin page from linking to
+ * its own sibling page. `cooldownButton.cooldownAction` is the middle segment of
+ * `cooldown:<action>:<playerId>`, a Redis key segment governed by
+ * `COOLDOWN_ACTION_RE`, which bars `/` outright and so can never name an
+ * endpoint.
+ *
+ * Walked with an explicit stack. `PageSchemaSchema` has already bounded the view
+ * at `MAX_VIEW_DEPTH`, so recursion would in fact be safe here — the stack is for
+ * the reader, to make the traversal one thing rather than a second recursive
+ * shape to keep in step with `checkViewBounds`.
+ */
+function viewActions(view: ViewNode): string[] {
+  const actions: string[] = [];
+  const pending: ViewNode[] = [view];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    switch (node.kind) {
+      case "button":
+      case "cooldownButton":
+      case "form":
+        actions.push(node.action);
+        break;
+      case "panel":
+        for (const child of node.children) pending.push(child);
+        break;
+      case "list":
+        for (const item of node.items) pending.push(item);
+        break;
+      default:
+        break;
+    }
+  }
+  return actions;
 }
 
 /**
@@ -93,18 +160,30 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     }
   }
 
-  // Route containment runs second: every basePath is known by now, so a route
-  // under a *later* basePath of the same plugin is not reported as a violation.
+  // Containment runs second: every basePath is known by now, so a route or an
+  // action under a *later* basePath of the same plugin is not reported as a
+  // violation.
   for (const manifest of manifests) {
+    const scope = `its basePaths [${manifest.basePaths.join(", ")}]`;
+
     for (const route of manifest.routes) {
       const path = routePath(route, manifest.id);
-      const inScope = manifest.basePaths.some(
-        (base) => path === base || path.startsWith(`${base}/`),
-      );
-      if (!inScope) {
-        fail(
-          `plugin "${manifest.id}" registers "${path}", outside its basePaths [${manifest.basePaths.join(", ")}]`,
-        );
+      if (!containedIn(path, manifest.basePaths)) {
+        fail(`plugin "${manifest.id}" registers "${path}", outside ${scope}`);
+      }
+    }
+
+    // A page is served under the plugin's name, so the endpoints it drives are
+    // attributed to the plugin. `basePaths` is that attribution, and a view
+    // action reaching past it makes the manifest a false account of what the
+    // plugin touches — the route half of the same manifest has never allowed it.
+    for (const page of manifest.pages) {
+      for (const action of viewActions(page.view)) {
+        if (!containedIn(actionPath(action), manifest.basePaths)) {
+          fail(
+            `plugin "${manifest.id}" page "${page.id}" declares action "${action}", outside ${scope}`,
+          );
+        }
       }
     }
   }
