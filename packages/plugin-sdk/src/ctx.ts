@@ -87,18 +87,36 @@ export interface PluginEventInput {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Mirrors core's `RankUpResult` (`economy/ranks.ts`) field for field — the
+ * promotion details `applyExpAndRankUp` returns on a fresh rank-up, or
+ * `null` when nothing changed (no exp gained, or already at the qualifying
+ * rank).
+ */
+export interface RankUpResult {
+  rankId: string;
+  rankName: string;
+  cashReward: bigint;
+  bulletReward: number;
+  maxHealth: number;
+}
+
 export interface PluginTx {
   readonly db: PluginDbTx;
   readonly economy: {
     applyBalanceChange(change: PluginBalanceChange): Promise<bigint>;
     applyGangBalanceChange(change: PluginGangBalanceChange): Promise<bigint>;
     addExp(playerId: string, amount: bigint): Promise<void>;
+    applyExpAndRankUp(playerId: string, expGain: bigint): Promise<RankUpResult | null>;
   };
+  readonly jail: { sendToJail(playerId: string, seconds: number): Promise<Date> };
   readonly locks: {
     player(playerIds: string[]): Promise<void>;
     gangAndPlayer(gangId: string, playerId: string): Promise<void>;
+    location(locationId: string): Promise<void>;
   };
   gangLog(entry: GangLogEntry): Promise<void>;
+  notify(playerId: string, body: string): Promise<void>;
   /**
    * Buffers the event. The loader publishes after commit and discards on
    * rollback, which makes NOTES.md rule 5 unrepresentable rather than merely

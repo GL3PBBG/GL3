@@ -181,6 +181,7 @@ export default defineWorkspace([
         "test/mail.test.ts",
         "test/news.test.ts",
         "test/notifications.test.ts",
+        "test/plugin-ctx-port-prereqs.test.ts",
         "test/plugin-ctx-transaction.test.ts",
         "test/plugin-jobs.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
