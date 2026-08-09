@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
 import type { FilterPoint, FilterSubscription } from "./filters.js";
 import { PageSchemaSchema, type PageSchema } from "./pages.js";
+import type { PluginRoute } from "./route.js";
 
 export const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const SEMVER_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -18,9 +19,6 @@ const MigrationSchema = z.object({ name: z.string().min(1), sql: z.string().min(
  * on `PluginManifest`; normalising once in `definePlugin` is what stops every
  * downstream consumer from writing `?? []` under `exactOptionalPropertyTypes`.
  *
- * The remaining `unknown` element type is a placeholder — Task 10 replaces it
- * with the real route type. Task 2 has already done so for `provides` and
- * `filters`, Task 3 for `pages`, and Task 4 for `events`.
  */
 export interface PluginManifestInput {
   id: string;
@@ -28,7 +26,7 @@ export interface PluginManifestInput {
   basePaths: string[];
   tables?: Record<string, unknown>;
   migrations?: PluginMigration[];
-  routes?: unknown[];
+  routes?: PluginRoute[];
   pages?: PageSchema[];
   events?: PluginEventDecl[];
   jobs?: Record<string, unknown>;
@@ -43,7 +41,7 @@ export interface PluginManifest {
   basePaths: string[];
   tables: Record<string, unknown>;
   migrations: PluginMigration[];
-  routes: unknown[];
+  routes: PluginRoute[];
   pages: PageSchema[];
   events: PluginEventDecl[];
   jobs: Record<string, unknown>;
@@ -97,7 +95,7 @@ const InputSchema = z
       .min(1),
     tables: z.record(z.unknown()).optional(),
     migrations: z.array(MigrationSchema).optional(),
-    routes: z.array(z.unknown()).optional(),
+    routes: z.array(z.custom<PluginRoute>()).optional(),
     pages: z.array(PageSchemaSchema).optional(),
     events: z.array(PluginEventDeclSchema).optional(),
     jobs: z.record(z.unknown()).optional(),
