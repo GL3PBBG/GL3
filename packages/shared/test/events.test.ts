@@ -58,6 +58,18 @@ const bulletsPurchased = {
   bullets: "10",
 } as const;
 
+const pluginEvent = {
+  id: "018f8e2a-0000-7000-8000-000000000020",
+  type: "plugin.event",
+  at: "2026-08-07T00:00:00.000Z",
+  actorId: "018f8e2a-0000-7000-8000-000000000002",
+  actorName: "Vito",
+  audience: { kind: "global" },
+  pluginId: "bounties",
+  name: "placed",
+  payload: { target: "Ron", amount: "50000" },
+} as const;
+
 describe("GameEventSchema", () => {
   it("accepts a crime.resolved event", () => {
     expect(GameEventSchema.parse(crimeResolved)).toMatchObject({ type: "crime.resolved" });
@@ -85,14 +97,37 @@ describe("GameEventSchema", () => {
     expect(GameEventSchema.parse(bulletsPurchased)).toMatchObject({ type: "bullets.purchased" });
   });
 
-  it("covers all nineteen event names after M2's additions", () => {
+  // M5 adds exactly one name — the envelope every plugin event travels in. The
+  // nineteen core names stay closed: a ported core module gets its own variant,
+  // not a plugin.event, so this census failing is how an accidental widening of
+  // the core union is caught.
+  it("covers the nineteen core event names plus M5's plugin envelope", () => {
     expect(new Set(GameEventSchema.options.map((o) => o.shape.type.value))).toEqual(new Set([
       "crime.resolved", "player.jailed", "player.released", "player.travelled",
       "player.attacked", "player.killed", "bounty.placed", "bounty.claimed",
       "gang.created", "gang.memberJoined", "gang.memberLeft", "mail.received",
       "notification.created", "news.posted", "chat.message", "player.joined",
       "player.rankedUp", "bank.transacted", "bullets.purchased",
+      "plugin.event",
     ]));
+  });
+
+  it("accepts a plugin.event envelope and round-trips its payload", () => {
+    expect(GameEventSchema.parse(pluginEvent)).toMatchObject({
+      type: "plugin.event", pluginId: "bounties", name: "placed",
+    });
+    expect(GameEventSchema.parse(JSON.parse(JSON.stringify(pluginEvent)))).toEqual(pluginEvent);
+  });
+
+  // The envelope is deliberately open about *what* is in the payload — the
+  // plugin's own declared schema is what checks that — but it is not open about
+  // the envelope's own fields, which the client reads to route and render.
+  it("requires pluginId and name on the envelope, and a payload object", () => {
+    const { pluginId: _p, ...noPluginId } = pluginEvent;
+    expect(() => GameEventSchema.parse(noPluginId)).toThrow();
+    const { name: _n, ...noName } = pluginEvent;
+    expect(() => GameEventSchema.parse(noName)).toThrow();
+    expect(() => GameEventSchema.parse({ ...pluginEvent, payload: "not an object" })).toThrow();
   });
 
   it("requires player.travelled to carry a cost, and allows a null fromLocationId for a player's first move", () => {

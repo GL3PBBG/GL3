@@ -50,6 +50,11 @@ function describe(event: GameEvent): string {
       return `Bank ${event.direction}: ${formatMoney(event.amount)}`;
     case "bullets.purchased":
       return `Bought ${event.quantity} bullets for ${formatMoney(event.cost)}`;
+    case "plugin.event":
+      // Plan 2 replaces this with the manifest's `describe` template fetched
+      // from GET /api/plugins. Until then the envelope renders its own fields
+      // rather than crashing the feed.
+      return `${event.actorName}: ${event.pluginId}.${event.name}`;
   }
 }
 

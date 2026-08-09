@@ -67,5 +67,10 @@ export function invalidationKeys(
     case "chat.message":
     case "player.joined":
       return [];
+    case "plugin.event":
+      // Plan 2 maps this to the manifest's `invalidates` list. Returning no
+      // keys is correct until that metadata reaches the client: a plugin
+      // event invalidating nothing is stale data, not a wrong render.
+      return [];
   }
 }
