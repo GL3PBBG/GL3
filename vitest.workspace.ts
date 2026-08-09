@@ -27,6 +27,9 @@ const srcAliases = {
       "@gl3/plugin-ranks": fileURLToPath(
         new URL("./packages/plugins/ranks/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-notifications": fileURLToPath(
+        new URL("./packages/plugins/notifications/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
