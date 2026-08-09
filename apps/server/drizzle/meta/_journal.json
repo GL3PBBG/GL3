@@ -29,6 +29,13 @@
       "when": 1786136136219,
       "tag": "0003_gang_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786236398674,
+      "tag": "0004_plugin_runtime",
+      "breakpoints": true
     }
   ]
 }
