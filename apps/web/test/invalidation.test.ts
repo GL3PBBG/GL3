@@ -105,13 +105,14 @@ describe("invalidationKeys", () => {
   });
 
   // Separate from the "no server routes" case below because the reason differs:
-  // this one invalidates nothing only until the manifest's `invalidates` list
-  // reaches the client, so the day that changes it should be a deliberate edit
-  // here rather than a silent addition to that list.
-  it("returns no keys for a plugin.event until manifest metadata reaches the client", () => {
+  // a plugin event's own keys come from the manifest, which this two-argument
+  // call has not supplied — but the manifest itself is still stale, since a
+  // plugin can add a page or event after first boot. So it is never empty.
+  // The metadata-driven cases live in plugins-invalidation.test.ts.
+  it("refreshes the manifest for a plugin.event with no metadata to resolve it", () => {
     expect(invalidationKeys(
       event("plugin.event", { pluginId: "hello", name: "greeted", payload: {} }), VIEWER,
-    )).toEqual([]);
+    )).toEqual([keys.plugins()]);
   });
 
   it("invalidates nothing for surfaces that have no server routes at all", () => {
