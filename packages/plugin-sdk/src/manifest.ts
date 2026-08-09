@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
 import type { FilterPoint, FilterSubscription } from "./filters.js";
 import { PageSchemaSchema, type PageSchema } from "./pages.js";
 
@@ -17,9 +18,9 @@ const MigrationSchema = z.object({ name: z.string().min(1), sql: z.string().min(
  * on `PluginManifest`; normalising once in `definePlugin` is what stops every
  * downstream consumer from writing `?? []` under `exactOptionalPropertyTypes`.
  *
- * The remaining `unknown` element types are placeholders — Tasks 4 and 10
- * replace each with its real type (events, routes) as it is defined. Task 2 has
- * already done so for `provides` and `filters`, and Task 3 for `pages`.
+ * The remaining `unknown` element type is a placeholder — Task 10 replaces it
+ * with the real route type. Task 2 has already done so for `provides` and
+ * `filters`, Task 3 for `pages`, and Task 4 for `events`.
  */
 export interface PluginManifestInput {
   id: string;
@@ -29,7 +30,7 @@ export interface PluginManifestInput {
   migrations?: PluginMigration[];
   routes?: unknown[];
   pages?: PageSchema[];
-  events?: unknown[];
+  events?: PluginEventDecl[];
   jobs?: Record<string, unknown>;
   provides?: FilterPoint<unknown>[];
   filters?: FilterSubscription[];
@@ -44,7 +45,7 @@ export interface PluginManifest {
   migrations: PluginMigration[];
   routes: unknown[];
   pages: PageSchema[];
-  events: unknown[];
+  events: PluginEventDecl[];
   jobs: Record<string, unknown>;
   provides: FilterPoint<unknown>[];
   filters: FilterSubscription[];
@@ -55,14 +56,16 @@ export interface PluginManifest {
  * manifest fails on `import` with the plugin's own id in the message. The
  * loader re-checks cross-plugin concerns (collisions) it cannot see from here.
  *
- * The function-bearing fields — `routes`, `events` and `jobs` — are
- * `z.unknown()`: their shape is enforced by the TypeScript types, and a zod
- * schema over a function would only assert `typeof === "function"`.
- * `.strict()` is what rejects unknown fields.
+ * The function-bearing fields — `routes` and `jobs` — are `z.unknown()`: their
+ * shape is enforced by the TypeScript types, and a zod schema over a function
+ * would only assert `typeof === "function"`. `.strict()` is what rejects
+ * unknown fields.
  *
- * Two fields are not function-bearing and so do not follow that rule. `pages`
+ * Three fields are not function-bearing and so do not follow that rule. `pages`
  * holds pure data, so `PageSchemaSchema` checks it for real here and a malformed
- * view node fails at definition time rather than at render. `tables` maps a
+ * view node fails at definition time rather than at render. `events` is data
+ * apart from its `payload` schema, and `PluginEventDeclSchema` checks it the
+ * same way. `tables` maps a
  * plugin's own key to the SQL name of one of its tables — data too, and today
  * just a string — but its value type is left `unknown` because the plan defers
  * the final shape (a drizzle-table accessor) to the port that proves it end to
@@ -96,7 +99,7 @@ const InputSchema = z
     migrations: z.array(MigrationSchema).optional(),
     routes: z.array(z.unknown()).optional(),
     pages: z.array(PageSchemaSchema).optional(),
-    events: z.array(z.unknown()).optional(),
+    events: z.array(PluginEventDeclSchema).optional(),
     jobs: z.record(z.unknown()).optional(),
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),

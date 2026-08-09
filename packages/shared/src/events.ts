@@ -70,6 +70,24 @@ export const GameEventSchema = z.discriminatedUnion("type", [
     ...base, type: z.literal("bullets.purchased"),
     locationId: IdSchema, quantity: z.number().int().positive(), cost: MoneySchema, cash: MoneySchema, bullets: MoneySchema,
   }),
+  /**
+   * The envelope every plugin event travels in. The nineteen core variants
+   * above stay closed and unchanged; ported core modules keep emitting their
+   * own typed variants (spec: Events). A plugin declares the payload schema,
+   * the `describe` template and the invalidation keys in its manifest, and all
+   * three reach the client through GET /api/plugins.
+   *
+   * `payload` is `z.record(z.unknown())` because this schema cannot know a
+   * plugin's shapes — the plugin's own declared schema is what checks them.
+   * Money inside a payload is still a decimal string, as everywhere else.
+   */
+  z.object({
+    ...base,
+    type: z.literal("plugin.event"),
+    pluginId: z.string(),
+    name: z.string(),
+    payload: z.record(z.unknown()),
+  }),
 ]);
 
 export type GameEvent = z.infer<typeof GameEventSchema>;

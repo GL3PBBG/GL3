@@ -16,6 +16,7 @@ export {
   type ViewNode,
   type MenuEntry,
 } from "./pages.js";
+export { renderDescribe, PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
 export {
   definePlugin,
   PLUGIN_ID_PATTERN,

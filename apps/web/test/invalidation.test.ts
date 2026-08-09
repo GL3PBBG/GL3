@@ -104,6 +104,16 @@ describe("invalidationKeys", () => {
     expect(invalidationKeys(event("news.posted"), VIEWER)).toEqual([keys.news()]);
   });
 
+  // Separate from the "no server routes" case below because the reason differs:
+  // this one invalidates nothing only until the manifest's `invalidates` list
+  // reaches the client, so the day that changes it should be a deliberate edit
+  // here rather than a silent addition to that list.
+  it("returns no keys for a plugin.event until manifest metadata reaches the client", () => {
+    expect(invalidationKeys(
+      event("plugin.event", { pluginId: "hello", name: "greeted", payload: {} }), VIEWER,
+    )).toEqual([]);
+  });
+
   it("invalidates nothing for surfaces that have no server routes at all", () => {
     for (const type of ["chat.message", "bounty.placed", "bounty.claimed", "player.joined"] as const) {
       expect(invalidationKeys(event(type), VIEWER)).toEqual([]);
