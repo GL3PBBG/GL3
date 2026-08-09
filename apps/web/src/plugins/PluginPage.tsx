@@ -37,5 +37,8 @@ export function PluginPage(): JSX.Element | null {
     return <Panel title={page.id}><p>This plugin has no UI installed.</p></Panel>;
   }
 
-  return <PageRenderer instructions={instructions} />;
+  // Keyed by page id: without it, React reuses the PageRenderer instance
+  // across a /plugins/a -> /plugins/b navigation, so formValues and the
+  // error banner from page A survive onto page B.
+  return <PageRenderer key={page.id} instructions={instructions} />;
 }
