@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
-  useJail, useLocations, useLogout, useMail, useMe, useNotifications, useRanks,
+  useJail, useLocations, useLogout, useMail, useMe, useNotifications, usePlugins, useRanks,
 } from "../api/queries.js";
 import { formatDuration } from "../lib/errors.js";
 import { unreadCount } from "../lib/mail.js";
@@ -43,6 +43,14 @@ export function Shell(): JSX.Element {
   const logout = useLogout();
   const mail = useMail();
   const notifications = useNotifications();
+  const plugins = usePlugins();
+
+  // `order` is the only thing that field is for, so the nav is the one place it
+  // has to be honoured. Sorted on a copy — the array belongs to the query cache
+  // — and tie-broken on pageId so two entries sharing an order stay put across
+  // refetches instead of swapping places.
+  const pluginLinks = [...(plugins.data?.menu ?? [])]
+    .sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
 
   // /api/auth/me carries neither rank nor location; both are derived from the
   // list endpoints, which is why the HUD depends on three queries.
@@ -94,6 +102,24 @@ export function Shell(): JSX.Element {
             </NavLink>
           );
         })}
+        {/*
+          Plugin entries sit below the core links and carry no badge: a badge is
+          a count the shell polls for, and nothing in the manifest supplies one.
+          The link target is the namespaced route, not the entry's declared
+          `path` — see the routing note in App.tsx. `pageId` is only constrained
+          to be non-empty, so it is encoded rather than trusted as a path segment.
+        */}
+        {pluginLinks.map((entry) => (
+          <NavLink
+            key={entry.pageId}
+            to={`/plugins/${encodeURIComponent(entry.pageId)}`}
+            className={({ isActive }) =>
+              isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+            }
+          >
+            {entry.label}
+          </NavLink>
+        ))}
       </nav>
 
       {jail.data?.jailed === true ? (
