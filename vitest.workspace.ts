@@ -21,6 +21,9 @@ const srcAliases = {
       "@gl3/plugin-sdk": fileURLToPath(
         new URL("./packages/plugin-sdk/src/index.ts", import.meta.url),
       ),
+      "@gl3/hello-plugin": fileURLToPath(
+        new URL("./examples/hello-plugin/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -81,7 +84,23 @@ const dbHookTimeout = 30000;
  * the "both" project is always *safe*, just not free.
  */
 export default defineWorkspace([
-  "packages/*",
+  {
+    test: {
+      name: "@gl3/shared",
+      root: "./packages/shared",
+      include: ["test/**/*.test.ts"],
+    },
+    ...srcAliases,
+  },
+  {
+    test: {
+      name: "@gl3/plugin-sdk",
+      root: "./packages/plugin-sdk",
+      include: ["test/**/*.test.ts"],
+      typecheck: { enabled: true },
+    },
+    ...srcAliases,
+  },
   {
     // Pure client modules only — money/rank/error formatting and the
     // event→cache-key map. No jsdom and no component rendering: everything
@@ -166,6 +185,7 @@ export default defineWorkspace([
         "test/plugin-jobs.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
+        "test/plugin-loader.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/travel.test.ts",
