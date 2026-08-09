@@ -18,6 +18,7 @@ export type {
   PluginGangBalanceChange,
   PluginRng,
   PluginTx,
+  RankUpResult,
 } from "./ctx.js";
 export {
   PageSchemaSchema,

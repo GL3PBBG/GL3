@@ -24,6 +24,12 @@ const srcAliases = {
       "@gl3/hello-plugin": fileURLToPath(
         new URL("./examples/hello-plugin/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-ranks": fileURLToPath(
+        new URL("./packages/plugins/ranks/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-notifications": fileURLToPath(
+        new URL("./packages/plugins/notifications/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -175,12 +181,14 @@ export default defineWorkspace([
         "test/gang-membership.test.ts",
         "test/gang-transfer.test.ts",
         "test/gangs.test.ts",
+        "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
         "test/news.test.ts",
         "test/notifications.test.ts",
+        "test/plugin-ctx-port-prereqs.test.ts",
         "test/plugin-ctx-transaction.test.ts",
         "test/plugin-jobs.test.ts",
         "test/plugin-manifest-endpoint.test.ts",

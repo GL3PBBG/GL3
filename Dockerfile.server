@@ -3,18 +3,23 @@
 # Server image: API + WebSocket gateway. Built from compiled TypeScript.
 #
 # The builder runs `tsc --build` against @gl3/server, which follows its
-# tsconfig references to @gl3/shared, @gl3/plugin-sdk and @gl3/hello-plugin and
-# emits all four dist/ dirs in one step — so no separate `build -w` is needed
-# here (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
-# needs dist present before the web build starts).
+# tsconfig references to @gl3/shared, @gl3/plugin-sdk, @gl3/plugin-ranks,
+# @gl3/plugin-notifications and @gl3/hello-plugin and emits all six dist/
+# dirs in one step — so no separate `build -w` is needed here (unlike
+# Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and needs dist
+# present before the web build starts).
 #
 # Every project apps/server/tsconfig.json references must be copied in, sources
 # and tsconfig both: tsc reads the referenced tsconfig even for a type-only
-# import and fails with TS5083 if it is missing. @gl3/hello-plugin is also a
-# RUNTIME requirement — src/index.ts imports it statically for the plugin import
-# map (a dynamic import(pluginId) is deliberately not used, so the
-# dependency-direction check stays compiler-enforceable). Without it in the
-# runtime stage the server cannot boot even with PLUGIN_IDS empty.
+# import and fails with TS5083 if it is missing. @gl3/hello-plugin,
+# @gl3/plugin-ranks and @gl3/plugin-notifications are also RUNTIME
+# requirements — src/index.ts imports @gl3/hello-plugin statically for the
+# optional-plugin import map, and src/plugins/core-plugins.ts imports
+# @gl3/plugin-ranks and @gl3/plugin-notifications statically as ported core
+# modules (a dynamic import(pluginId) is deliberately not used for any of
+# them, so the dependency-direction check stays compiler-enforceable).
+# Without all three in the runtime stage the server cannot boot, even with
+# PLUGIN_IDS empty — core plugins are never optional.
 #
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
 # build toolchain (no python/make/g++).
@@ -39,6 +44,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY packages/plugins/ranks/package.json packages/plugins/ranks/
+COPY packages/plugins/notifications/package.json packages/plugins/notifications/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -50,6 +57,10 @@ COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
 COPY packages/shared/src packages/shared/src
 COPY packages/plugin-sdk/tsconfig.json packages/plugin-sdk/tsconfig.json
 COPY packages/plugin-sdk/src packages/plugin-sdk/src
+COPY packages/plugins/ranks/tsconfig.json packages/plugins/ranks/tsconfig.json
+COPY packages/plugins/ranks/src packages/plugins/ranks/src
+COPY packages/plugins/notifications/tsconfig.json packages/plugins/notifications/tsconfig.json
+COPY packages/plugins/notifications/src packages/plugins/notifications/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -75,11 +86,13 @@ WORKDIR /app
 
 # Same manifests as the builder, then a production-only install. This recreates
 # the node_modules/@gl3/* workspace symlinks, which is how the runtime resolves
-# `@gl3/shared`, `@gl3/plugin-sdk` and `@gl3/hello-plugin` through their
-# package.json exports maps.
+# `@gl3/shared`, `@gl3/plugin-sdk`, `@gl3/plugin-ranks`, `@gl3/plugin-notifications`
+# and `@gl3/hello-plugin` through their package.json exports maps.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY packages/plugins/ranks/package.json packages/plugins/ranks/
+COPY packages/plugins/notifications/package.json packages/plugins/notifications/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -90,6 +103,8 @@ RUN npm ci --omit=dev
 # ../../drizzle relative to dist/db/, i.e. apps/server/drizzle.
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/plugin-sdk/dist packages/plugin-sdk/dist
+COPY --from=builder /app/packages/plugins/ranks/dist packages/plugins/ranks/dist
+COPY --from=builder /app/packages/plugins/notifications/dist packages/plugins/notifications/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist

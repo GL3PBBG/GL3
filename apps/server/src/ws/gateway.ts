@@ -98,7 +98,15 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
     }
   };
 
-  await subscribeToEvents(deps.subscriber, (event) => { void route(event); });
+  await subscribeToEvents(deps.subscriber, (event) => {
+    // route() can reject (the "gang" branch queries Postgres) — same hole
+    // subscribe.ts already guards for a malformed frame ("must not take
+    // this process down"): an unhandled rejection here can crash the whole
+    // process and drop every connected socket, not just this one event.
+    route(event).catch((err: unknown) => {
+      console.error({ err, eventType: event.type, audienceKind: event.audience.kind }, "gateway: failed to route event");
+    });
+  });
 
   return {
     connectionCount: () => [...sockets.values()].reduce((n, set) => n + set.size, 0),
