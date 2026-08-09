@@ -88,8 +88,14 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
       queues: loaded.queues,
       settings: {},
     });
-    registerPluginsEndpoint(app, loaded.payload);
   }
+
+  // Outside the guard: the client's `usePlugins()` call is unconditional, so a
+  // server booted with no plugins must answer this route with an empty manifest
+  // rather than 404. A 404 surfaces as `plugins.isError`, which blanks the
+  // plugin nav *and* makes PluginPage render its error state — a state a
+  // plugin-less deployment should never be in.
+  registerPluginsEndpoint(app, loaded?.payload ?? { menu: [], pages: [], events: [] });
 
   return app;
 }

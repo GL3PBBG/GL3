@@ -79,4 +79,20 @@ describe("GET /api/plugins", () => {
       await close();
     }
   });
+
+  // bootTestServer() with no argument is the only path that leaves
+  // `deps.plugins` undefined, which is the branch this case exists for.
+  // Passing `{ plugins: [] }` would run the loader and reach the endpoint
+  // through the *defined* branch, proving nothing about a plugin-less boot.
+  it("returns an empty 200 payload when no plugins are loaded", async () => {
+    const { app, close } = await bootTestServer();
+    try {
+      const { token } = await register(app);
+      const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ menu: [], pages: [], events: [] });
+    } finally {
+      await close();
+    }
+  });
 });

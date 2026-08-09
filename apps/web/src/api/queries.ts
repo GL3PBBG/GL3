@@ -5,15 +5,15 @@ import {
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
   GangMemberListResponseSchema, JailStatusSchema, LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
-  NewsListResponseSchema, NotificationListResponseSchema, ProfileDtoSchema,
-  RankListResponseSchema, TravelResponseSchema,
+  NewsListResponseSchema, NotificationListResponseSchema, PluginsPayloadSchema,
+  ProfileDtoSchema, RankListResponseSchema, TravelResponseSchema,
   type BankStatusResponse, type BuyBulletsResponse, type CreateGangRequest,
   type CrimeListResponse, type GangBankResponse, type GangDto, type GangInviteListResponse,
   type GangLogListResponse, type GangMemberListResponse, type GangPermission,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
-  type NewsListResponse, type NotificationListResponse, type ProfileDto,
-  type RankListResponse, type UpdateProfileRequest,
+  type NewsListResponse, type NotificationListResponse, type PluginsPayload,
+  type ProfileDto, type RankListResponse, type UpdateProfileRequest,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
 import { keys } from "./keys.js";
@@ -397,5 +397,20 @@ export function useNews() {
   return useQuery<NewsListResponse>({
     queryKey: keys.news(),
     queryFn: async () => NewsListResponseSchema.parse(await api("/api/news")),
+  });
+}
+
+/* ------------------------------------------------------------------ plugins
+ *
+ * The manifest of everything the loaded plugins contribute: menu entries,
+ * page views, and the event metadata the feed renders. It is parsed here like
+ * every other response — `PagePayload.view` stays `unknown` past this point on
+ * purpose, and the renderer narrows it per node kind.
+ */
+
+export function usePlugins() {
+  return useQuery<PluginsPayload>({
+    queryKey: keys.plugins(),
+    queryFn: async () => PluginsPayloadSchema.parse(await api("/api/plugins")),
   });
 }
