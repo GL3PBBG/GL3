@@ -14,6 +14,7 @@ let closeServer: () => Promise<void>;
 let baseUrl: string;
 let senderToken: string;
 let recipientToken: string;
+let recipientId: string;
 
 beforeEach(async () => {
   await resetDb(db);
@@ -27,6 +28,7 @@ beforeEach(async () => {
   senderToken = sender.json().token;
   const recipient = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
   recipientToken = recipient.json().token;
+  recipientId = recipient.json().playerId;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -76,14 +78,47 @@ const open = (url: string): Promise<WebSocket> =>
     socket.once("error", reject);
   });
 
-const nextFrame = (socket: WebSocket): Promise<unknown> => {
+/**
+ * Resolves with the next frame matching `predicate` (default: any frame),
+ * silently discarding anything else along the way.
+ *
+ * `game:events` is a single Redis channel shared by every test file running
+ * concurrently, and the gateway broadcasts every `global`-audience event
+ * (e.g. `news.posted`) to *every* connected socket regardless of who it's
+ * "for" (gateway.ts's `route`, "global" case) — so an unfiltered `nextFrame`
+ * can consume a stranger's frame instead of the one this test is actually
+ * waiting for. This is the WS-socket-level equivalent of NOTES.md rule 4
+ * ("tests asserting on `game:events` must filter by their own actorId") —
+ * see `test/helpers/events.ts`'s `awaitOwnEvent`, which does the same thing
+ * one layer down, directly on the Redis subscription. Bounded by the same
+ * 4000ms so a genuinely missing frame still fails loudly instead of hanging.
+ */
+const nextFrame = (socket: WebSocket, predicate: (frame: unknown) => boolean = () => true): Promise<unknown> => {
   const state = frameQueues.get(socket);
   if (!state) throw new Error("socket was not opened via open()");
-  if (state.queue.length > 0) return Promise.resolve(state.queue.shift());
+  while (state.queue.length > 0) {
+    const frame = state.queue.shift();
+    if (predicate(frame)) return Promise.resolve(frame);
+  }
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("nextFrame: no frame within 4000ms")), 4000);
-    state.waiting = (frame) => { clearTimeout(timer); resolve(frame); };
+    const timer = setTimeout(() => reject(new Error("nextFrame: no matching frame within 4000ms")), 4000);
+    const waitForMatch = (frame: unknown): void => {
+      if (predicate(frame)) { clearTimeout(timer); resolve(frame); return; }
+      state.waiting = waitForMatch;
+    };
+    state.waiting = waitForMatch;
   });
+};
+
+// mail.received's actor is the *sender* (schema: "actor = the sender, or
+// the recipient for system mail"), so filtering on actorId the way
+// gang-invites.test.ts / m3-acceptance.test.ts do for notification.created
+// would not identify this test's own wait — recipientId is the field that does.
+/** Matches a `mail.received` server frame addressed to `recipientId` — see nextFrame's predicate. */
+const isMailFor = (recipientId: string) => (frame: unknown): boolean => {
+  const parsed = ServerFrameSchema.safeParse(frame);
+  return parsed.success && parsed.data.kind === "event"
+    && parsed.data.event.type === "mail.received" && parsed.data.event.recipientId === recipientId;
 };
 
 describe("POST /api/mail", () => {
@@ -91,7 +126,7 @@ describe("POST /api/mail", () => {
     const ticket = await mintTicket(recipientToken);
     const socket = await open(`${baseUrl}?ticket=${ticket}`);
     await nextFrame(socket); // ready
-    const incoming = nextFrame(socket);
+    const incoming = nextFrame(socket, isMailFor(recipientId));
 
     const res = await app.inject({
       method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
