@@ -84,6 +84,15 @@ describe("PluginsPayloadSchema view sink constraints", () => {
       .toThrow(/cooldownAction must be a bare cooldown key segment/);
   });
 
+  it("rejects a menu path that is not an app-internal absolute path", () => {
+    const bad = {
+      pages: [], events: [],
+      menu: [{ pageId: "hello.index", path: "//evil.example", label: "Hello", order: 1 }],
+    };
+    expect(() => PluginsPayloadSchema.parse(bad))
+      .toThrow(/menu path must be an app-internal absolute path/);
+  });
+
   it("rejects a page path that is not an app-internal absolute path", () => {
     const bad = {
       menu: [], events: [],
@@ -148,14 +157,5 @@ describe("PluginsPayloadSchema view size bounds", () => {
   it("rejects a pathologically wide view without overflowing the stack", () => {
     expect(() => PluginsPayloadSchema.parse(pageWithView(fanOut(200_000))))
       .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
-  });
-
-  it("rejects a menu path that is not an app-internal absolute path", () => {
-    const bad = {
-      pages: [], events: [],
-      menu: [{ pageId: "hello.index", path: "//evil.example", label: "Hello", order: 1 }],
-    };
-    expect(() => PluginsPayloadSchema.parse(bad))
-      .toThrow(/menu path must be an app-internal absolute path/);
   });
 });
