@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_VIEW_DEPTH, MAX_VIEW_NODES } from "@gl3/shared";
 import { definePlugin, PageSchemaSchema } from "../src/index.js";
 
 const page = {
@@ -198,5 +199,125 @@ describe("definePlugin pages validation", () => {
 
     expect(() => definePlugin(withBadPage)).toThrow(/invalid plugin manifest for "hello"/);
     expect(() => definePlugin(withBadPage)).toThrow(/pages\.0\.view/);
+  });
+});
+
+/**
+ * `to`, `action` and `cooldownAction` are the three strings a view hands
+ * straight to a sink: an `href`, a `fetch` target, and the middle segment of
+ * `cooldown:<action>:<playerId>`. A plugin is third-party code by definition,
+ * so each is constrained here — at authoring time, where a bad value fails the
+ * boot that loads the plugin rather than the browser that renders it.
+ */
+describe("view sink constraints", () => {
+  function withNode(node: unknown): unknown {
+    return { ...page, view: { kind: "panel", title: "x", children: [node] } };
+  }
+
+  it.each([
+    ["a javascript: URI", "javascript:alert(1)"],
+    ["an absolute http URL", "https://evil.example/steal"],
+    ["a protocol-relative URL", "//evil.example/steal"],
+    ["a relative path", "hello"],
+  ])("rejects a link.to that is %s", (_label, to) => {
+    expect(() => PageSchemaSchema.parse(withNode({ kind: "link", label: "L", to }))).toThrow(
+      /link\.to must be an app-internal absolute path/,
+    );
+  });
+
+  it("accepts a link.to that is an app-internal absolute path", () => {
+    expect(() =>
+      PageSchemaSchema.parse(withNode({ kind: "link", label: "L", to: "/gang/1" })),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["a bare path with no method", "/api/hello/go"],
+    ["an absolute URL", "POST https://evil.example/steal"],
+    ["a protocol-relative target", "POST //evil.example/steal"],
+    ["an unknown method", "TRACE /api/hello/go"],
+  ])("rejects a button action that is %s", (_label, action) => {
+    expect(() => PageSchemaSchema.parse(withNode({ kind: "button", label: "B", action }))).toThrow(
+      /action must be `METHOD \/absolute\/path`/,
+    );
+  });
+
+  it("applies the same action constraint to form nodes", () => {
+    const bad = withNode({
+      kind: "form",
+      action: "POST https://evil.example/steal",
+      submitLabel: "Go",
+      fields: [{ name: "who", label: "Who", type: "text" }],
+    });
+    expect(() => PageSchemaSchema.parse(bad)).toThrow(/action must be `METHOD \/absolute\/path`/);
+  });
+
+  // A `:` here would let a view name `cooldown:crime:<someone-else>` — a key
+  // that belongs to another action, or another player.
+  it.each([
+    ["contains a colon", "crime:other"],
+    ["is empty", ""],
+    ["starts with a digit", "1crime"],
+  ])("rejects a cooldownAction that %s", (_label, cooldownAction) => {
+    const bad = withNode({
+      kind: "cooldownButton",
+      label: "Greet",
+      action: "POST /api/hello/greet",
+      cooldownAction,
+    });
+    expect(() => PageSchemaSchema.parse(bad)).toThrow(
+      /cooldownAction must be a bare cooldown key segment/,
+    );
+  });
+});
+
+/**
+ * `ViewNodeSchema` is recursive, so an over-deep view would overflow the stack
+ * inside `z.lazy` before any refinement could reject it. `checkViewBounds` runs
+ * ahead of it in a pipeline and walks the raw value iteratively, which is what
+ * makes these two cases a rejection rather than a crash.
+ */
+describe("view size bounds", () => {
+  function nest(depth: number): unknown {
+    let node: unknown = { kind: "text", value: "leaf" };
+    for (let i = 1; i < depth; i += 1) node = { kind: "panel", title: "p", children: [node] };
+    return node;
+  }
+
+  function fanOut(width: number): unknown {
+    return {
+      kind: "panel",
+      title: "wide",
+      children: Array.from({ length: width }, () => ({ kind: "text", value: "leaf" })),
+    };
+  }
+
+  it(`accepts a view exactly ${MAX_VIEW_DEPTH} levels deep`, () => {
+    expect(() => PageSchemaSchema.parse({ ...page, view: nest(MAX_VIEW_DEPTH) })).not.toThrow();
+  });
+
+  it("rejects a view one level deeper than the bound", () => {
+    expect(() => PageSchemaSchema.parse({ ...page, view: nest(MAX_VIEW_DEPTH + 1) })).toThrow(
+      new RegExp(`view nests deeper than ${MAX_VIEW_DEPTH} levels`),
+    );
+  });
+
+  it(`accepts a view of exactly ${MAX_VIEW_NODES} nodes`, () => {
+    const view = fanOut(MAX_VIEW_NODES - 1);
+    expect(() => PageSchemaSchema.parse({ ...page, view })).not.toThrow();
+  });
+
+  it("rejects a view one node over the bound", () => {
+    expect(() => PageSchemaSchema.parse({ ...page, view: fanOut(MAX_VIEW_NODES) })).toThrow(
+      new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`),
+    );
+  });
+
+  // The bound has to hold against a value deep enough to blow the stack if the
+  // recursive schema ever saw it — that is the failure mode it exists to stop.
+  it("rejects a pathologically deep view without overflowing the stack", () => {
+    expect(() => PageSchemaSchema.parse({ ...page, view: nest(50_000) })).toThrow(
+      new RegExp(`view nests deeper than ${MAX_VIEW_DEPTH} levels`),
+    );
   });
 });
