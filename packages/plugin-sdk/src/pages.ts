@@ -10,7 +10,7 @@ import { z } from "zod";
  * silently dropped by the renderer, which is the failure mode hardest to spot
  * from the page that renders wrong.
  */
-const Leaf = z.discriminatedUnion("kind", [
+const leafOptions = [
   z.object({ kind: z.literal("text"), value: z.string() }).strict(),
   z.object({ kind: z.literal("money"), value: z.string() }).strict(),
   z.object({ kind: z.literal("error"), value: z.string() }).strict(),
@@ -46,7 +46,10 @@ const Leaf = z.discriminatedUnion("kind", [
       ),
     })
     .strict(),
-]);
+] as const;
+
+/** Type-level only: `ViewNode` infers its eight non-nesting members from here. */
+const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
   | z.infer<typeof Leaf>
@@ -57,10 +60,21 @@ export type ViewNode =
  * `panel` and `list` nest, so the schema is recursive and needs the explicit
  * type annotation zod requires for `z.lazy` — inference cannot close the loop
  * on its own.
+ *
+ * One flat `discriminatedUnion` over all ten kinds, rather than
+ * `union([Leaf, panel, list])`. The two are equivalent in what they accept and
+ * reject; they are not equivalent in what they report. `ZodUnion` aborts on
+ * failure and emits a single `invalid_union` issue at the path of the
+ * *outermost* union — always `view` — burying the real cause in `unionErrors`,
+ * which `definePlugin` discards because it maps only `error.issues`. Every
+ * authoring mistake below the top level therefore came out as
+ * `pages.0.view: Invalid input`. Dispatching on `kind` picks one branch and
+ * reports that branch's own issues at their own paths, so a bad node three
+ * levels down names itself.
  */
 export const ViewNodeSchema: z.ZodType<ViewNode> = z.lazy(() =>
-  z.union([
-    Leaf,
+  z.discriminatedUnion("kind", [
+    ...leafOptions,
     z
       .object({
         kind: z.literal("panel"),
