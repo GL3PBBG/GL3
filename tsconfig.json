@@ -4,6 +4,7 @@
     { "path": "./packages/shared" },
     { "path": "./packages/plugin-sdk" },
     { "path": "./packages/plugins/ranks" },
+    { "path": "./packages/plugins/notifications" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }
