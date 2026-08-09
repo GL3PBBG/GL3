@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { ErrorText, Money, Panel } from "../components/ui.js";
+import { togglePending } from "./pending.js";
 import type { RenderInstruction } from "./render.js";
 import styles from "../pages/pages.module.css";
 
@@ -63,8 +64,12 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
   // on one page may each declare an `amount`, and a page-wide map would make
   // them the same input. Submit maps its own keys back to bare names.
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  // Keyed by instruction index, same as `formValues` and for the same reason:
+  // stable and unique across the whole page. One button in flight does not
+  // disable the others (see `togglePending`) — only the control that fired.
+  const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
 
-  async function runAction(action: string, body?: Record<string, string>): Promise<void> {
+  async function runAction(index: number, action: string, body?: Record<string, string>): Promise<void> {
     setError(null);
     const [method, path] = action.split(" ");
     if (method === undefined || path === undefined) {
@@ -74,6 +79,11 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
       setError(new Error(`Plugin action is malformed: ${action}`));
       return;
     }
+    // Set before the request, cleared in `finally`: plugin routes carry no
+    // idempotency key (NOTES.md rule 1's failure mode reached from the
+    // client), so a double-click must not fire a second POST while the first
+    // is still in flight, whether it succeeds, fails, or throws.
+    setPending((previous) => togglePending(previous, index, true));
     try {
       // The client sets `content-type: application/json` iff `init.body` is
       // present, and the server answers a bodyless request carrying that header
@@ -88,6 +98,8 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
       // turns an ApiError into player copy ("Not ready yet — 30s to go.")
       // where `.message` would show "429 on_cooldown".
       setError(caught);
+    } finally {
+      setPending((previous) => togglePending(previous, index, false));
     }
   }
 
@@ -113,7 +125,12 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         );
       case "button":
         return (
-          <button key={index} type="button" onClick={() => { void runAction(inst.action); }}>
+          <button
+            key={index}
+            type="button"
+            disabled={pending.has(index)}
+            onClick={() => { void runAction(index, inst.action); }}
+          >
             {inst.label}
           </button>
         );
@@ -123,7 +140,12 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         // from server-supplied seconds and the manifest carries no cooldown
         // snapshot — so at render there is nothing to seed the countdown with.
         return (
-          <button key={index} type="button" onClick={() => { void runAction(inst.action); }}>
+          <button
+            key={index}
+            type="button"
+            disabled={pending.has(index)}
+            onClick={() => { void runAction(index, inst.action); }}
+          >
             {inst.label}
           </button>
         );
@@ -147,7 +169,7 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
               event.preventDefault();
               const body: Record<string, string> = {};
               for (const field of inst.fields) body[field.name] = formValues[`${index}:${field.name}`] ?? "";
-              void runAction(inst.action, body);
+              void runAction(index, inst.action, body);
             }}
           >
             {inst.fields.map((field) => {
@@ -169,7 +191,7 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
                 </label>
               );
             })}
-            <button type="submit">{inst.submitLabel}</button>
+            <button type="submit" disabled={pending.has(index)}>{inst.submitLabel}</button>
           </form>
         );
     }
