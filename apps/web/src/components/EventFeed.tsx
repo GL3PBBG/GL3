@@ -1,5 +1,7 @@
-import type { GameEvent } from "@gl3/shared";
+import type { EventMeta, GameEvent } from "@gl3/shared";
+import { usePlugins } from "../api/queries.js";
 import { formatMoney } from "../lib/money.js";
+import { describePluginEvent } from "../plugins/describe.js";
 import { useEvents } from "../store/events.js";
 import styles from "./EventFeed.module.css";
 
@@ -7,8 +9,15 @@ import styles from "./EventFeed.module.css";
  * One line of copy per event type. Exhaustive over the union — an unhandled
  * type is a compile error rather than a raw `event.type` string on screen,
  * which is what the previous `default:` branch produced for 18 of the 20 types.
+ *
+ * `eventMetas` is the manifest's event metadata, which only `plugin.event`
+ * consults. It is a parameter rather than a `usePlugins()` call inside this
+ * function because `describe` runs inside a `.map` callback, and a conditional
+ * hook call in a loop violates the rules of hooks — same threading as
+ * `invalidationKeys` in ws/invalidation.ts. It defaults to empty so a caller
+ * that renders only core events need not know about the manifest at all.
  */
-function describe(event: GameEvent): string {
+function describe(event: GameEvent, eventMetas: readonly EventMeta[] = []): string {
   switch (event.type) {
     case "crime.resolved":
       return event.success
@@ -50,16 +59,33 @@ function describe(event: GameEvent): string {
       return `Bank ${event.direction}: ${formatMoney(event.amount)}`;
     case "bullets.purchased":
       return `Bought ${event.quantity} bullets for ${formatMoney(event.cost)}`;
-    case "plugin.event":
-      // Plan 2 replaces this with the manifest's `describe` template fetched
-      // from GET /api/plugins. Until then the envelope renders its own fields
-      // rather than crashing the feed.
-      return `${event.actorName}: ${event.pluginId}.${event.name}`;
+    case "plugin.event": {
+      // The copy is the plugin's own `describe` template from GET /api/plugins;
+      // only the manifest knows how to word a plugin's event. Matched on
+      // (pluginId, name) rather than name alone because two plugins may each
+      // declare a "pinged". No match falls back to the envelope's own fields —
+      // that happens when the manifest has not loaded yet, or when the event
+      // came from a plugin the client's cached manifest does not know about.
+      const meta = eventMetas.find((m) => m.pluginId === event.pluginId && m.name === event.name);
+      if (meta === undefined) return `${event.actorName}: ${event.pluginId}.${event.name}`;
+      // `actorName` is spread last on purpose: `event.payload` is
+      // `z.record(z.unknown())` and may carry player-supplied strings, so the
+      // other order would let a payload with its own `actorName` key overwrite
+      // the envelope's authoritative one and render an attacker-chosen name
+      // where the feed promises the acting player's.
+      //
+      // Known limitation: a money field in a payload renders as its raw
+      // decimal string, unlike the core cases above, which run formatMoney.
+      // The manifest carries no per-field type, so there is nothing to key
+      // formatting off.
+      return describePluginEvent(meta.describe, { ...event.payload, actorName: event.actorName });
+    }
   }
 }
 
 export function EventFeed(): JSX.Element {
   const events = useEvents();
+  const plugins = usePlugins();
   return (
     <aside className={styles.feed}>
       <h3 className={styles.heading}>Live feed</h3>
@@ -70,7 +96,7 @@ export function EventFeed(): JSX.Element {
             <time className={styles.time} dateTime={event.at}>
               {new Date(event.at).toLocaleTimeString()}
             </time>{" "}
-            {describe(event)}
+            {describe(event, plugins.data?.events ?? [])}
           </li>
         ))}
       </ul>
