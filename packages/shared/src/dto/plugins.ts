@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MoneySchema } from "../primitives.js";
 
 /**
  * DTO schemas for the `GET /api/plugins` response. The shapes mirror what the
@@ -88,7 +89,13 @@ export function checkViewBounds(value: unknown, ctx: z.RefinementCtx): void {
 
 const leafOptions = [
   z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-  z.object({ kind: z.literal("money"), value: z.string() }).strict(),
+  // MoneySchema, not z.string(): the renderer hands this to `formatAmount`,
+  // which throws on anything outside `/^-?\d+$/`, and the client has no
+  // ErrorBoundary — so a decimal string here unmounts the React root and blanks
+  // the app mid-render. It is also the money-on-the-wire invariant every other
+  // monetary field already carries. Kept identical to the SDK's `money` leaf:
+  // the two diverging is how a value passes boot and then fails the browser.
+  z.object({ kind: z.literal("money"), value: MoneySchema }).strict(),
   z.object({ kind: z.literal("error"), value: z.string() }).strict(),
   z.object({
     kind: z.literal("link"),

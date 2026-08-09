@@ -2,6 +2,7 @@ import {
   checkViewBounds,
   COOLDOWN_ACTION_RE,
   INTERNAL_PATH_RE,
+  MoneySchema,
   VIEW_ACTION_RE,
 } from "@gl3/shared";
 import { z } from "zod";
@@ -18,7 +19,14 @@ import { z } from "zod";
  */
 const leafOptions = [
   z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-  z.object({ kind: z.literal("money"), value: z.string() }).strict(),
+  // MoneySchema, not z.string(): the web renderer hands this to `formatAmount`,
+  // which throws on anything outside `/^-?\d+$/`, and the client has no
+  // ErrorBoundary — so a decimal string here unmounts the React root and blanks
+  // the app mid-render. Constrained at authoring time so a plugin declaring
+  // "10.00" fails the boot that loads it. Kept identical to the DTO's `money`
+  // leaf: the two diverging is how a value passes boot and then fails the
+  // browser.
+  z.object({ kind: z.literal("money"), value: MoneySchema }).strict(),
   z.object({ kind: z.literal("error"), value: z.string() }).strict(),
   z
     .object({
