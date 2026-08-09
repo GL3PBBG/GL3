@@ -1,13 +1,14 @@
 import type {
   FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx,
 } from "@gl3/plugin-sdk";
-import { runFilterChain } from "@gl3/plugin-sdk";
+import { JobAlreadyAppliedError, runFilterChain } from "@gl3/plugin-sdk";
 import type { GameEvent } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
+import { pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange,
   lockGangAndPlayerForUpdate, lockPlayersForUpdate,
@@ -16,6 +17,7 @@ import { appendGangLog } from "../game/gangs/logs.js";
 import {
   acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
 } from "../game/cooldown.js";
+import { newSeed } from "../game/rng.js";
 
 export interface PluginCtxDeps {
   db: Db;
@@ -44,6 +46,20 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       const buffered: PluginEventInput[] = [];
 
       const result = await deps.db.transaction(async (tx) => {
+        if (options.job !== null) {
+          // CLAUDE.md rule 1, made structural: FIRST statement in the
+          // transaction, before any handler code. A retry of an already-
+          // committed job conflicts here and aborts before re-applying
+          // anything. A plugin cannot forget this because it never writes it.
+          const claimed = await tx
+            .insert(pluginJobRuns)
+            .values({ pluginId: options.pluginId, jobId: options.job.id })
+            .onConflictDoNothing()
+            .returning({ jobId: pluginJobRuns.jobId });
+          if (claimed.length === 0) {
+            throw new JobAlreadyAppliedError(options.pluginId, options.job.id);
+          }
+        }
         const pluginTx: PluginTx = {
           db: tx,
           economy: {
@@ -84,7 +100,14 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
         releaseCooldown(deps.redis, cooldownKey(playerId, action)),
     },
     jobs: {
-      enqueue: () => { throw new Error("ctx.jobs is wired in Task 11"); },
+      enqueue: async (name, data) => {
+        const queue = deps.queues.get(`${options.pluginId}:${name}`);
+        if (queue === undefined) throw new Error(`plugin "${options.pluginId}" has no job "${name}"`);
+        // The seed is generated here, at enqueue time (spec: ctx API), so a
+        // retry replays the same seed and the outcome is reproducible.
+        const job = await queue.add(name, { ...data, seed: newSeed() });
+        return String(job.id);
+      },
     },
 
     filters: {
