@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { pluginJobRuns, pluginMigrations } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { pgErrorCode, pgErrorConstraint } from "./helpers/pg-error.js";
 
 const { db, sql: conn } = testDb();
 
@@ -12,18 +13,13 @@ beforeEach(async () => { await resetDb(db); });
 afterAll(async () => { await conn.end(); });
 
 /**
- * drizzle wraps the driver error, so the thrown `Error.message` is only
- * "Failed query: insert into ..." — the constraint that actually rejected the
- * row is on `cause` (a postgres.js PostgresError). Narrowed with `in` checks
- * rather than a cast, per the repo's no-cast rule.
+ * The constraint name, but only for a genuine unique violation — a different
+ * SQLSTATE that happens to carry a `constraint_name` must not be reported as
+ * one. The narrowing itself lives in helpers/pg-error.ts, which explains why
+ * the Postgres detail is on `cause` rather than on the thrown message.
  */
 function violatedConstraint(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  const cause: unknown = error.cause;
-  if (typeof cause !== "object" || cause === null) return undefined;
-  if (!("code" in cause) || cause.code !== "23505") return undefined;
-  if (!("constraint_name" in cause) || typeof cause.constraint_name !== "string") return undefined;
-  return cause.constraint_name;
+  return pgErrorCode(error) === "23505" ? pgErrorConstraint(error) : undefined;
 }
 
 /**

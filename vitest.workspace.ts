@@ -129,6 +129,7 @@ export default defineWorkspace([
         "test/ledger.test.ts",
         "test/schema.test.ts",
         "test/gang-ledger.test.ts",
+        "test/plugin-migrate.test.ts",
         "test/plugin-runtime-schema.test.ts",
       ],
       globalSetup,
