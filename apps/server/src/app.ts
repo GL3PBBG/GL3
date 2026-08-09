@@ -18,6 +18,7 @@ import { registerNotificationRoutes } from "./game/notifications/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerRankRoutes } from "./game/ranks/routes.js";
 import { registerTravelRoutes } from "./game/travel/routes.js";
+import { buildPluginsPayload, registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
@@ -85,6 +86,9 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     queues: new Map(),
     settings: {},
   });
+
+  const payload = buildPluginsPayload(deps.plugins ?? []);
+  registerPluginsEndpoint(app, payload);
 
   return app;
 }
