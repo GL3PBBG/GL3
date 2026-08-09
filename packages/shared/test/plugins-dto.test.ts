@@ -39,7 +39,7 @@ describe("PluginsPayloadSchema", () => {
 
 /**
  * The DTO is the client's boundary against a payload it did not build, so the
- * three sink strings are constrained here as well as in the SDK. Constraining
+ * four sink strings are constrained here as well as in the SDK. Constraining
  * only one side would leave whichever side was skipped as the way in.
  */
 describe("PluginsPayloadSchema view sink constraints", () => {
@@ -83,6 +83,28 @@ describe("PluginsPayloadSchema view sink constraints", () => {
     expect(() => PluginsPayloadSchema.parse(payloadWith(node)))
       .toThrow(/cooldownAction must be a bare cooldown key segment/);
   });
+
+  // The fourth sink: `money.value` reaches `formatAmount`, which throws on
+  // anything outside `/^-?\d+$/`. The client has no ErrorBoundary, so a value
+  // that slips through here blanks the whole app during render rather than
+  // spoiling one node. Rejecting the payload is the lesser failure — and the
+  // same MoneySchema every other monetary field on the wire already carries.
+  it.each([
+    ["has a decimal point", "10.00"],
+    ["is empty", ""],
+    ["is not numeric at all", "lots"],
+    ["carries a thousands separator", "1,000"],
+  ])("rejects a money value that %s", (_label, value) => {
+    expect(() => PluginsPayloadSchema.parse(payloadWith({ kind: "money", value })))
+      .toThrow(/must be an integer string/);
+  });
+
+  it.each([["a positive integer", "1000"], ["a negative integer", "-50"]])(
+    "accepts a money value that is %s",
+    (_label, value) => {
+      expect(() => PluginsPayloadSchema.parse(payloadWith({ kind: "money", value }))).not.toThrow();
+    },
+  );
 
   it("rejects a menu path that is not an app-internal absolute path", () => {
     const bad = {

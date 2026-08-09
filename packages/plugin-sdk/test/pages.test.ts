@@ -197,11 +197,12 @@ describe("definePlugin pages validation", () => {
 });
 
 /**
- * `to`, `action` and `cooldownAction` are the three strings a view hands
- * straight to a sink: an `href`, a `fetch` target, and the middle segment of
- * `cooldown:<action>:<playerId>`. A plugin is third-party code by definition,
- * so each is constrained here — at authoring time, where a bad value fails the
- * boot that loads the plugin rather than the browser that renders it.
+ * `to`, `action`, `cooldownAction` and `money.value` are the four strings a view
+ * hands straight to a sink: an `href`, a `fetch` target, the middle segment of
+ * `cooldown:<action>:<playerId>`, and the argument to `formatAmount`. A plugin
+ * is third-party code by definition, so each is constrained here — at authoring
+ * time, where a bad value fails the boot that loads the plugin rather than the
+ * browser that renders it.
  */
 describe("view sink constraints", () => {
   function withNode(node: unknown): unknown {
@@ -268,6 +269,30 @@ describe("view sink constraints", () => {
       /cooldownAction must be a bare cooldown key segment/,
     );
   });
+
+  // `money.value` is not merely displayed — the web renderer passes it to
+  // `formatAmount`, which throws on anything outside `/^-?\d+$/` rather than
+  // rendering NaN. `apps/web` has no ErrorBoundary, so an unconstrained value
+  // here is a blank page: React unmounts the root and takes the nav with it.
+  // MoneySchema is the same predicate, applied where a bad value fails the
+  // plugin's boot instead.
+  it.each([
+    ["has a decimal point", "10.00"],
+    ["is empty", ""],
+    ["is not numeric at all", "lots"],
+    ["carries a thousands separator", "1,000"],
+  ])("rejects a money value that %s", (_label, value) => {
+    expect(() => PageSchemaSchema.parse(withNode({ kind: "money", value }))).toThrow(
+      /must be an integer string/,
+    );
+  });
+
+  it.each([["a positive integer", "1000"], ["a negative integer", "-50"]])(
+    "accepts a money value that is %s",
+    (_label, value) => {
+      expect(() => PageSchemaSchema.parse(withNode({ kind: "money", value }))).not.toThrow();
+    },
+  );
 });
 
 /**
