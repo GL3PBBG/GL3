@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ServerFrameSchema } from "@gl3/shared";
+import { ServerFrameSchema, type PluginsPayload } from "@gl3/shared";
 import { z } from "zod";
 import { api } from "../api/client.js";
+import { keys } from "../api/keys.js";
 import { eventStore } from "../store/events.js";
 import { invalidationKeys } from "./invalidation.js";
 
@@ -61,11 +62,18 @@ export function useGameEvents(playerId: string | undefined): void {
         const parsed = ServerFrameSchema.safeParse(JSON.parse(message.data as string));
         if (!parsed.success || parsed.data.kind !== "event") return;
         eventStore.push(parsed.data.event);
+        // A plugin event's invalidation keys live in the manifest, so read it
+        // straight from cache — the only writer of this key is usePlugins'
+        // queryFn, which PluginsPayloadSchema.parse()s before anything is
+        // stored, so the value is already validated and re-parsing the whole
+        // manifest on every socket message would buy nothing. Undefined until
+        // the manifest loads, which invalidationKeys treats as "no metadata".
+        const manifest = queryClient.getQueryData<PluginsPayload>(keys.plugins());
         // BullMQ is at-least-once, so a retried job can deliver the same event
         // twice. Invalidation is idempotent, so a duplicate costs one refetch
         // and nothing else — the feed's own dedupe is what stops it showing up
         // as two crimes.
-        for (const key of invalidationKeys(parsed.data.event, playerId)) {
+        for (const key of invalidationKeys(parsed.data.event, playerId, manifest?.events ?? [])) {
           void queryClient.invalidateQueries({ queryKey: key });
         }
       });

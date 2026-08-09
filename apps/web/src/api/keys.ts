@@ -29,4 +29,9 @@ export const keys = {
   mailThread: (threadId: string) => ["mail", "thread", threadId] as const,
   notifications: () => ["notifications"] as const,
   news: () => ["news"] as const,
+
+  // Pass 3 (plugin SDK). One key for the whole manifest: menu, pages and event
+  // metadata arrive from `GET /api/plugins` in a single payload, so splitting
+  // them would only buy three refetches of the same response.
+  plugins: () => ["plugins"] as const,
 };

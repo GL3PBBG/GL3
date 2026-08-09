@@ -1,3 +1,10 @@
+import {
+  checkViewBounds,
+  COOLDOWN_ACTION_RE,
+  INTERNAL_PATH_RE,
+  MoneySchema,
+  VIEW_ACTION_RE,
+} from "@gl3/shared";
 import { z } from "zod";
 
 /**
@@ -12,16 +19,37 @@ import { z } from "zod";
  */
 const leafOptions = [
   z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-  z.object({ kind: z.literal("money"), value: z.string() }).strict(),
+  // MoneySchema, not z.string(): the web renderer hands this to `formatAmount`,
+  // which throws on anything outside `/^-?\d+$/`, and the client has no
+  // ErrorBoundary — so a decimal string here unmounts the React root and blanks
+  // the app mid-render. Constrained at authoring time so a plugin declaring
+  // "10.00" fails the boot that loads it. Kept identical to the DTO's `money`
+  // leaf: the two diverging is how a value passes boot and then fails the
+  // browser.
+  z.object({ kind: z.literal("money"), value: MoneySchema }).strict(),
   z.object({ kind: z.literal("error"), value: z.string() }).strict(),
-  z.object({ kind: z.literal("link"), label: z.string(), to: z.string() }).strict(),
-  z.object({ kind: z.literal("button"), label: z.string(), action: z.string() }).strict(),
+  z
+    .object({
+      kind: z.literal("link"),
+      label: z.string(),
+      to: z.string().regex(INTERNAL_PATH_RE, "link.to must be an app-internal absolute path"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("button"),
+      label: z.string(),
+      action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("cooldownButton"),
       label: z.string(),
-      action: z.string(),
-      cooldownAction: z.string(),
+      action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
+      cooldownAction: z
+        .string()
+        .regex(COOLDOWN_ACTION_RE, "cooldownAction must be a bare cooldown key segment"),
     })
     .strict(),
   z
@@ -33,7 +61,7 @@ const leafOptions = [
   z
     .object({
       kind: z.literal("form"),
-      action: z.string(),
+      action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
       submitLabel: z.string(),
       fields: z.array(
         z
@@ -90,12 +118,33 @@ export const MenuEntrySchema = z
   .object({ label: z.string().min(1), order: z.number().int() })
   .strict();
 
+/**
+ * What a page's `view` is authored against: the size bound (`checkViewBounds`,
+ * from `@gl3/shared`) runs first and aborts the pipeline before the recursive
+ * node schema can descend, so an over-deep view fails validation instead of
+ * overflowing the stack inside `z.lazy`.
+ */
+export const BoundedViewNodeSchema: z.ZodType<ViewNode, z.ZodTypeDef, unknown> = z
+  .unknown()
+  .superRefine(checkViewBounds)
+  .pipe(ViewNodeSchema);
+
 export const PageSchemaSchema = z
   .object({
     id: z.string().min(1),
-    path: z.string().regex(/^\/[a-z0-9\-/:]*$/, "page path must be absolute"),
+    /**
+     * Two rules, both load-bearing. `INTERNAL_PATH_RE` is the DTO's rule, so a
+     * path that boots here also parses on the client — the strict object over
+     * `pages[]` means one path the DTO rejects takes down parsing of the whole
+     * payload, in the browser, which is the failure this schema exists to move
+     * to boot time. The charset is the narrower SDK-only rule on top.
+     */
+    path: z
+      .string()
+      .regex(INTERNAL_PATH_RE, "page path must be an app-internal absolute path")
+      .regex(/^[a-z0-9\-/:]*$/, "page path must be lowercase"),
     menu: MenuEntrySchema.optional(),
-    view: ViewNodeSchema,
+    view: BoundedViewNodeSchema,
   })
   .strict();
 

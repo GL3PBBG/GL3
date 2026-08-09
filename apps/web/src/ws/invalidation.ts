@@ -1,5 +1,6 @@
-import type { GameEvent } from "@gl3/shared";
+import type { EventMeta, GameEvent } from "@gl3/shared";
 import { keys } from "../api/keys.js";
+import { pluginInvalidationKeys } from "../plugins/invalidation.js";
 
 /**
  * Which cached queries a live event makes stale.
@@ -17,9 +18,13 @@ import { keys } from "../api/keys.js";
  * Returning an empty array is still a deliberate answer for the event types
  * whose surfaces have no server routes at all (attacks, bounties, chat): they
  * reach the event feed and invalidate nothing.
+ *
+ * `eventMetas` is the manifest's event metadata, which only `plugin.event`
+ * consults; it defaults to empty so every core call site stays a two-argument
+ * one and a client that has not loaded the manifest yet still gets an answer.
  */
 export function invalidationKeys(
-  event: GameEvent, viewerId: string,
+  event: GameEvent, viewerId: string, eventMetas: readonly EventMeta[] = [],
 ): readonly (readonly string[])[] {
   switch (event.type) {
     case "crime.resolved":
@@ -68,9 +73,9 @@ export function invalidationKeys(
     case "player.joined":
       return [];
     case "plugin.event":
-      // Plan 2 maps this to the manifest's `invalidates` list. Returning no
-      // keys is correct until that metadata reaches the client: a plugin
-      // event invalidating nothing is stale data, not a wrong render.
-      return [];
+      // The keys are the plugin's own declaration, not this table's: only the
+      // manifest knows what a plugin's event touches. Always includes
+      // keys.plugins() — see plugins/invalidation.ts for why.
+      return pluginInvalidationKeys(event, eventMetas);
   }
 }

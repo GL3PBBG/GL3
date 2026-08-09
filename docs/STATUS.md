@@ -14,9 +14,9 @@ Branch: `feat/container-images` (forked from `main` at `f6e1a66`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation shipped — SDK, loader, example. Renderer + module ports pending |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. Module ports pending |
 
-**Suite: 57 files / 420 tests**, green. Count verified by the controller's own
+**Suite: 65 files / 557 tests**, green. Count verified by the controller's own
 `npm run verify` run, not taken from an agent report.
 
 ---
@@ -106,11 +106,30 @@ Plugins load only when `PLUGIN_IDS` is set (comma-separated ids; default empty
 dynamic `import(pluginId)` is deliberately not used so the dependency-direction
 check stays compiler-enforceable.
 
+### What has shipped (web renderer, Plan 2)
+
+- **`packages/shared/src/dto/plugins.ts`** — the wire DTO for `GET /api/plugins`,
+  carrying a second copy of the ten-kind view vocabulary. The duplication is
+  deliberate: `@gl3/shared` may not depend on `@gl3/plugin-sdk`, so the DTO is
+  self-contained. `packages/plugin-sdk/test/view-schema-contract.test.ts` is the
+  drift guard — it imports both schemas and asserts they agree on a corpus of 12
+  accepts and 18 rejects. Bounds (`MAX_VIEW_NODES`, `MAX_VIEW_DEPTH`) are walked
+  over `children`/`items`/`rows`/`fields`.
+- **`apps/web/src/plugins/`** — `render.ts` flattens a view tree to instructions,
+  `PageRenderer.tsx` reconstructs panels and runs actions (per-control in-flight
+  disable), `PluginPage.tsx` hosts a page keyed by id, `overrides.ts` is the
+  core-page override map, `describe.ts` and `invalidation.ts` handle plugin
+  events. Plugin pages route at `/plugins/:pageId`; a page's declared `path` is
+  advisory in v1.
+- **View actions are confined to the plugin's `basePaths`** at load
+  (`apps/server/src/plugins/validate.ts`), and a path containing a `.` or `..`
+  segment is rejected outright — `fetch` resolves those before the request
+  leaves the page, so otherwise the approved string is not the sent string.
+- **`apps/web/serve.mjs`** falls back to `index.html` for client routes, so a
+  direct load of `/plugins/<id>` works in the container image.
+
 ### What is pending
 
-- **Web renderer + override registry** (Plan 2): `GET /api/plugins` is served
-  but no client consumes it. A generic page-schema renderer and a core-page
-  override map are the next build.
 - **Twelve `game/*` module ports** (Plan 3): porting the existing hardcoded
   modules onto the SDK, one per task (strangler — old wiring deleted last).
   Spec port order: read-mostly first (`ranks`, `leaderboard`, `news`,

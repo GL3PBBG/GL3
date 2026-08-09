@@ -13,9 +13,9 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) shipped; the web renderer and the twelve `game/*`
+(SDK + loader + example) and the web page renderer have shipped; the `game/*`
 module ports are pending. M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **57 files / 420 tests**, green across repeated
+MariaDB install. Suite: **65 files / 557 tests**, green across repeated
 back-to-back runs.
 
 Full detail, including how to start M4, is in `docs/STATUS.md`.
@@ -43,8 +43,9 @@ npm run verify          # typecheck + full suite — run this LOCALLY before com
 ```
 
 **GitHub CI does not run the integration suite.** Its `verify` job runs
-`npm run verify:ci` (typecheck + the `@gl3/server:unit` and `@gl3/shared`
-projects) with no Postgres or Redis service containers. A green build proves the
+`npm run verify:ci` (typecheck + the `@gl3/server:unit`, `@gl3/shared`,
+`@gl3/plugin-sdk` and `@gl3/web` projects) with no Postgres or Redis service
+containers. A green build proves the
 tree typechecks and the no-DB tests pass — it is **not** evidence that the
 integration suite passes. That check only exists on your machine, and it is on
 you to run it. CI's second job, `images`, builds and (on `main`) pushes the two

@@ -1,0 +1,71 @@
+import { describe, expect, it } from "vitest";
+import { renderNode, type RenderInstruction } from "../src/plugins/render.js";
+
+describe("renderNode", () => {
+  it("renders a leaf text node", () => {
+    expect(renderNode({ kind: "text", value: "Hi" }, {})).toEqual<RenderInstruction[]>([
+      { kind: "text", value: "Hi" },
+    ]);
+  });
+
+  it("renders a button as a button instruction carrying its action", () => {
+    expect(renderNode({ kind: "button", label: "Greet", action: "POST /api/hello/greet" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "button", label: "Greet", action: "POST /api/hello/greet" }]);
+  });
+
+  it("renders a panel by flattening its children in order", () => {
+    const node = {
+      kind: "panel" as const, title: "P",
+      children: [{ kind: "text" as const, value: "a" }, { kind: "text" as const, value: "b" }],
+    };
+    const out = renderNode(node, {});
+    expect(out).toHaveLength(3); // header + 2 children
+    expect(out[0]).toEqual({ kind: "panelHeader", title: "P" });
+    expect(out[1]).toEqual({ kind: "text", value: "a" });
+    expect(out[2]).toEqual({ kind: "text", value: "b" });
+  });
+
+  it("renders a list by flattening its items in order with no separator", () => {
+    const node = {
+      kind: "list" as const,
+      items: [{ kind: "money" as const, value: "100" }, { kind: "text" as const, value: "x" }],
+    };
+    expect(renderNode(node, {})).toEqual<RenderInstruction[]>([
+      { kind: "money", value: "100" },
+      { kind: "text", value: "x" },
+    ]);
+  });
+
+  it("renders a money value as a money instruction, value untouched (decimal string)", () => {
+    expect(renderNode({ kind: "money", value: "1000000000000" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "money", value: "1000000000000" }]);
+  });
+
+  it("renders a keyValue as a single instruction carrying its rows", () => {
+    const out = renderNode({ kind: "keyValue", rows: [{ label: "A", value: "1" }] }, {});
+    expect(out).toEqual<RenderInstruction[]>([
+      { kind: "keyValue", rows: [{ label: "A", value: "1" }] },
+    ]);
+  });
+
+  it("renders a form with its fields and submit action", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "amount", label: "Amount", type: "money" as const }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "amount", label: "Amount", type: "money" }],
+    }]);
+  });
+
+  it("nests arbitrarily deep panels", () => {
+    const node = {
+      kind: "panel" as const, title: "outer",
+      children: [{ kind: "panel" as const, title: "inner",
+        children: [{ kind: "text" as const, value: "deep" }] }],
+    };
+    const out = renderNode(node, {});
+    expect(out.some((i) => "value" in i && i.value === "deep")).toBe(true);
+  });
+});

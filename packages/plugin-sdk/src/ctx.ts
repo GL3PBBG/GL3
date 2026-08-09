@@ -35,6 +35,7 @@ type _NoRelationalQuery = _Assert<"query" extends keyof PluginDbTx ? false : tru
 
 export interface PlayerSnapshot {
   id: string;
+  username: string;
   cash: bigint;
   bank: bigint;
   level: number;

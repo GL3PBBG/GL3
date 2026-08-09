@@ -61,13 +61,19 @@ async function dropIsolatedDatabase(): Promise<void> {
     // Force-disconnect this file's own pool. afterAll hooks run in
     // registration order, and this setup file's afterAll is registered
     // before the test file's own (which closes its pool) — so this file's
-    // connections may still be open here. Terminating them first makes
-    // cleanup order-independent instead of racing DROP DATABASE against
-    // "database is being accessed by other users".
-    await admin.unsafe(
-      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid()`,
-    );
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
+    // connections may still be open here, and a plain DROP would lose the
+    // race with "database is being accessed by other users".
+    //
+    // WITH (FORCE) rather than a hand-rolled pg_terminate_backend sweep over
+    // pg_stat_activity. The sweep terminated every pid reported against this
+    // database, and the test role is neither superuser nor a member of
+    // pg_signal_backend — so any row it matched that it did not own failed
+    // the whole statement with 42501 "permission denied to terminate
+    // process", taking teardown with it and failing the file at suite level
+    // for a reason nothing in the test touched. Postgres does this itself
+    // with the right privileges: FORCE needs only database ownership, which
+    // this role has by having created the clone.
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
   } finally {
     await admin.end();
   }
