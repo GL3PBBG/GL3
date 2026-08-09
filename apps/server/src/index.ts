@@ -6,16 +6,20 @@ import { createDb } from "./db/client.js";
 import { seedCrimes, seedLocations, seedRanks } from "./db/seed.js";
 import { startCrimeWorker } from "./game/crimes/worker.js";
 import { rebuildLeaderboards } from "./game/leaderboard/service.js";
+import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins } from "./plugins/loader.js";
 import { createCrimeQueue } from "./queue/index.js";
 import { createRedis, createSubscriber } from "./redis.js";
 import { attachGateway } from "./ws/gateway.js";
 
 /**
- * The explicit id→manifest map (spec: Boot sequence step 1). A static `import`
- * is what keeps the dependency direction checkable by the compiler — the
- * example package imports only `@gl3/plugin-sdk`/`zod`/`drizzle-orm`, and a
- * dynamic `import(pluginId)` would bypass that check.
+ * The explicit id→manifest map for OPTIONAL plugins (spec: Boot sequence
+ * step 1). A static `import` is what keeps the dependency direction
+ * checkable by the compiler — the example package imports only
+ * `@gl3/plugin-sdk`/`zod`/`drizzle-orm`, and a dynamic `import(pluginId)`
+ * would bypass that check. Ported core modules are not looked up here — they
+ * live in `CORE_PLUGINS` and load unconditionally, never gated by
+ * `PLUGIN_IDS`.
  */
 const AVAILABLE_PLUGINS: Record<string, PluginManifest> = { hello: helloPlugin };
 
@@ -30,20 +34,32 @@ await seedLocations(db);
 await rebuildLeaderboards(db, redis);
 startCrimeWorker({ db, connection: createRedis(config.redisUrl), publisher: createRedis(config.redisUrl) });
 
-// Resolve plugin ids to manifests, failing boot on an unknown id.
-const manifests = config.pluginIds.map((id) => {
+// Resolve optional plugin ids to manifests, failing boot on an unknown id.
+const optionalManifests = config.pluginIds.map((id) => {
   const manifest = AVAILABLE_PLUGINS[id];
   if (manifest === undefined) throw new Error(`unknown plugin id "${id}" — no entry in AVAILABLE_PLUGINS`);
   return manifest;
 });
 
-const loadedPlugins = manifests.length > 0
-  ? await loadPlugins({ db, redis, settings: {} }, manifests)
-  : undefined;
+// A ported core module is never optional (spec) — CORE_PLUGINS always loads,
+// and PLUGIN_IDS only adds to it. De-duplicated by id so a core module's id
+// also named in PLUGIN_IDS doesn't load twice.
+const seenIds = new Set(CORE_PLUGINS.map((m) => m.id));
+const manifests: PluginManifest[] = [
+  ...CORE_PLUGINS,
+  ...optionalManifests.filter((m) => {
+    if (seenIds.has(m.id)) return false;
+    seenIds.add(m.id);
+    return true;
+  }),
+];
 
-const app = await buildApp(config, loadedPlugins !== undefined
-  ? { db, redis, crimeQueue, plugins: loadedPlugins }
-  : { db, redis, crimeQueue });
+const loadedPlugins = await loadPlugins({ db, redis, settings: {} }, manifests);
+
+// Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
+// fallback (see the comment at that seam in app.ts): production keeps its
+// plugin set visible at the boot site.
+const app = await buildApp(config, { db, redis, crimeQueue, plugins: loadedPlugins });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
 await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins });

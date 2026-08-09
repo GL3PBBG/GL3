@@ -24,6 +24,9 @@ const srcAliases = {
       "@gl3/hello-plugin": fileURLToPath(
         new URL("./examples/hello-plugin/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-ranks": fileURLToPath(
+        new URL("./packages/plugins/ranks/src/index.ts", import.meta.url),
+      ),
     },
   },
 };

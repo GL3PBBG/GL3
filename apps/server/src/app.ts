@@ -15,9 +15,9 @@ import { registerMailRoutes } from "./game/mail/routes.js";
 import { registerNewsRoutes } from "./game/news/routes.js";
 import { registerNotificationRoutes } from "./game/notifications/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
-import { registerRankRoutes } from "./game/ranks/routes.js";
 import { registerTravelRoutes } from "./game/travel/routes.js";
-import type { LoadedPlugins } from "./plugins/loader.js";
+import { CORE_PLUGINS } from "./plugins/core-plugins.js";
+import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
 import type { CrimeJobData } from "./queue/index.js";
@@ -73,29 +73,63 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerNewsRoutes(app, deps.db, deps.redis, requireAuth);
   registerNotificationRoutes(app, deps.db, requireAuth);
   registerProfileRoutes(app, deps.db, requireAuth);
-  registerRankRoutes(app, deps.db, requireAuth);
   registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while
   // app.ts keeps registering un-ported modules directly (spec: Sequencing).
   // Both paths coexist for the length of M5 and the old one is deleted last.
-  const loaded = deps.plugins;
-  if (loaded !== undefined) {
-    registerPluginRoutes(app, loaded.manifests, {
-      db: deps.db,
-      redis: deps.redis,
-      queues: loaded.queues,
-      settings: {},
+  //
+  // A ported core module is never optional, so this app must end up with
+  // CORE_PLUGINS loaded one way or another. `bootTestServer()` and `index.ts`
+  // both build their own `deps.plugins` (CORE_PLUGINS plus whatever optional
+  // manifests were selected) and pass it in explicitly — that always wins.
+  // But most test files call `buildApp` directly with no `plugins` at all
+  // (`ranks.test.ts` among them), and those callers still need a ported
+  // module's route to answer rather than 404. When `deps.plugins` is
+  // undefined, load CORE_PLUGINS here instead.
+  let loaded = deps.plugins;
+  let ownsLoadedPlugins = false;
+  if (loaded === undefined) {
+    // This default path has no queue-name prefix, unlike `bootTestServer`'s
+    // own `loadPlugins` call (`plugin-test-${randomUUID()}:`) — a shared
+    // BullMQ queue name across concurrently-running test files has already
+    // caused real cross-talk here (see the `crime-test-${randomUUID()}`
+    // comment in test/helpers/server.ts). No CORE_PLUGINS manifest declares
+    // jobs today, so the gap is theoretical; keep it that way rather than
+    // silently creating an unprefixed, unisolated queue the first time one
+    // does. A core plugin that needs jobs must be passed to `buildApp`
+    // explicitly by a caller that can supply an isolated prefix.
+    for (const manifest of CORE_PLUGINS) {
+      if (Object.keys(manifest.jobs).length > 0) {
+        throw new Error(
+          `core plugin "${manifest.id}" declares jobs — it must be loaded by the caller with an isolated queue prefix, not by buildApp's default`,
+        );
+      }
+    }
+    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: {} }, CORE_PLUGINS);
+    ownsLoadedPlugins = true;
+  }
+
+  registerPluginRoutes(app, loaded.manifests, {
+    db: deps.db,
+    redis: deps.redis,
+    queues: loaded.queues,
+    settings: {},
+  });
+
+  // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`
+  // is owned by that caller (e.g. bootTestServer's own `close()`), and closing
+  // it again here would be a double-close bug of our own making.
+  if (ownsLoadedPlugins) {
+    const owned = loaded;
+    app.addHook("onClose", async () => {
+      for (const w of owned.workers) await w.close();
+      for (const q of owned.queues.values()) await q.close();
     });
   }
 
-  // Outside the guard: the client's `usePlugins()` call is unconditional, so a
-  // server booted with no plugins must answer this route with an empty manifest
-  // rather than 404. A 404 surfaces as `plugins.isError`, which blanks the
-  // plugin nav *and* makes PluginPage render its error state — a state a
-  // plugin-less deployment should never be in.
-  registerPluginsEndpoint(app, loaded?.payload ?? { menu: [], pages: [], events: [] });
+  registerPluginsEndpoint(app, loaded.payload);
 
   return app;
 }
