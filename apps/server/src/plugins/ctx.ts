@@ -13,6 +13,9 @@ import {
   lockGangAndPlayerForUpdate, lockPlayersForUpdate,
 } from "../economy/ledger.js";
 import { appendGangLog } from "../game/gangs/logs.js";
+import {
+  acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
+} from "../game/cooldown.js";
 
 export interface PluginCtxDeps {
   db: Db;
@@ -68,16 +71,17 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       return result;
     },
 
-    // Wired in Tasks 9 and 11. These are throwing stubs, NOT `{} as
-    // PluginCtx["cooldown"]`: an empty object behind a cast typechecks and then
-    // fails at runtime with `undefined is not a function`, which names neither
-    // the surface nor the task that owes it. A function body that throws infers
-    // `never`, which is assignable to every return type here — so this needs no
-    // cast at all and satisfies the repo's "type guards over casts" rule.
+    // Delegates to the core helpers rather than re-deriving the key, so a
+    // ported module's Redis keys are unchanged and `SET NX EX` stays the
+    // only write shape available (CLAUDE.md rule 2 — there is no read-then-
+    // write pair on this surface to misuse).
     cooldown: {
-      acquire: () => { throw new Error("ctx.cooldown is wired in Task 9"); },
-      peek: () => { throw new Error("ctx.cooldown is wired in Task 9"); },
-      release: () => { throw new Error("ctx.cooldown is wired in Task 9"); },
+      acquire: (action, playerId, ttlSeconds) =>
+        acquireCooldown(deps.redis, cooldownKey(playerId, action), ttlSeconds),
+      peek: (action, playerId) =>
+        peekCooldown(deps.redis, cooldownKey(playerId, action)),
+      release: (action, playerId) =>
+        releaseCooldown(deps.redis, cooldownKey(playerId, action)),
     },
     jobs: {
       enqueue: () => { throw new Error("ctx.jobs is wired in Task 11"); },
