@@ -6,14 +6,20 @@ import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { crimeLog, crimes, playerCrimeSkill, players, playerStats, transactions } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
-import { processCrimeJob } from "../src/game/crimes/worker.js";
+import { runPluginJob } from "../src/plugins/jobs.js";
+import crimesPlugin from "@gl3/plugin-crimes";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 
 const { db, sql: conn } = testDb();
 const config = loadConfig(process.env);
-const publisher = createRedis(config.redisUrl);
+const redis = createRedis(config.redisUrl);
 const subscriber = createSubscriber(config.redisUrl);
+
+// runPluginJob drives the real plugin handler in-process (no HTTP, no
+// boot) with the real plugin_job_runs guard — the same shape a BullMQ
+// retry takes.
+const deps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix: "idempotency-test" });
 
 let playerId: string;
 let crimeId: string;
@@ -36,11 +42,11 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await conn.end();
-  publisher.disconnect();
+  redis.disconnect();
   subscriber.disconnect();
 });
 
-describe("processCrimeJob idempotency", () => {
+describe("plugin commit job idempotency", () => {
   it("does not double-pay when a BullMQ retry re-runs the same job.id", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     const events: unknown[] = [];
@@ -60,12 +66,14 @@ describe("processCrimeJob idempotency", () => {
     };
 
     // First attempt: resolves and credits normally.
-    await processCrimeJob(db, publisher, job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
     // A BullMQ retry re-runs the whole handler from scratch with the exact
     // same job.id and the exact same seed — seed-determinism means it rolls
-    // the identical outcome, but the crime_log.job_id unique index must stop
-    // it from crediting a second time.
-    await processCrimeJob(db, publisher, job);
+    // the identical outcome, but the `plugin_job_runs` idempotency guard
+    // (structural, first write inside ctx.transaction) must stop it from
+    // crediting a second time. `crime_log.job_id` is still unique but is
+    // incidental to that guard, not the mechanism enforcing it.
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
 
     const logs = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));
     expect(logs).toHaveLength(1);
@@ -78,18 +86,19 @@ describe("processCrimeJob idempotency", () => {
     expect(stats?.cash).toBeGreaterThan(0n); // the forced 100% chance guarantees a payout
     expect(stats?.cash).toBe(ledger[0]?.amount); // credited exactly once, matching the one ledger row
 
-    // Decision 1 (see worker.ts): the retry still republishes the event,
-    // because the retry exists precisely to cover the case where the first
-    // attempt committed and then died before publishing. Give redis pub/sub
-    // a moment to deliver both messages.
+    // Give redis pub/sub a moment to deliver the message.
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(events).toHaveLength(2);
+    // Spec §2: a retried already-committed job emits ONE event, not two.
+    // Core republished crime.resolved on replay (worker.ts Decision 1); the
+    // plugin framework swallows the replay (JobAlreadyAppliedError aborts the
+    // handler before any publishCore), so only the first run's event arrives.
+    expect(events).toHaveLength(1);
   });
 });
 
 // Task 6: jail-on-failure and rank-up now live inside the same guarded
 // transaction as the payout — prove a retry can't double-apply either.
-describe("processCrimeJob idempotency — jail and rank-up (Task 6)", () => {
+describe("plugin commit job idempotency — jail and rank-up", () => {
   it("does not double-jail on a retried job that fails and rolls jail", async () => {
     // Force a guaranteed jail regardless of the RNG seed: 0% success (so the
     // crime always fails) and a 100% jail chance on that failure.
@@ -99,7 +108,7 @@ describe("processCrimeJob idempotency — jail and rank-up (Task 6)", () => {
 
     const job = { id: "retry-jail-job-1", data: { playerId, crimeId, seed: "fixed-seed-for-jail-idempotency" } };
 
-    await processCrimeJob(db, publisher, job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
     const [firstStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(firstStats?.jailedUntil).not.toBeNull();
@@ -107,7 +116,7 @@ describe("processCrimeJob idempotency — jail and rank-up (Task 6)", () => {
 
     // Retry: same job.id, same seed — must NOT re-jail (which would extend
     // or reset the sentence past what the original attempt set).
-    await processCrimeJob(db, publisher, job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
     const [secondStats] = await db.select({ jailedUntil: playerStats.jailedUntil })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(secondStats?.jailedUntil?.getTime()).toBe(firstUntil);
@@ -127,14 +136,14 @@ describe("processCrimeJob idempotency — jail and rank-up (Task 6)", () => {
 
     const job = { id: "retry-rank-job-1", data: { playerId, crimeId, seed: "fixed-seed-for-rank-idempotency" } };
 
-    await processCrimeJob(db, publisher, job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
     const [firstStats] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(firstStats?.rankId).not.toBeNull(); // promoted past the default null rank
 
     // Retry: same job.id, same seed — must NOT re-promote or re-pay the
     // rank's cash reward a second time.
-    await processCrimeJob(db, publisher, job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
     const [secondStats] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(secondStats?.rankId).toBe(firstStats?.rankId);

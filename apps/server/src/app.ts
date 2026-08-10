@@ -1,11 +1,9 @@
 import cors from "@fastify/cors";
-import type { Queue } from "bullmq";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
-import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import { registerGangRoutes } from "./game/gangs/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
@@ -16,13 +14,11 @@ import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
-import type { CrimeJobData } from "./queue/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
   db: Db;
   redis: Redis;
-  crimeQueue: Queue<CrimeJobData>;
   /** Overridable so tests can pair a server with a test-private leaderboard namespace — see rebuildLeaderboards. */
   leaderboardPrefix?: string;
   /** Overridable so tests can pair a server with a test-private rate-limit namespace — see bootTestServer. */
@@ -60,7 +56,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
-  registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerGangRoutes(app, deps.db, deps.redis, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
@@ -84,14 +79,16 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   let ownsLoadedPlugins = false;
   if (loaded === undefined) {
     // This default path has no queue-name prefix, unlike `bootTestServer`'s
-    // own `loadPlugins` call (`plugin-test-${randomUUID()}:`) — a shared
+    // own `loadPlugins` call (`plugin-test-${randomUUID()}-`) — a shared
     // BullMQ queue name across concurrently-running test files has already
     // caused real cross-talk here (see the `crime-test-${randomUUID()}`
-    // comment in test/helpers/server.ts). No CORE_PLUGINS manifest declares
-    // jobs today, so the gap is theoretical; keep it that way rather than
-    // silently creating an unprefixed, unisolated queue the first time one
-    // does. A core plugin that needs jobs must be passed to `buildApp`
-    // explicitly by a caller that can supply an isolated prefix.
+    // comment in test/helpers/server.ts). `crimes` is the first core plugin
+    // that declares jobs, so this fallback now always throws on a real boot:
+    // every caller must pass `deps.plugins` explicitly, built with an
+    // isolated queue prefix, exactly as `bootTestServer` and `index.ts`
+    // already do. The guard stays even though the branch below it is now
+    // unreachable — the alternative is silently creating an unprefixed,
+    // unisolated queue the first time a caller forgets to pass `plugins`.
     for (const manifest of CORE_PLUGINS) {
       if (Object.keys(manifest.jobs).length > 0) {
         throw new Error(

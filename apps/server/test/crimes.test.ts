@@ -6,6 +6,8 @@ import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { crimes, playerStats, transactions } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
+import { runPluginJob } from "../src/plugins/jobs.js";
+import crimesPlugin from "@gl3/plugin-crimes";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
@@ -13,9 +15,10 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
-// Only needed by the `processCrimeJob` unit tests below, which bypass the
+// Only needed by the plugin commit job unit tests below, which bypass the
 // queue/worker entirely and so need their own publisher to hand it.
 const redis = createRedis(loadConfig(process.env).redisUrl);
+const jobDeps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix: "crimes-test" });
 
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
@@ -134,9 +137,8 @@ describe("POST /api/crimes/:crimeId/commit while jailed", () => {
   });
 });
 
-describe("processCrimeJob — jail and rank-up wiring", () => {
+describe("plugin commit job — jail and rank-up wiring", () => {
   it("jails the player on a crime whose failure rolls jail, and reports it on crime.resolved", async () => {
-    const { processCrimeJob } = await import("../src/game/crimes/worker.js");
     const [armouredVan] = await db.select().from(crimes).where(eq(crimes.name, "Armoured Van"));
     if (!armouredVan) throw new Error("seed missing Armoured Van");
 
@@ -167,7 +169,7 @@ describe("processCrimeJob — jail and rank-up wiring", () => {
     }
     expect(seed).not.toBe("");
 
-    await processCrimeJob(db, redis, { id: "jail-test-job", data: { playerId, crimeId: armouredVan.id, seed } });
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", { id: "jail-test-job", data: { playerId, crimeId: armouredVan.id, seed } });
 
     const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(stats?.jailedUntil).not.toBeNull();
@@ -179,8 +181,7 @@ describe("processCrimeJob — jail and rank-up wiring", () => {
     expect(jailed).toBeDefined();
   });
 
-  it("ranks up and republishes an accurate jailedUntil on an idempotent replay", async () => {
-    const { processCrimeJob } = await import("../src/game/crimes/worker.js");
+  it("ranks up on the first commit and does not re-apply the rank-up on an idempotent replay", async () => {
     const { seedRanks } = await import("../src/db/seed.js");
     await seedRanks(db);
 
@@ -197,13 +198,15 @@ describe("processCrimeJob — jail and rank-up wiring", () => {
     expect(seed).not.toBe("");
 
     const job = { id: "rank-test-job", data: { playerId, crimeId, seed } };
-    await processCrimeJob(db, redis, job);
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", job);
     const [afterFirst] = await db.select({ rankId: playerStats.rankId }).from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(afterFirst?.rankId).not.toBeNull();
 
-    // Replay the SAME job.id — must not double-promote or double-credit,
-    // and must still report the player's real (already-jailed-or-not) state.
-    await processCrimeJob(db, redis, job);
+    // Replay the SAME job.id — must not double-promote or double-credit.
+    // Under the accepted §2 deviation, a replay is swallowed as
+    // JobAlreadyAppliedError before any handler code runs, so it publishes
+    // no events at all (unlike core, which republished crime.resolved).
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", job);
     const [afterReplay] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash }).from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(afterReplay?.rankId).toBe(afterFirst?.rankId);
   });

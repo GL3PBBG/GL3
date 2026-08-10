@@ -5,6 +5,7 @@ import newsPlugin from "@gl3/plugin-news";
 import notificationsPlugin from "@gl3/plugin-notifications";
 import rankPlugin from "@gl3/plugin-ranks";
 import travelPlugin from "@gl3/plugin-travel";
+import crimesPlugin from "@gl3/plugin-crimes";
 
 /**
  * Ported core modules — plugin-served, never optional. A static `import`
@@ -21,7 +22,7 @@ import travelPlugin from "@gl3/plugin-travel";
  * change of its own.
  */
 export const CORE_PLUGINS: readonly PluginManifest[] = [
-  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin, travelPlugin,
+  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin, travelPlugin, crimesPlugin,
 ];
 
 /**
