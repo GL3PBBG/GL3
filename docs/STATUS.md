@@ -16,7 +16,7 @@ Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); three of twelve module ports shipped (`ranks`, `notifications`, `news`); the six remaining pending ports are now unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 70 files / 571 tests**, green across repeated back-to-back runs.
+**Suite: 70 files / 572 tests**, green across repeated back-to-back runs.
 
 ---
 
@@ -231,6 +231,29 @@ Branch `feat/plugin-core-events`, forked from `main` at `102079c`. Design:
 
 Six module ports remain: `bank`, `bullets`, `travel`, `crimes`, `mail`,
 `gangs`. All are now unblocked.
+
+**Carried forward from this branch's final review** — three accepted Minors,
+none blocking, all worth closing when the next port touches the same code:
+
+1. **`applyExpAndRankUp`'s zero-gain early return is untested.** The zero-gain
+   guard exists on both `tx.economy.addExp` and `tx.economy.applyExpAndRankUp`
+   (a zero gain is core's own no-op, so no `UPDATE` runs, so no row lock is
+   taken — reading `player_stats` anyway would be an unlocked read that can
+   `ZADD` a stale value over a newer one after commit). Only the `addExp` half
+   has a test. `applyExpAndRankUp` is the branch that buffers *two* kinds
+   (`exp` and `cash`), so it is the one with more to get wrong. `crimes` calls
+   both on a failed crime and is the natural place to close this.
+2. **The `news` GET route's ordering and cap are untested.**
+   `apps/server/test/news.test.ts` covers an empty list and a single item, so
+   neither `ORDER BY createdAt DESC` with more than one row nor the `limit(50)`
+   cap is exercised. Pre-existing — it predates the port — but the handler is
+   new code in `packages/plugins/news` now.
+3. **`CorpusEntry` in `plugin-ctx-core-events.test.ts` collapses the union.**
+   It is `Omit<CoreEventInput, …>`, i.e. the same non-distributing `Omit` that
+   `OmitFromUnion` exists to avoid, which is why the corpus needs an
+   `as CoreEventInput` cast at the call site. Plan-mandated verbatim, and the
+   runtime `GameEventSchema.parse` is the real guard, so the cast is not
+   load-bearing — but reusing `OmitFromUnion` there would remove it.
 
 ## Starting M4
 
