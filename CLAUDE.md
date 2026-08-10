@@ -154,8 +154,8 @@ unavailable here.
   `srcAliases`, `plugins/core-plugins.ts`, the old `app.ts` registration to
   delete, and **five separate COPY lines in `Dockerfile.server`**
   (`Dockerfile.server:54,74,75,112,127` for `bullets`; `travel` is the same
-  shape — one per plugin per line, so `grep -c "packages/plugins/<id>
-  Dockerfile.server` is the fast check for a new port, expecting 5). Missing the
+  shape — one per plugin per line, so `grep -c "packages/plugins/<id>" Dockerfile.server`
+  is the fast check for a new port, expecting 5). Missing the
   `apps/server/tsconfig.json` reference or a Dockerfile COPY fails **only in
   CI** — the root tsconfig makes `npm run typecheck` pass regardless. Catch the
   first locally with `npx tsc --build --force apps/server/tsconfig.json`, the
