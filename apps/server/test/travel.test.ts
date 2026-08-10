@@ -304,7 +304,7 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
     // L_cooldown is a single per-player travel cooldown, not per-route).
     const blocked = await app.inject({ method: "POST", url: `/api/travel/${miamiId}`, headers: auth });
     expect(blocked.statusCode).toBe(429);
-    expect(blocked.json()).toMatchObject({ error: "on_cooldown" });
+    expect(blocked.json()).toMatchObject({ error: "on_cooldown", retryAfter: expect.any(Number) });
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
 
     // Simulate the cooldown having elapsed so the same-destination rejection
@@ -346,6 +346,11 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
 
     const unauthenticated = await app.inject({ method: "GET", url: "/api/locations" });
     expect(unauthenticated.statusCode).toBe(401);
+
+    // Parity with core, not a regression, but the money-moving route deserves
+    // its own 401 assertion rather than relying solely on GET's.
+    const unauthenticatedPost = await app.inject({ method: "POST", url: `/api/travel/${chicagoId}` });
+    expect(unauthenticatedPost.statusCode).toBe(401);
 
     await app.close();
   });
