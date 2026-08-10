@@ -10,7 +10,8 @@ import travelPlugin from "@gl3/plugin-travel";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
 import { cooldownKey } from "../src/game/cooldown.js";
-import { processCrimeJob } from "../src/game/crimes/worker.js";
+import { runPluginJob } from "../src/plugins/jobs.js";
+import crimesPlugin from "@gl3/plugin-crimes";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
@@ -21,13 +22,14 @@ const PLAYER_COUNT = 5;
 const OP_COUNT = 1000;
 const STARTING_CASH = 50_000n;
 
-// This file calls processCrimeJob/performBankTransaction directly (no
+// This file calls runPluginJob/callPluginRoute/applyBalanceChange directly (no
 // bootTestServer, no HTTP), so nothing namespaces their leaderboard writes
-// automatically the way a booted test server would. Both take an optional
-// trailing `leaderboardPrefix` — pass a run-unique one so this file never
-// zadd's into the shared, global `leaderboard:*` keys other concurrent
-// test files/agents may be reading.
+// automatically the way a booted test server would. The plugin job deps
+// carry a run-unique `leaderboardPrefix` so this file never zadd's into
+// the shared, global `leaderboard:*` keys other concurrent test
+// files/agents may be reading.
 const leaderboardPrefix = `invariant-test-${uuidv7()}`;
+const pluginJobDeps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 
 let playerIds: string[] = [];
 let crimeIds: string[] = [];
@@ -99,9 +101,11 @@ describe("economy invariant across every M2 money path", () => {
       attempted[opName] += 1;
       try {
         if (opName === "crime") {
-          await processCrimeJob(
-            db, redis, { id: `invariant-crime-${i}`, data: { playerId, crimeId: pick(crimeIds), seed: `invariant-seed-${i}` } },
-            leaderboardPrefix,
+          await runPluginJob(
+            pluginJobDeps(),
+            crimesPlugin,
+            "commit",
+            { id: `invariant-crime-${i}`, data: { playerId, crimeId: pick(crimeIds), seed: `invariant-seed-${i}` } },
           );
         } else if (opName === "bank") {
           const direction = rand() < 0.5 ? "deposit" : "withdraw";
@@ -160,7 +164,7 @@ describe("economy invariant across every M2 money path", () => {
         if (
           err instanceof InsufficientFundsError ||
           // Every ported module's expected rejections arrive as the
-          // PluginError its handler throws. Only crimes is still core.
+          // PluginError its handler throws.
           (err instanceof PluginError &&
             (err.code === "insufficient_funds" || err.code === "insufficient_stock" ||
              err.code === "no_location" || err.code === "already_there"))

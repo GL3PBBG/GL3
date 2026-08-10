@@ -2,7 +2,7 @@ import {
   definePlugin, InsufficientFundsError, PluginError, route,
   type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { crimeLog, crimes, playerCrimeSkill, playerStats, players } from "./schema.js";
@@ -119,41 +119,41 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
   const rng = ctx.job?.rng;
   if (rng === undefined) throw new Error("commit job ran without a seeded rng");
 
-  // Pre-tx reads (spec §4.1) — ctx.player is null inside a job.
-  const crime = await ctx.transaction(async (tx) => {
-    const [row] = await tx.db.select().from(crimes).where(eq(crimes.id, crimeId));
-    return row ?? null;
-  });
-  if (crime === null) return; // crime deleted between enqueue and resolve
-
-  const actorName = await ctx.transaction(async (tx) => {
-    const [row] = await tx.db.select({ username: players.username })
-      .from(players).where(eq(players.id, playerId));
-    return row?.username ?? null;
-  });
-  if (actorName === null) return; // player deleted
-
-  const skillChance = await ctx.transaction(async (tx) => {
-    const [row] = await tx.db.select({ chance: playerCrimeSkill.chance })
-      .from(playerCrimeSkill).where(eq(playerCrimeSkill.playerId, playerId));
-    return row?.chance ?? null;
-  });
-  const chance = Number(skillChance ?? DEFAULT_CRIME_CHANCE);
-
-  // The roll (spec §4.2) — seeded, identical draws to core.
-  const roll = rng.int(0, 10_000);
-  const success = roll < Math.round(chance * 100);
-  const payout = success ? rng.bigint(crime.minPayout, crime.maxPayout) : 0n;
-  const bullets = success ? BigInt(rng.int(crime.minBullets, crime.maxBullets + 1)) : 0n;
-  const exp = success ? crime.expReward : 0n;
-  const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
-  const jailed = jailRoll < crime.jailChancePercent;
-
-  // The one transaction (spec §4.3). plugin_job_runs insert is already first
-  // (structural in ctx.transaction); a retry throws JobAlreadyAppliedError
-  // before this closure body runs.
+  // All reads and writes in one transaction (spec §4.3). plugin_job_runs
+  // insert is structural (first in ctx.transaction); a retry throws
+  // JobAlreadyAppliedError before any handler code runs. Pre-tx reads
+  // (spec §4.1) live inside this same transaction — ctx only exposes
+  // `transaction` for DB access, and each call would re-claim the job.
   let promotion: RankUpResult | null = null;
   await ctx.transaction(async (tx) => {
+    // Pre-tx reads (spec §4.1) — ctx.player is null inside a job.
+    const [crime] = await tx.db.select().from(crimes).where(eq(crimes.id, crimeId));
+    if (!crime) return; // crime deleted between enqueue and resolve
+
+    const [actor] = await tx.db.select({ username: players.username })
+      .from(players).where(eq(players.id, playerId));
+    if (!actor) return; // player deleted
+    const actorName = actor.username;
+
+    // Per-crime chance: player_crime_skill is one row per (player, crime) —
+    // core queried by playerId only and took [0], grabbing an arbitrary row's
+    // chance. This port scopes it to the committed crimeId (documented
+    // deviation; security-review-confirmed). Falls back to the default when
+    // the player has no row for this crime yet.
+    const [skillRow] = await tx.db.select({ chance: playerCrimeSkill.chance })
+      .from(playerCrimeSkill)
+      .where(and(eq(playerCrimeSkill.playerId, playerId), eq(playerCrimeSkill.crimeId, crimeId)));
+    const chance = Number(skillRow?.chance ?? DEFAULT_CRIME_CHANCE);
+
+    // The roll (spec §4.2) — seeded, identical draws to core.
+    const roll = rng.int(0, 10_000);
+    const success = roll < Math.round(chance * 100);
+    const payout = success ? rng.bigint(crime.minPayout, crime.maxPayout) : 0n;
+    const bullets = success ? BigInt(rng.int(crime.minBullets, crime.maxBullets + 1)) : 0n;
+    const exp = success ? crime.expReward : 0n;
+    const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
+    const jailed = jailRoll < crime.jailChancePercent;
+
     await tx.db.insert(crimeLog).values({
       id: uuidv7(), playerId, crimeId, success, payout, jobId: ctx.job!.id,
     });
