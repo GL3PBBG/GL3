@@ -33,6 +33,9 @@ const srcAliases = {
       "@gl3/plugin-news": fileURLToPath(
         new URL("./packages/plugins/news/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-bank": fileURLToPath(
+        new URL("./packages/plugins/bank/src/index.ts", import.meta.url),
+      ),
     },
   },
 };

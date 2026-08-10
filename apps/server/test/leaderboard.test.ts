@@ -4,7 +4,8 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { players, playerStats } from "../src/db/schema/index.js";
-import { performBankTransaction } from "../src/game/bank/service.js";
+import bankPlugin from "@gl3/plugin-bank";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 import { rebuildLeaderboards, recordScore, topN } from "../src/game/leaderboard/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -81,7 +82,11 @@ describe("GET /api/leaderboard/:kind", () => {
     const { token, playerId } = reg.json();
     await db.update(playerStats).set({ cash: 1000n }).where(eq(playerStats.playerId, playerId));
 
-    await performBankTransaction(db, redis, playerId, "deposit", 300n, PREFIX);
+    // Drives the bank plugin's route: this is what proves the ctx buffers a
+    // leaderboard write per changed kind, with no plugin-side recordScore.
+    await callPluginRoute(bankPlugin, "POST", "/api/bank/deposit", {
+      db, redis, leaderboardPrefix: PREFIX, playerId, body: { amount: "300" },
+    });
 
     const res = await app.inject({ method: "GET", url: "/api/leaderboard/cash", headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(200);

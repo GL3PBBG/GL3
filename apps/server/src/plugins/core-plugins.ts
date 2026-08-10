@@ -1,4 +1,5 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
+import bankPlugin from "@gl3/plugin-bank";
 import newsPlugin from "@gl3/plugin-news";
 import notificationsPlugin from "@gl3/plugin-notifications";
 import rankPlugin from "@gl3/plugin-ranks";
@@ -17,7 +18,9 @@ import rankPlugin from "@gl3/plugin-ranks";
  * plugin route despite calling `buildApp` directly, with no test-boot
  * change of its own.
  */
-export const CORE_PLUGINS: readonly PluginManifest[] = [rankPlugin, notificationsPlugin, newsPlugin];
+export const CORE_PLUGINS: readonly PluginManifest[] = [
+  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin,
+];
 
 /**
  * A ported core module is never optional (spec) — CORE_PLUGINS always loads,

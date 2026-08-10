@@ -6,6 +6,7 @@
     { "path": "./packages/plugins/ranks" },
     { "path": "./packages/plugins/notifications" },
     { "path": "./packages/plugins/news" },
+    { "path": "./packages/plugins/bank" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }

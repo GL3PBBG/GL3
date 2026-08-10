@@ -4,13 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { crimes, locations, players, playerStats, transactions } from "../src/db/schema/index.js";
 import { seedCrimes, seedLocations, seedRanks } from "../src/db/seed.js";
-import { performBankTransaction } from "../src/game/bank/service.js";
+import bankPlugin from "@gl3/plugin-bank";
+import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
 import { processCrimeJob } from "../src/game/crimes/worker.js";
 import { AlreadyAtLocationError, LocationNotFoundError, performTravel } from "../src/game/travel/service.js";
 import { InsufficientStockError, NoLocationError, performBulletsPurchase } from "../src/game/bullets/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -103,7 +105,10 @@ describe("economy invariant across every M2 money path", () => {
         } else if (opName === "bank") {
           const direction = rand() < 0.5 ? "deposit" : "withdraw";
           const amount = BigInt(1 + Math.floor(rand() * 200));
-          await performBankTransaction(db, redis, playerId, direction, amount, leaderboardPrefix);
+          // bank is a plugin now; this drives its real route handler.
+          await callPluginRoute(bankPlugin, "POST", `/api/bank/${direction}`, {
+            db, redis, leaderboardPrefix, playerId, body: { amount: amount.toString() },
+          });
         } else if (opName === "travel") {
           await performTravel(db, redis, playerId, pick(locationIds));
         } else if (opName === "bullets") {
@@ -126,7 +131,11 @@ describe("economy invariant across every M2 money path", () => {
         if (
           err instanceof InsufficientFundsError || err instanceof AlreadyAtLocationError ||
           err instanceof InsufficientStockError || err instanceof NoLocationError ||
-          err instanceof LocationNotFoundError
+          err instanceof LocationNotFoundError ||
+          // bank is a plugin now: its overdraft arrives as the PluginError its
+          // handler throws, not as core's InsufficientFundsError. The other
+          // four ops are still core and still throw core classes.
+          (err instanceof PluginError && err.code === "insufficient_funds")
         ) continue;
         throw err;
       }

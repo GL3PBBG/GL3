@@ -5,7 +5,6 @@ import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
-import { registerBankRoutes } from "./game/bank/routes.js";
 import { registerBulletsRoutes } from "./game/bullets/routes.js";
 import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import { registerGangRoutes } from "./game/gangs/routes.js";
@@ -63,7 +62,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
-  registerBankRoutes(app, deps.db, deps.redis, requireAuth);
   registerBulletsRoutes(app, deps.db, deps.redis, requireAuth);
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerGangRoutes(app, deps.db, deps.redis, requireAuth);
