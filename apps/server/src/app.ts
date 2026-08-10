@@ -13,7 +13,6 @@ import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerMailRoutes } from "./game/mail/routes.js";
-import { registerNewsRoutes } from "./game/news/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerTravelRoutes } from "./game/travel/routes.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
@@ -71,7 +70,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
   registerMailRoutes(app, deps.db, deps.redis, requireAuth);
-  registerNewsRoutes(app, deps.db, deps.redis, requireAuth);
   registerProfileRoutes(app, deps.db, requireAuth);
   registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);

@@ -46,6 +46,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY packages/plugins/ranks/package.json packages/plugins/ranks/
 COPY packages/plugins/notifications/package.json packages/plugins/notifications/
+COPY packages/plugins/news/package.json packages/plugins/news/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -61,6 +62,8 @@ COPY packages/plugins/ranks/tsconfig.json packages/plugins/ranks/tsconfig.json
 COPY packages/plugins/ranks/src packages/plugins/ranks/src
 COPY packages/plugins/notifications/tsconfig.json packages/plugins/notifications/tsconfig.json
 COPY packages/plugins/notifications/src packages/plugins/notifications/src
+COPY packages/plugins/news/tsconfig.json packages/plugins/news/tsconfig.json
+COPY packages/plugins/news/src packages/plugins/news/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -93,6 +96,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY packages/plugins/ranks/package.json packages/plugins/ranks/
 COPY packages/plugins/notifications/package.json packages/plugins/notifications/
+COPY packages/plugins/news/package.json packages/plugins/news/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -105,6 +109,7 @@ COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/plugin-sdk/dist packages/plugin-sdk/dist
 COPY --from=builder /app/packages/plugins/ranks/dist packages/plugins/ranks/dist
 COPY --from=builder /app/packages/plugins/notifications/dist packages/plugins/notifications/dist
+COPY --from=builder /app/packages/plugins/news/dist packages/plugins/news/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist
