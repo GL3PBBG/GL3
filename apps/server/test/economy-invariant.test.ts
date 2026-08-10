@@ -6,10 +6,11 @@ import { crimes, locations, players, playerStats, transactions } from "../src/db
 import { seedCrimes, seedLocations, seedRanks } from "../src/db/seed.js";
 import bankPlugin from "@gl3/plugin-bank";
 import bulletsPlugin from "@gl3/plugin-bullets";
+import travelPlugin from "@gl3/plugin-travel";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
+import { cooldownKey } from "../src/game/cooldown.js";
 import { processCrimeJob } from "../src/game/crimes/worker.js";
-import { AlreadyAtLocationError, LocationNotFoundError, performTravel } from "../src/game/travel/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
@@ -110,7 +111,15 @@ describe("economy invariant across every M2 money path", () => {
             db, redis, leaderboardPrefix, playerId, body: { amount: amount.toString() },
           });
         } else if (opName === "travel") {
-          await performTravel(db, redis, playerId, pick(locationIds));
+          // travel is a plugin now; this drives its real route handler. Core's
+          // performTravel had no cooldown gate — the route did — so clear the
+          // key first, or nearly every op in this sweep would answer 429 and
+          // travel coverage would silently collapse to almost nothing.
+          // Targeted DEL, never FLUSHDB: Redis is shared with every other file.
+          await redis.del(cooldownKey(playerId, "travel"));
+          await callPluginRoute(travelPlugin, "POST", "/api/travel/:locationId", {
+            db, redis, leaderboardPrefix, playerId, params: { locationId: pick(locationIds) },
+          });
         } else if (opName === "bullets") {
           const quantity = 1 + Math.floor(rand() * 5);
           // bullets is a plugin now; this drives its real route handler, so
@@ -133,15 +142,28 @@ describe("economy invariant across every M2 money path", () => {
         // Expected, frequent rejections that must NOT corrupt state: insufficient
         // funds/stock, already-at-location, no-location-yet. Anything else is a
         // real bug and must fail the test.
+        //
+        // Deliberately NOT accepted, even though they are real PluginError codes
+        // travel can throw: on_cooldown, location_changed, location_not_found.
+        // All three are unreachable in THIS sweep by construction — the
+        // redis.del immediately precedes each travel call and the sweep is
+        // single-threaded (on_cooldown), a locationId mismatch needs a
+        // concurrent move between the pre-read and the locked recheck that a
+        // sequential sweep can never produce (location_changed), and location
+        // ids come from the seeded table and are never deleted
+        // (location_not_found). If any of the three ever fires here, that is
+        // the bug — e.g. a future change namespacing the cooldown key by
+        // plugin id would make cooldownKey(playerId, "travel") stop matching,
+        // silently collapsing succeeded.travel to near-zero behind a wide
+        // accept-list that swallowed the 429s as "expected". Keeping them out
+        // is what lets the coverage assertion below actually catch that.
         if (
-          err instanceof InsufficientFundsError || err instanceof AlreadyAtLocationError ||
-          err instanceof LocationNotFoundError ||
-          // bank and bullets are plugins now: their expected rejections arrive
-          // as the PluginError their handlers throw, not as core classes.
-          // travel and crimes are still core and still throw core classes.
+          err instanceof InsufficientFundsError ||
+          // Every ported module's expected rejections arrive as the
+          // PluginError its handler throws. Only crimes is still core.
           (err instanceof PluginError &&
             (err.code === "insufficient_funds" || err.code === "insufficient_stock" ||
-             err.code === "no_location"))
+             err.code === "no_location" || err.code === "already_there"))
         ) continue;
         throw err;
       }
@@ -159,6 +181,11 @@ describe("economy invariant across every M2 money path", () => {
     // kinds alone and pass silently with zero bullets coverage — assert the
     // op kind directly, not just the aggregate.
     expect(succeeded.bullets).toBeGreaterThan(0);
+    // The accept-list above swallows travel's expected rejections alongside
+    // every other op kind's. A regression that made every travel fail would
+    // still satisfy the other kinds and pass silently with zero travel
+    // coverage — assert it moved at least once.
+    expect(succeeded.travel).toBeGreaterThan(0);
 
     for (const playerId of playerIds) {
       const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

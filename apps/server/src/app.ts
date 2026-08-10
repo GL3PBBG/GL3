@@ -12,7 +12,6 @@ import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerMailRoutes } from "./game/mail/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
-import { registerTravelRoutes } from "./game/travel/routes.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
@@ -67,7 +66,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
   registerMailRoutes(app, deps.db, deps.redis, requireAuth);
   registerProfileRoutes(app, deps.db, requireAuth);
-  registerTravelRoutes(app, deps.db, deps.redis, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while
