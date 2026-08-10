@@ -126,9 +126,10 @@ describe("plugin routes", () => {
     expect(res.statusCode).toBe(423);
     expect(res.json()).toMatchObject({ error: "jailed" });
     expect(typeof res.json().remainingSeconds).toBe("number");
-    // Core's own jail-gated routes set this (game/bullets/routes.ts:19,
-    // game/travel/routes.ts:42, game/crimes/routes.ts:55). "Exact core jail
-    // response" is not exact without it.
+    // Core's own jail-gated routes set this (game/crimes/routes.ts:55; the
+    // ported bullets and travel routes now answer from plugins, so the loader
+    // at apps/server/src/plugins/routes.ts:33 is what carries it for them).
+    // "Exact core jail response" is not exact without it.
     expect(res.headers["retry-after"]).toBe(String(res.json().remainingSeconds));
   });
 
