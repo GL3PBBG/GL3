@@ -91,7 +91,11 @@ export function createPluginWorkers(
       workers.push(new Worker(
         pluginQueueName(prefix, manifest.id, name),
         async (job) => { await runPluginJob(deps, manifest, name, job); },
-        { connection: deps.redis },
+        // concurrency:5 matches core's deleted crime worker (`startCrimeWorker`,
+        // same reasoning as the `defaultJobOptions` block in
+        // `createPluginQueues` above) — BullMQ's default is 1 (serial), which
+        // would silently regress every plugin job to one-at-a-time processing.
+        { connection: deps.redis, concurrency: 5 },
       ));
     }
   }

@@ -69,8 +69,10 @@ describe("plugin commit job idempotency", () => {
     await runPluginJob(deps(), crimesPlugin, "commit", job);
     // A BullMQ retry re-runs the whole handler from scratch with the exact
     // same job.id and the exact same seed — seed-determinism means it rolls
-    // the identical outcome, but the crime_log.job_id unique index must stop
-    // it from crediting a second time.
+    // the identical outcome, but the `plugin_job_runs` idempotency guard
+    // (structural, first write inside ctx.transaction) must stop it from
+    // crediting a second time. `crime_log.job_id` is still unique but is
+    // incidental to that guard, not the mechanism enforcing it.
     await runPluginJob(deps(), crimesPlugin, "commit", job);
 
     const logs = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));

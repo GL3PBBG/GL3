@@ -181,7 +181,7 @@ describe("plugin commit job — jail and rank-up wiring", () => {
     expect(jailed).toBeDefined();
   });
 
-  it("ranks up and republishes an accurate jailedUntil on an idempotent replay", async () => {
+  it("ranks up on the first commit and does not re-apply the rank-up on an idempotent replay", async () => {
     const { seedRanks } = await import("../src/db/seed.js");
     await seedRanks(db);
 
@@ -202,8 +202,10 @@ describe("plugin commit job — jail and rank-up wiring", () => {
     const [afterFirst] = await db.select({ rankId: playerStats.rankId }).from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(afterFirst?.rankId).not.toBeNull();
 
-    // Replay the SAME job.id — must not double-promote or double-credit,
-    // and must still report the player's real (already-jailed-or-not) state.
+    // Replay the SAME job.id — must not double-promote or double-credit.
+    // Under the accepted §2 deviation, a replay is swallowed as
+    // JobAlreadyAppliedError before any handler code runs, so it publishes
+    // no events at all (unlike core, which republished crime.resolved).
     await runPluginJob(jobDeps(), crimesPlugin, "commit", job);
     const [afterReplay] = await db.select({ rankId: playerStats.rankId, cash: playerStats.cash }).from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(afterReplay?.rankId).toBe(afterFirst?.rankId);
