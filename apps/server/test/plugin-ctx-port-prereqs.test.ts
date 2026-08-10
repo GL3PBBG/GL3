@@ -1,11 +1,13 @@
 import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
 import { eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
 import type { FastifyInstance } from "fastify";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loadConfig } from "../src/config.js";
+import * as schema from "../src/db/schema/index.js";
 import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { lockLocationsForUpdate } from "../src/economy/ledger.js";
 import { testDb } from "./helpers/db.js";
@@ -152,7 +154,15 @@ describe("plugin ctx port prerequisites", () => {
 });
 
 describe("tx.locks.locations", () => {
-  it("locks several rows, drops nulls, dedupes, and is a no-op when nothing is left", async () => {
+  // What this proves: a multi-row call (with a duplicate and a null mixed
+  // in) doesn't throw, and the rows it locked are still intact and
+  // readable once the transaction has committed and released its locks.
+  // It does NOT prove ordering, deduplication, or null-dropping — Postgres
+  // allows re-acquiring FOR UPDATE on a row a transaction already holds, so
+  // a non-deduping implementation passes this unchanged, and `id = NULL`
+  // locks zero rows without throwing, so a missing null-filter passes this
+  // unchanged too. See the next test for those three properties.
+  it("does not throw on a multi-row call with a duplicate and a null, and leaves the rows intact", async () => {
     const a = uuidv7();
     const b = uuidv7();
     await db.insert(locations).values([
@@ -179,6 +189,48 @@ describe("tx.locks.locations", () => {
     const rows = await db.select({ id: locations.id }).from(locations)
       .where(inArray(locations.id, [a, b]));
     expect(rows).toHaveLength(2);
+  });
+
+  // Whether lockLocationsForUpdate's internal dedupe, null-drop, and sort
+  // are *observed* by the database (as opposed to merely not throwing) is
+  // not visible through the row data alone — the only externally-observable
+  // trace is the actual SQL Postgres receives. Modelled directly on the
+  // sibling `lockPlayersForUpdate` precedent at ledger.test.ts:227-258: a
+  // second real connection with the `postgres` driver's `debug` hook (a
+  // genuine driver feature, not a test double) records every statement and
+  // its bound params. lockLocationsForUpdate issues one `FOR UPDATE`
+  // statement per row (not a single `IN (...)`, see the doc comment on the
+  // helper), so a call with a duplicate and a null mixed into a descending
+  // pair must still produce exactly two such statements, for the lower id
+  // then the higher id, in that order — proving dedup (3 inputs collapse to
+  // 2 statements), null-drop (the null never appears), and ascending order
+  // (lo before hi despite descending call-site order) all at once.
+  it("sends exactly one FOR UPDATE statement per distinct id, in ascending order, dropping the null", async () => {
+    const a = uuidv7();
+    const b = uuidv7();
+    await db.insert(locations).values([
+      { id: a, name: "Gamma", bulletStock: 1, bulletCost: 1n },
+      { id: b, name: "Delta", bulletStock: 1, bulletCost: 1n },
+    ]);
+    const [hi, lo] = a < b ? [b, a] : [a, b];
+
+    const captured: { query: string; params: unknown[] }[] = [];
+    const debugSql = postgres(loadConfig(process.env).databaseUrl, {
+      debug: (_conn, query, params) => { captured.push({ query, params }); },
+    });
+    const debugDb = drizzle(debugSql, { schema });
+
+    try {
+      await debugDb.transaction(async (tx) => {
+        await lockLocationsForUpdate(tx, [hi, lo, hi, null]);
+      });
+
+      const lockQueries = captured.filter((c) => /for update/i.test(c.query));
+      expect(lockQueries).toHaveLength(2);
+      expect(lockQueries.map((q) => q.params)).toEqual([[lo], [hi]]);
+    } finally {
+      await debugSql.end();
+    }
   });
 
   it("actually blocks a competing FOR UPDATE on one of the rows", async () => {
