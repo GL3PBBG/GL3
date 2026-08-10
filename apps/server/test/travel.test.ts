@@ -268,11 +268,17 @@ describe("GET /api/locations", () => {
 describe("GET /api/locations and POST /api/travel/:locationId", () => {
   it("lists locations, travels, cooldown-gates, re-blocks the same destination, and jail-gates", async () => {
     const { buildApp } = await import("../src/app.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
     const { cooldownKey } = await import("../src/game/cooldown.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-travel-test-${uuidv7()}-`,
+    );
+    const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Travel${Date.now()}`, password: "hunter2hunter2" } });
     const { token, playerId: registeredId } = reg.json();
     const auth = { authorization: `Bearer ${token}` };
@@ -324,14 +330,22 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
     expect(jailed.json()).toMatchObject({ error: "jailed" });
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 
   it("404s a well-formed but unknown location id and 400s a malformed one", async () => {
     const { buildApp } = await import("../src/app.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-travel-test-${uuidv7()}-`,
+    );
+    const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Travel404${Date.now()}`, password: "hunter2hunter2" } });
     const { token } = reg.json();
     const auth = { authorization: `Bearer ${token}` };
@@ -353,5 +367,7 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
     expect(unauthenticatedPost.statusCode).toBe(401);
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 });
