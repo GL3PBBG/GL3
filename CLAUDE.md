@@ -13,14 +13,14 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; five of the
+(SDK + loader + example) and the web page renderer have shipped; six of the
 twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`,
-`bank`, `bullets`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
+`bank`, `bullets`, `travel`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
 lets a plugin publish any of the 19 core `GameEvent` variants verbatim, so the
-four remaining ports (`travel`, `crimes`, `mail`, `gangs`) are
+three remaining ports (`crimes`, `mail`, `gangs`) are
 unblocked (`profile`, `leaderboard`, `jail` are deliberate non-ports — see
 `docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **70 files / 574 tests**, green across repeated
+MariaDB install. Suite: **71 files / 586 tests**, green across repeated
 back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
@@ -113,12 +113,18 @@ unavailable here.
 6. **A foreign key is a lock.** Inserting a row whose FK references another row
    takes `FOR KEY SHARE` on it, which conflicts with `FOR UPDATE`. No lock call
    appears in the code, so lock-order bugs here are invisible to a reader checking
-   only the explicit locks — read the FKs too. M3 shipped a deadlock (`40P01`,
-   surfacing as HTTP 500 on a well-formed request) because the membership routes
-   locked `player_stats` first and reached `gangs` implicitly through a `gang_logs`
-   insert, inverting the bank routes' order. Every gang↔player path now goes through
-   `lockGangAndPlayerForUpdate` (`economy/ledger.ts`); regression test:
-   `test/gang-lock-order.test.ts`.
+   only the explicit locks — read the FKs too. Two deadlocks have shipped from
+   this, both closed: the M3 gang case (membership routes locked `player_stats`
+   first and reached `gangs` implicitly through a `gang_logs` insert, inverting
+   the bank routes' order) and the travel case (travel locked `player_stats` FOR
+   UPDATE and reached `locations` implicitly through the `location_id` FK,
+   inverting bullets' location→player order). Every gang↔player path now goes
+   through `lockGangAndPlayerForUpdate`; every location↔player path is
+   locations-first — a single row via `lockLocationForUpdate` (bullets) or
+   several via `lockLocationsForUpdate`, which sorts them ascending (travel
+   locks both its source and destination through it). Regression tests:
+   `test/gang-lock-order.test.ts`, `test/travel-lock-order.test.ts`
+   (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing
@@ -147,9 +153,9 @@ unavailable here.
   references, root `tsconfig.json` references, `vitest.workspace.ts`
   `srcAliases`, `plugins/core-plugins.ts`, the old `app.ts` registration to
   delete, and **five separate COPY lines in `Dockerfile.server`**
-  (`Dockerfile.server:54,74,75,112,127` for `bullets` — one per plugin per
-  line, so `grep -c "packages/plugins/<id>" Dockerfile.server` is the fast
-  check for a new port). Missing the
+  (`Dockerfile.server:54,74,75,112,127` for `bullets`; `travel` is the same
+  shape — one per plugin per line, so `grep -c "packages/plugins/<id>
+  Dockerfile.server` is the fast check for a new port, expecting 5). Missing the
   `apps/server/tsconfig.json` reference or a Dockerfile COPY fails **only in
   CI** — the root tsconfig makes `npm run typecheck` pass regardless. Catch the
   first locally with `npx tsc --build --force apps/server/tsconfig.json`, the

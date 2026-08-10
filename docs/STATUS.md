@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 6 (`bullets` port) outcome recorded.
-Branch: `feat/plugin-bullets-port` (forked from `main` at `2663d95`).
+Last updated: 2026-08-10, M5 stage 7 (`travel` port) outcome recorded.
+Branch: `feat/plugin-travel-port` (forked from `main` at `8eb42cf`).
 
 ---
 
@@ -14,11 +14,11 @@ Branch: `feat/plugin-bullets-port` (forked from `main` at `2663d95`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); five of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`); four ports remain (`travel`, `crimes`, `mail`, `gangs`), all unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); six of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`); three ports remain (`crimes`, `mail`, `gangs`), all unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 70 files / 574 tests**, green across repeated back-to-back runs. Unchanged
-by the `bullets` port — five service-level tests converted to drive the plugin
-route rather than adding new ones, and Task 3 added assertions to existing tests.
+**Suite: 71 files / 586 tests**, green across repeated back-to-back runs.
+The `travel` port added one new file (`travel-lock-order.test.ts`) plus assertions
+to existing tests.
 
 ---
 
@@ -277,7 +277,7 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
 Five module ports remained: `bullets`, `travel`, `crimes`, `mail`, `gangs`. All
 were unblocked. `bullets` and `travel` were the natural next two: single-player
 money paths that reuse the SDK error and the helper with nothing new. `bullets`
-went first — see below.
+went first, then `travel` — see both below.
 
 **Carried forward from this branch's final review** — three accepted Minors,
 none blocking, all worth closing when the next port touches the same code:
@@ -317,10 +317,11 @@ package), `2a2e59f` (the cutover).
   (`3abfa90`) built four ctx capabilities with no caller at the time;
   `tx.locks.location` sat unused until this port. The location→player lock
   order (CLAUDE.md rule 6, "what M3 established" above) is now exercised, not
-  merely documented — though see the watch item below for the half `travel`
-  still owns. The concurrency test — a stock of 1, two simultaneous
-  buyers — was demonstrated **failing** with the lock line commented out (both
-  buyers succeeded, an oversell) before being restored to passing.
+  merely documented — and the `travel` port has since closed the deadlock
+  half `travel` used to own (see "Resolved" below). The concurrency test — a
+  stock of 1, two simultaneous buyers — was demonstrated **failing** with
+  the lock line commented out (both buyers succeeded, an oversell) before
+  being restored to passing.
 - **First plugin to write a core-owned column no ctx capability covers.**
   `player_stats.bullets` and `locations.bullet_stock` are written directly
   through `tx.db`, via mirrored schemas in the plugin's own `schema.ts`
@@ -364,9 +365,26 @@ package), `2a2e59f` (the cutover).
 - **The invariant sweep** (`economy-invariant.test.ts`) reports
   `succeeded.bullets = 190` of `attempted.bullets = 201` over its 1000-op run.
 
-Four module ports remain: `travel`, `crimes`, `mail`, `gangs`. `travel` is the
-natural next one — it owns the other half of the read-then-lock race the
-watch items below record.
+### The `travel` port (Plan 7)
+
+Design: `docs/superpowers/specs/2026-08-10-plugin-travel-port-design.md`.
+
+- **`travel` ported** to `packages/plugins/travel`. `GET /api/locations` and
+  `POST /api/travel/:locationId` answer from the plugin;
+  `apps/server/src/game/travel/` no longer exists.
+- **`tx.locks.locations`** (Plan 7, Task 1) — a new ctx capability that
+  locks several `locations` rows in ascending-id order, deduped, null-safe.
+  `travel` locks both its source and destination rows through it before the
+  player row, settling the location↔player lock order as locations-first in
+  every path that touches both. The old `tx.locks.location` (single row)
+  stays for `bullets`. Regression test: `apps/server/test/travel-lock-order.test.ts`
+  — a hand-written raw-SQL adversary (see "Resolved" for why a real
+  buy-vs-travel test cannot be built), shown red against the inverted order.
+- **The closed defect is documented in "Resolved" below**, alongside the
+  reason locking only the destination would have left the staleness half
+  open.
+
+Three module ports remain: `crimes`, `mail`, `gangs`.
 
 ## Starting M4
 
@@ -385,12 +403,12 @@ subagent-driven-development/scripts/task-brief \
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
   are two orders and they do not conflict: gang↔player goes through
-  `lockGangAndPlayerForUpdate` (UUID comparison); location↔player is the bullets
-  shop's **location before player**. Travel is the mirror of bullets (player first,
-  then `FOR KEY SHARE` on `locations` via the `location_id` update) and is inert
-  only because it rejects destination == current before touching that row. Adding a
-  path that locks a location and a player in a new order, or a gang and a player
-  outside the helper, reintroduces SPEC §2.3's deadlock class.
+  `lockGangAndPlayerForUpdate` (UUID comparison); location↔player is **always
+  locations first** — a single location via `lockLocationForUpdate` (bullets), or
+  several via `lockLocationsForUpdate` which sorts them ascending (travel locks
+  both its source and destination rows through it). Adding a path that locks a
+  location and a player in a new order, or a gang and a player outside the helper,
+  reintroduces SPEC §2.3's deadlock class.
 - **An implicit FK lock counts as a lock.** Inserting a row whose FK references a
   locked row takes `FOR KEY SHARE` on it, which conflicts with `FOR UPDATE`. This is
   invisible in the code — no lock call appears — and it is what caused the M3
@@ -513,64 +531,16 @@ web image serves only the SPA's own assets.
   is a deliberate decision nobody has taken yet. Note that npm audit's *suggested*
   fix for the drizzle-kit findings is a **downgrade to 0.18.1 that would reintroduce
   a SQL-injection CVE** — do not follow it.
-- **The bullets purchase reads `player_stats.location_id` unlocked**, before
-  taking the location lock. A `travel` committing in that window means the
-  player buys at a location they have already left. Inherited verbatim from
-  core (`game/bullets/service.ts:32-36` before the port). Closing it here was
-  rejected: locking the player first inverts the mandated location→player
-  order, and re-reading `location_id` after the location lock is a behaviour
-  change smuggled into a port whose provable correctness depends on there
-  being none (design §6). `travel` owns the other half of this race and is
-  the natural place to close it.
-
-  That is the staleness half. There is also a **deadlock half, already
-  reachable, not introduced by this port**: `player_stats.location_id`
-  carries a FK to `locations` (`apps/server/src/db/schema/identity.ts:67`),
-  so `performTravel`'s `UPDATE player_stats SET location_id = …`
-  (`apps/server/src/game/travel/service.ts:41-50`) takes `player_stats` FOR
-  UPDATE first and then an *implicit* FOR KEY SHARE on the destination's
-  `locations` row — the opposite order from bullets, which takes
-  `locations` FOR UPDATE first (`packages/plugins/bullets/src/index.ts`)
-  and then `player_stats` FOR UPDATE inside `applyBalanceChange`. A player at
-  L starting a buy (holds `locations[L]`) racing an intervening committed
-  travel L→C→L (the second leg holds `player_stats[P]`, needs
-  `locations[L]` FOR KEY SHARE, while the buy needs `player_stats[P]`) closes
-  the ABBA cycle: `40P01`, surfacing as a 500 on a well-formed request — the
-  same shape CLAUDE.md rule 6 already documents from M3. Core had this same
-  order (`git show 2a2e59f^:apps/server/src/game/bullets/service.ts:36`), so
-  it predates this port; fixing it here would be an unproven behaviour
-  change to a port whose only claim is byte-identical behaviour. It is
-  `travel`'s job, alongside the staleness half above.
-
-  Two things narrow exactly when this fires, both worth stating because the
-  `travel` implementer needs them to build the right regression test. A
-  same-instant race does **not** deadlock: travel rejects destination ==
-  current with `AlreadyAtLocationError`, so a buy at L racing a travel *out
-  of* L cannot close the cycle — that travel's FOR KEY SHARE lands on a
-  different `locations` row than the one the buy holds. This is why the
-  interleaving needs an *intervening committed* travel, not a merely
-  concurrent one. And the cycle needs the **same** `player_stats` row on
-  both sides: a buy by P1 at L racing a travel by P2 *into* L does not
-  deadlock either, because the two transactions hold different player rows
-  and there is nothing for the cycle to close on.
-
-  The consequence: the staleness half and the deadlock half are the same bug
-  seen from two angles, both stemming from the unlocked read of
-  `player_stats.location_id` before the location lock is taken. Closing the
-  stale-read window — the fix the staleness paragraph above defers to
-  `travel` — is what removes the interleaving that makes the deadlock half
-  reachable at all.
-
-  **Hard constraint on the `travel` port**, so the next design cannot miss
-  this: `performTravel` must take the location lock
-  (`tx.locks.location(toLocationId)`) BEFORE the player lock, matching
-  bullets' order instead of inverting it as today's core version does, and
-  the travel branch must add a deadlock regression test whose two
-  participants do **not** both acquire their locks through the same helper.
-  That last clause matters for a reason CLAUDE.md rule 6's corollary already
-  records: the existing gang-lock deadlock test agreed on lock ordering by
-  construction and stayed green straight through the M3 deadlock it was
-  meant to catch.
+- **`@gl3/plugin-news` is imported by `core-plugins.ts` but absent from
+  `apps/server/package.json`** (all four other core plugins are listed). It
+  resolves only via npm workspaces hoisting today. Pre-existing, outside this
+  branch's scope; recorded here so it is not lost. Adding it to `package.json`
+  is the fix when the next port touches that area.
+- **`travel_cooldown_seconds = 0` makes `acquireCooldown` call Redis
+  `SET ... EX 0`**, which Redis rejects, surfacing as an HTTP 500 on any
+  travel. Pre-existing, carried verbatim from core, outside this port's
+  remit. A live game sets a positive value; the path is unreachable in any
+  sensible config but is a real crash on the misconfigured one.
 - **`bank.test.ts`'s `app.inject` block boots `buildApp` with no
   `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
   ctx-buffered leaderboard writes land in the production global
@@ -581,6 +551,42 @@ web image serves only the SPA's own assets.
 
 **Resolved, but the reasoning matters if you touch these areas:**
 
+- **The location↔player lock-order defect (the old bullets watch item, both
+  halves).** The bullets purchase used to read `player_stats.location_id`
+  unlocked before taking the location lock — a `travel` committing in that
+  window let a player buy at a location they had already left (the staleness
+  half). The same unlocked read was also what made the deadlock half
+  reachable: `performTravel` took `player_stats` FOR UPDATE first and reached
+  `locations` implicitly through the `FOR KEY SHARE` Postgres takes on the
+  `location_id` FK — the opposite order from bullets, closing an ABBA cycle
+  (`40P01`, same shape as the M3 gang deadlock) across the two location rows
+  a player visits in sequence. Both halves are closed. `@gl3/plugin-travel`
+  now locks both its location rows (source **and** destination) through
+  `lockLocationsForUpdate` before the player row, matching bullets' order.
+  Locking only the destination — the constraint this section originally
+  recorded — would have closed the deadlock but left the staleness half open:
+  a travel OUT of location L never touches `locations[L]`, so a buy reading
+  L could still race it. Both rows are locked for that reason. Regression
+  test: `apps/server/test/travel-lock-order.test.ts` — a raw-SQL adversary
+  against the real travel handler, forced via observed `pg_stat_activity`
+  wait state, shown red (a real `40P01` in the server log) under the
+  inverted order.
+
+  A direct real-buy-vs-real-travel regression test cannot be built, and the
+  reason is worth recording so nobody re-attempts it: the cycle needs a buy
+  to hold `locations[L]` while the player sits somewhere else, so a travel's
+  destination can be L. But the real handler derives L from
+  `player_stats.location_id` and locks it in the same uninterrupted stretch
+  of code; making that read stale means moving the player between the read
+  and the lock, a window internal to the handler with no hook. Every
+  blocker placement collapses — on `player_stats` the player cannot move, on
+  `locations[L]` the intervening travel needed to move them deadlocks the
+  setup against the fixed code, and doing that travel first makes the buy
+  read C instead of L. A test-only pause inside the shipped bullets
+  transaction was rejected — it would put scaffolding inside a verified
+  port to expose the very window this port removes. The hand-written
+  adversary in `travel-lock-order.test.ts` is the substitute, and its
+  construction is documented at the top of that file.
 - Test databases are cloned from a pre-migrated **template** with
   `STRATEGY = WAL_LOG`. Postgres' default `FILE_COPY` serialises concurrent
   `CREATE DATABASE` (10.3s vs 0.28s for 14 clones).
