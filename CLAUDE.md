@@ -45,6 +45,14 @@ export REDIS_URL=redis://localhost:6379
 npm run verify          # typecheck + full suite — run this LOCALLY before committing
 ```
 
+**Read `verify`'s exit code, not its summary.** Piping the run through
+`grep`/`tail` discards npm's exit status, and the summary alone is not the
+whole verdict: an unhandled rejection anywhere in the run makes vitest exit
+non-zero while still printing `Tests 559 passed (559)`. That is exactly how the
+gateway's missing `.catch` (`ws/gateway.ts`, fixed in `54423c8`) survived two
+runs reported as green. Use `npm run verify > /tmp/verify.log 2>&1; echo "exit=$?"`
+and treat any non-zero exit as a failure even when every test passed.
+
 **GitHub CI does not run the integration suite.** Its `verify` job runs
 `npm run verify:ci` (typecheck + the `@gl3/server:unit`, `@gl3/shared`,
 `@gl3/plugin-sdk` and `@gl3/web` projects) with no Postgres or Redis service
