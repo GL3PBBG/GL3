@@ -1,8 +1,9 @@
 import type {
-  FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx,
+  CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput,
+  PluginTx,
 } from "@gl3/plugin-sdk";
 import { JobAlreadyAppliedError, runFilterChain } from "@gl3/plugin-sdk";
-import type { GameEvent } from "@gl3/shared";
+import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
@@ -37,6 +38,17 @@ export interface PluginCtxOptions {
   filters: readonly FilterSubscription[];
 }
 
+/**
+ * One buffer holds both kinds so a handler's relative call order survives to
+ * the wire. `game/crimes/worker.ts` publishes `crime.resolved` before
+ * `player.jailed` deliberately — "so a client that reacts to player.jailed can
+ * already cross-reference the crime that caused it" — and a ported crimes
+ * module must be able to keep that.
+ */
+type BufferedEvent =
+  | { kind: "plugin"; event: PluginEventInput }
+  | { kind: "core"; event: CoreEventInput };
+
 export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions): PluginCtx {
   const ctx: PluginCtx = {
     pluginId: options.pluginId,
@@ -46,7 +58,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     async transaction<T>(fn: (tx: PluginTx) => Promise<T>): Promise<T> {
       // The buffer lives in this call's closure, so two concurrent requests on
       // the same ctx factory cannot see each other's pending events.
-      const buffered: PluginEventInput[] = [];
+      const buffered: BufferedEvent[] = [];
 
       const result = await deps.db.transaction(async (tx) => {
         if (options.job !== null) {
@@ -80,7 +92,8 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
           gangLog: (entry) => appendGangLog(tx, entry.gangId, entry.playerId, entry.message),
           notify: (playerId, body) => insertNotification(tx, { id: uuidv7(), playerId, body }),
           events: {
-            publish: async (event) => { buffered.push(event); },
+            publish: async (event) => { buffered.push({ kind: "plugin", event }); },
+            publishCore: async (event) => { buffered.push({ kind: "core", event }); },
           },
         };
         return await fn(pluginTx);
@@ -88,8 +101,13 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
 
       // Only reached on commit — a throw above propagates and `buffered` is
       // discarded with the closure (NOTES.md rule 5).
-      for (const event of buffered) {
-        await publishEvent(deps.redis, toEnvelope(options.pluginId, event));
+      for (const entry of buffered) {
+        await publishEvent(
+          deps.redis,
+          entry.kind === "plugin"
+            ? toEnvelope(options.pluginId, entry.event)
+            : toCoreEvent(entry.event),
+        );
       }
       return result;
     },
@@ -149,4 +167,16 @@ function toEnvelope(pluginId: string, event: PluginEventInput): GameEvent {
     name: event.name,
     payload: event.payload,
   };
+}
+
+/**
+ * `id`/`at` are built exactly as `toEnvelope` and core's own emitters build
+ * them. The `GameEventSchema.parse` is what supplies the `GameEvent` return
+ * type without a cast — `Omit` distributed over a union does not spread back
+ * into the union by inference, and `apps/*` prefers a zod parse to a cast.
+ * `publishEvent` parses again; that second parse is a few microseconds and
+ * buys the type honesty here.
+ */
+function toCoreEvent(event: CoreEventInput): GameEvent {
+  return GameEventSchema.parse({ id: uuidv7(), at: new Date().toISOString(), ...event });
 }
