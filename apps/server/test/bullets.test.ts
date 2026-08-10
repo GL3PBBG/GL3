@@ -1,20 +1,31 @@
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import bulletsPlugin from "@gl3/plugin-bullets";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { locations, players, playerStats, transactions } from "../src/db/schema/index.js";
-import { InsufficientFundsError } from "../src/economy/ledger.js";
-import { InsufficientStockError, NoLocationError, performBulletsPurchase } from "../src/game/bullets/service.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let playerId: string;
 let locationId: string;
+
+// Required, never defaulted: an omitted prefix means the production
+// `leaderboard:*` keys, which every concurrent test file and agent shares.
+// The ctx buffers a cash leaderboard write on every applyBalanceChange
+// (design §4.2), so this file now writes them where core's service did not.
+const leaderboardPrefix = `bullets-test-${uuidv7()}`;
+
+const buy = (forPlayerId: string, quantity: number) =>
+  callPluginRoute(bulletsPlugin, "POST", "/api/bullets/buy", {
+    db, redis, leaderboardPrefix, playerId: forPlayerId, body: { quantity },
+  });
 
 beforeEach(async () => {
   await resetDb(db);
@@ -24,9 +35,15 @@ beforeEach(async () => {
   await db.insert(players).values({ id: playerId, username: `p${Date.now()}` });
   await db.insert(playerStats).values({ playerId, cash: 1000n, locationId });
 });
-afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconnect(); });
+afterAll(async () => {
+  // Targeted DELs, never FLUSHDB — Redis is shared with every other test file.
+  await redis.del(`${leaderboardPrefix}:cash`);
+  await conn.end();
+  redis.disconnect();
+  subscriber.disconnect();
+});
 
-describe("performBulletsPurchase", () => {
+describe("the bullets plugin handler", () => {
   it("debits cash, credits bullets, decrements shared stock, and publishes bullets.purchased", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     // `game:events` is a global channel shared by every test file running in
@@ -35,8 +52,9 @@ describe("performBulletsPurchase", () => {
     // can grab someone else's payload. Filter on this test's own actor.
     const received = awaitOwnEvent(subscriber, playerId);
 
-    const result = await performBulletsPurchase(db, redis, playerId, 4);
-    expect(result).toEqual({ cash: "980", bullets: "4", bulletStock: 6 });
+    const result = await buy(playerId, 4);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ cash: "980", bullets: "4", bulletStock: 6 });
 
     const event = await received;
     expect(event.type).toBe("bullets.purchased");
@@ -47,16 +65,20 @@ describe("performBulletsPurchase", () => {
 
   it("rejects a player with no location", async () => {
     await db.update(playerStats).set({ locationId: null }).where(eq(playerStats.playerId, playerId));
-    await expect(performBulletsPurchase(db, redis, playerId, 1)).rejects.toBeInstanceOf(NoLocationError);
+    // The wire contract, not an internal class name: NoLocationError was
+    // deleted with game/bullets/ and `no_location` is what a client sees.
+    await expect(buy(playerId, 1)).rejects.toMatchObject({ code: "no_location", status: 409 });
   });
 
-  it("rejects buying more than the location has in stock", async () => {
-    await expect(performBulletsPurchase(db, redis, playerId, 11)).rejects.toBeInstanceOf(InsufficientStockError);
+  it("rejects buying more than the location has in stock, and reports what is available", async () => {
+    await expect(buy(playerId, 11)).rejects.toMatchObject({
+      code: "insufficient_stock", status: 409, extra: { available: 10 },
+    });
   });
 
   it("rejects a purchase the player can't afford", async () => {
     await db.update(playerStats).set({ cash: 1n }).where(eq(playerStats.playerId, playerId));
-    await expect(performBulletsPurchase(db, redis, playerId, 1)).rejects.toBeInstanceOf(InsufficientFundsError);
+    await expect(buy(playerId, 1)).rejects.toMatchObject({ code: "insufficient_funds", status: 409 });
 
     // No ledger row and no stock change — a rejected purchase must leave no trace.
     const rows = await db.select().from(transactions).where(eq(transactions.playerId, playerId));
@@ -66,7 +88,9 @@ describe("performBulletsPurchase", () => {
   });
 
   // --- The defining risk of this task: two players buying simultaneously
-  // against a shared stock of 1 must never both succeed (lost update / oversell).
+  // against a shared stock of 1 must never both succeed (lost update /
+  // oversell). This is the ONLY proof that tx.locks.location does its job,
+  // and it has no HTTP equivalent.
   it("under concurrent purchase against a stock of 1, lets exactly one buyer succeed and never goes negative", async () => {
     await db.update(locations).set({ bulletStock: 1 }).where(eq(locations.id, locationId));
 
@@ -74,18 +98,15 @@ describe("performBulletsPurchase", () => {
     await db.insert(players).values({ id: otherPlayerId, username: `q${Date.now()}` });
     await db.insert(playerStats).values({ playerId: otherPlayerId, cash: 1000n, locationId });
 
-    const results = await Promise.allSettled([
-      performBulletsPurchase(db, redis, playerId, 1),
-      performBulletsPurchase(db, redis, otherPlayerId, 1),
-    ]);
+    const results = await Promise.allSettled([buy(playerId, 1), buy(otherPlayerId, 1)]);
 
-    const fulfilled = results.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof performBulletsPurchase>>> => r.status === "fulfilled");
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
 
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
-    expect(rejected[0]?.reason).toBeInstanceOf(InsufficientStockError);
-    expect(fulfilled[0]?.value.bulletStock).toBe(0);
+    expect(rejected[0]?.reason).toMatchObject({ code: "insufficient_stock", status: 409 });
+    expect(fulfilled[0]).toMatchObject({ value: { body: { bulletStock: 0 } } });
 
     const [loc] = await db.select({ bulletStock: locations.bulletStock }).from(locations).where(eq(locations.id, locationId));
     expect(loc?.bulletStock).toBe(0); // never negative
