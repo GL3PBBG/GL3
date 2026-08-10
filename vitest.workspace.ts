@@ -39,6 +39,9 @@ const srcAliases = {
       "@gl3/plugin-bullets": fileURLToPath(
         new URL("./packages/plugins/bullets/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-crimes": fileURLToPath(
+        new URL("./packages/plugins/crimes/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-travel": fileURLToPath(
         new URL("./packages/plugins/travel/src/index.ts", import.meta.url),
       ),
