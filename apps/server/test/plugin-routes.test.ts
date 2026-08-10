@@ -118,6 +118,10 @@ describe("plugin routes", () => {
     expect(res.statusCode).toBe(423);
     expect(res.json()).toMatchObject({ error: "jailed" });
     expect(typeof res.json().remainingSeconds).toBe("number");
+    // Core's own jail-gated routes set this (game/bullets/routes.ts:19,
+    // game/travel/routes.ts:42, game/crimes/routes.ts:55). "Exact core jail
+    // response" is not exact without it.
+    expect(res.headers["retry-after"]).toBe(String(res.json().remainingSeconds));
   });
 
   it("400s an invalid uuid param before it reaches Postgres", async () => {
