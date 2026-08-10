@@ -208,35 +208,70 @@ image build runs).
 
 ### 7.1 Deadlock regression — `test/travel-lock-order.test.ts`
 
-Deterministic, both participants driving their real shipped handlers, and —
-as `docs/STATUS.md` requires — **not** acquiring their locks through the same
-helper: `bullets` uses `locks.location` + `applyBalanceChange`, `travel` uses
-`locks.locations` + `locks.player`. The test's own transaction is a scheduler,
-not a third lock-order participant.
+#### Why both participants cannot be real handlers
 
-Setup: locations L and C, player P at L with cash.
+The obvious construction — real buy against real travel — cannot be built,
+and the reason belongs in the record so nobody rebuilds it.
 
-1. A test-owned transaction takes `player_stats[P] FOR UPDATE` and holds it.
-2. Start a travel C→L. Under the old (player-first) order it queues on the
-   player row; under the new order it takes `locations[L]` and `locations[C]`
-   first, then queues.
-3. Poll `pg_locks` until that waiter is visible. No sleeps, no timing
-   assumptions — CLAUDE.md, "flaky means broken".
-4. Start a buy at L through the real `bullets` handler. It takes
-   `locations[L]` if free, then queues on the player row **behind** the
-   travel (Postgres lock queues are FIFO).
-5. The test transaction commits.
-   - **Old order:** travel wakes holding `player_stats[P]`, needs
-     `locations[L]` — held by the buy, which is waiting on the player row.
-     `40P01`.
-   - **New order:** the buy never obtained `locations[L]` at step 4 and holds
-     nothing. Travel completes, releases, the buy follows. Green.
+The cycle requires the buy to **hold `locations[L]` while the player sits at
+some other location**, so that a travel's *destination* can be L. But the real
+buy handler derives L from `player_stats.location_id` and takes the lock in
+the same uninterrupted stretch of code. Making that read stale means moving
+the player between the read and the lock — a window internal to the handler,
+with no hook. Every ordering collapses:
 
-**Proof the test can fail is a required plan step**, not an optional one: a
-scratch revert of travel to player-first order, the `40P01` captured, the
-revert discarded. CLAUDE.md's working method — "a green acceptance test that
-was never shown turning red proves nothing" — and rule 6's corollary about
-the M3 deadlock test that stayed green by construction.
+- Blocker on `player_stats[P]`: the buy parks holding `locations[L]`, but the
+  player cannot move, so no travel can target L.
+- Blocker on `locations[L]`: the buy parks *before* holding it, and the
+  intervening travel L→C needed to move the player also wants `locations[L]`
+  under the new order — the setup deadlocks on the fixed code, so the test
+  would need a different setup per branch and would prove nothing.
+- Intervening travel first: the buy then reads C, locks `locations[C]`, and
+  never touches L.
+
+Adding a test-only pause inside the shipped `bullets` transaction was
+rejected: it puts scaffolding inside a verified port to expose the very
+window this port removes.
+
+#### The construction that works
+
+One real participant, one hand-written adversary in `bullets`' exact lock
+shape — which still satisfies `docs/STATUS.md`'s requirement that the two
+sides not acquire locks through the same helper.
+
+Setup: locations L and C, player P at L with cash. Run a real travel L→C,
+then clear the Redis travel cooldown (`travel.test.ts:107` precedent). P is
+now at C.
+
+1. `t0` (raw connection, standing in for a buy that read L before the move):
+   `BEGIN; SELECT id FROM locations WHERE id = L FOR UPDATE`.
+2. Fire a real travel C→L.
+   - **Old order:** takes `player_stats[P] FOR UPDATE`, then parks on
+     `locations[L]` (the implicit `FOR KEY SHARE`).
+   - **New order:** parks on `locations[L]` holding no player row.
+3. `waitForLockWaiters(1)` — polls `pg_stat_activity`, the
+   `gang-lock-order.test.ts:93` template. No sleeps; CLAUDE.md, "flaky means
+   broken".
+4. `t0` requests `SELECT player_id FROM player_stats WHERE player_id = P FOR
+   UPDATE`, completing the buy's lock shape.
+   - **Old order:** `t0` holds L and wants P; travel holds P and wants L.
+     `40P01` — the travel request answers 500.
+   - **New order:** travel holds no player row, so `t0` is granted P
+     immediately. `t0` commits, travel takes L, answers 200.
+
+#### The companion test
+
+A second test fires the **real** buy and the **real** travel concurrently and
+asserts no 500 and a balanced ledger. It cannot force the cycle — by the
+argument above — and its comment must say so, in the same terms, so that a
+later reader does not mistake it for the regression proof. It exists to cover
+the two shipped handlers coexisting under concurrency, nothing more.
+
+**Proof the regression test can fail is a required plan step**, not an
+optional one: a scratch revert of travel to player-first order, the `40P01`
+captured, the revert discarded. CLAUDE.md's working method — "a green
+acceptance test that was never shown turning red proves nothing" — and rule
+6's corollary about the M3 deadlock test that stayed green by construction.
 
 ### 7.2 Other tests
 
