@@ -41,10 +41,19 @@ const buyRoute = route({
       if (!locationId) throw new PluginError("no_location", 409);
 
       // (3) LOCATION LOCK FIRST. `tx.economy.applyBalanceChange` below takes
-      // the player lock internally, so this line is what keeps the pair in the
-      // one order every location↔player path agrees on. Moving any player-row
-      // access above it reintroduces SPEC §2.3's deadlock class, and no
-      // explicit player lock appears below to hint at it.
+      // the player lock internally, so this line is what this handler must
+      // keep first — moving any player-row access above it would invert the
+      // location→player order and no explicit player lock appears below to
+      // hint at it. This order does NOT by itself rule out a deadlock: it
+      // only fixes this handler's own two locks relative to each other.
+      // `performTravel` (`apps/server/src/game/travel/service.ts`) takes
+      // `player_stats` FOR UPDATE first and then, via the FK on
+      // `player_stats.location_id`, an implicit FOR KEY SHARE on `locations`
+      // — the opposite order, closing an ABBA cycle across the two location
+      // rows a player visits in sequence. That cycle is pre-existing (core's
+      // `game/bullets/service.ts` had this same order) and is not this port's
+      // to fix — see the watch item in `docs/STATUS.md` for the hard
+      // constraint the `travel` port must satisfy to close it.
       await tx.locks.location(locationId);
 
       const [location] = await tx.db.select().from(locations).where(eq(locations.id, locationId));

@@ -153,6 +153,12 @@ describe("economy invariant across every M2 money path", () => {
     // A gate that mostly rejects proves nothing about real balance movement —
     // guard against that degenerating silently in the future.
     expect(totalSucceeded / OP_COUNT).toBeGreaterThan(0.5);
+    // The accept-list above swallows bullets' three expected PluginError codes
+    // alongside every other op kind's. A regression that made every bullets
+    // call throw would satisfy the sweep-wide ratio above on the other four op
+    // kinds alone and pass silently with zero bullets coverage — assert the
+    // op kind directly, not just the aggregate.
+    expect(succeeded.bullets).toBeGreaterThan(0);
 
     for (const playerId of playerIds) {
       const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import bulletsPlugin from "@gl3/plugin-bullets";
+import type { RouteResult } from "@gl3/plugin-sdk";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { locations, players, playerStats, transactions } from "../src/db/schema/index.js";
@@ -100,7 +101,7 @@ describe("the bullets plugin handler", () => {
 
     const results = await Promise.allSettled([buy(playerId, 1), buy(otherPlayerId, 1)]);
 
-    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<RouteResult> => r.status === "fulfilled");
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
 
     expect(fulfilled).toHaveLength(1);
