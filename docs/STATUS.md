@@ -317,7 +317,8 @@ package), `2a2e59f` (the cutover).
   (`3abfa90`) built four ctx capabilities with no caller at the time;
   `tx.locks.location` sat unused until this port. The location→player lock
   order (CLAUDE.md rule 6, "what M3 established" above) is now exercised, not
-  merely documented. The concurrency test — a stock of 1, two simultaneous
+  merely documented — though see the watch item below for the half `travel`
+  still owns. The concurrency test — a stock of 1, two simultaneous
   buyers — was demonstrated **failing** with the lock line commented out (both
   buyers succeeded, an oversell) before being restored to passing.
 - **First plugin to write a core-owned column no ctx capability covers.**
@@ -517,11 +518,59 @@ web image serves only the SPA's own assets.
   player buys at a location they have already left. Inherited verbatim from
   core (`game/bullets/service.ts:32-36` before the port). Closing it here was
   rejected: locking the player first inverts the mandated location→player
-  order and reintroduces SPEC §2.3's deadlock class, and re-reading
-  `location_id` after the location lock is a behaviour change smuggled into a
-  port whose provable correctness depends on there being none (design §6).
-  `travel` owns the other half of this race and is the natural place to
-  close it.
+  order, and re-reading `location_id` after the location lock is a behaviour
+  change smuggled into a port whose provable correctness depends on there
+  being none (design §6). `travel` owns the other half of this race and is
+  the natural place to close it.
+
+  That is the staleness half. There is also a **deadlock half, already
+  reachable, not introduced by this port**: `player_stats.location_id`
+  carries a FK to `locations` (`apps/server/src/db/schema/identity.ts:67`),
+  so `performTravel`'s `UPDATE player_stats SET location_id = …`
+  (`apps/server/src/game/travel/service.ts:41-50`) takes `player_stats` FOR
+  UPDATE first and then an *implicit* FOR KEY SHARE on the destination's
+  `locations` row — the opposite order from bullets, which takes
+  `locations` FOR UPDATE first (`packages/plugins/bullets/src/index.ts`)
+  and then `player_stats` FOR UPDATE inside `applyBalanceChange`. A player at
+  L starting a buy (holds `locations[L]`) racing an intervening committed
+  travel L→C→L (the second leg holds `player_stats[P]`, needs
+  `locations[L]` FOR KEY SHARE, while the buy needs `player_stats[P]`) closes
+  the ABBA cycle: `40P01`, surfacing as a 500 on a well-formed request — the
+  same shape CLAUDE.md rule 6 already documents from M3. Core had this same
+  order (`git show 2a2e59f^:apps/server/src/game/bullets/service.ts:36`), so
+  it predates this port; fixing it here would be an unproven behaviour
+  change to a port whose only claim is byte-identical behaviour. It is
+  `travel`'s job, alongside the staleness half above.
+
+  Two things narrow exactly when this fires, both worth stating because the
+  `travel` implementer needs them to build the right regression test. A
+  same-instant race does **not** deadlock: travel rejects destination ==
+  current with `AlreadyAtLocationError`, so a buy at L racing a travel *out
+  of* L cannot close the cycle — that travel's FOR KEY SHARE lands on a
+  different `locations` row than the one the buy holds. This is why the
+  interleaving needs an *intervening committed* travel, not a merely
+  concurrent one. And the cycle needs the **same** `player_stats` row on
+  both sides: a buy by P1 at L racing a travel by P2 *into* L does not
+  deadlock either, because the two transactions hold different player rows
+  and there is nothing for the cycle to close on.
+
+  The consequence: the staleness half and the deadlock half are the same bug
+  seen from two angles, both stemming from the unlocked read of
+  `player_stats.location_id` before the location lock is taken. Closing the
+  stale-read window — the fix the staleness paragraph above defers to
+  `travel` — is what removes the interleaving that makes the deadlock half
+  reachable at all.
+
+  **Hard constraint on the `travel` port**, so the next design cannot miss
+  this: `performTravel` must take the location lock
+  (`tx.locks.location(toLocationId)`) BEFORE the player lock, matching
+  bullets' order instead of inverting it as today's core version does, and
+  the travel branch must add a deadlock regression test whose two
+  participants do **not** both acquire their locks through the same helper.
+  That last clause matters for a reason CLAUDE.md rule 6's corollary already
+  records: the existing gang-lock deadlock test agreed on lock ordering by
+  construction and stayed green straight through the M3 deadlock it was
+  meant to catch.
 - **`bank.test.ts`'s `app.inject` block boots `buildApp` with no
   `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
   ctx-buffered leaderboard writes land in the production global

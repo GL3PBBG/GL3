@@ -146,7 +146,10 @@ unavailable here.
   `apps/server/package.json` (+ `npm install`), `apps/server/tsconfig.json`
   references, root `tsconfig.json` references, `vitest.workspace.ts`
   `srcAliases`, `plugins/core-plugins.ts`, the old `app.ts` registration to
-  delete, and **four separate COPY sites in `Dockerfile.server`**. Missing the
+  delete, and **five separate COPY lines in `Dockerfile.server`**
+  (`Dockerfile.server:54,74,75,112,127` for `bullets` — one per plugin per
+  line, so `grep -c "packages/plugins/<id>" Dockerfile.server` is the fast
+  check for a new port). Missing the
   `apps/server/tsconfig.json` reference or a Dockerfile COPY fails **only in
   CI** — the root tsconfig makes `npm run typecheck` pass regardless. Catch the
   first locally with `npx tsc --build --force apps/server/tsconfig.json`, the
