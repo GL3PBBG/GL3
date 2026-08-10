@@ -3,12 +3,11 @@ import type {
   PluginTx,
 } from "@gl3/plugin-sdk";
 import { JobAlreadyAppliedError, runFilterChain } from "@gl3/plugin-sdk";
-import { GameEventSchema, type GameEvent } from "@gl3/shared";
+import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
-import type { LeaderboardKind } from "@gl3/shared";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
@@ -106,11 +105,22 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             applyGangBalanceChange: (change) => applyGangBalanceChange(tx, change),
             addExp: async (playerId, amount) => {
               await addExp(tx, playerId, amount);
+              // A zero gain is core's own no-op (economy/ledger.ts) — no
+              // UPDATE runs, so no row lock is taken. Reading playerStats
+              // here anyway would be an unlocked read that can observe a
+              // stale snapshot and ZADD it over a newer value after commit.
+              // Nothing was written, so there is nothing to record.
+              if (amount === 0n) return;
               const fresh = await freshStats(tx, playerId);
               if (fresh) bufferScore("exp", playerId, fresh.exp);
             },
             applyExpAndRankUp: async (playerId, expGain) => {
               const result = await applyExpAndRankUp(tx, playerId, expGain);
+              // Same reasoning as addExp above: core's applyExpAndRankUp
+              // (economy/ranks.ts) is itself a no-op on a zero gain — no
+              // UPDATE, no row lock — so skip the unlocked read/buffer here
+              // too and return core's own null unchanged.
+              if (expGain === 0n) return result;
               // Both kinds: a rank-up pays its cash reward through core's own
               // internal applyBalanceChange (economy/ranks.ts), which this
               // wrapper never sees, so buffering exp alone leaves cash stale.
