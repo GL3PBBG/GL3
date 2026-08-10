@@ -1,4 +1,4 @@
-export { PluginError, JobAlreadyAppliedError } from "./errors.js";
+export { PluginError, JobAlreadyAppliedError, InsufficientFundsError } from "./errors.js";
 export {
   filterPoint,
   on,

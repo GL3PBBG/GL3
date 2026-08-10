@@ -1,3 +1,5 @@
+import type { PluginBalanceChange } from "./ctx.js";
+
 /**
  * The only error type a plugin route handler is expected to throw. The loader
  * maps it to `reply.code(status).send({ error: code, ...extra })`, which is how
@@ -28,5 +30,27 @@ export class JobAlreadyAppliedError extends Error {
   ) {
     super(`job ${jobId} already applied for plugin ${pluginId}`);
     this.name = "JobAlreadyAppliedError";
+  }
+}
+
+/**
+ * Thrown by `tx.economy.applyBalanceChange` when a debit would take a balance
+ * below zero. Core's own `InsufficientFundsError` (`economy/ledger.ts`) lives
+ * in `apps/server`, which a plugin package may not import, so the ctx
+ * translates it into this one on the way out.
+ *
+ * Deliberately NOT mapped to a status by the route loader: three modules
+ * answer 409 `insufficient_funds` (bank, travel, bullets) and one answers 400
+ * `insufficient_cash` (gangs, `game/gangs/routes.ts:789`). A central mapping
+ * would have to change one of them, so each plugin catches this and throws its
+ * own `PluginError`.
+ */
+export class InsufficientFundsError extends Error {
+  constructor(
+    readonly playerId: string,
+    readonly kind: PluginBalanceChange["kind"],
+  ) {
+    super(`insufficient ${kind} for player ${playerId}`);
+    this.name = "InsufficientFundsError";
   }
 }

@@ -1,9 +1,9 @@
-import { definePlugin, route } from "@gl3/plugin-sdk";
+import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { locations, notifications, playerStats } from "../src/db/schema/index.js";
+import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -44,6 +44,41 @@ const prereqPlugin = definePlugin({
   ],
 });
 
+/**
+ * An overdraft is the one `applyBalanceChange` failure a ported module must
+ * turn into a specific HTTP response (409 for bank/travel/bullets, 400 for
+ * gangs). Core's InsufficientFundsError lives in apps/server, which a plugin
+ * package may not import, so the SDK exports its own and the ctx translates.
+ */
+const overdraftPlugin = definePlugin({
+  id: "pcod",
+  version: "1.0.0",
+  basePaths: ["/api/pcod"],
+  routes: [
+    route({
+      method: "POST",
+      path: "/api/pcod/overdraft",
+      handler: async (ctx) => {
+        const playerId = ctx.player?.id;
+        if (playerId === undefined) throw new Error("expected authenticated player");
+        return ctx.transaction(async (tx) => {
+          try {
+            await tx.economy.applyBalanceChange({
+              playerId, amount: -1n, kind: "cash", reason: "test.overdraft",
+            });
+          } catch (error) {
+            if (error instanceof InsufficientFundsError) {
+              throw new PluginError("insufficient_funds", 409, { kind: error.kind });
+            }
+            throw error;
+          }
+          return { status: 200, body: { ok: true } };
+        });
+      },
+    }),
+  ],
+});
+
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 
@@ -71,7 +106,7 @@ async function insertLocation(): Promise<string> {
 }
 
 beforeAll(async () => {
-  ({ app, close: closeServer } = await bootTestServer({ plugins: [prereqPlugin] }));
+  ({ app, close: closeServer } = await bootTestServer({ plugins: [prereqPlugin, overdraftPlugin] }));
 });
 
 afterAll(async () => {
@@ -109,5 +144,29 @@ describe("plugin ctx port prerequisites", () => {
     const notes = await db.select().from(notifications).where(eq(notifications.playerId, playerId));
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ playerId, body: "hello" });
+  });
+});
+
+describe("plugin ctx overdraft translation", () => {
+  it("surfaces an overdraft as the SDK's InsufficientFundsError and rolls the transaction back", async () => {
+    // A freshly registered player starts at 0 cash, so debiting 1 overdrafts.
+    const { token, playerId } = await register(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/pcod/overdraft",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    // 409, not 500: the plugin caught a class it is allowed to import.
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "insufficient_funds", kind: "cash" });
+
+    // Fresh reads on a separate connection: the failed leg committed nothing.
+    const [stats] = await db.select({ cash: playerStats.cash })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(stats?.cash).toBe(0n);
+    expect(await db.select().from(transactions)
+      .where(eq(transactions.playerId, playerId))).toHaveLength(0);
   });
 });
