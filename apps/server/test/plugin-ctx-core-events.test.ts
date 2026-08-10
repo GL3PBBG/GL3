@@ -212,6 +212,21 @@ describe("plugin economy changes update the leaderboard", () => {
     expect(await score("exp", player.id)).toBe("42");
   });
 
+  // Regression for the zero-gain case: core's addExp (economy/ledger.ts)
+  // is a no-op on amount === 0n — no UPDATE, so no row lock. Buffering a
+  // score here would be an unlocked read that could ZADD a stale snapshot
+  // over a newer committed value. A zero gain is the ordinary failed-action
+  // case, so this must leave the leaderboard key untouched, not merely
+  // "eventually correct."
+  it("does not touch the leaderboard when addExp gains zero", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await ctx.transaction(async (tx) => { await tx.economy.addExp(player.id, 0n); });
+
+    expect(await score("exp", player.id)).toBeNull();
+  });
+
   it("writes nothing when the transaction rolls back", async () => {
     const player = await createPlayer();
     const ctx = createPluginCtx(deps(), opts);
