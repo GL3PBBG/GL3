@@ -13,13 +13,20 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; two of the
-twelve `game/*` module ports have shipped (`ranks`, `notifications`), and the
-remaining seven event-publishing modules are blocked on an event-envelope
-design decision (`profile`, `leaderboard`, `jail` are deliberate non-ports —
-see `docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **66 files / 558 tests**, green across repeated
+(SDK + loader + example) and the web page renderer have shipped; three of the
+twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`).
+The event-envelope blocker is **resolved** — `tx.events.publishCore` lets a
+plugin publish any of the 19 core `GameEvent` variants verbatim, so the six
+remaining ports (`bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) are
+unblocked (`profile`, `leaderboard`, `jail` are deliberate non-ports — see
+`docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
+MariaDB install. Suite: **70 files / 572 tests**, green across repeated
 back-to-back runs.
+
+`publishCore` is unrestricted by design: any installed plugin can publish any
+core event to any audience, and plugin output is no longer identifiable on the
+wire as `plugin.event`. Trust is granted at install time; there is no runtime
+guard. See `docs/STATUS.md` and design §5.
 
 Full detail, including how to start M4, is in `docs/STATUS.md`.
 
