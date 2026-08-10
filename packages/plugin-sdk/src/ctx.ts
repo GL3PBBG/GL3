@@ -88,6 +88,30 @@ export interface PluginEventInput {
 }
 
 /**
+ * `Omit` does not distribute over a union — `Omit<A | B, "id">` collapses to
+ * the shared keys and destroys the discriminant. This conditional type is a
+ * naked type parameter, so it distributes and each variant keeps its own
+ * fields.
+ */
+type OmitFromUnion<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * What a plugin supplies to `tx.events.publishCore`: every core event variant
+ * minus the two fields core fills in — `id` (uuidv7) and `at` (ISO string).
+ * `plugin.event` is excluded; that envelope has its own input type,
+ * `PluginEventInput`.
+ *
+ * Derived from `GameEvent` rather than restated, so a new core variant reaches
+ * plugins automatically and cannot drift. The cost is that adding a core
+ * variant is an SDK surface change — `apps/server/test/plugin-ctx-core-events.test.ts`
+ * is the guard that makes that coupling visible.
+ */
+export type CoreEventInput = OmitFromUnion<
+  Exclude<GameEvent, { type: "plugin.event" }>,
+  "id" | "at"
+>;
+
+/**
  * Mirrors core's `RankUpResult` (`economy/ranks.ts`) field for field — the
  * promotion details `applyExpAndRankUp` returns on a fresh rank-up, or
  * `null` when nothing changed (no exp gained, or already at the qualifying
@@ -138,11 +162,17 @@ export interface PluginTx {
   gangLog(entry: GangLogEntry): Promise<void>;
   notify(playerId: string, body: string): Promise<void>;
   /**
-   * Buffers the event. The loader publishes after commit and discards on
-   * rollback, which makes NOTES.md rule 5 unrepresentable rather than merely
-   * documented.
+   * Both methods buffer into ONE array, so a handler's relative call order
+   * survives to the wire — `game/crimes/worker.ts` publishes `crime.resolved`
+   * before `player.jailed` deliberately, and a port must be able to keep that.
+   * The loader publishes after commit and discards on rollback, which makes
+   * NOTES.md rule 5 unrepresentable rather than merely documented.
    */
-  readonly events: { publish(event: PluginEventInput): Promise<void> };
+  readonly events: {
+    publish(event: PluginEventInput): Promise<void>;
+    /** Publishes a core `GameEventSchema` variant verbatim — no envelope. */
+    publishCore(event: CoreEventInput): Promise<void>;
+  };
 }
 
 export interface JobContext { readonly id: string; readonly seed: string; readonly rng: PluginRng }

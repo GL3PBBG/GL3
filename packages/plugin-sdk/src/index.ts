@@ -8,6 +8,7 @@ export {
   type FilterSubscription,
 } from "./filters.js";
 export type {
+  CoreEventInput,
   GangLogEntry,
   JobContext,
   PlayerSnapshot,
@@ -20,6 +21,7 @@ export type {
   PluginTx,
   RankUpResult,
 } from "./ctx.js";
+export { newId } from "./id.js";
 export {
   PageSchemaSchema,
   ViewNodeSchema,
