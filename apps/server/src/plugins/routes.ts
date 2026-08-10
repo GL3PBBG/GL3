@@ -28,6 +28,9 @@ export function registerPluginRoutes(
             // ends on the next action rather than on a poll.
             const jail = await releaseIfExpired(deps.db, deps.redis, playerId);
             if (jail.jailed) {
+              // Core's jail-gated routes set this alongside the body
+              // (game/bullets/routes.ts:19). A ported module must not lose it.
+              reply.header("retry-after", String(jail.remainingSeconds));
               return reply.code(423).send({ error: "jailed", remainingSeconds: jail.remainingSeconds });
             }
           }

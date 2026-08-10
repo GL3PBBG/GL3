@@ -80,10 +80,22 @@ export async function applyBalanceChange(tx: Tx, change: BalanceChange): Promise
 /**
  * Same rationale as lockPlayersForUpdate, for the one shared non-player row
  * this schema locks: a bullets purchase decrements `locations.bullet_stock`,
- * a value every buyer at that location contends over. Global Constraints:
- * always lock the location row before the player's row (called first in
- * performBulletsPurchase) — a single fixed direction is what rules out a
- * deadlock against any future code path that might lock a player row first.
+ * a value every buyer at that location contends over. Global Constraint:
+ * always lock the location row before the player's row — called first in
+ * `packages/plugins/bullets/src/index.ts` (moved there when `bullets` became
+ * a plugin; `applyBalanceChange` above takes the player lock internally).
+ *
+ * This fixed direction does NOT rule out a deadlock against every future
+ * path that touches both rows — it already doesn't. `player_stats.location_id`
+ * carries a FK to `locations` (`apps/server/src/db/schema/identity.ts`), so
+ * `performTravel`'s `UPDATE player_stats SET location_id = …`
+ * (`apps/server/src/game/travel/service.ts`) takes an implicit FOR KEY SHARE
+ * on the destination's `locations` row *after* locking `player_stats` FOR
+ * UPDATE — the opposite order from this function, closing an ABBA cycle with
+ * bullets across the two location rows a player visits in sequence (`40P01`,
+ * same shape as the M3 gang-lock deadlock in CLAUDE.md rule 6). See the watch
+ * item in `docs/STATUS.md` for the constraint the `travel` port must satisfy
+ * to close it; it is not this function's job to fix.
  */
 export async function lockLocationForUpdate(tx: Tx, locationId: string): Promise<void> {
   await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, locationId)).for("update");

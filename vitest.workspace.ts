@@ -36,6 +36,9 @@ const srcAliases = {
       "@gl3/plugin-bank": fileURLToPath(
         new URL("./packages/plugins/bank/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-bullets": fileURLToPath(
+        new URL("./packages/plugins/bullets/src/index.ts", import.meta.url),
+      ),
     },
   },
 };

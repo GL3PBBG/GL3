@@ -5,11 +5,11 @@ import { loadConfig } from "../src/config.js";
 import { crimes, locations, players, playerStats, transactions } from "../src/db/schema/index.js";
 import { seedCrimes, seedLocations, seedRanks } from "../src/db/seed.js";
 import bankPlugin from "@gl3/plugin-bank";
+import bulletsPlugin from "@gl3/plugin-bullets";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
 import { processCrimeJob } from "../src/game/crimes/worker.js";
 import { AlreadyAtLocationError, LocationNotFoundError, performTravel } from "../src/game/travel/service.js";
-import { InsufficientStockError, NoLocationError, performBulletsPurchase } from "../src/game/bullets/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
@@ -113,7 +113,12 @@ describe("economy invariant across every M2 money path", () => {
           await performTravel(db, redis, playerId, pick(locationIds));
         } else if (opName === "bullets") {
           const quantity = 1 + Math.floor(rand() * 5);
-          await performBulletsPurchase(db, redis, playerId, quantity);
+          // bullets is a plugin now; this drives its real route handler, so
+          // the 1000-op sum(ledger) == balance sweep still covers its actual
+          // code path.
+          await callPluginRoute(bulletsPlugin, "POST", "/api/bullets/buy", {
+            db, redis, leaderboardPrefix, playerId, body: { quantity },
+          });
         } else {
           const direction = rand() < 0.5 ? "credit" : "debit";
           const amount = BigInt(1 + Math.floor(rand() * 100));
@@ -130,12 +135,13 @@ describe("economy invariant across every M2 money path", () => {
         // real bug and must fail the test.
         if (
           err instanceof InsufficientFundsError || err instanceof AlreadyAtLocationError ||
-          err instanceof InsufficientStockError || err instanceof NoLocationError ||
           err instanceof LocationNotFoundError ||
-          // bank is a plugin now: its overdraft arrives as the PluginError its
-          // handler throws, not as core's InsufficientFundsError. The other
-          // four ops are still core and still throw core classes.
-          (err instanceof PluginError && err.code === "insufficient_funds")
+          // bank and bullets are plugins now: their expected rejections arrive
+          // as the PluginError their handlers throw, not as core classes.
+          // travel and crimes are still core and still throw core classes.
+          (err instanceof PluginError &&
+            (err.code === "insufficient_funds" || err.code === "insufficient_stock" ||
+             err.code === "no_location"))
         ) continue;
         throw err;
       }
@@ -147,6 +153,12 @@ describe("economy invariant across every M2 money path", () => {
     // A gate that mostly rejects proves nothing about real balance movement —
     // guard against that degenerating silently in the future.
     expect(totalSucceeded / OP_COUNT).toBeGreaterThan(0.5);
+    // The accept-list above swallows bullets' three expected PluginError codes
+    // alongside every other op kind's. A regression that made every bullets
+    // call throw would satisfy the sweep-wide ratio above on the other four op
+    // kinds alone and pass silently with zero bullets coverage — assert the
+    // op kind directly, not just the aggregate.
+    expect(succeeded.bullets).toBeGreaterThan(0);
 
     for (const playerId of playerIds) {
       const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

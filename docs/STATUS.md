@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 5 (`bank` port) outcome recorded.
-Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
+Last updated: 2026-08-10, M5 stage 6 (`bullets` port) outcome recorded.
+Branch: `feat/plugin-bullets-port` (forked from `main` at `2663d95`).
 
 ---
 
@@ -14,9 +14,11 @@ Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); four of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`); the five remaining pending ports are now unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); five of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`); four ports remain (`travel`, `crimes`, `mail`, `gangs`), all unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 70 files / 574 tests**, green across repeated back-to-back runs.
+**Suite: 70 files / 574 tests**, green across repeated back-to-back runs. Unchanged
+by the `bullets` port — five service-level tests converted to drive the plugin
+route rather than adding new ones, and Task 3 added assertions to existing tests.
 
 ---
 
@@ -272,9 +274,10 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
   gang↔player lock ordering under two owners — the split-brain shape M3's
   deadlock came from.
 
-Five module ports remain: `bullets`, `travel`, `crimes`, `mail`, `gangs`. All
-are unblocked. `bullets` and `travel` are the natural next two: single-player
-money paths that reuse the SDK error and the helper with nothing new.
+Five module ports remained: `bullets`, `travel`, `crimes`, `mail`, `gangs`. All
+were unblocked. `bullets` and `travel` were the natural next two: single-player
+money paths that reuse the SDK error and the helper with nothing new. `bullets`
+went first — see below.
 
 **Carried forward from this branch's final review** — three accepted Minors,
 none blocking, all worth closing when the next port touches the same code:
@@ -298,6 +301,72 @@ none blocking, all worth closing when the next port touches the same code:
    `as CoreEventInput` cast at the call site. Plan-mandated verbatim, and the
    runtime `GameEventSchema.parse` is the real guard, so the cast is not
    load-bearing — but reusing `OmitFromUnion` there would remove it.
+
+### The `bullets` port (Plan 6)
+
+Design: `docs/superpowers/specs/2026-08-10-plugin-bullets-port-design.md`.
+Three commits: `c58121e` (loader `retry-after` fix), `bfbc4a6` (the plugin
+package), `2a2e59f` (the cutover).
+
+- **`bullets` ported** to `packages/plugins/bullets`. `POST /api/bullets/buy`
+  answers from the plugin; `apps/server/src/game/bullets/` no longer exists.
+  `bullets.test.ts`'s `app.inject` block is unchanged bar the two additions
+  below and is the proof that paths, status codes, error strings and response
+  bodies are byte-identical.
+- **First caller of `tx.locks.location`.** Task 0 of the module-ports plan
+  (`3abfa90`) built four ctx capabilities with no caller at the time;
+  `tx.locks.location` sat unused until this port. The location→player lock
+  order (CLAUDE.md rule 6, "what M3 established" above) is now exercised, not
+  merely documented — though see the watch item below for the half `travel`
+  still owns. The concurrency test — a stock of 1, two simultaneous
+  buyers — was demonstrated **failing** with the lock line commented out (both
+  buyers succeeded, an oversell) before being restored to passing.
+- **First plugin to write a core-owned column no ctx capability covers.**
+  `player_stats.bullets` and `locations.bullet_stock` are written directly
+  through `tx.db`, via mirrored schemas in the plugin's own `schema.ts`
+  (column names and types matched to `db/schema/identity.ts` and
+  `content.ts` by hand). `bank` routed every write through
+  `tx.economy.applyBalanceChange`; `news` wrote only a table core no longer
+  touches. Growing the SDK a `tx.inventory.addBullets` /
+  `tx.locations.takeStock` pair was rejected — two members whose only caller
+  is one plugin, the same objection that made `profile` a deliberate
+  non-port. The consequence, stated plainly: schema isolation is
+  compiler-enforced for relational queries (`PluginDbTx` omits Drizzle's
+  `query`) and for money (`applyBalanceChange`), and is **convention** for
+  everything else. A plugin that mirrors a table can write it.
+- **The loader now sends `retry-after` on its 423.** Core's jail-gated routes
+  always set the header alongside the body (`game/travel/routes.ts:42`,
+  `game/crimes/routes.ts:55`); the plugin loader (`apps/server/src/plugins/routes.ts:33`)
+  sent only the body, so a naive port would have silently dropped it — and
+  the pre-fix test, asserting only `toMatchObject({ error: "jailed" })`,
+  would have stayed green through the loss. Fixed in the loader in `c58121e`,
+  ahead of the port itself, so `travel` and `crimes` inherit it for free. No
+  plugin sets `accessInJail: false` today, so nothing else changes behaviour.
+- **The cash leaderboard now updates on a purchase.** Core's bullets service
+  never called `recordScore`; `tx.economy.applyBalanceChange` buffers one
+  leaderboard write per changed kind and flushes after commit (core-events
+  design §B1), so the ported route begins `ZADD`-ing the player's cash score
+  where core did not. No opt-out was added, deliberately: a suppression flag
+  would exist only to preserve a core inconsistency (`bank` and `crimes`
+  record cash; `bullets` and `travel` did not), and every future port would
+  have to decide which way to set it. Now asserted directly in
+  `bullets.test.ts` rather than incidental.
+- **A deliberate deviation from byte-identity, found in review.**
+  `packages/plugins/bullets/src/index.ts` guards the `player_stats`
+  UPDATE...RETURNING with `if (!fresh) throw new PluginError("no_location", 409)`.
+  Core used a non-null assertion in the same spot, which would have thrown an
+  uncaught TypeError — an HTTP 500 — had the row vanished. Effectively
+  unreachable in both versions, since `applyBalanceChange` already locked and
+  read that row moments earlier in the same transaction, and 409 is strictly
+  safer than a crash — but it is a real deviation from the "byte-identical"
+  claim the file's own header comment makes, recorded here rather than
+  smoothed over.
+- **The invariant sweep** (`economy-invariant.test.ts`) reports
+  `succeeded.bullets = 190` of `attempted.bullets = 201` over its 1000-op run.
+
+Four module ports remain: `travel`, `crimes`, `mail`, `gangs`. `travel` is the
+natural next one — it owns the other half of the read-then-lock race the
+watch items below record.
 
 ## Starting M4
 
@@ -444,6 +513,71 @@ web image serves only the SPA's own assets.
   is a deliberate decision nobody has taken yet. Note that npm audit's *suggested*
   fix for the drizzle-kit findings is a **downgrade to 0.18.1 that would reintroduce
   a SQL-injection CVE** — do not follow it.
+- **The bullets purchase reads `player_stats.location_id` unlocked**, before
+  taking the location lock. A `travel` committing in that window means the
+  player buys at a location they have already left. Inherited verbatim from
+  core (`game/bullets/service.ts:32-36` before the port). Closing it here was
+  rejected: locking the player first inverts the mandated location→player
+  order, and re-reading `location_id` after the location lock is a behaviour
+  change smuggled into a port whose provable correctness depends on there
+  being none (design §6). `travel` owns the other half of this race and is
+  the natural place to close it.
+
+  That is the staleness half. There is also a **deadlock half, already
+  reachable, not introduced by this port**: `player_stats.location_id`
+  carries a FK to `locations` (`apps/server/src/db/schema/identity.ts:67`),
+  so `performTravel`'s `UPDATE player_stats SET location_id = …`
+  (`apps/server/src/game/travel/service.ts:41-50`) takes `player_stats` FOR
+  UPDATE first and then an *implicit* FOR KEY SHARE on the destination's
+  `locations` row — the opposite order from bullets, which takes
+  `locations` FOR UPDATE first (`packages/plugins/bullets/src/index.ts`)
+  and then `player_stats` FOR UPDATE inside `applyBalanceChange`. A player at
+  L starting a buy (holds `locations[L]`) racing an intervening committed
+  travel L→C→L (the second leg holds `player_stats[P]`, needs
+  `locations[L]` FOR KEY SHARE, while the buy needs `player_stats[P]`) closes
+  the ABBA cycle: `40P01`, surfacing as a 500 on a well-formed request — the
+  same shape CLAUDE.md rule 6 already documents from M3. Core had this same
+  order (`git show 2a2e59f^:apps/server/src/game/bullets/service.ts:36`), so
+  it predates this port; fixing it here would be an unproven behaviour
+  change to a port whose only claim is byte-identical behaviour. It is
+  `travel`'s job, alongside the staleness half above.
+
+  Two things narrow exactly when this fires, both worth stating because the
+  `travel` implementer needs them to build the right regression test. A
+  same-instant race does **not** deadlock: travel rejects destination ==
+  current with `AlreadyAtLocationError`, so a buy at L racing a travel *out
+  of* L cannot close the cycle — that travel's FOR KEY SHARE lands on a
+  different `locations` row than the one the buy holds. This is why the
+  interleaving needs an *intervening committed* travel, not a merely
+  concurrent one. And the cycle needs the **same** `player_stats` row on
+  both sides: a buy by P1 at L racing a travel by P2 *into* L does not
+  deadlock either, because the two transactions hold different player rows
+  and there is nothing for the cycle to close on.
+
+  The consequence: the staleness half and the deadlock half are the same bug
+  seen from two angles, both stemming from the unlocked read of
+  `player_stats.location_id` before the location lock is taken. Closing the
+  stale-read window — the fix the staleness paragraph above defers to
+  `travel` — is what removes the interleaving that makes the deadlock half
+  reachable at all.
+
+  **Hard constraint on the `travel` port**, so the next design cannot miss
+  this: `performTravel` must take the location lock
+  (`tx.locks.location(toLocationId)`) BEFORE the player lock, matching
+  bullets' order instead of inverting it as today's core version does, and
+  the travel branch must add a deadlock regression test whose two
+  participants do **not** both acquire their locks through the same helper.
+  That last clause matters for a reason CLAUDE.md rule 6's corollary already
+  records: the existing gang-lock deadlock test agreed on lock ordering by
+  construction and stayed green straight through the M3 deadlock it was
+  meant to catch.
+- **`bank.test.ts`'s `app.inject` block boots `buildApp` with no
+  `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
+  ctx-buffered leaderboard writes land in the production global
+  `leaderboard:*` keys that every concurrent test file and agent shares.
+  Nothing reads those keys in tests, so it is dirty rather than broken —
+  `bullets.test.ts:126` passes a prefix on the equivalent call; `bank.test.ts`
+  should too.
 
 **Resolved, but the reasoning matters if you touch these areas:**
 
