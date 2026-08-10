@@ -83,12 +83,19 @@ describe("plugin jobs", () => {
       id: "retry-opts", version: "1.0.0", basePaths: ["/api/retry-opts"],
       jobs: { work: async () => {} },
     });
-    const queues = createPluginQueues(redis, [manifest], "test-prefix-");
-    const queue = queues.get("retry-opts:work");
-    expect(queue).toBeDefined();
-    // attempts:3 — without this, BullMQ defaults to 1 and plugin jobs never retry,
-    // which defeats the plugin_job_runs idempotency guard (spec §2.5).
-    expect(queue!.opts.defaultJobOptions?.attempts).toBe(3);
-    expect(queue!.opts.defaultJobOptions?.backoff).toEqual({ type: "exponential", delay: 500 });
+    // A unique prefix per test run — a fixed one would collide with any other
+    // concurrently-running test file creating a same-named BullMQ queue on
+    // the same shared Redis instance.
+    const queues = createPluginQueues(redis, [manifest], `test-prefix-${randomUUID()}-`);
+    try {
+      const queue = queues.get("retry-opts:work");
+      expect(queue).toBeDefined();
+      // attempts:3 — without this, BullMQ defaults to 1 and plugin jobs never retry,
+      // which defeats the plugin_job_runs idempotency guard (spec §2.5).
+      expect(queue!.opts.defaultJobOptions?.attempts).toBe(3);
+      expect(queue!.opts.defaultJobOptions?.backoff).toEqual({ type: "exponential", delay: 500 });
+    } finally {
+      await Promise.all([...queues.values()].map((queue) => queue.close()));
+    }
   });
 });

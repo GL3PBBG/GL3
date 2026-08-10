@@ -1,5 +1,5 @@
 import {
-  definePlugin, InsufficientFundsError, PluginError, route,
+  definePlugin, PluginError, route,
   type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
 import { and, asc, eq } from "drizzle-orm";
@@ -124,8 +124,9 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
   // JobAlreadyAppliedError before any handler code runs. Pre-tx reads
   // (spec §4.1) live inside this same transaction — ctx only exposes
   // `transaction` for DB access, and each call would re-claim the job.
-  let promotion: RankUpResult | null = null;
   await ctx.transaction(async (tx) => {
+    let promotion: RankUpResult | null = null;
+
     // Pre-tx reads (spec §4.1) — ctx.player is null inside a job.
     const [crime] = await tx.db.select().from(crimes).where(eq(crimes.id, crimeId));
     if (!crime) return; // crime deleted between enqueue and resolve

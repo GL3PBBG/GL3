@@ -225,6 +225,13 @@ chance, and the chance is seeded once at registration (GL3 has no
 progression-by-use — verified: nothing in `game/` writes `player_crime_skill`).
 An unlocked read of a value that no concurrent writer changes is safe.
 
+**Deliberate improvement over core:** `player_crime_skill` has composite PK
+`(player_id, crime_id)` — one row per crime, each with its own chance. Core's
+`worker.ts` queried it by `playerId` alone and took `[0]`, so it could apply
+an arbitrary *other* crime's chance to the one actually committed whenever a
+player had rolled more than one crime. This port filters by both `playerId`
+and the committed `crimeId`, closing that bug rather than porting it forward.
+
 ### 4.2 The roll — seeded, verbatim
 
 The RNG is `ctx.job.rng`, derived from `job.data.seed`, which `ctx.jobs.enqueue`

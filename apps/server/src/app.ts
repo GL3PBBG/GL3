@@ -82,11 +82,13 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     // own `loadPlugins` call (`plugin-test-${randomUUID()}-`) — a shared
     // BullMQ queue name across concurrently-running test files has already
     // caused real cross-talk here (see the `crime-test-${randomUUID()}`
-    // comment in test/helpers/server.ts). No CORE_PLUGINS manifest declares
-    // jobs today, so the gap is theoretical; keep it that way rather than
-    // silently creating an unprefixed, unisolated queue the first time one
-    // does. A core plugin that needs jobs must be passed to `buildApp`
-    // explicitly by a caller that can supply an isolated prefix.
+    // comment in test/helpers/server.ts). `crimes` is the first core plugin
+    // that declares jobs, so this fallback now always throws on a real boot:
+    // every caller must pass `deps.plugins` explicitly, built with an
+    // isolated queue prefix, exactly as `bootTestServer` and `index.ts`
+    // already do. The guard stays even though the branch below it is now
+    // unreachable — the alternative is silently creating an unprefixed,
+    // unisolated queue the first time a caller forgets to pass `plugins`.
     for (const manifest of CORE_PLUGINS) {
       if (Object.keys(manifest.jobs).length > 0) {
         throw new Error(

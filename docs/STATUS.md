@@ -661,6 +661,28 @@ web image serves only the SPA's own assets.
   travel. Pre-existing, carried verbatim from core, outside this port's
   remit. A live game sets a positive value; the path is unreachable in any
   sensible config but is a real crash on the misconfigured one.
+- **A second `ctx.transaction` in one job handler fails silently as success.**
+  `runPluginJob` swallows `JobAlreadyAppliedError` (`apps/server/src/plugins/jobs.ts`),
+  which is correct for a real BullMQ retry. But a handler that opens a second
+  `ctx.transaction` commits its first, throws on the second's duplicate
+  `plugin_job_runs` claim, is reported complete to BullMQ, and silently skips
+  everything after — no error, no retry, no log. A boolean latch on the ctx
+  throwing a distinct, non-swallowed error would close it. The `crimes` port
+  hit this during development; every job handler shipped so far uses exactly
+  one `ctx.transaction`, so it is latent, not live, until `mail` or `gangs`
+  needs a second.
+- **`plugin_job_runs`'s PK omits the job name.** `apps/server/src/db/schema/plugins.ts`
+  keys on `(plugin_id, job_id)`, but BullMQ ids are per-QUEUE counters starting
+  at 1. A plugin declaring two jobs would have both queues issue id `"1"`, and
+  the second would be silently swallowed as already-applied. Latent for
+  `crimes` (one job); a live hazard for the first plugin — `mail` or `gangs`
+  — that declares two.
+- **Queue-prefix isolation stops at Redis.** Two `loadPlugins`/`bootTestServer`
+  boots in one test file get separate prefixed queues (ids restart at 1) but
+  share one database, so the second boot's first job would be swallowed as
+  already-applied by the first boot's `plugin_job_runs` row. No file does both
+  today.
+
 **Resolved, but the reasoning matters if you touch these areas:**
 
 - **`bank.test.ts`'s `app.inject` block used to boot `buildApp` with no
