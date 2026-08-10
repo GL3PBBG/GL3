@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 3 (module ports) outcome recorded.
-Branch: `feat/plugin-sdk-module-ports` (forked from `main` at `b26c68a`).
+Last updated: 2026-08-10, M5 stage 4 (core-event publishing + `news` port) outcome recorded.
+Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
 
 ---
 
@@ -14,10 +14,9 @@ Branch: `feat/plugin-sdk-module-ports` (forked from `main` at `b26c68a`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. Two of twelve module ports shipped (`ranks`, `notifications`); seven blocked on an event-envelope design decision; `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); three of twelve module ports shipped (`ranks`, `notifications`, `news`); the six remaining pending ports are now unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 66 files / 558 tests**, green. Count verified by the controller's own
-`npm run verify` run (161s), not taken from an agent report.
+**Suite: 70 files / 571 tests**, green across repeated back-to-back runs.
 
 ---
 
@@ -168,17 +167,13 @@ A final-review fix commit lands on top of those.
 
 **Deferred, and why:**
 
-1. **Seven modules blocked on the plugin event envelope.** `news`, `bank`,
-   `bullets`, `travel`, `crimes`, `mail` and `gangs` all publish **core
-   typed** events (`news.posted`, `bank.transacted`, `bullets.purchased`,
-   `player.travelled`, `crime.resolved`, `player.jailed`, `player.rankedUp`,
-   `mail.received`, `gang.*`). A plugin's `tx.events.publish` wraps
-   everything in the `plugin.event` envelope (`packages/shared/src/events.ts`).
-   Porting any of them as-is would change the event type on the wire,
-   breaking both `awaitOwnEvent` assertions and the web client — violating
-   this plan's own "M5 changes no HTTP response" constraint. Needs an event
-   design decision (a core-event publish capability, or a client that
-   understands both shapes) that was out of scope for these ports.
+1. **The plugin-event-envelope blocker is resolved** (branch
+   `feat/plugin-core-events`, design: `docs/superpowers/specs/2026-08-10-plugin-core-events-design.md`).
+   `tx.events.publishCore` lets a plugin publish any core-typed `GameEvent`
+   verbatim — `id`/`at` filled by the SDK, no `plugin.event` envelope — so a
+   port's wire shape is unchanged from core's own emission. `news` is the
+   first port built on it (below); `bank`, `bullets`, `travel`, `crimes`,
+   `mail` and `gangs` are no longer blocked on an event design decision.
 2. **`profile` not ported.** `PUT /api/profile` validates `avatarUrl` with a
    stored-XSS guard living in `@gl3/shared` (`dto/profile.ts` — scheme
    allowlist, embedded-credential rejection, URL normalization). A plugin
@@ -195,6 +190,47 @@ The two SDK gaps that used to be listed here as carry-forward work
 (`PlayerSnapshot` lacking `username`; `LoadPluginsDeps` not derived from
 `PluginCtxDeps`) are both closed — see `packages/plugin-sdk/src/ctx.ts` and
 `apps/server/src/plugins/loader.ts`'s `LoadPluginsDeps` respectively.
+
+### Core-event publishing + the `news` port (Plan 4)
+
+Branch `feat/plugin-core-events`, forked from `main` at `102079c`. Design:
+`docs/superpowers/specs/2026-08-10-plugin-core-events-design.md`.
+
+- **`tx.events.publishCore`** — a plugin can now publish any of the 19 core
+  `GameEvent` variants (everything `GameEventSchema` declares besides
+  `plugin.event`) exactly as core itself would: same type, same fields, no
+  wrapping envelope. `CoreEventInput` is derived from `GameEventSchema` (not
+  restated), so a twentieth core variant reaches plugins with no SDK edit.
+  `apps/server/test/plugin-ctx-core-events.test.ts` is the drift guard and
+  covers ordering, rollback-discards-the-buffer (CLAUDE.md rule 5), and the
+  leaderboard-buffering side effect below.
+- **Leaderboard side effect.** `tx.economy.addExp` / `applyExpAndRankUp` now
+  keep the Redis leaderboard current after a plugin-driven exp/cash change,
+  the same way core's own economy paths do — buffered during the transaction
+  and flushed only after commit.
+- **`tx.notify`** now also publishes `notification.created`, addressed to the
+  notified player (not the caller), alongside the existing row insert.
+- **`news` ported** to `packages/plugins/news` — the first port built on
+  `publishCore` (one event, `news.posted`, global audience, no ctx
+  capability), chosen deliberately as the smallest case before `crimes` and
+  `gangs`, which carry ordering and lock-order complexity. `apps/server/src/game/news/`
+  no longer exists; `apps/server/test/news.test.ts` is unchanged and passes
+  against the ported implementation.
+- **Trust model — operator-facing.** `publishCore` is unrestricted: any
+  loaded plugin may publish any core event to any audience once installed
+  (trust is granted at install time, not per call — the same basis
+  `tx.economy.applyBalanceChange` already relies on). Two consequences worth
+  knowing before installing a third-party plugin: a plugin can publish
+  `bank.transacted` with numbers that match no ledger row, and a plugin can
+  address any core event to `audience: { kind: "global" }` and reach every
+  connected socket. Before this change, a plugin's output was at least
+  *identifiable* on the wire as `plugin.event`; `publishCore` removes that
+  distinction, so a malicious or buggy plugin that could already corrupt
+  state can now also lie about it convincingly. The mitigation is install-time
+  review — there is no runtime guard beyond that. See design §5.
+
+Six module ports remain: `bank`, `bullets`, `travel`, `crimes`, `mail`,
+`gangs`. All are now unblocked.
 
 ## Starting M4
 
