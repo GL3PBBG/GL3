@@ -122,7 +122,9 @@ describe("POST /api/bullets/buy", () => {
     const { createCrimeQueue } = await import("../src/queue/index.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const app = await buildApp(config, {
+      db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)), leaderboardPrefix,
+    });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Bullets${Date.now()}`, password: "hunter2hunter2" } });
     const { token, playerId: registeredId } = reg.json();
     const auth = { authorization: `Bearer ${token}` };
@@ -131,6 +133,11 @@ describe("POST /api/bullets/buy", () => {
     const buy = await app.inject({ method: "POST", url: "/api/bullets/buy", headers: auth, payload: { quantity: 3 } });
     expect(buy.statusCode).toBe(200);
     expect(buy.json()).toEqual({ cash: "985", bullets: "3", bulletStock: 7 });
+
+    // Design §4.2: core's bullets service never called recordScore, but the
+    // ctx buffers one leaderboard write per changed kind and flushes it after
+    // commit. A deliberate divergence, asserted so it stays proven.
+    expect(await redis.zscore(`${leaderboardPrefix}:cash`, registeredId)).toBe("985");
 
     const badBody = await app.inject({ method: "POST", url: "/api/bullets/buy", headers: auth, payload: { quantity: 0 } });
     expect(badBody.statusCode).toBe(400);
@@ -166,6 +173,7 @@ describe("POST /api/bullets/buy", () => {
     const jailed = await app.inject({ method: "POST", url: "/api/bullets/buy", headers: auth, payload: { quantity: 1 } });
     expect(jailed.statusCode).toBe(423);
     expect(jailed.json()).toMatchObject({ error: "jailed" });
+    expect(jailed.headers["retry-after"]).toBe(String(jailed.json().remainingSeconds));
 
     const unauthenticated = await app.inject({ method: "POST", url: "/api/bullets/buy", payload: { quantity: 1 } });
     expect(unauthenticated.statusCode).toBe(401);
