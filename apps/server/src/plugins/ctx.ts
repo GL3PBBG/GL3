@@ -2,7 +2,11 @@ import type {
   CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput,
   PluginTx,
 } from "@gl3/plugin-sdk";
-import { JobAlreadyAppliedError, runFilterChain } from "@gl3/plugin-sdk";
+import {
+  InsufficientFundsError as SdkInsufficientFundsError,
+  JobAlreadyAppliedError,
+  runFilterChain,
+} from "@gl3/plugin-sdk";
 import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
@@ -12,7 +16,7 @@ import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
 import {
-  addExp, applyBalanceChange, applyGangBalanceChange,
+  addExp, applyBalanceChange, applyGangBalanceChange, InsufficientFundsError,
   lockGangAndPlayerForUpdate, lockLocationForUpdate, lockPlayersForUpdate,
   type Tx,
 } from "../economy/ledger.js";
@@ -97,8 +101,23 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
           db: tx,
           economy: {
             applyBalanceChange: async (change) => {
-              const after = await applyBalanceChange(tx, change);
-              // `points` has no leaderboard — LeaderboardKind is cash/bank/exp.
+              let after: bigint;
+              try {
+                after = await applyBalanceChange(tx, change);
+              } catch (error) {
+                // Only this call is wrapped, and only this one error is
+                // translated: a plugin package cannot import core's class, so
+                // without this every overdraft escapes the loader's
+                // PluginError catch and Fastify 500s. Everything else
+                // propagates untouched.
+                if (error instanceof InsufficientFundsError) {
+                  throw new SdkInsufficientFundsError(change.playerId, change.kind);
+                }
+                throw error;
+              }
+              // Deliberately outside the try: a leg that threw must buffer no
+              // score. `points` has no leaderboard — LeaderboardKind is
+              // cash/bank/exp.
               if (change.kind !== "points") bufferScore(change.kind, change.playerId, after);
               return after;
             },
