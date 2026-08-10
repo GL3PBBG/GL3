@@ -13,11 +13,11 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; four of the
+(SDK + loader + example) and the web page renderer have shipped; five of the
 twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`,
-`bank`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
+`bank`, `bullets`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
 lets a plugin publish any of the 19 core `GameEvent` variants verbatim, so the
-five remaining ports (`bullets`, `travel`, `crimes`, `mail`, `gangs`) are
+four remaining ports (`travel`, `crimes`, `mail`, `gangs`) are
 unblocked (`profile`, `leaderboard`, `jail` are deliberate non-ports — see
 `docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
 MariaDB install. Suite: **70 files / 574 tests**, green across repeated
