@@ -49,6 +49,14 @@ const testPlugin = definePlugin({
       path: "/api/rt/boom",
       handler: async () => { throw new PluginError("too_poor", 409, { need: "500" }); },
     }),
+    route({
+      method: "GET",
+      path: "/api/rt/hdr",
+      auth: "public",
+      handler: async () => {
+        throw new PluginError("on_cooldown", 429, { retryAfter: 42 }, { "retry-after": "42" });
+      },
+    }),
   ],
 });
 
@@ -156,6 +164,14 @@ describe("plugin routes", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "too_poor", need: "500" });
+  });
+
+  it("applies PluginError headers to the response alongside the body", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/rt/hdr" });
+
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toEqual({ error: "on_cooldown", retryAfter: 42 });
+    expect(res.headers["retry-after"]).toBe("42");
   });
 });
 
