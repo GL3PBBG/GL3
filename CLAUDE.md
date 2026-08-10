@@ -13,14 +13,14 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; three of the
-twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`).
-The event-envelope blocker is **resolved** — `tx.events.publishCore` lets a
-plugin publish any of the 19 core `GameEvent` variants verbatim, so the six
-remaining ports (`bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) are
+(SDK + loader + example) and the web page renderer have shipped; four of the
+twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`,
+`bank`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
+lets a plugin publish any of the 19 core `GameEvent` variants verbatim, so the
+five remaining ports (`bullets`, `travel`, `crimes`, `mail`, `gangs`) are
 unblocked (`profile`, `leaderboard`, `jail` are deliberate non-ports — see
 `docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **70 files / 572 tests**, green across repeated
+MariaDB install. Suite: **70 files / 574 tests**, green across repeated
 back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
@@ -141,6 +141,18 @@ unavailable here.
   `.default(0n)`; drizzle-kit's serialiser crashes on `BigInt`.
 - Integration tests run against **real** Postgres and Redis. No mocks for DB, queue
   or bus paths, ever.
+- **A new plugin package has eight registration sites, three of which fail
+  silently or remotely.** `packages/plugins/<id>/` itself, then:
+  `apps/server/package.json` (+ `npm install`), `apps/server/tsconfig.json`
+  references, root `tsconfig.json` references, `vitest.workspace.ts`
+  `srcAliases`, `plugins/core-plugins.ts`, the old `app.ts` registration to
+  delete, and **four separate COPY sites in `Dockerfile.server`**. Missing the
+  `apps/server/tsconfig.json` reference or a Dockerfile COPY fails **only in
+  CI** — the root tsconfig makes `npm run typecheck` pass regardless. Catch the
+  first locally with `npx tsc --build --force apps/server/tsconfig.json`, the
+  exact command the image build runs. Missing the `srcAliases` entry fails
+  **nothing** and silently grades the last `tsc --build` against a stale
+  `dist/`.
 - Conventional Commits.
 
 ---

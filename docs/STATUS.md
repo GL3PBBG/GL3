@@ -1,6 +1,6 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 4 (core-event publishing + `news` port) outcome recorded.
+Last updated: 2026-08-10, M5 stage 5 (`bank` port) outcome recorded.
 Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
 
 ---
@@ -14,9 +14,9 @@ Branch: `feat/plugin-core-events` (forked from `main` at `102079c`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); three of twelve module ports shipped (`ranks`, `notifications`, `news`); the six remaining pending ports are now unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); four of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`); the five remaining pending ports are now unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 70 files / 572 tests**, green across repeated back-to-back runs.
+**Suite: 70 files / 574 tests**, green across repeated back-to-back runs.
 
 ---
 
@@ -229,8 +229,52 @@ Branch `feat/plugin-core-events`, forked from `main` at `102079c`. Design:
   state can now also lie about it convincingly. The mitigation is install-time
   review — there is no runtime guard beyond that. See design §5.
 
-Six module ports remain: `bank`, `bullets`, `travel`, `crimes`, `mail`,
-`gangs`. All are now unblocked.
+### The `bank` port (Plan 5)
+
+Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
+`docs/superpowers/plans/2026-08-10-plugin-bank-port.md`.
+
+- **`bank` ported** to `packages/plugins/bank`. `POST /api/bank/deposit` and
+  `/withdraw` answer from the plugin; `apps/server/src/game/bank/` no longer
+  exists. `test/bank.test.ts`'s `app.inject` block is unchanged and is the
+  proof that paths, status codes, error strings, response bodies and the
+  `bank.transacted` event are byte-identical.
+- **No `schema.ts`.** Unlike `news` and `ranks`, this plugin mirrors no core
+  tables: `actorName` comes from `ctx.player.username`, and both balances come
+  from the two `applyBalanceChange` return values. Core's post-commit
+  `SELECT cash, bank` and both its `recordScore` calls disappear — the latter
+  absorbed by the ctx's leaderboard buffering (core-events design §B1), which
+  `test/leaderboard.test.ts` now proves end to end.
+- **`InsufficientFundsError` added to the SDK.** `tx.economy.applyBalanceChange`
+  threw core's class, which lives in `apps/server` and so cannot be imported by
+  a plugin package; the route loader maps only `PluginError`, so **every plugin
+  overdraft was a 500**. `plugins/ctx.ts` now translates core's into the SDK's,
+  which the plugin catches. Deliberately **not** mapped centrally by the loader:
+  `bank`, `travel` and `bullets` answer 409 `insufficient_funds` but `gangs`
+  answers 400 `insufficient_cash` (`game/gangs/routes.ts:789`), so a central
+  mapping would have to change one of them. Only `applyBalanceChange` is
+  wrapped — `InsufficientGangFundsError` has the identical gap and is deferred
+  to the `gangs` port, which is the plan that can prove it end to end.
+- **`callPluginRoute` test helper** (`test/helpers/plugin-route.ts`). Three core
+  test files imported `performBankTransaction` directly — `news` had no such
+  coupling, which is why `news.test.ts` needed no edit. They now drive the real
+  plugin handler in-process, so `economy-invariant.test.ts`'s 1000-op
+  `sum(ledger) == balance` sweep still covers bank's actual code path.
+  `loadSnapshot` is exported from `plugins/routes.ts` rather than copied, so a
+  test's ctx cannot drift from the real route's. The helper is explicitly **not
+  the HTTP contract** — no jail gate, no auth, no `PluginError` → status
+  mapping. `travel`, `bullets`, `crimes` and `gangs` face the same coupling and
+  reuse it.
+- **The gang bank routes are NOT part of this port.** `game/bank/` was
+  player-only; the routes CLAUDE.md rule 6 describes are
+  `POST /api/gangs/:gangId/bank/{deposit,withdraw}` at `game/gangs/routes.ts:751`
+  and `:795`, and they ship with `gangs`. Splitting them out would put
+  gang↔player lock ordering under two owners — the split-brain shape M3's
+  deadlock came from.
+
+Five module ports remain: `bullets`, `travel`, `crimes`, `mail`, `gangs`. All
+are unblocked. `bullets` and `travel` are the natural next two: single-player
+money paths that reuse the SDK error and the helper with nothing new.
 
 **Carried forward from this branch's final review** — three accepted Minors,
 none blocking, all worth closing when the next port touches the same code:
