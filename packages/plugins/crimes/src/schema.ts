@@ -36,5 +36,21 @@ export const crimeLog = pgTable("crime_log", {
   success: boolean("success").notNull(),
   payout: bigint("payout", { mode: "bigint" }).notNull(),
   jobId: text("job_id"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Read mirrors of core-owned tables needed by the commit job.
+ * The job has no ctx.player (null inside a job), so it must read
+ * `players.username` for the actor name and `player_stats.jailedUntil`
+ * for the in-tx effective-jail read (spec §4.4).
+ */
+export const players = pgTable("players", {
+  id: uuid("id").primaryKey(),
+  username: text("username").notNull(),
+});
+
+export const playerStats = pgTable("player_stats", {
+  playerId: uuid("player_id").primaryKey(),
+  jailedUntil: timestamp("jailed_until", { withTimezone: true }),
 });
