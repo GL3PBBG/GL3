@@ -57,6 +57,9 @@ export function registerPluginRoutes(
               : await reply.code(result.status).send(result.body);
           } catch (error) {
             if (error instanceof PluginError) {
+              for (const [name, value] of Object.entries(error.headers)) {
+                reply.header(name, value);
+              }
               return reply.code(error.status).send({ error: error.code, ...error.extra });
             }
             throw error;

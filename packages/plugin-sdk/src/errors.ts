@@ -5,12 +5,18 @@ import type { PluginBalanceChange } from "./ctx.js";
  * maps it to `reply.code(status).send({ error: code, ...extra })`, which is how
  * ported modules keep their existing status codes and error strings byte for
  * byte (spec: "M5 changes no HTTP response").
+ *
+ * `headers` exists because a status line is not always the whole response:
+ * core's travel route answers 429 with a `retry-after` header alongside the
+ * body (`game/travel/routes.ts` before the port). The loader sets the 423
+ * jail header itself; everything else a handler needs goes here.
  */
 export class PluginError extends Error {
   constructor(
     readonly code: string,
     readonly status: number,
     readonly extra: Record<string, unknown> = {},
+    readonly headers: Record<string, string> = {},
   ) {
     super(code);
     this.name = "PluginError";
