@@ -142,15 +142,28 @@ describe("economy invariant across every M2 money path", () => {
         // Expected, frequent rejections that must NOT corrupt state: insufficient
         // funds/stock, already-at-location, no-location-yet. Anything else is a
         // real bug and must fail the test.
+        //
+        // Deliberately NOT accepted, even though they are real PluginError codes
+        // travel can throw: on_cooldown, location_changed, location_not_found.
+        // All three are unreachable in THIS sweep by construction — the
+        // redis.del immediately precedes each travel call and the sweep is
+        // single-threaded (on_cooldown), a locationId mismatch needs a
+        // concurrent move between the pre-read and the locked recheck that a
+        // sequential sweep can never produce (location_changed), and location
+        // ids come from the seeded table and are never deleted
+        // (location_not_found). If any of the three ever fires here, that is
+        // the bug — e.g. a future change namespacing the cooldown key by
+        // plugin id would make cooldownKey(playerId, "travel") stop matching,
+        // silently collapsing succeeded.travel to near-zero behind a wide
+        // accept-list that swallowed the 429s as "expected". Keeping them out
+        // is what lets the coverage assertion below actually catch that.
         if (
           err instanceof InsufficientFundsError ||
           // Every ported module's expected rejections arrive as the
           // PluginError its handler throws. Only crimes is still core.
           (err instanceof PluginError &&
             (err.code === "insufficient_funds" || err.code === "insufficient_stock" ||
-             err.code === "no_location" || err.code === "already_there" ||
-             err.code === "location_not_found" || err.code === "location_changed" ||
-             err.code === "on_cooldown"))
+             err.code === "no_location" || err.code === "already_there"))
         ) continue;
         throw err;
       }
