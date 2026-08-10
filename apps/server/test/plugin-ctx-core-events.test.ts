@@ -224,3 +224,40 @@ describe("plugin economy changes update the leaderboard", () => {
     expect(await score("cash", player.id)).toBeNull();
   });
 });
+
+describe("tx.notify", () => {
+  it("publishes notification.created addressed to the NOTIFIED player", async () => {
+    const actor = await createPlayer();
+    const recipient = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+    // Filters on the recipient, not the actor — that is the assertion.
+    const watch = watchOwnEvents(recipient.id, 1);
+
+    await ctx.transaction(async (tx) => { await tx.notify(recipient.id, "You have mail."); });
+
+    await watch.settled;
+    expect(watch.seen).toHaveLength(1);
+    const event = watch.seen[0];
+    if (event?.type !== "notification.created") throw new Error(`expected notification.created, got ${String(event?.type)}`);
+    expect(event.actorId).toBe(recipient.id);
+    expect(event.actorName).toBe(recipient.username);
+    expect(event.audience).toEqual({ kind: "player", playerId: recipient.id });
+    expect(event.body).toBe("You have mail.");
+    expect(event.notificationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(actor.id).not.toBe(event.actorId);
+  });
+
+  it("publishes nothing when the transaction rolls back", async () => {
+    const recipient = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+    const watch = watchOwnEvents(recipient.id, 1);
+
+    await expect(ctx.transaction(async (tx) => {
+      await tx.notify(recipient.id, "never sent");
+      throw new Error("boom");
+    })).rejects.toThrow("boom");
+
+    await watch.settled;
+    expect(watch.seen).toEqual([]);
+  });
+});
