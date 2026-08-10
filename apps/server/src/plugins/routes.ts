@@ -75,7 +75,7 @@ function collectFilters(manifests: readonly PluginManifest[]) {
  * the schema, only `exp` (bigint) and `rankId`. Nothing consumes `.level`
  * today; 0 until a port needs it.
  */
-async function loadSnapshot(deps: PluginCtxDeps, playerId: string): Promise<PlayerSnapshot | null> {
+export async function loadSnapshot(deps: PluginCtxDeps, playerId: string): Promise<PlayerSnapshot | null> {
   const [row] = await deps.db
     .select({
       id: players.id,

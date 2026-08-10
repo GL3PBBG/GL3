@@ -3,11 +3,17 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { playerStats } from "../src/db/schema/index.js";
+import { uuidv7 } from "uuidv7";
+import { loadConfig } from "../src/config.js";
+import { players, playerStats } from "../src/db/schema/index.js";
+import { createRedis } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+// Own connection: callPluginRoute builds a ctx directly rather than going
+// through the booted server, so it needs a Redis handle of its own.
+const redis = createRedis(loadConfig(process.env).redisUrl);
 
 const testPlugin = definePlugin({
   id: "rt",
@@ -74,6 +80,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeServer();
   await conn.end();
+  redis.disconnect();
 });
 
 describe("plugin routes", () => {
@@ -145,5 +152,34 @@ describe("plugin routes", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "too_poor", need: "500" });
+  });
+});
+
+describe("callPluginRoute helper", () => {
+  it("drives a real plugin route in-process against the manifest's own schemas", async () => {
+    const { callPluginRoute } = await import("./helpers/plugin-route.js");
+    const ranksPlugin = (await import("@gl3/plugin-ranks")).default;
+    const { seedRanks } = await import("../src/db/seed.js");
+
+    await seedRanks(db);
+    const playerId = uuidv7();
+    await db.insert(players).values({ id: playerId, username: `helper${Date.now()}` });
+    await db.insert(playerStats).values({ playerId });
+
+    const result = await callPluginRoute(ranksPlugin, "GET", "/api/ranks", {
+      db, redis, leaderboardPrefix: `helper-test-${playerId}`, playerId,
+    });
+
+    expect(result.status).toBe(200);
+    const body = result.body as { ranks: { name: string; current: boolean }[] };
+    expect(body.ranks.length).toBeGreaterThan(0);
+
+    // A path the manifest does not serve must fail loudly rather than
+    // silently test nothing.
+    await expect(
+      callPluginRoute(ranksPlugin, "GET", "/api/nope", {
+        db, redis, leaderboardPrefix: `helper-test-${playerId}`, playerId,
+      }),
+    ).rejects.toThrow(/no GET route "\/api\/nope"/);
   });
 });
