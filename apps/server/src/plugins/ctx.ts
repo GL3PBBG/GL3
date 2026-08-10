@@ -17,7 +17,7 @@ import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange, InsufficientFundsError,
-  lockGangAndPlayerForUpdate, lockLocationForUpdate, lockPlayersForUpdate,
+  lockGangAndPlayerForUpdate, lockLocationForUpdate, lockLocationsForUpdate, lockPlayersForUpdate,
   type Tx,
 } from "../economy/ledger.js";
 import { applyExpAndRankUp } from "../economy/ranks.js";
@@ -156,6 +156,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             player: (playerIds) => lockPlayersForUpdate(tx, playerIds),
             gangAndPlayer: (gangId, playerId) => lockGangAndPlayerForUpdate(tx, gangId, playerId),
             location: (locationId) => lockLocationForUpdate(tx, locationId),
+            locations: (locationIds) => lockLocationsForUpdate(tx, locationIds),
           },
           gangLog: (entry) => appendGangLog(tx, entry.gangId, entry.playerId, entry.message),
           /**
