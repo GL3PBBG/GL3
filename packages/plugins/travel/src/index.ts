@@ -185,6 +185,20 @@ async function attemptTravel(
     await tx.locks.locations([expectedFrom, toLocationId]);
     // (5) Then the player. Explicit, because a zero-fare travel never calls
     // applyBalanceChange and would otherwise hold no player lock at all.
+    //
+    // Defence in depth, not dead weight: the lost-update race this guards
+    // against — two overlapping transactions racing this same block for one
+    // player — is not reachable through travelRoute today, because
+    // ctx.cooldown.acquire's SET NX on the per-player travel cooldown key
+    // admits only one in-flight call per player (game/cooldown.ts). That is
+    // a Redis-level accident of the current caller, not a database-level
+    // guarantee: if the cooldown key is ever evicted, if a future caller
+    // invokes attemptTravel outside travelRoute, or if a later port reuses
+    // this handler without the same gate, this lock is the only thing left
+    // standing between two overlapping transactions and a player.travelled
+    // event whose fromLocationId names a location the player had already
+    // left. Do not remove it because today's caller happens to serialize
+    // elsewhere.
     await tx.locks.player([player.id]);
 
     // (6) The value the transaction actually trusts.
