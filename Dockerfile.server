@@ -4,22 +4,22 @@
 #
 # The builder runs `tsc --build` against @gl3/server, which follows its
 # tsconfig references to @gl3/shared, @gl3/plugin-sdk, @gl3/plugin-ranks,
-# @gl3/plugin-notifications and @gl3/hello-plugin and emits all six dist/
-# dirs in one step — so no separate `build -w` is needed here (unlike
-# Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and needs dist
-# present before the web build starts).
+# @gl3/plugin-notifications, @gl3/plugin-news and @gl3/hello-plugin and emits
+# all seven dist/ dirs in one step — so no separate `build -w` is needed here
+# (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
+# needs dist present before the web build starts).
 #
 # Every project apps/server/tsconfig.json references must be copied in, sources
 # and tsconfig both: tsc reads the referenced tsconfig even for a type-only
 # import and fails with TS5083 if it is missing. @gl3/hello-plugin,
-# @gl3/plugin-ranks and @gl3/plugin-notifications are also RUNTIME
-# requirements — src/index.ts imports @gl3/hello-plugin statically for the
-# optional-plugin import map, and src/plugins/core-plugins.ts imports
-# @gl3/plugin-ranks and @gl3/plugin-notifications statically as ported core
-# modules (a dynamic import(pluginId) is deliberately not used for any of
-# them, so the dependency-direction check stays compiler-enforceable).
-# Without all three in the runtime stage the server cannot boot, even with
-# PLUGIN_IDS empty — core plugins are never optional.
+# @gl3/plugin-ranks, @gl3/plugin-notifications and @gl3/plugin-news are also
+# RUNTIME requirements — src/index.ts imports @gl3/hello-plugin statically for
+# the optional-plugin import map, and src/plugins/core-plugins.ts imports
+# @gl3/plugin-ranks, @gl3/plugin-notifications and @gl3/plugin-news statically
+# as ported core modules (a dynamic import(pluginId) is deliberately not used
+# for any of them, so the dependency-direction check stays
+# compiler-enforceable). Without all four in the runtime stage the server
+# cannot boot, even with PLUGIN_IDS empty — core plugins are never optional.
 #
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
 # build toolchain (no python/make/g++).
@@ -76,9 +76,10 @@ COPY apps/server/drizzle apps/server/drizzle
 # The root tsconfig also references apps/web, which is not copied into this
 # image, so building from root fails with TS5083 (Cannot read
 # apps/web/tsconfig.json). The server project's own references pull in shared,
-# plugin-sdk and hello-plugin, so every dist/ this image needs is produced;
-# `--force` matches `npm run typecheck` (rebuild from scratch, since
-# .dockerignore excluded any cached .tsbuildinfo).
+# plugin-sdk, plugins/ranks, plugins/notifications, plugins/news and
+# hello-plugin, so every dist/ this image needs is produced; `--force` matches
+# `npm run typecheck` (rebuild from scratch, since .dockerignore excluded any
+# cached .tsbuildinfo).
 RUN npx tsc --build --force apps/server/tsconfig.json
 
 # --- runtime stage -----------------------------------------------------------
