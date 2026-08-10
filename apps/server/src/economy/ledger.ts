@@ -85,20 +85,46 @@ export async function applyBalanceChange(tx: Tx, change: BalanceChange): Promise
  * `packages/plugins/bullets/src/index.ts` (moved there when `bullets` became
  * a plugin; `applyBalanceChange` above takes the player lock internally).
  *
- * This fixed direction does NOT rule out a deadlock against every future
- * path that touches both rows — it already doesn't. `player_stats.location_id`
- * carries a FK to `locations` (`apps/server/src/db/schema/identity.ts`), so
- * `performTravel`'s `UPDATE player_stats SET location_id = …`
- * (`apps/server/src/game/travel/service.ts`) takes an implicit FOR KEY SHARE
- * on the destination's `locations` row *after* locking `player_stats` FOR
- * UPDATE — the opposite order from this function, closing an ABBA cycle with
- * bullets across the two location rows a player visits in sequence (`40P01`,
- * same shape as the M3 gang-lock deadlock in CLAUDE.md rule 6). See the watch
- * item in `docs/STATUS.md` for the constraint the `travel` port must satisfy
- * to close it; it is not this function's job to fix.
+ * The direction is now global: every path that touches a location row and a
+ * player row takes LOCATIONS FIRST. `travel` used to invert it — locking
+ * `player_stats` FOR UPDATE and reaching `locations` afterwards through the
+ * implicit FOR KEY SHARE on the `location_id` FK — which closed an ABBA cycle
+ * with a bullets purchase. `packages/plugins/travel/src/index.ts` now takes
+ * both its location rows through `lockLocationsForUpdate` before the player
+ * row; regression test `apps/server/test/travel-lock-order.test.ts`.
+ *
+ * A path needing SEVERAL location rows must use `lockLocationsForUpdate`, not
+ * repeated calls to this function: the order between them is the point.
  */
 export async function lockLocationForUpdate(tx: Tx, locationId: string): Promise<void> {
   await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, locationId)).for("update");
+}
+
+/**
+ * Locks several `locations` rows in one fixed order — ascending id — so two
+ * transactions that need overlapping sets can never take them in opposite
+ * orders. `travel` needs this: it locks the source and destination rows
+ * together (`packages/plugins/travel/src/index.ts`), and picking the order
+ * per-call would reintroduce the location↔location half of SPEC §2.3's
+ * deadlock class.
+ *
+ * `null` entries are dropped rather than rejected: a player's first-ever
+ * travel has no source location. An empty result is a no-op — deliberately
+ * NOT a `WHERE id = ANY('{}')`, which would still plan a scan.
+ *
+ * One statement per row, not a single `WHERE id IN (...) ORDER BY id FOR
+ * UPDATE`. The single-statement form relies on the planner putting LockRows
+ * above Sort to get the lock order right; a loop over sorted ids depends on
+ * nothing. Two rows per travel makes the extra round trip irrelevant.
+ */
+export async function lockLocationsForUpdate(
+  tx: Tx,
+  locationIds: readonly (string | null)[],
+): Promise<void> {
+  const ids = [...new Set(locationIds.filter((id): id is string => id !== null))].sort();
+  for (const id of ids) {
+    await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, id)).for("update");
+  }
 }
 
 /** Credit exp — not money, but bigint and same overflow concern (spec §1.1). */

@@ -15,6 +15,7 @@
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-ranks": "*",
     "@gl3/plugin-sdk": "*",
+    "@gl3/plugin-travel": "*",
     "@gl3/shared": "*",
     "argon2": "^0.41.1",
     "bullmq": "^5.34.2",

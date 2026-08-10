@@ -49,6 +49,14 @@ const testPlugin = definePlugin({
       path: "/api/rt/boom",
       handler: async () => { throw new PluginError("too_poor", 409, { need: "500" }); },
     }),
+    route({
+      method: "GET",
+      path: "/api/rt/hdr",
+      auth: "public",
+      handler: async () => {
+        throw new PluginError("on_cooldown", 429, { retryAfter: 42 }, { "retry-after": "42" });
+      },
+    }),
   ],
 });
 
@@ -118,9 +126,10 @@ describe("plugin routes", () => {
     expect(res.statusCode).toBe(423);
     expect(res.json()).toMatchObject({ error: "jailed" });
     expect(typeof res.json().remainingSeconds).toBe("number");
-    // Core's own jail-gated routes set this (game/bullets/routes.ts:19,
-    // game/travel/routes.ts:42, game/crimes/routes.ts:55). "Exact core jail
-    // response" is not exact without it.
+    // Core's own jail-gated routes set this (game/crimes/routes.ts:55; the
+    // ported bullets and travel routes now answer from plugins, so the loader
+    // at apps/server/src/plugins/routes.ts:33 is what carries it for them).
+    // "Exact core jail response" is not exact without it.
     expect(res.headers["retry-after"]).toBe(String(res.json().remainingSeconds));
   });
 
@@ -156,6 +165,14 @@ describe("plugin routes", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "too_poor", need: "500" });
+  });
+
+  it("applies PluginError headers to the response alongside the body", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/rt/hdr" });
+
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toEqual({ error: "on_cooldown", retryAfter: 42 });
+    expect(res.headers["retry-after"]).toBe("42");
   });
 });
 

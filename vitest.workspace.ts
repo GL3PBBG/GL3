@@ -39,6 +39,9 @@ const srcAliases = {
       "@gl3/plugin-bullets": fileURLToPath(
         new URL("./packages/plugins/bullets/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-travel": fileURLToPath(
+        new URL("./packages/plugins/travel/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -214,6 +217,7 @@ export default defineWorkspace([
         "test/plugin-loader.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
+        "test/travel-lock-order.test.ts",
         "test/travel.test.ts",
         "test/ws.test.ts",
         "test/acceptance/**/*.test.ts",

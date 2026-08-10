@@ -149,8 +149,10 @@ export interface PluginTx {
    * - A gang and a player together: `gangAndPlayer`, never `player` and a
    *   gang lock taken separately — it fixes the one order every gang↔player
    *   path (including core's bank and membership routes) agrees on.
-   * - A location alongside a player: `location` first, then the player —
-   *   the direction core's bullets purchase locks in.
+   * - A location alongside a player: `location` first, then the player.
+   * - SEVERAL locations alongside a player: `locations` first (it sorts them),
+   *   then the player — never repeated `location` calls, whose relative order
+   *   is exactly what a deadlock needs. `travel` is the caller.
    * - Jailing a player needs no separate call here: `jail.sendToJail` takes
    *   the player lock itself, in the same order as `economy.applyBalanceChange`.
    */
@@ -158,6 +160,7 @@ export interface PluginTx {
     player(playerIds: string[]): Promise<void>;
     gangAndPlayer(gangId: string, playerId: string): Promise<void>;
     location(locationId: string): Promise<void>;
+    locations(locationIds: readonly (string | null)[]): Promise<void>;
   };
   gangLog(entry: GangLogEntry): Promise<void>;
   notify(playerId: string, body: string): Promise<void>;
