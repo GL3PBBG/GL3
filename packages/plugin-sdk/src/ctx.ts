@@ -158,6 +158,7 @@ export interface PluginTx {
     player(playerIds: string[]): Promise<void>;
     gangAndPlayer(gangId: string, playerId: string): Promise<void>;
     location(locationId: string): Promise<void>;
+    locations(locationIds: readonly (string | null)[]): Promise<void>;
   };
   gangLog(entry: GangLogEntry): Promise<void>;
   notify(playerId: string, body: string): Promise<void>;

@@ -101,6 +101,33 @@ export async function lockLocationForUpdate(tx: Tx, locationId: string): Promise
   await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, locationId)).for("update");
 }
 
+/**
+ * Locks several `locations` rows in one fixed order — ascending id — so two
+ * transactions that need overlapping sets can never take them in opposite
+ * orders. `travel` needs this: it locks the source and destination rows
+ * together (`packages/plugins/travel/src/index.ts`), and picking the order
+ * per-call would reintroduce the location↔location half of SPEC §2.3's
+ * deadlock class.
+ *
+ * `null` entries are dropped rather than rejected: a player's first-ever
+ * travel has no source location. An empty result is a no-op — deliberately
+ * NOT a `WHERE id = ANY('{}')`, which would still plan a scan.
+ *
+ * One statement per row, not a single `WHERE id IN (...) ORDER BY id FOR
+ * UPDATE`. The single-statement form relies on the planner putting LockRows
+ * above Sort to get the lock order right; a loop over sorted ids depends on
+ * nothing. Two rows per travel makes the extra round trip irrelevant.
+ */
+export async function lockLocationsForUpdate(
+  tx: Tx,
+  locationIds: readonly (string | null)[],
+): Promise<void> {
+  const ids = [...new Set(locationIds.filter((id): id is string => id !== null))].sort();
+  for (const id of ids) {
+    await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, id)).for("update");
+  }
+}
+
 /** Credit exp — not money, but bigint and same overflow concern (spec §1.1). */
 export async function addExp(tx: Tx, playerId: string, amount: bigint): Promise<void> {
   if (amount === 0n) return;

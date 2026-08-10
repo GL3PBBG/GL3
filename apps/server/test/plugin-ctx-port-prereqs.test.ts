@@ -1,9 +1,13 @@
 import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import postgres from "postgres";
+import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { loadConfig } from "../src/config.js";
 import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
+import { lockLocationsForUpdate } from "../src/economy/ledger.js";
 import { testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -144,6 +148,65 @@ describe("plugin ctx port prerequisites", () => {
     const notes = await db.select().from(notifications).where(eq(notifications.playerId, playerId));
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ playerId, body: "hello" });
+  });
+});
+
+describe("tx.locks.locations", () => {
+  it("locks several rows, drops nulls, dedupes, and is a no-op when nothing is left", async () => {
+    const a = uuidv7();
+    const b = uuidv7();
+    await db.insert(locations).values([
+      { id: a, name: "Alpha", bulletStock: 1, bulletCost: 1n },
+      { id: b, name: "Beta", bulletStock: 1, bulletCost: 1n },
+    ]);
+
+    // Descending input: the helper must still lock ascending.
+    const [hi, lo] = a < b ? [b, a] : [a, b];
+    await db.transaction(async (tx) => {
+      await lockLocationsForUpdate(tx, [hi, lo, hi, null]);
+    });
+
+    // A null-only call must not throw and must not emit a statement that
+    // would lock the whole table.
+    await db.transaction(async (tx) => {
+      await lockLocationsForUpdate(tx, [null]);
+    });
+
+    // The rows are untouched and still readable afterwards. Scoped to this
+    // test's own ids, not the whole table: the earlier "plugin ctx port
+    // prerequisites" describe above inserts its own location row with no
+    // cleanup in between, so the table is not empty by the time this runs.
+    const rows = await db.select({ id: locations.id }).from(locations)
+      .where(inArray(locations.id, [a, b]));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("actually blocks a competing FOR UPDATE on one of the rows", async () => {
+    const id = uuidv7();
+    await db.insert(locations).values({ id, name: "Contended", bulletStock: 1, bulletCost: 1n });
+
+    const blocker = postgres(loadConfig(process.env).databaseUrl, { max: 1 });
+    const t0 = await blocker.reserve();
+    try {
+      await t0`BEGIN`;
+      await t0`SELECT id FROM locations WHERE id = ${id}::uuid FOR UPDATE`;
+
+      let locked = false;
+      const contender = db.transaction(async (tx) => {
+        await lockLocationsForUpdate(tx, [id]);
+        locked = true;
+      });
+
+      await new Promise((resolve) => { setTimeout(resolve, 200); });
+      expect(locked).toBe(false); // still parked on t0's lock
+
+      await t0`ROLLBACK`;
+      await contender;
+      expect(locked).toBe(true);
+    } finally {
+      t0.release();
+      await blocker.end();
+    }
   });
 });
 
