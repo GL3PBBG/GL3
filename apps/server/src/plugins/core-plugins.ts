@@ -1,5 +1,6 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import bankPlugin from "@gl3/plugin-bank";
+import bulletsPlugin from "@gl3/plugin-bullets";
 import newsPlugin from "@gl3/plugin-news";
 import notificationsPlugin from "@gl3/plugin-notifications";
 import rankPlugin from "@gl3/plugin-ranks";
@@ -19,7 +20,7 @@ import rankPlugin from "@gl3/plugin-ranks";
  * change of its own.
  */
 export const CORE_PLUGINS: readonly PluginManifest[] = [
-  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin,
+  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin,
 ];
 
 /**
