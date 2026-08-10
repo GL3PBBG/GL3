@@ -83,9 +83,16 @@ describe("GET /api/jail", () => {
   it("reports free status and auto-releases an expired jail via HTTP", async () => {
     const { buildApp } = await import("../src/app.js");
     const { loadConfig: loadCfg } = await import("../src/config.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
     const config = loadCfg({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const leaderboardPrefix = `jail-test-${uuidv7()}`;
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-jail-test-${uuidv7()}-`,
+    );
+    const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
 
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Jail${Date.now()}`, password: "hunter2hunter2" } });
     const { token } = reg.json();
@@ -96,5 +103,7 @@ describe("GET /api/jail", () => {
     expect(free.json()).toMatchObject({ jailed: false });
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 });
