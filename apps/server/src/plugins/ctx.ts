@@ -11,7 +11,7 @@ import { uuidv7 } from "uuidv7";
 import type { LeaderboardKind } from "@gl3/shared";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
-import { pluginJobRuns, playerStats } from "../db/schema/index.js";
+import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange,
   lockGangAndPlayerForUpdate, lockLocationForUpdate, lockPlayersForUpdate,
@@ -129,7 +129,36 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             location: (locationId) => lockLocationForUpdate(tx, locationId),
           },
           gangLog: (entry) => appendGangLog(tx, entry.gangId, entry.playerId, entry.message),
-          notify: (playerId, body) => insertNotification(tx, { id: uuidv7(), playerId, body }),
+          /**
+           * The row AND the event, always. `events.ts` documents
+           * notification.created as "actor = the notified player" — the
+           * recipient, not whoever triggered it — matching every other
+           * privately-audienced event, and matching what core's own gang
+           * routes publish. `awaitOwnEvent(subscriber, actorId)` is the
+           * mandated rule-4 filter, so the wrong actor here silently breaks
+           * every caller waiting on the recipient's own id.
+           */
+          notify: async (playerId, body) => {
+            const notificationId = uuidv7();
+            await insertNotification(tx, { id: notificationId, playerId, body });
+            const [target] = await tx
+              .select({ username: players.username })
+              .from(players)
+              .where(eq(players.id, playerId));
+            buffered.push({
+              kind: "core",
+              event: {
+                type: "notification.created",
+                actorId: playerId,
+                // "unknown" is the fallback every other event-publishing site
+                // in this codebase uses (gangs/routes.ts, mail/routes.ts).
+                actorName: target?.username ?? "unknown",
+                audience: { kind: "player", playerId },
+                notificationId,
+                body,
+              },
+            });
+          },
           events: {
             publish: async (event) => { buffered.push({ kind: "plugin", event }); },
             publishCore: async (event) => { buffered.push({ kind: "core", event }); },
