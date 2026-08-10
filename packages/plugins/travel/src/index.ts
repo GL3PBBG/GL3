@@ -146,9 +146,22 @@ const travelRoute = route({
  * has left. Both rows are locked here for that reason.
  *
  * The source id has to be read before it can be locked, which is why the
- * unlocked pre-read below exists. It is a HINT used to choose rows, never a
- * value acted on: the re-read under the player lock is what the transaction
- * trusts, and a mismatch abandons the attempt.
+ * unlocked pre-read below exists. It is a HINT used to choose which rows to
+ * lock, never a value the commit depends on: the re-read under the lock is
+ * what the transaction trusts for the fare, the destination write and the
+ * published event, and a mismatch there abandons the attempt (`LocationMovedRetry`).
+ *
+ * `already_there` is the one exception, and it is decided BEFORE any lock is
+ * taken, straight off the unlocked pre-read — there is no locked backstop for
+ * it. That is safe only because the check is rejection-only: it throws before
+ * a transaction opens, so nothing commits and no money moves, and the
+ * cooldown is released on the way out so a client that lost the race to a
+ * concurrent move of its own can simply retry. The one way to observe a wrong
+ * answer here is a player racing themselves past the cooldown between the
+ * pre-read and this check; if that race instead lands the player back on
+ * `toLocationId` under the lock, step 6's mismatch check (`actualFrom !==
+ * expectedFrom`) catches it and retries, whose fresh pre-read then throws
+ * `already_there` correctly.
  */
 async function attemptTravel(
   ctx: PluginCtx,
@@ -181,7 +194,6 @@ async function attemptTravel(
       .where(eq(playerStats.playerId, player.id));
     const actualFrom = current?.locationId ?? null;
     if (actualFrom !== expectedFrom) throw new LocationMovedRetry();
-    if (actualFrom === toLocationId) throw new PluginError("already_there", 409);
 
     // (7) Fare read under the lock. Absent = deleted since step 1.
     const [destination] = await tx.db

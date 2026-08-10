@@ -5,10 +5,10 @@
 # The builder runs `tsc --build` against @gl3/server, which follows its
 # tsconfig references to @gl3/shared, @gl3/plugin-sdk, @gl3/plugin-ranks,
 # @gl3/plugin-notifications, @gl3/plugin-news, @gl3/plugin-bank,
-# @gl3/plugin-bullets and @gl3/hello-plugin and emits all nine dist/ dirs in
-# one step — so no separate `build -w` is needed here (unlike Dockerfile.web,
-# where Vite — not tsc — resolves @gl3/shared and needs dist present before
-# the web build starts).
+# @gl3/plugin-bullets, @gl3/plugin-travel and @gl3/hello-plugin and emits all
+# ten dist/ dirs in one step — so no separate `build -w` is needed here
+# (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
+# needs dist present before the web build starts).
 #
 # Every project apps/server/tsconfig.json references must be copied in, sources
 # and tsconfig both: tsc reads the referenced tsconfig even for a type-only
@@ -103,8 +103,12 @@ WORKDIR /app
 # Same manifests as the builder, then a production-only install. This recreates
 # the node_modules/@gl3/* workspace symlinks, which is how the runtime resolves
 # `@gl3/shared`, `@gl3/plugin-sdk`, `@gl3/plugin-ranks`, `@gl3/plugin-notifications`,
-# `@gl3/plugin-news`, `@gl3/plugin-bank`, `@gl3/plugin-bullets` and
-# `@gl3/hello-plugin` through their package.json exports maps.
+# `@gl3/plugin-news`, `@gl3/plugin-bank`, `@gl3/plugin-bullets`,
+# `@gl3/plugin-travel` and `@gl3/hello-plugin` through their package.json
+# exports maps. `@gl3/plugin-travel` is copied here because
+# apps/server/package.json already declares it as a workspace dependency;
+# nothing imports it yet (`src/plugins/core-plugins.ts` does that in Task 4),
+# so its dist/ is present but unused until then.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
