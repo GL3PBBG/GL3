@@ -1,21 +1,84 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import travelPlugin from "@gl3/plugin-travel";
+import { PluginError, type PluginCtx, type RouteResult } from "@gl3/plugin-sdk";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
-import { locations, players, playerStats } from "../src/db/schema/index.js";
-import { AlreadyAtLocationError, LocationNotFoundError, performTravel } from "../src/game/travel/service.js";
-import { InsufficientFundsError } from "../src/economy/ledger.js";
+import { locations, players, playerStats, transactions } from "../src/db/schema/index.js";
+import { cooldownKey } from "../src/game/cooldown.js";
+import { createPluginCtx } from "../src/plugins/ctx.js";
+import { loadSnapshot } from "../src/plugins/routes.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
+const leaderboardPrefix = `travel-test-${uuidv7()}`;
+
 let playerId: string;
 let chicagoId: string;
 let miamiId: string;
+let denverId: string;
+
+const travel = (toLocationId: string) =>
+  callPluginRoute(travelPlugin, "POST", "/api/travel/:locationId", {
+    db, redis, leaderboardPrefix, playerId, params: { locationId: toLocationId },
+  });
+
+/**
+ * Same non-HTTP contract as `callPluginRoute` (see its own header comment)
+ * but hand-builds `ctx` so a test can see every `ctx.transaction` call
+ * boundary as it happens. `travelRoute` opens exactly one transaction for
+ * the destination lookup, then `attemptTravel` opens exactly two per attempt
+ * (the unlocked pre-read, then the locked recheck) — so `onTransactionSettled`
+ * fires once per boundary, 1-indexed across the whole call, and a test can
+ * commit a plain write between two specific calls to force `LocationMovedRetry`
+ * deterministically.
+ *
+ * This is a sequential-external-write technique, not real concurrency:
+ * everything here runs on one thread, so it proves the retry/staleness-
+ * detection path (`LocationMovedRetry`), not the necessity of the explicit
+ * `tx.locks.player` call inside the locked block — a plain re-read under
+ * READ COMMITTED sees the same committed row regardless of whether that lock
+ * is held. See task-3-report.md's I1 section for why that distinction
+ * matters and what proving the lock itself would require.
+ *
+ * Only test-file code: `ctx` is a plain object literal returned by
+ * `createPluginCtx` (apps/server/src/plugins/ctx.ts), so spreading it with an
+ * overridden `transaction` needs no production seam.
+ */
+async function travelWithTransactionHook(
+  toLocationId: string,
+  calls: { count: number },
+  onTransactionSettled: (callNumber: number) => Promise<void>,
+): Promise<RouteResult> {
+  const pluginRoute = travelPlugin.routes.find(
+    (r) => r.method === "POST" && r.path === "/api/travel/:locationId",
+  );
+  if (pluginRoute === undefined) throw new Error("travel plugin has no POST /api/travel/:locationId route");
+
+  const deps = { db, redis, queues: new Map(), settings: {}, leaderboardPrefix };
+  const player = await loadSnapshot(deps, playerId);
+  const ctx = createPluginCtx(deps, { pluginId: travelPlugin.id, player, job: null, filters: travelPlugin.filters });
+
+  const realTransaction = ctx.transaction.bind(ctx);
+  const hookedTransaction: PluginCtx["transaction"] = async (fn) => {
+    calls.count += 1;
+    const callNumber = calls.count;
+    const result = await realTransaction(fn);
+    await onTransactionSettled(callNumber);
+    return result;
+  };
+  const hookedCtx: PluginCtx = { ...ctx, transaction: hookedTransaction };
+
+  const params = pluginRoute.params.parse({ locationId: toLocationId });
+  const body = pluginRoute.body.parse({});
+  return pluginRoute.handler(hookedCtx, { params, body });
+}
 
 beforeEach(async () => {
   await resetDb(db);
@@ -25,24 +88,35 @@ beforeEach(async () => {
 
   chicagoId = uuidv7();
   miamiId = uuidv7();
+  denverId = uuidv7();
   await db.insert(locations).values([
     { id: chicagoId, name: "Chicago", travelCost: 100n, travelCooldownSeconds: 60, bulletStock: 500, bulletCost: 5n },
     { id: miamiId, name: "Miami", travelCost: 250n, travelCooldownSeconds: 120, bulletStock: 300, bulletCost: 8n },
+    // Zero fare: schema default (content.ts:31 `.default(sql\`0\`)`), not an
+    // exotic case. The only path that depends on the explicit tx.locks.player
+    // call at index.ts — a zero-fare travel never calls applyBalanceChange,
+    // which is where every non-zero fare's player lock comes from.
+    { id: denverId, name: "Denver", travelCost: 0n, travelCooldownSeconds: 45, bulletStock: 200, bulletCost: 3n },
   ]);
+  await redis.del(cooldownKey(playerId, "travel"));
 });
-afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconnect(); });
 
-describe("performTravel", () => {
-  it("debits the travel cost, moves the player, and publishes player.travelled with a null fromLocationId the first time", async () => {
+afterAll(async () => {
+  await redis.del(`${leaderboardPrefix}:cash`, `${leaderboardPrefix}:bank`, `${leaderboardPrefix}:exp`);
+  await conn.end();
+  redis.disconnect();
+  subscriber.disconnect();
+});
+
+describe("POST /api/travel/:locationId", () => {
+  it("debits the fare, moves the player, and publishes player.travelled with a null fromLocationId the first time", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
-    // `game:events` is a global channel shared by every test file running in
-    // parallel (e.g. bullets.test.ts also publishes on it) — a bare
-    // `once("message")` resolves on whichever file's event lands first and
-    // can grab someone else's payload. Filter on this test's own actor.
+    // `game:events` is global across test files — filter on this test's actor
+    // (CLAUDE.md rule 4).
     const received = awaitOwnEvent(subscriber, playerId);
 
-    const result = await performTravel(db, redis, playerId, chicagoId);
-    expect(result).toEqual({ locationId: chicagoId, cash: "900" });
+    const result = await travel(chicagoId);
+    expect(result).toEqual({ status: 200, body: { locationId: chicagoId, cash: "900" } });
 
     const event = await received;
     expect(event.type).toBe("player.travelled");
@@ -53,19 +127,141 @@ describe("performTravel", () => {
   });
 
   it("rejects travelling to the player's current location", async () => {
-    await performTravel(db, redis, playerId, chicagoId);
-    await expect(performTravel(db, redis, playerId, chicagoId)).rejects.toBeInstanceOf(AlreadyAtLocationError);
+    await travel(chicagoId);
+    await redis.del(cooldownKey(playerId, "travel"));
+    await expect(travel(chicagoId)).rejects.toMatchObject({ code: "already_there", status: 409 });
+  });
+
+  it("commits a zero-fare travel and charges nothing", async () => {
+    const result = await travel(denverId);
+    expect(result).toEqual({ status: 200, body: { locationId: denverId, cash: "1000" } });
+
+    const [row] = await db
+      .select({ locationId: playerStats.locationId, cash: playerStats.cash })
+      .from(playerStats)
+      .where(eq(playerStats.playerId, playerId));
+    expect(row?.locationId).toBe(denverId);
+    expect(row?.cash).toBe(1000n);
+  });
+
+  it("retries after the player moves between the pre-read and the lock, charging the fare exactly once", async () => {
+    const calls = { count: 0 };
+    const result = await travelWithTransactionHook(chicagoId, calls, async (callNumber) => {
+      // Call 2 is attemptTravel's unlocked pre-read on attempt 1 (call 1 is
+      // travelRoute's destination lookup, before attemptTravel is entered).
+      // Committing a plain move here — after that read returns, before the
+      // locked recheck opens as call 3 — lands the write exactly in the
+      // window LocationMovedRetry exists to detect.
+      if (callNumber === 2) {
+        await db.update(playerStats).set({ locationId: miamiId }).where(eq(playerStats.playerId, playerId));
+      }
+    });
+
+    expect(result).toEqual({ status: 200, body: { locationId: chicagoId, cash: "900" } });
+    // 1 (destination lookup) + 2 per attempt x 2 attempts (attempt 1 aborts on
+    // the mismatch, attempt 2 commits) = 5. A wrong count would mean either
+    // the retry never fired (still 3: no LocationMovedRetry at all) or fired
+    // more than once (7+: the mismatch reproduced on the retry's own re-read).
+    expect(calls.count).toBe(5);
+
+    const [row] = await db
+      .select({ locationId: playerStats.locationId, cash: playerStats.cash })
+      .from(playerStats)
+      .where(eq(playerStats.playerId, playerId));
+    expect(row?.locationId).toBe(chicagoId);
+    expect(row?.cash).toBe(900n);
+
+    // Row count, not just the cash string: a double-charge that netted to the
+    // same balance (e.g. charge then refund) would pass a cash-only assertion.
+    const fareRows = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.playerId, playerId), eq(transactions.reason, "travel.cost")));
+    expect(fareRows).toHaveLength(1);
+    expect(fareRows[0]?.amount).toBe(-100n);
+  });
+
+  it("answers a clean 409 location_changed when the player keeps moving through every attempt", async () => {
+    const calls = { count: 0 };
+    const error = await travelWithTransactionHook(chicagoId, calls, async (callNumber) => {
+      // Calls 2, 4, 6 are the pre-read of attempts 1, 2 and 3. Moving the
+      // player after each one reproduces the mismatch on every attempt's
+      // locked recheck, exhausting MAX_ATTEMPTS. Alternate the destination
+      // so each move is a real change from wherever the previous one left
+      // the player (never chicagoId itself, or the pre-read would see
+      // "already there" instead of a mismatch).
+      if (callNumber === 2 || callNumber === 4 || callNumber === 6) {
+        const decoy = callNumber === 4 ? denverId : miamiId;
+        await db.update(playerStats).set({ locationId: decoy }).where(eq(playerStats.playerId, playerId));
+      }
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(PluginError);
+    if (!(error instanceof PluginError)) throw new Error("unreachable");
+    expect(error.code).toBe("location_changed");
+    expect(error.status).toBe(409);
+    // 1 (destination lookup) + 2 per attempt x 3 attempts, all three mismatching.
+    expect(calls.count).toBe(7);
+
+    // No commit happened on any attempt: no fare charged, cooldown released
+    // rather than stranding the player behind a trip that never landed.
+    const fareRows = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.playerId, playerId), eq(transactions.reason, "travel.cost")));
+    expect(fareRows).toHaveLength(0);
+    expect(await redis.exists(cooldownKey(playerId, "travel"))).toBe(0);
   });
 
   it("rejects an unknown location", async () => {
-    await expect(performTravel(db, redis, playerId, uuidv7())).rejects.toBeInstanceOf(LocationNotFoundError);
+    await expect(travel(uuidv7())).rejects.toMatchObject({ code: "location_not_found", status: 404 });
   });
 
-  it("rejects travel the player can't afford and leaves them in place", async () => {
+  it("rejects a fare the player can't afford and leaves them in place", async () => {
     await db.update(playerStats).set({ cash: 50n }).where(eq(playerStats.playerId, playerId));
-    await expect(performTravel(db, redis, playerId, miamiId)).rejects.toBeInstanceOf(InsufficientFundsError);
+    await expect(travel(miamiId)).rejects.toMatchObject({ code: "insufficient_funds", status: 409 });
+
     const [row] = await db.select({ locationId: playerStats.locationId }).from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(row?.locationId).toBeNull();
+  });
+
+  it("gates on the per-player travel cooldown and answers with a retry-after header", async () => {
+    await travel(chicagoId);
+    const err = await travel(miamiId).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PluginError);
+    if (!(err instanceof PluginError)) throw new Error("unreachable");
+    expect(err.status).toBe(429);
+    expect(err.code).toBe("on_cooldown");
+    expect(Number(err.headers["retry-after"])).toBeGreaterThan(0);
+  });
+
+  it("releases the cooldown when the travel itself fails, so a rejected trip does not strand the player", async () => {
+    await db.update(playerStats).set({ cash: 0n }).where(eq(playerStats.playerId, playerId));
+    await expect(travel(miamiId)).rejects.toMatchObject({ code: "insufficient_funds" });
+    expect(await redis.exists(cooldownKey(playerId, "travel"))).toBe(0);
+  });
+});
+
+describe("GET /api/locations", () => {
+  it("lists every location, marks the current one, and reports the live cooldown", async () => {
+    const before = await callPluginRoute(travelPlugin, "GET", "/api/locations", {
+      db, redis, leaderboardPrefix, playerId,
+    });
+    expect(before.status).toBe(200);
+    expect(before.body).toMatchObject({
+      locations: expect.arrayContaining([
+        expect.objectContaining({ id: chicagoId, name: "Chicago", travelCost: "100", current: false, cooldownRemaining: 0 }),
+      ]),
+    });
+
+    await travel(chicagoId);
+
+    const after = await callPluginRoute(travelPlugin, "GET", "/api/locations", {
+      db, redis, leaderboardPrefix, playerId,
+    });
+    const listed = (after.body as { locations: { id: string; current: boolean; cooldownRemaining: number }[] }).locations;
+    expect(listed.find((l) => l.id === chicagoId)?.current).toBe(true);
+    expect(listed.find((l) => l.id === chicagoId)?.cooldownRemaining).toBeGreaterThan(0);
   });
 });
 
@@ -87,9 +283,17 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
     const list = await app.inject({ method: "GET", url: "/api/locations", headers: auth });
     expect(list.statusCode).toBe(200);
     const listed = list.json().locations;
-    expect(listed).toHaveLength(2);
+    // Tracks the shared beforeEach fixture above (Chicago, Miami, Denver) —
+    // bump this if that fixture grows another location.
+    expect(listed).toHaveLength(3);
     const chicago = listed.find((l: { id: string }) => l.id === chicagoId);
     expect(chicago).toMatchObject({ name: "Chicago", travelCost: "100", current: false, cooldownRemaining: 0 });
+    // Money crosses the wire as a decimal string, never a JSON number — a
+    // zero-fare location is the case most likely to regress to the bare
+    // number 0 rather than the string "0", and nothing else on the wire
+    // asserts the zero case.
+    const denver = listed.find((l: { id: string }) => l.id === denverId);
+    expect(denver).toMatchObject({ name: "Denver", travelCost: "0", current: false, cooldownRemaining: 0 });
 
     const travel = await app.inject({ method: "POST", url: `/api/travel/${chicagoId}`, headers: auth });
     expect(travel.statusCode).toBe(200);
@@ -101,6 +305,7 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
     const blocked = await app.inject({ method: "POST", url: `/api/travel/${miamiId}`, headers: auth });
     expect(blocked.statusCode).toBe(429);
     expect(blocked.json()).toMatchObject({ error: "on_cooldown" });
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
 
     // Simulate the cooldown having elapsed so the same-destination rejection
     // (not the cooldown) is what's under test next.

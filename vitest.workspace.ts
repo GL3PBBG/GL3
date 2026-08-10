@@ -217,7 +217,6 @@ export default defineWorkspace([
         "test/plugin-loader.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
-        "test/travel-plugin.test.ts",
         "test/travel.test.ts",
         "test/ws.test.ts",
         "test/acceptance/**/*.test.ts",
