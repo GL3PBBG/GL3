@@ -8,6 +8,7 @@
     { "path": "./packages/plugins/news" },
     { "path": "./packages/plugins/bank" },
     { "path": "./packages/plugins/bullets" },
+    { "path": "./packages/plugins/crimes" },
     { "path": "./packages/plugins/travel" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },

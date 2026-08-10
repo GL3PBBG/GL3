@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 7 (`travel` port) outcome recorded.
-Branch: `feat/plugin-travel-port` (forked from `main` at `8eb42cf`).
+Last updated: 2026-08-10, M5 stage 8 (`crimes` port) outcome recorded.
+Branch: `feat/plugin-crimes-port`.
 
 ---
 
@@ -14,11 +14,13 @@ Branch: `feat/plugin-travel-port` (forked from `main` at `8eb42cf`).
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); six of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`); three ports remain (`crimes`, `mail`, `gangs`), all unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); seven of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`); two ports remain (`mail`, `gangs`), both unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 71 files / 586 tests**, green across repeated back-to-back runs.
-The `travel` port added one new file (`travel-lock-order.test.ts`) plus assertions
-to existing tests.
+**Suite: 71 files / 587 tests**, green across repeated back-to-back runs.
+The `crimes` port added one test (the loader `attempts: 3` fix, Plan 8 Task 1)
+and no new file — the existing `crimes.test.ts`, `crime-worker-idempotency.test.ts`,
+`acceptance/m1-vertical-slice.test.ts` and `economy-invariant.test.ts` were
+retargeted in place (see below).
 
 ---
 
@@ -384,7 +386,125 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-travel-port-design.md`.
   reason locking only the destination would have left the staleness half
   open.
 
-Three module ports remain: `crimes`, `mail`, `gangs`.
+### The `crimes` port (Plan 8)
+
+Design: `docs/superpowers/specs/2026-08-10-plugin-crimes-port-design.md`. Five
+commits: `f537ecf` (loader retry fix), `72f28e8` (scaffold), `8af0ff6`
+(routes+job), `e88fe04` (test retarget), `66b47b7` (cutover).
+
+- **`crimes` ported** to `packages/plugins/crimes`. `GET /api/crimes` and
+  `POST /api/crimes/:crimeId/commit` answer from the plugin;
+  `apps/server/src/game/crimes/` no longer exists, and neither does
+  `apps/server/src/queue/index.ts` — crimes was its only consumer, so the
+  cutover deleted the `queue/` module outright along with `startCrimeWorker`
+  and the `crimeQueue` field on `AppDeps`.
+- **First port with a BullMQ worker, and the first real exercise of the
+  plugin job system.** `manifest.jobs`, seeded `ctx.job.rng`, and the
+  `plugin_job_runs` idempotency guard had shipped with `examples/hello-plugin`
+  and a unit test, but no game module had used them until this port. The
+  route enqueues a `commit` job (`ctx.jobs.enqueue`); a worker resolves the
+  roll, payout, exp, and possible jail sentence in one `ctx.transaction`, the
+  same pattern every ctx capability already enforced for synchronous routes,
+  now proven for the async case too.
+- **`plugin_job_runs (plugin_id, job_id)` replaces `crime_log.job_id` as the
+  idempotency guard.** `ctx.transaction` inserts into `plugin_job_runs` as its
+  first statement; a retried job hits that primary key and throws
+  `JobAlreadyAppliedError` before the handler body runs at all. `crime_log`
+  still gets a row with `job_id` populated (existing tests assert on it), but
+  the column and its unique index are now incidental — core still owns and
+  migrates the table, the plugin only mirrors it.
+- **Accepted deviation: a retried, already-committed job now emits zero
+  events, where core republished `crime.resolved`** (design §2). Because
+  `JobAlreadyAppliedError` aborts the transaction closure before any
+  `publishCore` call executes, a replay cannot re-emit the event the way
+  core's worker did on purpose (`game/crimes/worker.ts` "Decision 1"). The
+  case this moves is narrow — a Postgres commit followed by a Redis publish
+  failure — and under the plugin that event is lost until the client
+  reconnects or re-fetches state, instead of being redelivered on the next
+  retry. Accepted as the same class of deviation `bullets` took with its
+  `no_location` 409: a rare, effectively-unreachable path whose core
+  behaviour was an incidental property, not a designed guarantee.
+  `crime-worker-idempotency.test.ts`'s `events.toHaveLength(2)` assertion is
+  now `1`; the double-pay/double-jail/double-rank DB-state assertions in the
+  same file are unaffected, since they're guarded by `plugin_job_runs`, not
+  by events.
+- **Loader change, applies to every plugin job, not just crimes' (design
+  §2.5).** `createPluginQueues` now passes
+  `defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay:
+  500 }, removeOnComplete: 1000, removeOnFail: 5000 }` on every `new Queue(...)`
+  call, matching core's old crime queue field for field. BullMQ's own default
+  is `attempts: 1` — no plugin job retried before this fix, which also made
+  the replay path above unreachable at runtime. This is shared loader code:
+  every plugin job gains retries, on the reasoning that the at-least-once
+  model (CLAUDE.md rule 1) assumes retries happen and `plugin_job_runs` makes
+  a retry safe for any plugin job. No per-plugin opt-out exists; none was
+  added — considered and rejected as SDK surface this one module doesn't
+  justify. Revisit if `mail` or `gangs` need it.
+- **A latent BullMQ queue-naming bug was found and fixed in the same commit
+  as the loader change (`f537ecf`).** `pluginQueueName` joined
+  `pluginId`/`jobName` with `:`, but BullMQ 5.81.3 rejects colons in queue
+  names (`Queue name cannot contain :`). No plugin had declared `jobs` before
+  crimes, so nothing was broken in practice — but crimes would have crashed
+  at boot on the first real job declaration. Changed to `-`, and
+  `bootTestServer`'s queue-prefix isolation likewise. The internal `Map` keys
+  (`${pluginId}:${jobName}`) still use `:` and are unaffected — only the
+  string passed to `new Queue`/`new Worker` mattered.
+- **A job handler may open only one `ctx.transaction`.** Each call inserts a
+  `plugin_job_runs` row first; a second call in the same job run hits that
+  row and throws `JobAlreadyAppliedError` against its own prior call. Found
+  while building the commit job, which was restructured to do all its reads
+  and writes — the crime lookup that matters for correctness, the ledger
+  credit, the exp/rank-up, the jail sentence, and the in-transaction
+  `jailedUntil` re-read (below) — inside a single transaction. This is a real
+  constraint on every future plugin job author, not specific to crimes.
+- **A deliberate improvement over core, found in security review.** Core's
+  worker read `player_crime_skill` filtered by `playerId` only and took
+  `[0]` — an arbitrary row, since the table's primary key is composite
+  `(player_id, crime_id)` and a player has one chance row per crime. A
+  player who has attempted more than one crime could have their roll use
+  another crime's chance. The plugin filters by `and(playerId, crimeId)`, so the
+  committed crime's own chance is always the one used.
+- **`effectiveJailedUntil` becomes an in-transaction read.** Core re-read
+  `player_stats.jailedUntil` *after* commit so a replay's `crime.resolved`
+  reported the real jail state rather than the (wrong, on a replay) local
+  `jailed` flag. The plugin can't do a post-commit re-read — the event is
+  buffered inside the transaction and flushed by the loader after commit — so
+  the resolution is a single read inside the transaction, right after
+  `sendToJail`: same connection (sees its own write), committed value on the
+  fresh path, and never runs at all on the replay path (`JobAlreadyAppliedError`
+  aborts first). Correct by construction, and one fewer round trip than
+  core's post-commit re-read.
+- **Two core responsibilities were absorbed by the ctx and deleted as code.**
+  Core's worker re-read `player_stats.exp`/`.cash` after the transaction and
+  called `recordScore` by hand for both leaderboards; the ctx economy
+  wrappers already buffer one score per changed kind and flush after commit,
+  so the ported job's `applyBalanceChange` + `applyExpAndRankUp` calls keep
+  both leaderboards current with no extra code. Core's `alreadyProcessed`
+  branch (catching a `crime_log_job_id_unique` violation to drive the
+  replay-republish) is unreachable in the plugin path — `JobAlreadyAppliedError`
+  aborts before any of that code could run — and was deleted rather than
+  ported dead.
+- **No lock-order test, deliberately.** Crimes touches only the acting
+  player's own row — no location, no gang, no second player — so
+  `applyBalanceChange`, `sendToJail`, and `applyExpAndRankUp` each lock that
+  one row internally and there is no ABBA surface to regress. Recorded here
+  (design §6) so a future reader doesn't add a `crimes-lock-order.test.ts`
+  expecting parity with the bullets/travel ports; if crimes ever grows a
+  second lock (an accomplice, say), that reasoning changes.
+- **One deferred minor left open.** `packages/plugins/crimes/src/index.ts`
+  imports `InsufficientFundsError` but never uses it — crimes only credits
+  the player, it never checks or debits a balance. Dead import;
+  `noUnusedLocals` is off in this repo's tsconfig, so it compiles clean.
+  Harmless, but worth deleting the next time this file is touched.
+- **A previously-open watch item is now closed.** `bank.test.ts`'s
+  `app.inject` block used to boot `buildApp` with no `leaderboardPrefix`, so
+  its ctx-buffered leaderboard writes landed in the shared global
+  `leaderboard:*` keys every concurrent test file and agent uses. It now
+  passes an isolated prefix, matching `bullets.test.ts`/`travel.test.ts`. See
+  "Known issues and watch items" below — the bullet that used to record this
+  is removed.
+
+Two module ports remain: `mail`, `gangs`.
 
 ## Starting M4
 
@@ -541,15 +661,38 @@ web image serves only the SPA's own assets.
   travel. Pre-existing, carried verbatim from core, outside this port's
   remit. A live game sets a positive value; the path is unreachable in any
   sensible config but is a real crash on the misconfigured one.
-- **`bank.test.ts`'s `app.inject` block boots `buildApp` with no
-  `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
-  ctx-buffered leaderboard writes land in the production global
-  `leaderboard:*` keys that every concurrent test file and agent shares.
-  Nothing reads those keys in tests, so it is dirty rather than broken —
-  `bullets.test.ts:126` passes a prefix on the equivalent call; `bank.test.ts`
-  should too.
+- **A second `ctx.transaction` in one job handler fails silently as success.**
+  `runPluginJob` swallows `JobAlreadyAppliedError` (`apps/server/src/plugins/jobs.ts`),
+  which is correct for a real BullMQ retry. But a handler that opens a second
+  `ctx.transaction` commits its first, throws on the second's duplicate
+  `plugin_job_runs` claim, is reported complete to BullMQ, and silently skips
+  everything after — no error, no retry, no log. A boolean latch on the ctx
+  throwing a distinct, non-swallowed error would close it. The `crimes` port
+  hit this during development; every job handler shipped so far uses exactly
+  one `ctx.transaction`, so it is latent, not live, until `mail` or `gangs`
+  needs a second.
+- **`plugin_job_runs`'s PK omits the job name.** `apps/server/src/db/schema/plugins.ts`
+  keys on `(plugin_id, job_id)`, but BullMQ ids are per-QUEUE counters starting
+  at 1. A plugin declaring two jobs would have both queues issue id `"1"`, and
+  the second would be silently swallowed as already-applied. Latent for
+  `crimes` (one job); a live hazard for the first plugin — `mail` or `gangs`
+  — that declares two.
+- **Queue-prefix isolation stops at Redis.** Two `loadPlugins`/`bootTestServer`
+  boots in one test file get separate prefixed queues (ids restart at 1) but
+  share one database, so the second boot's first job would be swallowed as
+  already-applied by the first boot's `plugin_job_runs` row. No file does both
+  today.
 
 **Resolved, but the reasoning matters if you touch these areas:**
+
+- **`bank.test.ts`'s `app.inject` block used to boot `buildApp` with no
+  `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
+  ctx-buffered leaderboard writes landed in the production global
+  `leaderboard:*` keys that every concurrent test file and agent shares.
+  Nothing read those keys in tests, so it was dirty rather than broken, but
+  `bullets.test.ts`/`travel.test.ts` already passed an isolated prefix on the
+  equivalent call. Closed during the `crimes` port (Plan 8) — `bank.test.ts`
+  now passes an isolated prefix too.
 
 - **The location↔player lock-order defect (the old bullets watch item, both
   halves).** The bullets purchase used to read `player_stats.location_id`

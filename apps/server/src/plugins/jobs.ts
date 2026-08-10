@@ -17,7 +17,7 @@ export type JobHandler = (ctx: PluginCtx, data: Record<string, unknown>) => Prom
 export interface PluginJobLike { id?: string | undefined; data: Record<string, unknown> }
 
 export function pluginQueueName(prefix: string, pluginId: string, jobName: string): string {
-  return `${prefix}${pluginId}:${jobName}`;
+  return `${prefix}${pluginId}-${jobName}`;
 }
 
 export function createPluginQueues(
@@ -27,7 +27,20 @@ export function createPluginQueues(
   for (const manifest of manifests) {
     for (const jobName of Object.keys(manifest.jobs)) {
       queues.set(`${manifest.id}:${jobName}`, new Queue(
-        pluginQueueName(prefix, manifest.id, jobName), { connection: redis },
+        pluginQueueName(prefix, manifest.id, jobName),
+        {
+          connection: redis,
+          // Match core's crime queue (`queue/index.ts:21-26`): BullMQ's default
+          // is attempts:1 (no retry), which would defeat the plugin_job_runs
+          // idempotency guard (spec §2.5) and turn transient failures into
+          // permanent event losses. The guard makes a retry safe for any job.
+          defaultJobOptions: {
+            attempts: 3,
+            backoff: { type: "exponential", delay: 500 },
+            removeOnComplete: 1000,
+            removeOnFail: 5000,
+          },
+        },
       ));
     }
   }
@@ -78,7 +91,11 @@ export function createPluginWorkers(
       workers.push(new Worker(
         pluginQueueName(prefix, manifest.id, name),
         async (job) => { await runPluginJob(deps, manifest, name, job); },
-        { connection: deps.redis },
+        // concurrency:5 matches core's deleted crime worker (`startCrimeWorker`,
+        // same reasoning as the `defaultJobOptions` block in
+        // `createPluginQueues` above) — BullMQ's default is 1 (serial), which
+        // would silently regress every plugin job to one-at-a-time processing.
+        { connection: deps.redis, concurrency: 5 },
       ));
     }
   }

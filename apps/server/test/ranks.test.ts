@@ -71,7 +71,8 @@ describe("applyExpAndRankUp", () => {
 describe("GET /api/ranks", () => {
   it("lists the ladder with the player's current rank flagged", async () => {
     const { buildApp } = await import("../src/app.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
     const { seedRanks } = await import("../src/db/seed.js");
     // beforeEach already inserted its own 2-rank fixture; seedRanks is
     // idempotent (no-ops when any row exists), so clear just the ranks
@@ -88,7 +89,13 @@ describe("GET /api/ranks", () => {
     await seedRanks(db);
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const leaderboardPrefix = `ranks-test-${uuidv7()}`;
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-ranks-test-${uuidv7()}-`,
+    );
+    const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Rank${Date.now()}`, password: "hunter2hunter2" } });
     const { token } = reg.json();
 
@@ -99,5 +106,7 @@ describe("GET /api/ranks", () => {
     expect(list.every((r: { current: boolean }) => r.current === false)).toBe(true); // no exp yet
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 });

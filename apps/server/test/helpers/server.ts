@@ -4,11 +4,9 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
-import { startCrimeWorker } from "../../src/game/crimes/worker.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
 import { withCorePlugins } from "../../src/plugins/core-plugins.js";
 import { loadPlugins } from "../../src/plugins/loader.js";
-import { createCrimeQueue } from "../../src/queue/index.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
 
@@ -19,24 +17,9 @@ export async function bootTestServer(
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
 
-  // Postgres is isolated per test file (isolated-db.setup.ts), but Redis is
-  // one shared instance across every file running in parallel. BullMQ's
-  // "crime" queue has no such isolation by default: any worker attached to
-  // the queue name can claim any job on it, regardless of which file's
-  // bootTestServer() enqueued it. Under load that lets one file's job land
-  // on another file's worker — which finds no matching row in its own
-  // private database and silently drops the job (worker.ts's intentional
-  // "crime deleted between enqueue and resolve" guard) — so the enqueuing
-  // test times out waiting for an event that will never arrive. Giving each
-  // bootTestServer() call its own private queue name closes that gap the
-  // same way isolated-db.setup.ts closes it for Postgres.
-  const queueName = `crime-test-${randomUUID()}`;
-  const crimeQueue = createCrimeQueue(createRedis(config.redisUrl), queueName);
-  const workerDb = createDb(config.databaseUrl);
-  const workerConnection = createRedis(config.redisUrl);
-  const publisher = createRedis(config.redisUrl);
-
-  // Same problem, same fix, as queueName above: leaderboard:* keys are
+  // Same problem, same fix, as queueName previously used for the crimes
+  // BullMQ queue (now gone — the crimes worker is a plugin worker, started
+  // and isolated per-call by loadPlugins below): leaderboard:* keys are
   // global by design in production (one Redis, one game — spec §2.2), but
   // that means every bootTestServer() call sweeping ITS OWN isolated
   // Postgres DB into those same shared keys would race every other
@@ -45,9 +28,8 @@ export async function bootTestServer(
   // /api/leaderboard/:kind reads all pointed at the same isolated set of
   // Redis keys nobody else can touch.
   const leaderboardPrefix = `leaderboard-test-${randomUUID()}`;
-  const worker = startCrimeWorker({ db: workerDb.db, connection: workerConnection, publisher, queueName, leaderboardPrefix });
 
-  // Same problem, same fix, as queueName and leaderboardPrefix above:
+  // Same problem, same fix, as leaderboardPrefix above:
   // /api/auth/register and /api/auth/login are rate-limited per IP via
   // ratelimit:<name>:<ip> keys in the same shared Redis, and Fastify's
   // inject() reports the same default 127.0.0.1 for every test file. Without
@@ -59,24 +41,27 @@ export async function bootTestServer(
 
   await rebuildLeaderboards(db, redis, leaderboardPrefix);
 
-  // When plugins are provided, run the full boot sequence (validate → migrate →
-  // queues/workers) the same way production does, so a test exercises the real
-  // loader path. `withCorePlugins` is what makes that true: a ported core
-  // module is never optional, so production always loads CORE_PLUGINS
-  // alongside whatever optional manifests it selects, and a with-plugins boot
-  // here must do the same rather than silently dropping the ported routes.
-  // The random queue prefix isolates plugin BullMQ queues from each other and
-  // from other test files' queues in the same shared Redis — same reason
-  // `crime-test-<uuid>` exists above.
-  const loadedPlugins = options?.plugins !== undefined
-    ? await loadPlugins(
-        { db, redis, settings: {}, leaderboardPrefix },
-        withCorePlugins(options.plugins),
-        `plugin-test-${randomUUID()}:`,
-      )
-    : undefined;
+  // Always run the full boot sequence (validate → migrate → queues/workers)
+  // the same way production does, so a test exercises the real loader path.
+  // `withCorePlugins` is what makes that true: a ported core module is never
+  // optional, so production always loads CORE_PLUGINS alongside whatever
+  // optional manifests it selects, and this boot does the same regardless of
+  // whether the caller passed any of its own. This can no longer be left to
+  // buildApp's own no-`deps.plugins` fallback (see the comment at that seam
+  // in app.ts): that fallback deliberately throws for a CORE_PLUGIN that
+  // declares jobs, of which the crimes plugin is now the first, so a
+  // `bootTestServer()` call must always supply `deps.plugins` itself, not
+  // just when the caller wants extra optional manifests. The random queue
+  // prefix isolates plugin BullMQ queues (including the crimes plugin's)
+  // from each other and from other test files' queues in the same shared
+  // Redis.
+  const loadedPlugins = await loadPlugins(
+    { db, redis, settings: {}, leaderboardPrefix },
+    withCorePlugins(options?.plugins ?? []),
+    `plugin-test-${randomUUID()}-`,
+  );
 
-  const app = await buildApp(config, { db, redis, crimeQueue, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins });
+  const app = await buildApp(config, { db, redis, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.
@@ -88,16 +73,10 @@ export async function bootTestServer(
   return {
     app,
     close: async () => {
-      if (loadedPlugins !== undefined) {
-        for (const w of loadedPlugins.workers) await w.close();
-        for (const q of loadedPlugins.queues.values()) await q.close();
-      }
+      for (const w of loadedPlugins.workers) await w.close();
+      for (const q of loadedPlugins.queues.values()) await q.close();
       await gateway.close();
       await app.close();
-      await worker.close();
-      await crimeQueue.close();
-      await workerDb.sql.end();
-      publisher.disconnect();
       gatewaySubscriber.disconnect();
       await sql.end();
       redis.disconnect();

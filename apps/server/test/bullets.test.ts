@@ -120,11 +120,17 @@ describe("the bullets plugin handler", () => {
 describe("POST /api/bullets/buy", () => {
   it("buys bullets at the player's current location, jail-gates, and validates the body", async () => {
     const { buildApp } = await import("../src/app.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-bullets-test-${uuidv7()}-`,
+    );
     const app = await buildApp(config, {
-      db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)), leaderboardPrefix,
+      db, redis, leaderboardPrefix, plugins: loadedPlugins,
     });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Bullets${Date.now()}`, password: "hunter2hunter2" } });
     const { token, playerId: registeredId } = reg.json();
@@ -180,5 +186,7 @@ describe("POST /api/bullets/buy", () => {
     expect(unauthenticated.statusCode).toBe(401);
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 });

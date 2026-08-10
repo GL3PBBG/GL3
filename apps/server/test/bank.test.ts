@@ -108,10 +108,16 @@ describe("bank plugin routes", () => {
 describe("POST /api/bank/deposit and /withdraw", () => {
   it("deposits, withdraws, and rejects an overdraft over HTTP", async () => {
     const { buildApp } = await import("../src/app.js");
-    const { createCrimeQueue } = await import("../src/queue/index.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
 
     const config = loadConfig({ ...process.env, NODE_ENV: "test" });
-    const app = await buildApp(config, { db, redis, crimeQueue: createCrimeQueue(createRedis(config.redisUrl)) });
+    const loadedPlugins = await loadPlugins(
+      { db, redis, settings: {}, leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-bank-test-${uuidv7()}-`,
+    );
+    const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
     const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Bank${Date.now()}`, password: "hunter2hunter2" } });
     const { token, playerId: registeredId } = reg.json();
     // registration starts a player at 0 cash — fund them directly so the
@@ -155,5 +161,7 @@ describe("POST /api/bank/deposit and /withdraw", () => {
     expect(unauthenticated.statusCode).toBe(401);
 
     await app.close();
+    for (const w of loadedPlugins.workers) await w.close();
+    for (const q of loadedPlugins.queues.values()) await q.close();
   });
 });
