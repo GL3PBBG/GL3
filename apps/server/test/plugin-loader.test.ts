@@ -1,6 +1,7 @@
 import helloPlugin from "@gl3/hello-plugin";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
@@ -25,7 +26,11 @@ afterAll(async () => {
   subscriber.disconnect();
 });
 
-const deps = () => ({ db, redis, queues: new Map(), settings: {} });
+// Redis is shared across every concurrently-running test file; a shared
+// `leaderboard:*` key would let two files see each other's scores.
+const leaderboardPrefix = `loader-test-${randomUUID()}`;
+
+const deps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 
 let regCounter = 0;
 

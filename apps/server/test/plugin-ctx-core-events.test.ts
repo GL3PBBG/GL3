@@ -1,5 +1,6 @@
 import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import type { CoreEventInput } from "@gl3/plugin-sdk";
+import { randomUUID } from "node:crypto";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -27,8 +28,13 @@ async function createPlayer(): Promise<{ id: string; username: string }> {
   return { id, username };
 }
 
+// A prefix unique to this file's run, for the same reason bootTestServer has
+// one: Redis is shared across every concurrently-running test file, so a
+// shared `leaderboard:*` key would let two files see each other's scores.
+const leaderboardPrefix = `pcce-test-${randomUUID()}`;
+
 const deps = (): Parameters<typeof createPluginCtx>[0] =>
-  ({ db, redis, queues: new Map(), settings: {} });
+  ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 const opts = { pluginId: "t", player: null, job: null, filters: [] };
 
 /**
@@ -165,5 +171,56 @@ describe("tx.events.publishCore", () => {
 
     await watch.settled;
     expect(watch.seen).toEqual([]);
+  });
+});
+
+describe("plugin economy changes update the leaderboard", () => {
+  const score = async (kind: "cash" | "bank" | "exp", playerId: string): Promise<string | null> =>
+    await redis.zscore(`${leaderboardPrefix}:${kind}`, playerId);
+
+  it("records the committed balance for a cash change", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await ctx.transaction(async (tx) => {
+      await tx.economy.applyBalanceChange({
+        playerId: player.id, amount: 750n, kind: "cash", reason: "plugin_test",
+      });
+    });
+
+    expect(await score("cash", player.id)).toBe("750");
+  });
+
+  it("records only the FINAL balance when one transaction moves cash twice", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await ctx.transaction(async (tx) => {
+      await tx.economy.applyBalanceChange({ playerId: player.id, amount: 500n, kind: "cash", reason: "a" });
+      await tx.economy.applyBalanceChange({ playerId: player.id, amount: -200n, kind: "cash", reason: "b" });
+    });
+
+    expect(await score("cash", player.id)).toBe("300");
+  });
+
+  it("records exp after addExp", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await ctx.transaction(async (tx) => { await tx.economy.addExp(player.id, 42n); });
+
+    expect(await score("exp", player.id)).toBe("42");
+  });
+
+  it("writes nothing when the transaction rolls back", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await expect(ctx.transaction(async (tx) => {
+      await tx.economy.applyBalanceChange({ playerId: player.id, amount: 900n, kind: "cash", reason: "rolled_back" });
+      throw new Error("boom");
+    })).rejects.toThrow("boom");
+
+    expect(await score("cash", player.id)).toBeNull();
   });
 });

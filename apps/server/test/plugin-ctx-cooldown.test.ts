@@ -8,8 +8,12 @@ import { createRedis } from "../src/redis.js";
 const redis = createRedis(loadConfig(process.env).redisUrl);
 afterAll(() => { redis.disconnect(); });
 
+// Redis is shared across every concurrently-running test file; a shared
+// `leaderboard:*` key would let two files see each other's scores.
+const leaderboardPrefix = `cooldown-test-${randomUUID()}`;
+
 const ctxFor = (pluginId: string) => createPluginCtx(
-  { db: undefined as never, redis, queues: new Map(), settings: { "hello.greeting": "hi" } },
+  { db: undefined as never, redis, queues: new Map(), settings: { "hello.greeting": "hi" }, leaderboardPrefix },
   { pluginId, player: null, job: null, filters: [] },
 );
 

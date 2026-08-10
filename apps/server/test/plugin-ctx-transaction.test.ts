@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -34,8 +35,12 @@ async function createPlayer(cash = 0n): Promise<{ id: string; username: string }
   return { id, username };
 }
 
+// Redis is shared across every concurrently-running test file; a shared
+// `leaderboard:*` key would let two files see each other's scores.
+const leaderboardPrefix = `ctxtx-test-${randomUUID()}`;
+
 const deps = (): Parameters<typeof createPluginCtx>[0] =>
-  ({ db, redis, queues: new Map(), settings: {} });
+  ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 const opts = { pluginId: "t", player: null, job: null, filters: [] };
 
 /**
@@ -170,7 +175,7 @@ describe("ctx.transaction", () => {
 
   it("reads settings under the plugin's own prefix and nowhere else", async () => {
     const ctx = createPluginCtx(
-      { db, redis, queues: new Map(), settings: { "t.greeting": "hi", "other.greeting": "no" } },
+      { db, redis, queues: new Map(), settings: { "t.greeting": "hi", "other.greeting": "no" }, leaderboardPrefix },
       opts,
     );
     expect(ctx.settings.get("greeting")).toBe("hi");

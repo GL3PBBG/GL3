@@ -37,7 +37,7 @@ export async function loadPlugins(
   await runPluginMigrations(deps.db, manifests);
   const queues = createPluginQueues(deps.redis, manifests, queuePrefix);
   const workers = createPluginWorkers(
-    { db: deps.db, redis: deps.redis, queues, settings: deps.settings },
+    { db: deps.db, redis: deps.redis, queues, settings: deps.settings, leaderboardPrefix: deps.leaderboardPrefix },
     manifests,
     queuePrefix,
   );

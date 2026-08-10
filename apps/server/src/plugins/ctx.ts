@@ -5,14 +5,17 @@ import type {
 import { JobAlreadyAppliedError, runFilterChain } from "@gl3/plugin-sdk";
 import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import type { Queue } from "bullmq";
+import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
+import type { LeaderboardKind } from "@gl3/shared";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
-import { pluginJobRuns } from "../db/schema/index.js";
+import { pluginJobRuns, playerStats } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange,
   lockGangAndPlayerForUpdate, lockLocationForUpdate, lockPlayersForUpdate,
+  type Tx,
 } from "../economy/ledger.js";
 import { applyExpAndRankUp } from "../economy/ranks.js";
 import { appendGangLog } from "../game/gangs/logs.js";
@@ -20,6 +23,7 @@ import {
   acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
 } from "../game/cooldown.js";
 import { sendToJail } from "../game/jail/status.js";
+import { recordScore } from "../game/leaderboard/service.js";
 import { insertNotification } from "../game/notifications/service.js";
 import { newSeed } from "../game/rng.js";
 
@@ -29,6 +33,14 @@ export interface PluginCtxDeps {
   /** Per-plugin BullMQ queues, keyed `<pluginId>:<jobName>`. Task 11 fills it. */
   queues: Map<string, Queue>;
   settings: Record<string, string>;
+  /**
+   * Required, not optional-with-a-default: an omitted prefix silently means
+   * the production `leaderboard:*` keys, and `bootTestServer` namespaces its
+   * own per boot so concurrent test files do not collide on shared Redis.
+   * `buildApp` applies the `?? DEFAULT_LEADERBOARD_PREFIX` default at the one
+   * place that already owns that decision.
+   */
+  leaderboardPrefix: string;
 }
 
 export interface PluginCtxOptions {
@@ -60,6 +72,13 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       // the same ctx factory cannot see each other's pending events.
       const buffered: BufferedEvent[] = [];
 
+      // Keyed so a second change to the same player+kind replaces the first:
+      // the leaderboard wants the FINAL balance, not each intermediate one.
+      const scores = new Map<string, { kind: LeaderboardKind; playerId: string; score: bigint }>();
+      const bufferScore = (kind: LeaderboardKind, playerId: string, score: bigint): void => {
+        scores.set(`${kind}:${playerId}`, { kind, playerId, score });
+      };
+
       const result = await deps.db.transaction(async (tx) => {
         if (options.job !== null) {
           // NOTES.md rule 1, made structural: FIRST statement in the
@@ -78,10 +97,30 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
         const pluginTx: PluginTx = {
           db: tx,
           economy: {
-            applyBalanceChange: (change) => applyBalanceChange(tx, change),
+            applyBalanceChange: async (change) => {
+              const after = await applyBalanceChange(tx, change);
+              // `points` has no leaderboard — LeaderboardKind is cash/bank/exp.
+              if (change.kind !== "points") bufferScore(change.kind, change.playerId, after);
+              return after;
+            },
             applyGangBalanceChange: (change) => applyGangBalanceChange(tx, change),
-            addExp: (playerId, amount) => addExp(tx, playerId, amount),
-            applyExpAndRankUp: (playerId, expGain) => applyExpAndRankUp(tx, playerId, expGain),
+            addExp: async (playerId, amount) => {
+              await addExp(tx, playerId, amount);
+              const fresh = await freshStats(tx, playerId);
+              if (fresh) bufferScore("exp", playerId, fresh.exp);
+            },
+            applyExpAndRankUp: async (playerId, expGain) => {
+              const result = await applyExpAndRankUp(tx, playerId, expGain);
+              // Both kinds: a rank-up pays its cash reward through core's own
+              // internal applyBalanceChange (economy/ranks.ts), which this
+              // wrapper never sees, so buffering exp alone leaves cash stale.
+              const fresh = await freshStats(tx, playerId);
+              if (fresh) {
+                bufferScore("exp", playerId, fresh.exp);
+                bufferScore("cash", playerId, fresh.cash);
+              }
+              return result;
+            },
           },
           jail: { sendToJail: (playerId, seconds) => sendToJail(tx, playerId, seconds) },
           locks: {
@@ -99,8 +138,18 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
         return await fn(pluginTx);
       });
 
-      // Only reached on commit — a throw above propagates and `buffered` is
-      // discarded with the closure (NOTES.md rule 5).
+      // Only reached on commit — a throw above propagates and `buffered`/
+      // `scores` are discarded with the closure (NOTES.md rule 5).
+
+      // Leaderboard first, then events — the order game/crimes/worker.ts uses.
+      // Deliberately not wrapped in try/catch, for the reason that file states:
+      // the balance that committed is correct, and the next boot's
+      // rebuildLeaderboards repairs the index, so failing loudly beats a
+      // silently stale one. The existing event flush already behaves this way.
+      for (const entry of scores.values()) {
+        await recordScore(deps.redis, entry.kind, entry.playerId, entry.score, deps.leaderboardPrefix);
+      }
+
       for (const entry of buffered) {
         await publishEvent(
           deps.redis,
@@ -148,6 +197,20 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     },
   };
   return ctx;
+}
+
+/**
+ * Read inside the transaction, so the buffered score is the one the
+ * transaction is about to commit rather than whatever a concurrent writer
+ * leaves behind. `addExp` returns void and `applyExpAndRankUp` returns only
+ * the promotion, so there is nothing to buffer without this read.
+ */
+async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash: bigint } | undefined> {
+  const [row] = await tx
+    .select({ exp: playerStats.exp, cash: playerStats.cash })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, playerId));
+  return row;
 }
 
 /**

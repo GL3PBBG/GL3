@@ -70,7 +70,7 @@ export async function bootTestServer(
   // `crime-test-<uuid>` exists above.
   const loadedPlugins = options?.plugins !== undefined
     ? await loadPlugins(
-        { db, redis, settings: {} },
+        { db, redis, settings: {}, leaderboardPrefix },
         withCorePlugins(options.plugins),
         `plugin-test-${randomUUID()}:`,
       )

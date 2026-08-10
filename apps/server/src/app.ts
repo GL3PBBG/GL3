@@ -11,6 +11,7 @@ import { registerCrimeRoutes } from "./game/crimes/routes.js";
 import { registerGangRoutes } from "./game/gangs/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
+import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerMailRoutes } from "./game/mail/routes.js";
 import { registerNewsRoutes } from "./game/news/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
@@ -62,12 +63,13 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerAuthRoutes(app, config, deps.db, deps.redis, deps.rateLimitPrefix);
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+  const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   registerBankRoutes(app, deps.db, deps.redis, requireAuth);
   registerBulletsRoutes(app, deps.db, deps.redis, requireAuth);
   registerCrimeRoutes(app, deps.db, deps.redis, deps.crimeQueue, requireAuth);
   registerGangRoutes(app, deps.db, deps.redis, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
-  registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, deps.leaderboardPrefix);
+  registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
   registerMailRoutes(app, deps.db, deps.redis, requireAuth);
   registerNewsRoutes(app, deps.db, deps.redis, requireAuth);
   registerProfileRoutes(app, deps.db, requireAuth);
@@ -105,7 +107,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
         );
       }
     }
-    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: {} }, CORE_PLUGINS);
+    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: {}, leaderboardPrefix }, CORE_PLUGINS);
     ownsLoadedPlugins = true;
   }
 
@@ -114,6 +116,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     redis: deps.redis,
     queues: loaded.queues,
     settings: {},
+    leaderboardPrefix,
   });
 
   // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`

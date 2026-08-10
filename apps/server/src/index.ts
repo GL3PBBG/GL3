@@ -5,7 +5,7 @@ import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { seedCrimes, seedLocations, seedRanks } from "./db/seed.js";
 import { startCrimeWorker } from "./game/crimes/worker.js";
-import { rebuildLeaderboards } from "./game/leaderboard/service.js";
+import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { withCorePlugins } from "./plugins/core-plugins.js";
 import { loadPlugins } from "./plugins/loader.js";
 import { createCrimeQueue } from "./queue/index.js";
@@ -43,7 +43,10 @@ const optionalManifests = config.pluginIds.map((id) => {
 
 const manifests: PluginManifest[] = withCorePlugins(optionalManifests);
 
-const loadedPlugins = await loadPlugins({ db, redis, settings: {} }, manifests);
+const loadedPlugins = await loadPlugins(
+  { db, redis, settings: {}, leaderboardPrefix: DEFAULT_LEADERBOARD_PREFIX },
+  manifests,
+);
 
 // Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
 // fallback (see the comment at that seam in app.ts): production keeps its

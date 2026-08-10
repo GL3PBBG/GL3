@@ -28,7 +28,11 @@ async function createPlayer(cash: bigint): Promise<{ id: string }> {
   return { id };
 }
 
-const deps = () => ({ db, redis, queues: new Map(), settings: {} });
+// Redis is shared across every concurrently-running test file; a shared
+// `leaderboard:*` key would let two files see each other's scores.
+const leaderboardPrefix = `jobs-test-${randomUUID()}`;
+
+const deps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 
 const paying = definePlugin({
   id: "pay", version: "1.0.0", basePaths: ["/api/pay"],
