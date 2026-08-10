@@ -1,0 +1,11 @@
+{
+  "name": "@gl3/plugin-bank",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc --build" },
+  "dependencies": { "@gl3/plugin-sdk": "*", "zod": "^3.23.8" }
+}

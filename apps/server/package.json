@@ -10,6 +10,7 @@
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "@gl3/plugin-bank": "*",
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-ranks": "*",
     "@gl3/plugin-sdk": "*",

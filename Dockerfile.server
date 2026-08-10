@@ -4,21 +4,22 @@
 #
 # The builder runs `tsc --build` against @gl3/server, which follows its
 # tsconfig references to @gl3/shared, @gl3/plugin-sdk, @gl3/plugin-ranks,
-# @gl3/plugin-notifications, @gl3/plugin-news and @gl3/hello-plugin and emits
-# all seven dist/ dirs in one step — so no separate `build -w` is needed here
-# (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
-# needs dist present before the web build starts).
+# @gl3/plugin-notifications, @gl3/plugin-news, @gl3/plugin-bank and
+# @gl3/hello-plugin and emits all eight dist/ dirs in one step — so no separate
+# `build -w` is needed here (unlike Dockerfile.web, where Vite — not tsc —
+# resolves @gl3/shared and needs dist present before the web build starts).
 #
 # Every project apps/server/tsconfig.json references must be copied in, sources
 # and tsconfig both: tsc reads the referenced tsconfig even for a type-only
 # import and fails with TS5083 if it is missing. @gl3/hello-plugin,
-# @gl3/plugin-ranks, @gl3/plugin-notifications and @gl3/plugin-news are also
-# RUNTIME requirements — src/index.ts imports @gl3/hello-plugin statically for
-# the optional-plugin import map, and src/plugins/core-plugins.ts imports
-# @gl3/plugin-ranks, @gl3/plugin-notifications and @gl3/plugin-news statically
+# @gl3/plugin-ranks, @gl3/plugin-notifications, @gl3/plugin-news and
+# @gl3/plugin-bank are also RUNTIME requirements — src/index.ts imports
+# @gl3/hello-plugin statically for the optional-plugin import map, and
+# src/plugins/core-plugins.ts imports @gl3/plugin-ranks,
+# @gl3/plugin-notifications, @gl3/plugin-news and @gl3/plugin-bank statically
 # as ported core modules (a dynamic import(pluginId) is deliberately not used
 # for any of them, so the dependency-direction check stays
-# compiler-enforceable). Without all four in the runtime stage the server
+# compiler-enforceable). Without all five in the runtime stage the server
 # cannot boot, even with PLUGIN_IDS empty — core plugins are never optional.
 #
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
@@ -47,6 +48,7 @@ COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY packages/plugins/ranks/package.json packages/plugins/ranks/
 COPY packages/plugins/notifications/package.json packages/plugins/notifications/
 COPY packages/plugins/news/package.json packages/plugins/news/
+COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -64,6 +66,8 @@ COPY packages/plugins/notifications/tsconfig.json packages/plugins/notifications
 COPY packages/plugins/notifications/src packages/plugins/notifications/src
 COPY packages/plugins/news/tsconfig.json packages/plugins/news/tsconfig.json
 COPY packages/plugins/news/src packages/plugins/news/src
+COPY packages/plugins/bank/tsconfig.json packages/plugins/bank/tsconfig.json
+COPY packages/plugins/bank/src packages/plugins/bank/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -76,8 +80,8 @@ COPY apps/server/drizzle apps/server/drizzle
 # The root tsconfig also references apps/web, which is not copied into this
 # image, so building from root fails with TS5083 (Cannot read
 # apps/web/tsconfig.json). The server project's own references pull in shared,
-# plugin-sdk, plugins/ranks, plugins/notifications, plugins/news and
-# hello-plugin, so every dist/ this image needs is produced; `--force` matches
+# plugin-sdk, plugins/ranks, plugins/notifications, plugins/news, plugins/bank
+# and hello-plugin, so every dist/ this image needs is produced; `--force` matches
 # `npm run typecheck` (rebuild from scratch, since .dockerignore excluded any
 # cached .tsbuildinfo).
 RUN npx tsc --build --force apps/server/tsconfig.json
@@ -90,14 +94,16 @@ WORKDIR /app
 
 # Same manifests as the builder, then a production-only install. This recreates
 # the node_modules/@gl3/* workspace symlinks, which is how the runtime resolves
-# `@gl3/shared`, `@gl3/plugin-sdk`, `@gl3/plugin-ranks`, `@gl3/plugin-notifications`
-# and `@gl3/hello-plugin` through their package.json exports maps.
+# `@gl3/shared`, `@gl3/plugin-sdk`, `@gl3/plugin-ranks`, `@gl3/plugin-notifications`,
+# `@gl3/plugin-news`, `@gl3/plugin-bank` and `@gl3/hello-plugin` through their
+# package.json exports maps.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY packages/plugins/ranks/package.json packages/plugins/ranks/
 COPY packages/plugins/notifications/package.json packages/plugins/notifications/
 COPY packages/plugins/news/package.json packages/plugins/news/
+COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -111,6 +117,7 @@ COPY --from=builder /app/packages/plugin-sdk/dist packages/plugin-sdk/dist
 COPY --from=builder /app/packages/plugins/ranks/dist packages/plugins/ranks/dist
 COPY --from=builder /app/packages/plugins/notifications/dist packages/plugins/notifications/dist
 COPY --from=builder /app/packages/plugins/news/dist packages/plugins/news/dist
+COPY --from=builder /app/packages/plugins/bank/dist packages/plugins/bank/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist

@@ -4,16 +4,35 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { players, playerStats, transactions } from "../src/db/schema/index.js";
-import { InsufficientFundsError } from "../src/economy/ledger.js";
-import { performBankTransaction } from "../src/game/bank/service.js";
+import bankPlugin from "@gl3/plugin-bank";
+import { PluginError } from "@gl3/plugin-sdk";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let playerId: string;
+
+// This file drives the plugin handler directly (no bootTestServer), so
+// nothing namespaces its leaderboard writes automatically — pass a run-unique
+// prefix so it never zadd's into the shared `leaderboard:*` keys other
+// concurrent test files and agents read.
+const leaderboardPrefix = `bank-test-${uuidv7()}`;
+
+/** The bank plugin's own route, driven in-process. See helpers/plugin-route.ts. */
+async function bank(
+  direction: "deposit" | "withdraw",
+  amount: bigint,
+): Promise<{ cash: bigint; bank: bigint }> {
+  const result = await callPluginRoute(bankPlugin, "POST", `/api/bank/${direction}`, {
+    db, redis, leaderboardPrefix, playerId, body: { amount: amount.toString() },
+  });
+  const body = result.body as { cash: string; bank: string };
+  return { cash: BigInt(body.cash), bank: BigInt(body.bank) };
+}
 
 beforeEach(async () => {
   await resetDb(db);
@@ -21,9 +40,13 @@ beforeEach(async () => {
   await db.insert(players).values({ id: playerId, username: `p${Date.now()}` });
   await db.insert(playerStats).values({ playerId, cash: 1000n });
 });
-afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconnect(); });
+afterAll(async () => {
+  // Best-effort: only ever removes this run's own namespaced keys.
+  await redis.del(`${leaderboardPrefix}:cash`, `${leaderboardPrefix}:bank`);
+  await conn.end(); redis.disconnect(); subscriber.disconnect();
+});
 
-describe("performBankTransaction", () => {
+describe("bank plugin routes", () => {
   it("moves cash into the bank in one transaction with two ledger rows", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     // `game:events` is a global channel shared by every test file running in
@@ -32,14 +55,16 @@ describe("performBankTransaction", () => {
     // own actor.
     const received = awaitOwnEvent(subscriber, playerId);
 
-    const result = await performBankTransaction(db, redis, playerId, "deposit", 400n);
-    expect(result).toEqual({ cash: 600n, bank: 400n });
+    expect(await bank("deposit", 400n)).toEqual({ cash: 600n, bank: 400n });
 
     const event = await received;
     expect(event.type).toBe("bank.transacted");
     if (event.type !== "bank.transacted") throw new Error("unreachable");
     expect(event.direction).toBe("deposit");
     expect(event.amount).toBe("400");
+    // Bank state is NOT broadcast. The field most easily got wrong by copying
+    // the news port, whose audience is { kind: "global" }.
+    expect(event.audience).toEqual({ kind: "player", playerId });
 
     const ledger = await db.select().from(transactions).orderBy(transactions.balanceKind);
     expect(ledger).toHaveLength(2);
@@ -48,13 +73,17 @@ describe("performBankTransaction", () => {
   });
 
   it("moves bank cash back to cash on withdraw", async () => {
-    await performBankTransaction(db, redis, playerId, "deposit", 400n);
-    const result = await performBankTransaction(db, redis, playerId, "withdraw", 150n);
-    expect(result).toEqual({ cash: 750n, bank: 250n });
+    await bank("deposit", 400n);
+    expect(await bank("withdraw", 150n)).toEqual({ cash: 750n, bank: 250n });
   });
 
   it("rejects an overdraft on either leg and leaves both balances untouched", async () => {
-    await expect(performBankTransaction(db, redis, playerId, "withdraw", 1n)).rejects.toBeInstanceOf(InsufficientFundsError);
+    // Not a bare `.rejects.toThrow()`: that would pass on any error, including
+    // the 500-shaped one this port exists to rule out.
+    await expect(bank("withdraw", 1n)).rejects.toBeInstanceOf(PluginError);
+    await expect(bank("withdraw", 1n)).rejects.toMatchObject({
+      code: "insufficient_funds", status: 409,
+    });
     const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
     expect(row?.cash).toBe(1000n);
     expect(row?.bank).toBe(0n);
@@ -62,10 +91,10 @@ describe("performBankTransaction", () => {
   });
 
   it("serializes two concurrent withdrawals so only one can succeed against a tight balance", async () => {
-    await performBankTransaction(db, redis, playerId, "deposit", 100n);
+    await bank("deposit", 100n);
     const results = await Promise.allSettled([
-      performBankTransaction(db, redis, playerId, "withdraw", 60n),
-      performBankTransaction(db, redis, playerId, "withdraw", 60n),
+      bank("withdraw", 60n),
+      bank("withdraw", 60n),
     ]);
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
