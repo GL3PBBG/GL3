@@ -103,7 +103,15 @@ export default defineWorkspace([
       name: "@gl3/plugin-sdk",
       root: "./packages/plugin-sdk",
       include: ["test/**/*.test.ts"],
-      typecheck: { enabled: true },
+      // Explicit tsconfig: vitest's default is the nearest tsconfig.json,
+      // whose `include` is `src/**/*` (deliberately — it's also the build
+      // config), so no test file ever entered the tsc program and
+      // `.test-d.ts` files typechecked as vacuously clean regardless of
+      // content. tsconfig.test.json adds `test/**/*.test-d.ts` only —
+      // NOT all of `test/**`, which would pull in ordinary `.test.ts` files
+      // whose deliberate zod-negative-input tests aren't meant to satisfy
+      // strict typechecking.
+      typecheck: { enabled: true, tsconfig: "tsconfig.test.json" },
     },
     ...srcAliases,
   },
