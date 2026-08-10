@@ -72,7 +72,7 @@ export async function bootTestServer(
     ? await loadPlugins(
         { db, redis, settings: {}, leaderboardPrefix },
         withCorePlugins(options.plugins),
-        `plugin-test-${randomUUID()}:`,
+        `plugin-test-${randomUUID()}-`,
       )
     : undefined;
 

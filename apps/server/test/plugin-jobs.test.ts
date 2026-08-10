@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { players, playerStats, transactions } from "../src/db/schema/index.js";
-import { runPluginJob } from "../src/plugins/jobs.js";
+import { createPluginQueues, runPluginJob } from "../src/plugins/jobs.js";
 import { createRedis } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
 
@@ -76,5 +76,19 @@ describe("plugin jobs", () => {
   it("throws on an unknown job name rather than silently succeeding", async () => {
     await expect(runPluginJob(deps(), paying, "nope", { id: randomUUID(), data: {} }))
       .rejects.toThrow(/nope/);
+  });
+
+  it("creates plugin queues with attempts:3 retry options", async () => {
+    const manifest = definePlugin({
+      id: "retry-opts", version: "1.0.0", basePaths: ["/api/retry-opts"],
+      jobs: { work: async () => {} },
+    });
+    const queues = createPluginQueues(redis, [manifest], "test-prefix-");
+    const queue = queues.get("retry-opts:work");
+    expect(queue).toBeDefined();
+    // attempts:3 — without this, BullMQ defaults to 1 and plugin jobs never retry,
+    // which defeats the plugin_job_runs idempotency guard (spec §2.5).
+    expect(queue!.opts.defaultJobOptions?.attempts).toBe(3);
+    expect(queue!.opts.defaultJobOptions?.backoff).toEqual({ type: "exponential", delay: 500 });
   });
 });
