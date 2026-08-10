@@ -53,6 +53,7 @@ COPY packages/plugins/news/package.json packages/plugins/news/
 COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY packages/plugins/bullets/package.json packages/plugins/bullets/
 COPY packages/plugins/travel/package.json packages/plugins/travel/
+COPY packages/plugins/crimes/package.json packages/plugins/crimes/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -76,6 +77,8 @@ COPY packages/plugins/bullets/tsconfig.json packages/plugins/bullets/tsconfig.js
 COPY packages/plugins/bullets/src packages/plugins/bullets/src
 COPY packages/plugins/travel/tsconfig.json packages/plugins/travel/tsconfig.json
 COPY packages/plugins/travel/src packages/plugins/travel/src
+COPY packages/plugins/crimes/tsconfig.json packages/plugins/crimes/tsconfig.json
+COPY packages/plugins/crimes/src packages/plugins/crimes/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -118,6 +121,7 @@ COPY packages/plugins/news/package.json packages/plugins/news/
 COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY packages/plugins/bullets/package.json packages/plugins/bullets/
 COPY packages/plugins/travel/package.json packages/plugins/travel/
+COPY packages/plugins/crimes/package.json packages/plugins/crimes/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -134,6 +138,7 @@ COPY --from=builder /app/packages/plugins/news/dist packages/plugins/news/dist
 COPY --from=builder /app/packages/plugins/bank/dist packages/plugins/bank/dist
 COPY --from=builder /app/packages/plugins/bullets/dist packages/plugins/bullets/dist
 COPY --from=builder /app/packages/plugins/travel/dist packages/plugins/travel/dist
+COPY --from=builder /app/packages/plugins/crimes/dist packages/plugins/crimes/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist
