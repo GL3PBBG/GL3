@@ -14,7 +14,11 @@ const DEFAULT_COST_PER_SECOND = 1000n;
  */
 function costPerSecond(settings: Record<string, string>): bigint {
   const raw = settings["hospital.discharge_cost_per_second"];
-  if (raw === undefined) return DEFAULT_COST_PER_SECOND;
+  // `BigInt("")` and `BigInt("  ")` return 0n rather than throwing, so a
+  // blank value would otherwise slip past the try/catch below and make
+  // every discharge free. An admin clearing the form field must fall back
+  // to the default like any other malformed value, not to a cost of zero.
+  if (raw === undefined || raw.trim() === "") return DEFAULT_COST_PER_SECOND;
   try {
     const parsed = BigInt(raw);
     return parsed >= 0n ? parsed : DEFAULT_COST_PER_SECOND;
