@@ -12,7 +12,7 @@ import {
 } from "./effects.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
 import { items, playerItems, playerStats, ranks } from "./schema.js";
-import { shopListRoute } from "./shop.js";
+import { purchasedEvent, shopBuyRoute, shopListRoute } from "./shop.js";
 
 const listRoute = route({
   method: "GET",
@@ -215,9 +215,10 @@ export default definePlugin({
   basePaths: ["/api/inventory", "/api/shop"],
   tables: { shopStock: "p_inventory_shop_stock" },
   migrations: SHOP_MIGRATIONS,
-  routes: [listRoute, equipRoute, useRoute, shopListRoute],
-  // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
-  // asserts a no-arg boot answers GET /api/plugins with exactly
-  // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a core
-  // plugin declares jobs.
+  routes: [listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute],
+  events: [purchasedEvent],
+  // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts
+  // a no-arg boot answers GET /api/plugins with exactly
+  // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a
+  // core plugin declares jobs.
 });
