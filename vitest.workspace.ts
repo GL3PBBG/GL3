@@ -185,6 +185,7 @@ export default defineWorkspace([
         "test/gang-ledger.test.ts",
         "test/plugin-migrate.test.ts",
         "test/plugin-runtime-schema.test.ts",
+        "test/settings-load.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
