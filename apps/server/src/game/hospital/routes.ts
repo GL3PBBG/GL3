@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "../../db/client.js";
 import { playerStats } from "../../db/schema/index.js";
-import { applyBalanceChange, InsufficientFundsError } from "../../economy/ledger.js";
+import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
 import { checkHospital, maxHealthFor, settleHospital } from "./status.js";
 
 const DEFAULT_COST_PER_SECOND = 1000n;
@@ -67,8 +67,17 @@ export function registerHospitalRoutes(
 
     try {
       const result = await db.transaction(async (tx) => {
-        // settleHospital takes no lock of its own; applyBalanceChange below
-        // locks this player's row, and both run in this one transaction.
+        // FIRST statement, before settleHospital reads anything.
+        // `settleHospital` takes no lock of its own and `applyBalanceChange`
+        // takes one only when it runs, so without this the read of
+        // `hospital_until` happens outside any lock: two concurrent discharges
+        // both saw "hospitalised", both queued on the ledger's lock, and both
+        // charged — one discharge, two `hospital.discharge` rows, double the
+        // money gone. The ledger stays self-consistent through that, so
+        // `sum(ledger) == balance` never notices. Locking here makes the
+        // loser's re-read observe `hospital_until = null` and 409 instead.
+        // Regression: `test/hospital-concurrency.test.ts`.
+        await lockPlayersForUpdate(tx, [playerId]);
         const settled = await settleHospital(tx, playerId);
         if (!settled.hospitalised) return { kind: "free" as const };
 
