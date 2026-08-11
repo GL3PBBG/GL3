@@ -470,14 +470,20 @@ import { players, playerStats, ranks } from "../src/db/schema/index.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "../src/game/hospital/status.js";
 import { testDb } from "./helpers/db.js";
 
+// NOTE on `.slice(-8)`, which every test helper in this plan uses: take the
+// uuid's TAIL, never `.slice(0, 8)`. A uuidv7's leading 48 bits are a
+// millisecond timestamp, so the first 8 hex chars are its top 32 bits and only
+// change every 2^16 ms (~65 seconds) — every row inserted inside the same
+// minute would collide. That is a hard failure on a unique column
+// (`players.username`, `gangs.name`) and confusing noise elsewhere.
 async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: { rankMaxHealth?: number }) {
   const id = uuidv7();
-  await db.insert(players).values({ id, username: `hp-${id.slice(0, 8)}` });
+  await db.insert(players).values({ id, username: `hp-${id.slice(-8)}` });
   let rankId: string | null = null;
   if (opts?.rankMaxHealth !== undefined) {
     rankId = uuidv7();
     await db.insert(ranks).values({
-      id: rankId, name: `r-${rankId.slice(0, 8)}`, expRequired: 0n, maxHealth: opts.rankMaxHealth,
+      id: rankId, name: `r-${rankId.slice(-8)}`, expRequired: 0n, maxHealth: opts.rankMaxHealth,
     });
   }
   await db.insert(playerStats).values({ playerId: id, health: 100, rankId });
@@ -1421,7 +1427,7 @@ async function seedItem(
   effects: Record<string, unknown>,
 ): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `${itemType}-${id.slice(0, 8)}`, itemType, effects });
+  await db.insert(items).values({ id, name: `${itemType}-${id.slice(-8)}`, itemType, effects });
   return id;
 }
 
@@ -2384,7 +2390,7 @@ async function makeAttackable(
 ): Promise<string> {
   const locationId = uuidv7();
   await db.insert(locations).values({
-    id: locationId, name: `loc-${locationId.slice(0, 8)}`,
+    id: locationId, name: `loc-${locationId.slice(-8)}`,
     travelCost: 0n, travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 1n,
   });
   await db.update(playerStats)
@@ -2399,7 +2405,7 @@ async function equipWeapon(
   playerId: string, effects: Record<string, unknown>,
 ): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `w-${id.slice(0, 8)}`, itemType: "weapon", effects });
+  await db.insert(items).values({ id, name: `w-${id.slice(-8)}`, itemType: "weapon", effects });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));
   return id;
@@ -2461,7 +2467,7 @@ The cases:
     await makeAttackable(db, attackerId, targetId);
     const elsewhere = uuidv7();
     await db.insert(locations).values({
-      id: elsewhere, name: `far-${elsewhere.slice(0, 8)}`,
+      id: elsewhere, name: `far-${elsewhere.slice(-8)}`,
       travelCost: 0n, travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 1n,
     });
     await db.update(playerStats).set({ locationId: elsewhere })
@@ -2475,7 +2481,7 @@ The cases:
     const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     const gangId = uuidv7();
-    await db.insert(gangs).values({ id: gangId, name: `g-${gangId.slice(0, 8)}`, bossPlayerId: attackerId });
+    await db.insert(gangs).values({ id: gangId, name: `g-${gangId.slice(-8)}`, bossPlayerId: attackerId });
     await db.insert(gangMembers).values([
       { gangId, playerId: attackerId }, { gangId, playerId: targetId },
     ]);
