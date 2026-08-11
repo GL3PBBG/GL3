@@ -7,6 +7,7 @@ import { createDb } from "../../src/db/client.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
 import { withCorePlugins } from "../../src/plugins/core-plugins.js";
 import { loadPlugins } from "../../src/plugins/loader.js";
+import { loadSettings } from "../../src/settings/load.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
 
@@ -41,6 +42,8 @@ export async function bootTestServer(
 
   await rebuildLeaderboards(db, redis, leaderboardPrefix);
 
+  const loadedTestSettings = await loadSettings(db);
+
   // Always run the full boot sequence (validate → migrate → queues/workers)
   // the same way production does, so a test exercises the real loader path.
   // `withCorePlugins` is what makes that true: a ported core module is never
@@ -56,7 +59,7 @@ export async function bootTestServer(
   // from each other and from other test files' queues in the same shared
   // Redis.
   const loadedPlugins = await loadPlugins(
-    { db, redis, settings: {}, leaderboardPrefix },
+    { db, redis, settings: loadedTestSettings, leaderboardPrefix },
     withCorePlugins(options?.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
   );
