@@ -257,13 +257,20 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
       .update(playerStats)
       .set({ rankId, hospitalUntil: new Date(Date.now() - 1000), health: 0 })
       .where(eq(playerStats.playerId, targetId));
+    // Pinned, because the shot that follows the settle is a real one now. Left
+    // unarmed this asserted an exact health after random 1-5 damage behind a
+    // 25% hit chance, so it passed roughly three runs in four — green when the
+    // shot missed, and only honest by luck.
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 10, damageMax: 10 });
 
     const res = await attack(targetId);
 
     expect(res.statusCode).toBe(200);
     const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, targetId));
     expect(row?.hospitalUntil).toBeNull();
-    expect(row?.health).toBe(150);
+    // 150, not 100: healed to the rank's maxHealth by the settle, then shot.
+    // A target that was never settled would read 0 here, not 140.
+    expect(row?.health).toBe(140);
   });
 
   it("429s a second attack inside the cooldown", async () => {
@@ -487,6 +494,58 @@ describe("POST /api/combat/attack/:targetId — resolution", () => {
     expect(body.damage).toBeLessThanOrEqual(5);
     expect(body.hit).toBe(body.damage > 0 || body.armorAbsorbed > 0);
     expect(await healthOf(targetId)).toBe(100 - body.damage);
+  });
+
+  it("fills a V2-migrated weapon's missing accuracy from the settings default", async () => {
+    // The case `combat.default_weapon_accuracy` exists for. V2's `itemEffects`
+    // has no accuracy column at all, so every migrated weapon arrives without
+    // one. Before this was wired, the missing field failed the zod parse and
+    // the weapon fell back to UNARMED — the player lost the gun's damage too,
+    // silently, with the setting sitting unread in the table.
+    //
+    // 100 makes the shot deterministic; a flat 30-30 damage range separates
+    // "fired the weapon" (30) from "fell back to unarmed" (1-5) unambiguously.
+    await makeAttackable();
+    await equipWeapon(attackerId, { damageMin: 30, damageMax: 30 });
+    await db.insert(settings).values({ key: "combat.default_weapon_accuracy", value: "100" });
+
+    const { app: freshApp, close } = await bootTestServer();
+    try {
+      const res = await freshApp.inject({
+        method: "POST",
+        url: `/api/combat/attack/${targetId}`,
+        headers: { authorization: `Bearer ${attackerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ hit: true, damage: 30, targetHealth: 70 });
+    } finally {
+      await close();
+    }
+  });
+
+  it("prefers a weapon's own accuracy over the settings default", async () => {
+    // The other half: the default is a BACKFILL, not an override. With the
+    // default pinned to 0 an item that carries its own accuracy must still
+    // fire — otherwise wiring the fallback would have quietly disarmed every
+    // weapon that was already correct.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 30, damageMax: 30 });
+    await db.insert(settings).values({ key: "combat.default_weapon_accuracy", value: "0" });
+
+    const { app: freshApp, close } = await bootTestServer();
+    try {
+      const res = await freshApp.inject({
+        method: "POST",
+        url: `/api/combat/attack/${targetId}`,
+        headers: { authorization: `Bearer ${attackerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ hit: true, damage: 30 });
+    } finally {
+      await close();
+    }
   });
 
   it("reads the unarmed profile from the settings table", async () => {

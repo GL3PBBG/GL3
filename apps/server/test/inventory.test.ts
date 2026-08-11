@@ -82,6 +82,29 @@ describe("GET /api/inventory", () => {
     });
   });
 
+  it("lists a weapon that carries no accuracy instead of calling it unusable", async () => {
+    // The test above claims to cover the migrated-V2 case but seeds an
+    // accuracy anyway, so it never exercised it. A real V2 item has none —
+    // `itemEffects` has no such column — and while accuracy was required
+    // that item parsed to `null` here and fell back to unarmed in combat.
+    //
+    // Accuracy is absent from the response rather than filled: this plugin
+    // reports what the row stores, and the default that decides how an absent
+    // accuracy FIRES belongs to combat's settings, not to a listing.
+    const relic = await seedItem("weapon", { damageMin: 5, damageMax: 15 });
+    await grant(playerId, relic, 1);
+
+    const res = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.json().items[0].effects).toEqual({
+      damageMin: 5, damageMax: 15,
+      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+    });
+  });
+
   it("nulls the effects of a known item type whose jsonb does not parse", async () => {
     const junk = await seedItem("armor", { armor: "not a number" });
     await grant(playerId, junk, 1);

@@ -10,12 +10,18 @@ import { z } from "zod";
  * `items.effects` is jsonb, so it is an external boundary and is zod-parsed on
  * every read — never trusted raw.
  *
- * Every weapon field except accuracy and the damage range DEFAULTS, so a
- * migrated V2 item that carried only `damage` (V2's itemEffects has no
- * accuracy, no range, and none of the rest) parses without backfill.
+ * Only the damage range is REQUIRED. Every other weapon field either defaults
+ * here or, in accuracy's case, is optional — V2's `itemEffects` has no
+ * accuracy column, so a migrated item arrives without one and must still
+ * parse. Combat fills an absent accuracy from `combat.default_weapon_accuracy`
+ * (`index.ts`, `loadWeapon`); this schema deliberately does not, because the
+ * default is a combat tuning knob and a schema has no settings access.
+ *
+ * Absent is not the same as zero here: a weapon that really does state
+ * `accuracy: 0` never hits, and that must survive the round trip.
  */
 export const WeaponEffectsSchema = z.object({
-  accuracy: z.number().int().min(0).max(100),
+  accuracy: z.number().int().min(0).max(100).optional(),
   damageMin: z.number().int().nonnegative(),
   damageMax: z.number().int().nonnegative(),
   bulletsPerShot: z.number().int().positive().default(1),
