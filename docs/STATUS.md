@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-10, M5 stage 8 (`crimes` port) outcome recorded.
-Branch: `feat/plugin-crimes-port`.
+Last updated: 2026-08-11, M5 stage 9 (mail port).
+Branch: `feat/plugin-mail-port`.
 
 ---
 
@@ -14,13 +14,13 @@ Branch: `feat/plugin-crimes-port`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); seven of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`); two ports remain (`mail`, `gangs`), both unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); eight of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`); one port remains (`gangs`), unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
 **Suite: 71 files / 587 tests**, green across repeated back-to-back runs.
-The `crimes` port added one test (the loader `attempts: 3` fix, Plan 8 Task 1)
-and no new file — the existing `crimes.test.ts`, `crime-worker-idempotency.test.ts`,
-`acceptance/m1-vertical-slice.test.ts` and `economy-invariant.test.ts` were
-retargeted in place (see below).
+The `mail` port added no new test file — the existing `mail.test.ts` is
+**unchanged** and is the proof (all `app.inject`, no service block, zero
+edits to the test file; the routes are byte-identical and served at the same
+path, so no retargeting was needed).
 
 ---
 
@@ -504,7 +504,35 @@ commits: `f537ecf` (loader retry fix), `72f28e8` (scaffold), `8af0ff6`
   "Known issues and watch items" below — the bullet that used to record this
   is removed.
 
-Two module ports remain: `mail`, `gangs`.
+One module port remains: `gangs`.
+
+### The `mail` port (Plan 9)
+
+`mail` ported to `packages/plugins/mail`; `apps/server/src/game/mail/` no longer
+exists; `mail.test.ts`'s `app.inject` block is **unchanged** and is the proof
+(all-HTTP, no service block, single-commit cutover).
+
+Closest analog to `news`: event-driven write, no economy, no job, no jail gate,
+no locks. No loader change — the first port since `ranks`/`notifications`/`news`
+to add none.
+
+`mail_messages` + `players` mirrors; `senderName` from `ctx.player.username`
+(no `players` read for the sender); `recipientUsername` lookup via the
+`players` mirror.
+
+The two-check thread-participant gate preserved verbatim, including the
+recipient-side splice guard (`routes.ts:50-51`) — the regression this
+route's tests guard.
+
+`.returning()` replaces core's post-insert re-select; the 400 carries no
+`issues` array (plugin route layer property, same as `news`).
+
+No lock-order test, deliberately — mail takes no `FOR UPDATE`, only implicit
+`FOR KEY SHARE` on `players.id` via the FKs. No ABBA surface.
+
+No `economy-invariant.test.ts` edit — mail moves no money.
+
+One port remains: `gangs`.
 
 ## Starting M4
 

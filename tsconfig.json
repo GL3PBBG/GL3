@@ -10,6 +10,7 @@
     { "path": "./packages/plugins/bullets" },
     { "path": "./packages/plugins/crimes" },
     { "path": "./packages/plugins/travel" },
+    { "path": "./packages/plugins/mail" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }
