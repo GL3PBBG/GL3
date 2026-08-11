@@ -17,9 +17,10 @@ Branch: `feat/plugin-mail-port`.
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); eight of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`); one port remains (`gangs`), unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
 **Suite: 71 files / 587 tests**, green across repeated back-to-back runs.
-The `mail` port added no new test file — the existing `mail.test.ts` was
-retargeted in place (all `app.inject`, no service block, zero edits to the
-test file).
+The `mail` port added no new test file — the existing `mail.test.ts` is
+**unchanged** and is the proof (all `app.inject`, no service block, zero
+edits to the test file; the routes are byte-identical and served at the same
+path, so no retargeting was needed).
 
 ---
 
