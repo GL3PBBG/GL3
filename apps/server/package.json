@@ -12,6 +12,7 @@
   "dependencies": {
     "@gl3/plugin-bank": "*",
     "@gl3/plugin-bullets": "*",
+    "@gl3/plugin-combat": "*",
     "@gl3/plugin-crimes": "*",
     "@gl3/plugin-gangs": "*",
     "@gl3/plugin-inventory": "*",
