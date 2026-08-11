@@ -47,11 +47,6 @@ export const ranks = pgTable("ranks", {
   maxHealth: integer("max_health").notNull(),
 });
 
-export const gangMembers = pgTable("gang_members", {
-  gangId: uuid("gang_id").notNull(),
-  playerId: uuid("player_id").notNull(),
-});
-
 /**
  * The four defaults are not decoration: drizzle makes a `notNull` column with
  * no default REQUIRED on insert, so without them `createdAt` would have to be

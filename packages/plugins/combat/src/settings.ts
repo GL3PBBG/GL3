@@ -62,6 +62,7 @@ function big(get: (key: string) => string | null, key: string, fallback: bigint)
  * = 0` still has (see `docs/STATUS.md`). Not copied into a new module.
  */
 export function readCombatSettings(get: (key: string) => string | null): CombatSettings {
+  const damageMin = num(get, "unarmed.damage_min", 1);
   return {
     cooldownSeconds: Math.max(1, num(get, "cooldown_seconds", 60)),
     hospitalSeconds: Math.max(1, num(get, "hospital_seconds", 600)),
@@ -69,8 +70,16 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
     defaultWeaponAccuracy: Math.min(100, num(get, "default_weapon_accuracy", 50)),
     unarmed: {
       accuracy: Math.min(100, num(get, "unarmed.accuracy", 25)),
-      damageMin: num(get, "unarmed.damage_min", 1),
-      damageMax: num(get, "unarmed.damage_max", 5),
+      damageMin,
+      // Clamped, because an admin who sets min above max would otherwise take
+      // the route down: `rollFor` calls `randomInt(min, max + 1)`, which throws
+      // `ERR_OUT_OF_RANGE` on an inverted range, and an unarmed attack is the
+      // one path with no equipped item to fall back to. A weapon's own effects
+      // cannot do this — `WeaponEffectsSchema` refuses `damageMax < damageMin`
+      // and a rejected weapon falls back to this profile — so the settings
+      // table is the only way in. Collapsing to a fixed `min` damage beats
+      // 500ing every shot in the game.
+      damageMax: Math.max(damageMin, num(get, "unarmed.damage_max", 5)),
       bulletsPerShot: Math.max(1, num(get, "unarmed.bullets_per_shot", 1)),
     },
   };

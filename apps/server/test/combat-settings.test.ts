@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readCombatSettings } from "@gl3/plugin-combat";
+import { readCombatSettings, rollFor } from "@gl3/plugin-combat";
 
 /**
  * Builds the `get` the reader takes: a key→value map, missing keys null.
@@ -114,6 +114,27 @@ describe("readCombatSettings", () => {
 
     expect(settings.defaultWeaponAccuracy).toBe(100);
     expect(settings.unarmed.accuracy).toBe(100);
+  });
+
+  it("clamps an inverted unarmed range instead of letting randomInt throw", () => {
+    // `rollFor` calls `randomInt(min, max + 1)`, which throws ERR_OUT_OF_RANGE
+    // when min > max — a 500 on every unarmed shot in the game, from one typo
+    // in a settings row. A weapon cannot reach this state (WeaponEffectsSchema
+    // refuses damageMax < damageMin), so the settings table is the only way in.
+    const settings = readCombatSettings(getter({
+      "unarmed.damage_min": "10",
+      "unarmed.damage_max": "6",
+    }));
+
+    expect(settings.unarmed).toMatchObject({ damageMin: 10, damageMax: 10 });
+    // The assertion that matters: the profile it produces is one randomInt
+    // accepts. Asserting the numbers alone would not have caught the throw.
+    const profile = {
+      ...settings.unarmed,
+      critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+    };
+    expect(() => rollFor(profile)).not.toThrow();
+    expect(rollFor(profile).damageRoll).toBe(10);
   });
 
   it("accepts a newbie threshold beyond the range of a JS number", () => {
