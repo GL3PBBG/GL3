@@ -4,7 +4,6 @@ import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
-import { registerGangRoutes } from "./game/gangs/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
@@ -55,7 +54,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
-  registerGangRoutes(app, deps.db, deps.redis, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
   registerProfileRoutes(app, deps.db, requireAuth);
