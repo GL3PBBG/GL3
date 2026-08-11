@@ -1,3 +1,5 @@
+import combatPlugin from "@gl3/plugin-combat";
+import { PluginError } from "@gl3/plugin-sdk";
 import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
@@ -15,13 +17,19 @@ import {
   ranks,
   settings,
 } from "../src/db/schema/index.js";
-import { createSubscriber } from "../src/redis.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
+// Only the two callPluginRoute tests below use these; every other test in the
+// file goes through `app.inject`. The prefix is run-unique so nothing here can
+// zadd into the shared, global `leaderboard:*` keys.
+const redis = createRedis(loadConfig(process.env).redisUrl);
+const leaderboardPrefix = `combat-test-${uuidv7()}`;
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let attackerToken: string;
@@ -111,6 +119,9 @@ beforeEach(async () => {
 afterAll(async () => {
   await closeServer();
   await conn.end();
+  // Targeted DEL of this run's own namespaced keys, never FLUSHDB.
+  await redis.del(`${leaderboardPrefix}:cash`, `${leaderboardPrefix}:bank`, `${leaderboardPrefix}:exp`);
+  redis.disconnect();
   subscriber.disconnect();
 });
 
@@ -168,6 +179,75 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     const res = await attack(targetId);
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "target_jailed" });
+  });
+
+  /**
+   * The attacker's own sentence, re-checked INSIDE the transaction.
+   *
+   * `app.inject` cannot prove this: the loader gate (`plugins/routes.ts:39`)
+   * answers 423 before the handler is ever entered, so an in-handler check
+   * that did not exist would look exactly the same on the wire.
+   * `callPluginRoute` runs no gate, which is why these two go through it —
+   * they fail if and only if the handler itself stops checking.
+   *
+   * The window is real: the gate runs before the transaction, so between it
+   * and `tx.locks.player` the victim's gangmate can hospitalise or jail the
+   * attacker, and the shot fires anyway.
+   */
+  it("423s an attacker hospitalised after the gate ran — checked in the handler", async () => {
+    await makeAttackable();
+    await db
+      .update(playerStats)
+      .set({ hospitalUntil: new Date(Date.now() + 60_000), health: 0 })
+      .where(eq(playerStats.playerId, attackerId));
+
+    await expect(
+      callPluginRoute(combatPlugin, "POST", "/api/combat/attack/:targetId", {
+        db, redis, leaderboardPrefix, playerId: attackerId, params: { targetId },
+      }),
+    ).rejects.toMatchObject({ code: "hospitalised", status: 423 });
+    // Not just the right error: the shot must not have happened. Bullets are
+    // debited before the roll, so an unchanged count is what proves it.
+    expect(await bulletsOf(attackerId)).toBe(1000n);
+    expect(await healthOf(targetId)).toBe(100);
+  });
+
+  it("423s an attacker jailed after the gate ran — checked in the handler", async () => {
+    await makeAttackable();
+    await db
+      .update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() + 60_000) })
+      .where(eq(playerStats.playerId, attackerId));
+
+    await expect(
+      callPluginRoute(combatPlugin, "POST", "/api/combat/attack/:targetId", {
+        db, redis, leaderboardPrefix, playerId: attackerId, params: { targetId },
+      }),
+    ).rejects.toMatchObject({ code: "jailed", status: 423 });
+    expect(await bulletsOf(attackerId)).toBe(1000n);
+    expect(await healthOf(targetId)).toBe(100);
+  });
+
+  it("lets an attack through once the ATTACKER's own sentence has elapsed", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 10, damageMax: 10 });
+    // Already expired: the handler settles it under the lock rather than
+    // 423ing on a sentence that has run out.
+    await db
+      .update(playerStats)
+      .set({ hospitalUntil: new Date(Date.now() - 1000), health: 0 })
+      .where(eq(playerStats.playerId, attackerId));
+
+    const result = await callPluginRoute(combatPlugin, "POST", "/api/combat/attack/:targetId", {
+      db, redis, leaderboardPrefix, playerId: attackerId, params: { targetId },
+    });
+
+    expect(result).toMatchObject({ body: { hit: true } });
+    expect(await healthOf(targetId)).toBe(90);
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, attackerId));
+    expect(row?.hospitalUntil).toBeNull();
+    // Settled, not merely ignored: health is restored to the rank max.
+    expect(row?.health).toBeGreaterThan(0);
   });
 
   it("409s a target in another location", async () => {
