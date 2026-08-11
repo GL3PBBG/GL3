@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -207,5 +207,154 @@ describe("PUT /api/inventory/equip", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "rank_too_low" });
+  });
+});
+
+describe("POST /api/inventory/use/:itemId", () => {
+  it("heals a wounded player and consumes one unit", async () => {
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 2);
+    await db.update(playerStats).set({ health: 50 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ health: 80, healed: 30, qty: 1 });
+  });
+
+  it("caps the heal at the rank max health", async () => {
+    const megadose = await seedItem("consumable", { heal: 999 });
+    await grant(playerId, megadose, 1);
+    await db.update(playerStats).set({ health: 90 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${megadose}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    // Default max health is 100 for a player with no rank row.
+    expect(res.json()).toMatchObject({ health: 100, healed: 10 });
+  });
+
+  it("409s a player already at full health", async () => {
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 1);
+    await db.update(playerStats).set({ health: 100 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "already_full" });
+  });
+
+  it("400s a non-consumable", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    await grant(playerId, pistol, 1);
+    await db.update(playerStats).set({ health: 50 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${pistol}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "wrong_slot" });
+  });
+
+  it("never drives qty below zero", async () => {
+    const medkit = await seedItem("consumable", { heal: 10 });
+    await grant(playerId, medkit, 1);
+    await db.update(playerStats).set({ health: 10 }).where(eq(playerStats.playerId, playerId));
+
+    const first = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({ error: "not_owned" });
+
+    const [row] = await db.select().from(playerItems)
+      .where(and(eq(playerItems.playerId, playerId), eq(playerItems.itemId, medkit)));
+    expect(row?.qty).toBe(0);
+  });
+
+  it("423s a use attempt from hospital, so heal items cannot clear a sentence", async () => {
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 1);
+    await db.update(playerStats)
+      .set({ health: 0, hospitalUntil: new Date(Date.now() + 60_000) })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(423);
+    expect(res.json()).toMatchObject({ error: "hospitalised" });
+  });
+});
+
+describe("seedItems", () => {
+  it("seeds a weapon the equip route actually accepts", async () => {
+    // The starter items exist so equip is not inert before a shop exists, and
+    // they are only reachable through boot (index.ts), which no test runs. A
+    // malformed effects blob would otherwise 400 for a real player with
+    // nothing red here. Looked up by name because the ids are generated.
+    const { seedItems } = await import("../src/db/seed.js");
+    await seedItems(db);
+
+    const [pistol] = await db.select().from(items).where(eq(items.name, "Rusty Pistol"));
+    expect(pistol).toBeDefined();
+    if (!pistol) return;
+    await grant(playerId, pistol.id, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol.id },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ weaponItemId: pistol.id });
+  });
+
+  it("seeds a consumable the use route actually accepts", async () => {
+    const { seedItems } = await import("../src/db/seed.js");
+    await seedItems(db);
+
+    const [kit] = await db.select().from(items).where(eq(items.name, "First Aid Kit"));
+    expect(kit).toBeDefined();
+    if (!kit) return;
+    await grant(playerId, kit.id, 1);
+    await db.update(playerStats).set({ health: 50 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${kit.id}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ health: 75, healed: 25 });
+  });
+
+  it("is a no-op on a re-run rather than duplicating", async () => {
+    const { seedItems } = await import("../src/db/seed.js");
+    await seedItems(db);
+    await seedItems(db);
+
+    expect(await db.select().from(items)).toHaveLength(2);
   });
 });
