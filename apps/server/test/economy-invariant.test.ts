@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
@@ -15,11 +15,13 @@ import { seedCrimes, seedLocations, seedRanks } from "../src/db/seed.js";
 import bankPlugin from "@gl3/plugin-bank";
 import bulletsPlugin from "@gl3/plugin-bullets";
 import combatPlugin from "@gl3/plugin-combat";
+import inventoryPlugin from "@gl3/plugin-inventory";
 import travelPlugin from "@gl3/plugin-travel";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
 import { cooldownKey } from "../src/game/cooldown.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
+import { runPluginMigrations } from "../src/plugins/migrate.js";
 import crimesPlugin from "@gl3/plugin-crimes";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -43,12 +45,28 @@ const pluginJobDeps = () => ({ db, redis, queues: new Map(), settings: {}, leade
 let playerIds: string[] = [];
 let crimeIds: string[] = [];
 let locationIds: string[] = [];
+let shopItemId: string;
 
 beforeAll(async () => {
   await resetDb(db);
   await seedCrimes(db);
   await seedRanks(db);
   await seedLocations(db);
+  // p_inventory_shop_stock is a plugin-owned table (packages/plugins/inventory,
+  // via runPluginMigrations), not a core migration — this file drives plugin
+  // routes directly with callPluginRoute rather than bootTestServer, so
+  // nothing else here would apply the inventory plugin's migrations first.
+  await runPluginMigrations(db, [inventoryPlugin]);
+
+  // One item, stocked in every location, cheap and effectively unlimited so
+  // the sweep's shopBuy op mostly succeeds rather than mostly 409ing.
+  shopItemId = uuidv7();
+  await db.execute(sql`
+    insert into items (id, name, item_type, effects)
+    values (${shopItemId}, 'Invariant Widget', 'consumable', ${JSON.stringify({ heal: 1 })}::jsonb)`);
+  await db.execute(sql`
+    insert into p_inventory_shop_stock (location_id, item_id, price, stock)
+    select id, ${shopItemId}, 25::bigint, 100000 from locations`);
 
   crimeIds = (await db.select({ id: crimes.id }).from(crimes)).map((r) => r.id);
   locationIds = (await db.select({ id: locations.id }).from(locations)).map((r) => r.id);
@@ -125,9 +143,9 @@ describe("economy invariant across every M2 money path", () => {
 
     // Op-type/outcome tallies purely for the assertion below and the task
     // report — not part of the invariant itself.
-    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points", "kill"] as const;
-    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0 };
-    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0 };
+    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points", "kill", "shopBuy"] as const;
+    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0 };
+    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0 };
 
     for (let i = 0; i < OP_COUNT; i += 1) {
       const playerId = pick(playerIds);
@@ -174,6 +192,15 @@ describe("economy invariant across every M2 money path", () => {
           // code path.
           await callPluginRoute(bulletsPlugin, "POST", "/api/bullets/buy", {
             db, redis, leaderboardPrefix, playerId, body: { quantity },
+          });
+        } else if (opName === "shopBuy") {
+          // A purchase moves cash AND mutates p_inventory_shop_stock and
+          // player_items in the same transaction — the shape most likely to
+          // leave the ledger and the balance disagreeing if the money movement
+          // is ever moved out of applyBalanceChange.
+          const quantity = 1 + Math.floor(rand() * 3);
+          await callPluginRoute(inventoryPlugin, "POST", "/api/shop/buy", {
+            db, redis, leaderboardPrefix, playerId, body: { itemId: shopItemId, quantity },
           });
         } else if (opName === "kill") {
           // The kill payout is the first money movement in the game that is a
@@ -271,6 +298,11 @@ describe("economy invariant across every M2 money path", () => {
     // still satisfy the other kinds and pass silently with zero travel
     // coverage — assert it moved at least once.
     expect(succeeded.travel).toBeGreaterThan(0);
+    // Same reasoning as bullets/travel above: shopBuy's expected rejections
+    // (no_location before a player's first travel op, insufficient_funds late
+    // in the run) are in the accept-list too, so a regression that made every
+    // purchase fail would otherwise pass silently on the aggregate ratio alone.
+    expect(succeeded.shopBuy).toBeGreaterThan(0);
     // Kills throw nothing by construction (see the op above), so this only
     // guards the op being picked at all — a future OP_NAMES edit that drops
     // `kill` would otherwise leave the transfer path silently uncovered.
