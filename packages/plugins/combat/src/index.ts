@@ -177,22 +177,57 @@ const attackRoute = route({
           .where(eq(playerStats.playerId, params.targetId));
       }
 
-      // Task 12 sets `fatal` and `payout` on the death path.
+      // `outcome.damage > 0` is not redundant with the health check: a target
+      // already at 0 health that the shot misses would otherwise read as a
+      // fresh kill on every attempt, paying out repeatedly.
+      const killed = targetHealth === 0 && outcome.damage > 0;
+      let payout = 0n;
+
+      if (killed) {
+        // The killer takes the victim's entire ON-HAND cash; the bank is
+        // untouched, which is what makes depositing real counterplay.
+        // `target.cash` was read under the lock taken as this transaction's
+        // first statement, so it cannot have moved — the transfer can never
+        // overdraw and needs no InsufficientFundsError catch.
+        payout = target.cash;
+        // Skipped at zero rather than relying on whether a 0n change is a
+        // no-op or writes a zero ledger row.
+        if (payout > 0n) {
+          await tx.economy.applyBalanceChange({
+            playerId: params.targetId,
+            amount: -payout,
+            kind: "cash",
+            reason: "combat.killed",
+          });
+          await tx.economy.applyBalanceChange({
+            playerId: player.id,
+            amount: payout,
+            kind: "cash",
+            reason: "combat.kill_payout",
+          });
+        }
+        // Sets health = 0 alongside the deadline, so the health UPDATE above
+        // is redundant on this path — both write 0. Left alone; a conditional
+        // there would be a second branch for no gain.
+        await tx.hospital.sendToHospital(params.targetId, config.hospitalSeconds);
+      }
+
       await tx.db.insert(combatLog).values({
         id: uuidv7(),
         attackerId: player.id,
         targetId: params.targetId,
         hit: outcome.hit,
         damage: outcome.damage,
-        fatal: false,
+        fatal: killed,
         weaponItemId: attacker.weaponItemId,
-        payout: 0n,
+        payout,
       });
 
       const [targetRow] = await tx.db
         .select({ username: players.username })
         .from(players)
         .where(eq(players.id, params.targetId));
+      const targetName = targetRow?.username ?? "unknown";
 
       // Attacker AND victim, never global: a global audience would broadcast
       // every shot to every socket and leak position to anyone watching the
@@ -211,9 +246,26 @@ const attackRoute = route({
           actorName: player.username,
           audience: { kind: "player", playerId: audienceId },
           targetId: params.targetId,
-          targetName: targetRow?.username ?? "unknown",
+          targetName,
           damage: outcome.damage,
         });
+      }
+
+      if (killed) {
+        // AFTER player.attacked, deliberately: the buffer preserves relative
+        // call order all the way to the wire, and a client rendering "shot for
+        // 500" then "killed" reads correctly while the reverse reads as a
+        // corpse taking damage.
+        for (const audienceId of [player.id, params.targetId]) {
+          await tx.events.publishCore({
+            type: "player.killed",
+            actorId: player.id,
+            actorName: player.username,
+            audience: { kind: "player", playerId: audienceId },
+            victimId: params.targetId,
+            victimName: targetName,
+          });
+        }
       }
 
       return {
@@ -224,8 +276,8 @@ const attackRoute = route({
           damage: outcome.damage,
           armorAbsorbed: outcome.armorAbsorbed,
           targetHealth,
-          targetKilled: false,
-          payout: "0",
+          targetKilled: killed,
+          payout: payout.toString(),
           bulletsSpent: outcome.bulletsSpent,
         },
       };

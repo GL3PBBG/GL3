@@ -211,6 +211,7 @@ export default defineWorkspace([
         "test/auth.test.ts",
         "test/bank.test.ts",
         "test/bullets.test.ts",
+        "test/combat-kill.test.ts",
         "test/combat.test.ts",
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
