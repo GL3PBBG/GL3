@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
+import { registerHospitalRoutes } from "./game/hospital/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
@@ -12,6 +13,7 @@ import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
+import { loadSettings } from "./settings/load.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
@@ -26,6 +28,7 @@ export interface AppDeps {
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
+  const loadedSettings = await loadSettings(deps.db);
   const app = Fastify({ logger: config.nodeEnv !== "test" });
   await app.register(cors, { origin: config.corsOrigins, credentials: true });
 
@@ -55,6 +58,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
+  registerHospitalRoutes(app, deps.db, loadedSettings, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
   registerProfileRoutes(app, deps.db, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
@@ -92,7 +96,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
         );
       }
     }
-    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: {}, leaderboardPrefix }, CORE_PLUGINS);
+    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: loadedSettings, leaderboardPrefix }, CORE_PLUGINS);
     ownsLoadedPlugins = true;
   }
 
@@ -100,7 +104,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     db: deps.db,
     redis: deps.redis,
     queues: loaded.queues,
-    settings: {},
+    settings: loadedSettings,
     leaderboardPrefix,
   });
 

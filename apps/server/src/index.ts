@@ -3,10 +3,11 @@ import helloPlugin from "@gl3/hello-plugin";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { seedCrimes, seedLocations, seedRanks } from "./db/seed.js";
+import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { withCorePlugins } from "./plugins/core-plugins.js";
 import { loadPlugins } from "./plugins/loader.js";
+import { loadSettings } from "./settings/load.js";
 import { createRedis, createSubscriber } from "./redis.js";
 import { attachGateway } from "./ws/gateway.js";
 
@@ -28,6 +29,7 @@ const redis = createRedis(config.redisUrl);
 await seedCrimes(db);
 await seedRanks(db);
 await seedLocations(db);
+await seedItems(db);
 await rebuildLeaderboards(db, redis);
 
 // Resolve optional plugin ids to manifests, failing boot on an unknown id.
@@ -39,8 +41,9 @@ const optionalManifests = config.pluginIds.map((id) => {
 
 const manifests: PluginManifest[] = withCorePlugins(optionalManifests);
 
+const loadedSettings = await loadSettings(db);
 const loadedPlugins = await loadPlugins(
-  { db, redis, settings: {}, leaderboardPrefix: DEFAULT_LEADERBOARD_PREFIX },
+  { db, redis, settings: loadedSettings, leaderboardPrefix: DEFAULT_LEADERBOARD_PREFIX },
   manifests,
 );
 

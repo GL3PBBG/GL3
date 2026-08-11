@@ -3,6 +3,7 @@ import { PluginError } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { players, playerStats } from "../db/schema/index.js";
+import { settleHospital } from "../game/hospital/status.js";
 import { releaseIfExpired } from "../game/jail/status.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
 
@@ -32,6 +33,21 @@ export function registerPluginRoutes(
               // (game/bullets/routes.ts:19). A ported module must not lose it.
               reply.header("retry-after", String(jail.remainingSeconds));
               return reply.code(423).send({ error: "jailed", remainingSeconds: jail.remainingSeconds });
+            }
+          }
+
+          if (!pluginRoute.accessInHospital && playerId !== undefined) {
+            // settleHospital needs a transaction (it may UPDATE), unlike
+            // jail's releaseIfExpired which takes `db`. Restoring health on
+            // expiry is a write, and it must not be observed half-applied by
+            // the handler that runs immediately after.
+            const hospital = await deps.db.transaction((tx) => settleHospital(tx, playerId));
+            if (hospital.hospitalised) {
+              reply.header("retry-after", String(hospital.remainingSeconds));
+              return reply.code(423).send({
+                error: "hospitalised",
+                remainingSeconds: hospital.remainingSeconds,
+              });
             }
           }
 

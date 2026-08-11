@@ -36,6 +36,13 @@
       "when": 1786236398674,
       "tag": "0004_plugin_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786465391000,
+      "tag": "0005_combat_log",
+      "breakpoints": true
     }
   ]
 }

@@ -27,6 +27,7 @@ import { GANG_PERMISSIONS, hasGangPermission, type GangPermission } from "../gam
 import {
   acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
 } from "../game/cooldown.js";
+import { sendToHospital } from "../game/hospital/status.js";
 import { sendToJail } from "../game/jail/status.js";
 import { recordScore } from "../game/leaderboard/service.js";
 import { insertNotification } from "../game/notifications/service.js";
@@ -172,6 +173,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             },
           },
           jail: { sendToJail: (playerId, seconds) => sendToJail(tx, playerId, seconds) },
+          hospital: { sendToHospital: (playerId, seconds) => sendToHospital(tx, playerId, seconds) },
           locks: {
             player: (playerIds) => lockPlayersForUpdate(tx, playerIds),
             gangAndPlayer: (gangId, playerId) => lockGangAndPlayerForUpdate(tx, gangId, playerId),

@@ -1,0 +1,251 @@
+import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
+import { and, eq, gt, sql } from "drizzle-orm";
+import { z } from "zod";
+import {
+  ArmorEffectsSchema,
+  ConsumableEffectsSchema,
+  ITEM_TYPE_ARMOR,
+  ITEM_TYPE_CONSUMABLE,
+  ITEM_TYPE_WEAPON,
+  WeaponEffectsSchema,
+} from "./effects.js";
+import { items, playerItems, playerStats, ranks } from "./schema.js";
+
+/**
+ * `items.effects` is jsonb an admin can put anything in, so it is parsed
+ * rather than forwarded raw. Parsing also fills the weapon defaults
+ * (`bulletsPerShot`, `critChance`, `critMultiplier`, `armorPierce`,
+ * `minRankExp`), so a client rendering weapon stats sees the same numbers
+ * combat will use instead of having to know the defaults itself — a migrated
+ * V2 item carries none of them.
+ *
+ * `item_type` is unconstrained text (`content.ts:64`) and V2 shipped types
+ * beyond these three, so an unrecognised type is passed through untouched:
+ * this plugin has no schema for it and nothing here interprets it. A KNOWN
+ * type that fails to parse yields `null`, which is the same "unusable rather
+ * than a 500" answer the equip route gives.
+ */
+function readEffects(itemType: string, effects: unknown): unknown {
+  switch (itemType) {
+    case ITEM_TYPE_WEAPON: {
+      const parsed = WeaponEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_ARMOR: {
+      const parsed = ArmorEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_CONSUMABLE: {
+      const parsed = ConsumableEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    default:
+      return effects;
+  }
+}
+
+const listRoute = route({
+  method: "GET",
+  path: "/api/inventory",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const owned = await tx.db
+        .select({
+          itemId: items.id,
+          name: items.name,
+          itemType: items.itemType,
+          effects: items.effects,
+          qty: playerItems.qty,
+        })
+        .from(playerItems)
+        .innerJoin(items, eq(items.id, playerItems.itemId))
+        .where(and(eq(playerItems.playerId, player.id), gt(playerItems.qty, 0)));
+
+      const [stats] = await tx.db
+        .select({
+          weaponItemId: playerStats.weaponItemId,
+          armorItemId: playerStats.armorItemId,
+        })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+
+      return {
+        status: 200,
+        body: {
+          items: owned.map((row) => ({ ...row, effects: readEffects(row.itemType, row.effects) })),
+          equipped: {
+            weaponItemId: stats?.weaponItemId ?? null,
+            armorItemId: stats?.armorItemId ?? null,
+          },
+        },
+      };
+    });
+  },
+});
+
+/**
+ * `.optional().nullable()` on both, because `undefined` and `null` mean
+ * different things here and must not collapse: an absent key leaves the slot
+ * alone, an explicit `null` unequips it. The handler distinguishes them with
+ * an `in` check, not a truthiness test.
+ */
+const EquipSchema = z.object({
+  weaponItemId: z.string().uuid().nullable().optional(),
+  armorItemId: z.string().uuid().nullable().optional(),
+});
+
+const equipRoute = route({
+  method: "PUT",
+  path: "/api/inventory/equip",
+  accessInJail: false,
+  accessInHospital: false,
+  body: EquipSchema,
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const wantsWeapon = "weaponItemId" in body;
+    const wantsArmor = "armorItemId" in body;
+
+    return ctx.transaction(async (tx) => {
+      // The player's own row only — no second participant, so the single-id
+      // form of the standard ascending-order lock. The UPDATE below also
+      // takes FOR KEY SHARE on the referenced items row through
+      // player_stats' weapon_item_id/armor_item_id FKs (NOTES.md rule 6);
+      // nothing in the codebase locks an items row, so there is no path to
+      // invert against.
+      await tx.locks.player([player.id]);
+
+      const [stats] = await tx.db
+        .select({
+          exp: playerStats.exp,
+          weaponItemId: playerStats.weaponItemId,
+          armorItemId: playerStats.armorItemId,
+        })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (!stats) throw new PluginError("unauthorized", 401);
+
+      /** Verifies ownership, slot, and (for weapons) the rank gate. */
+      const validate = async (itemId: string, slot: "weapon" | "armor"): Promise<void> => {
+        const [owned] = await tx.db
+          .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
+          .from(playerItems)
+          .innerJoin(items, eq(items.id, playerItems.itemId))
+          .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, itemId)));
+
+        if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
+
+        const expectedType = slot === "weapon" ? ITEM_TYPE_WEAPON : ITEM_TYPE_ARMOR;
+        if (owned.itemType !== expectedType) throw new PluginError("wrong_slot", 400);
+
+        if (slot === "weapon") {
+          const parsed = WeaponEffectsSchema.safeParse(owned.effects);
+          // A malformed weapon is unusable rather than a 500: the jsonb is an
+          // external boundary and an admin can put anything in it.
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
+          if (BigInt(parsed.data.minRankExp) > stats.exp) {
+            throw new PluginError("rank_too_low", 409);
+          }
+        } else {
+          const parsed = ArmorEffectsSchema.safeParse(owned.effects);
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
+        }
+      };
+
+      const nextWeapon = wantsWeapon ? (body.weaponItemId ?? null) : stats.weaponItemId;
+      const nextArmor = wantsArmor ? (body.armorItemId ?? null) : stats.armorItemId;
+
+      if (wantsWeapon && body.weaponItemId != null) await validate(body.weaponItemId, "weapon");
+      if (wantsArmor && body.armorItemId != null) await validate(body.armorItemId, "armor");
+
+      await tx.db
+        .update(playerStats)
+        .set({ weaponItemId: nextWeapon, armorItemId: nextArmor })
+        .where(eq(playerStats.playerId, player.id));
+
+      return { status: 200, body: { weaponItemId: nextWeapon, armorItemId: nextArmor } };
+    });
+  },
+});
+
+const useRoute = route({
+  method: "POST",
+  path: "/api/inventory/use/:itemId",
+  accessInJail: false,
+  // What structurally enforces "a heal item does not get you out of hospital":
+  // the loader answers 423 before this handler runs.
+  accessInHospital: false,
+  params: z.object({ itemId: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      await tx.locks.player([player.id]);
+
+      const [owned] = await tx.db
+        .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
+        .from(playerItems)
+        .innerJoin(items, eq(items.id, playerItems.itemId))
+        .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, params.itemId)));
+      if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
+      if (owned.itemType !== ITEM_TYPE_CONSUMABLE) throw new PluginError("wrong_slot", 400);
+
+      const parsed = ConsumableEffectsSchema.safeParse(owned.effects);
+      if (!parsed.success) throw new PluginError("wrong_slot", 400);
+
+      const [stats] = await tx.db
+        .select({ health: playerStats.health, maxHealth: ranks.maxHealth })
+        .from(playerStats)
+        .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
+        .where(eq(playerStats.playerId, player.id));
+      if (!stats) throw new PluginError("unauthorized", 401);
+
+      // 100 matches core's `ranks.max_health` column default and
+      // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player has no
+      // rank row yet. A plugin cannot import that constant from apps/server,
+      // so the two must be kept in step by hand.
+      const maxHealth = stats.maxHealth ?? 100;
+      if (stats.health >= maxHealth) throw new PluginError("already_full", 409);
+
+      // The decrement is the guard, not a preceding read: `qty > 0` in the
+      // WHERE makes a concurrent second use match zero rows instead of driving
+      // the count negative. Same reasoning as NOTES.md rule 2's ban on
+      // check-then-act, applied to Postgres.
+      const decremented = await tx.db
+        .update(playerItems)
+        .set({ qty: sql`${playerItems.qty} - 1` })
+        .where(and(
+          eq(playerItems.playerId, player.id),
+          eq(playerItems.itemId, params.itemId),
+          gt(playerItems.qty, 0),
+        ))
+        .returning({ qty: playerItems.qty });
+      const remaining = decremented[0]?.qty;
+      if (remaining === undefined) throw new PluginError("not_owned", 409);
+
+      const health = Math.min(maxHealth, stats.health + parsed.data.heal);
+      await tx.db.update(playerStats).set({ health }).where(eq(playerStats.playerId, player.id));
+
+      return {
+        status: 200,
+        body: { health, healed: health - stats.health, qty: remaining },
+      };
+    });
+  },
+});
+
+export default definePlugin({
+  id: "inventory",
+  version: "1.0.0",
+  basePaths: ["/api/inventory"],
+  routes: [listRoute, equipRoute, useRoute],
+  // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
+  // asserts a no-arg boot answers GET /api/plugins with exactly
+  // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a core
+  // plugin declares jobs.
+});

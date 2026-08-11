@@ -1,6 +1,6 @@
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.js";
-import { crimes, locations, ranks } from "./schema/index.js";
+import { crimes, items, locations, ranks } from "./schema/index.js";
 
 export async function seedCrimes(db: Db): Promise<void> {
   const existing = await db.select({ id: crimes.id }).from(crimes).limit(1);
@@ -34,5 +34,33 @@ export async function seedLocations(db: Db): Promise<void> {
     { id: uuidv7(), name: "New York", travelCost: 0n, travelCooldownSeconds: 30, bulletStock: 1000, bulletCost: 3n },
     { id: uuidv7(), name: "Chicago", travelCost: 100n, travelCooldownSeconds: 60, bulletStock: 500, bulletCost: 5n },
     { id: uuidv7(), name: "Miami", travelCost: 250n, travelCooldownSeconds: 120, bulletStock: 300, bulletCost: 8n },
+  ]);
+}
+
+/**
+ * Two starter items so equip is not inert before a shop exists: one weapon to
+ * fight with, one consumable to heal with.
+ *
+ * Same shape as the other seeds in this file — uuidv7 ids and an
+ * already-populated early return, so a re-run is a no-op rather than a
+ * duplicate. Because the ids are generated, no test may hardcode one; look a
+ * starter item up by `name`.
+ */
+export async function seedItems(db: Db): Promise<void> {
+  const existing = await db.select({ id: items.id }).from(items).limit(1);
+  if (existing.length > 0) return;
+
+  await db.insert(items).values([
+    {
+      id: uuidv7(),
+      name: "Rusty Pistol",
+      itemType: "weapon",
+      effects: {
+        accuracy: 55, damageMin: 8, damageMax: 18,
+        bulletsPerShot: 1, critChance: 5, critMultiplier: 1.5,
+        armorPierce: 0, minRankExp: 0,
+      },
+    },
+    { id: uuidv7(), name: "First Aid Kit", itemType: "consumable", effects: { heal: 25 } },
   ]);
 }

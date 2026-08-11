@@ -59,6 +59,8 @@ COPY packages/plugins/travel/package.json packages/plugins/travel/
 COPY packages/plugins/crimes/package.json packages/plugins/crimes/
 COPY packages/plugins/mail/package.json packages/plugins/mail/
 COPY packages/plugins/gangs/package.json packages/plugins/gangs/
+COPY packages/plugins/inventory/package.json packages/plugins/inventory/
+COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -88,6 +90,10 @@ COPY packages/plugins/mail/tsconfig.json packages/plugins/mail/tsconfig.json
 COPY packages/plugins/mail/src packages/plugins/mail/src
 COPY packages/plugins/gangs/tsconfig.json packages/plugins/gangs/tsconfig.json
 COPY packages/plugins/gangs/src packages/plugins/gangs/src
+COPY packages/plugins/inventory/tsconfig.json packages/plugins/inventory/tsconfig.json
+COPY packages/plugins/inventory/src packages/plugins/inventory/src
+COPY packages/plugins/combat/tsconfig.json packages/plugins/combat/tsconfig.json
+COPY packages/plugins/combat/src packages/plugins/combat/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -133,6 +139,8 @@ COPY packages/plugins/travel/package.json packages/plugins/travel/
 COPY packages/plugins/crimes/package.json packages/plugins/crimes/
 COPY packages/plugins/mail/package.json packages/plugins/mail/
 COPY packages/plugins/gangs/package.json packages/plugins/gangs/
+COPY packages/plugins/inventory/package.json packages/plugins/inventory/
+COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -152,6 +160,8 @@ COPY --from=builder /app/packages/plugins/travel/dist packages/plugins/travel/di
 COPY --from=builder /app/packages/plugins/crimes/dist packages/plugins/crimes/dist
 COPY --from=builder /app/packages/plugins/mail/dist packages/plugins/mail/dist
 COPY --from=builder /app/packages/plugins/gangs/dist packages/plugins/gangs/dist
+COPY --from=builder /app/packages/plugins/inventory/dist packages/plugins/inventory/dist
+COPY --from=builder /app/packages/plugins/combat/dist packages/plugins/combat/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist
