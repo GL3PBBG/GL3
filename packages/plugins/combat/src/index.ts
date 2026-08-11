@@ -1,5 +1,5 @@
 import { definePlugin, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
@@ -285,9 +285,55 @@ const attackRoute = route({
   },
 });
 
+/**
+ * The caller's own fights, as attacker or as target. No jail or hospital gate
+ * — both default to open in the SDK and are left that way deliberately: the
+ * player most likely to read this is one who just woke up in hospital wanting
+ * to know who put them there.
+ */
+const logRoute = route({
+  method: "GET",
+  path: "/api/combat/log",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      // Bounded from the start. GET /api/mail and GET /api/notifications are
+      // both unbounded and unpaginated (docs/STATUS.md, open issue) — this
+      // does not become the third. Both directions of the OR are indexed
+      // (`combat_log_attacker_idx`, `combat_log_target_idx`, each on
+      // (player, created_at)).
+      const entries = await tx.db
+        .select()
+        .from(combatLog)
+        .where(or(eq(combatLog.attackerId, player.id), eq(combatLog.targetId, player.id)))
+        .orderBy(desc(combatLog.createdAt))
+        .limit(50);
+
+      return {
+        status: 200,
+        body: {
+          entries: entries.map((e) => ({
+            id: e.id,
+            attackerId: e.attackerId,
+            targetId: e.targetId,
+            hit: e.hit,
+            damage: e.damage,
+            fatal: e.fatal,
+            // Money crosses the wire as a decimal string, never a JSON number.
+            payout: e.payout.toString(),
+            createdAt: e.createdAt.toISOString(),
+          })),
+        },
+      };
+    });
+  },
+});
+
 export default definePlugin({
   id: "combat",
   version: "1.0.0",
   basePaths: ["/api/combat"],
-  routes: [attackRoute],
+  routes: [attackRoute, logRoute],
 });
