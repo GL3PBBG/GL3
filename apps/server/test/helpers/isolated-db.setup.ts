@@ -73,7 +73,19 @@ async function dropIsolatedDatabase(): Promise<void> {
     // for a reason nothing in the test touched. Postgres does this itself
     // with the right privileges: FORCE needs only database ownership, which
     // this role has by having created the clone.
+    //
+    // Still best-effort. FORCE terminates the other backends itself, and that
+    // termination is subject to the same privilege check as the hand-rolled
+    // sweep was — a backend this role cannot signal (an autovacuum worker on
+    // a clone that just took heavy TRUNCATE churn is the realistic one) still
+    // raises 42501 from inside DROP. That is a teardown-only problem: every
+    // test in the file has already passed by this point, so failing the file
+    // over it reports a regression that did not happen. Warn and leave the
+    // clone for the stale-clone sweep in global-setup.ts to reap on the next
+    // run, which is exactly the lifecycle stale templates already have.
     await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
+  } catch (err) {
+    console.warn(`[isolated-db] failed to drop test clone "${dbName}":`, err);
   } finally {
     await admin.end();
   }
