@@ -16,6 +16,11 @@ export interface CallPluginRouteOptions {
   playerId: string;
   body?: unknown;
   params?: unknown;
+  /**
+   * Defaults to `{}` — a route reading a setting must be given one here, the
+   * same way `bootTestServer` gets them from the `settings` table.
+   */
+  settings?: Record<string, string>;
 }
 
 /**
@@ -51,7 +56,7 @@ export async function callPluginRoute(
     db: opts.db,
     redis: opts.redis,
     queues: new Map(),
-    settings: {},
+    settings: opts.settings ?? {},
     leaderboardPrefix: opts.leaderboardPrefix,
   };
 

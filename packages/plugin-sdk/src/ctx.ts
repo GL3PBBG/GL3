@@ -141,6 +141,13 @@ export interface PluginTx {
    */
   readonly jail: { sendToJail(playerId: string, seconds: number): Promise<Date> };
   /**
+   * `sendToHospital` takes a player lock internally (ascending id order, same
+   * as `economy.applyBalanceChange` and `jail.sendToJail`), so a transaction
+   * that also moves money is already safe whichever order a plugin calls them
+   * in. Sets `health = 0` alongside the deadline.
+   */
+  readonly hospital: { sendToHospital(playerId: string, seconds: number): Promise<Date> };
+  /**
    * The lock-ordering contract every multi-row transaction in this game must
    * follow, to rule out deadlocks (`40P01`) against core and other plugins
    * touching the same rows in a different order:

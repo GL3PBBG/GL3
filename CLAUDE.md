@@ -19,8 +19,11 @@ module ports have shipped (`ranks`, `notifications`, `news`, `bank`,
 complete. The event-envelope blocker that unblocked the last of them is
 **resolved** — `tx.events.publishCore` lets a plugin publish any of the 19
 core `GameEvent` variants verbatim. `profile`, `leaderboard` and `jail`
-remain deliberate non-ports — see `docs/STATUS.md`. M4 (migration CLI) is
-planned and blocked on a MariaDB install. Suite: **71 files / 588 tests**,
+remain deliberate non-ports — see `docs/STATUS.md`. **PvP combat** has since
+shipped on `feat/pvp-combat`: the `combat` and `inventory` plugins plus core
+hospital, the first gameplay cluster that is not a port, so its tests are the
+only specification of its behaviour. M4 (migration CLI) is
+planned and blocked on a MariaDB install. Suite: **83 files / 707 tests**,
 green across repeated back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
@@ -122,8 +125,11 @@ unavailable here.
    through `lockGangAndPlayerForUpdate`; every location↔player path is
    locations-first — a single row via `lockLocationForUpdate` (bullets) or
    several via `lockLocationsForUpdate`, which sorts them ascending (travel
-   locks both its source and destination through it). Regression tests:
-   `test/gang-lock-order.test.ts`, `test/travel-lock-order.test.ts`
+   locks both its source and destination through it). Player↔player is the
+   third pair, added by combat: `lockPlayersForUpdate` dedupes and sorts
+   ascending in one statement, which is what makes A-shoots-B safe against
+   B-shoots-A. Regression tests: `test/gang-lock-order.test.ts`,
+   `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`
    (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via

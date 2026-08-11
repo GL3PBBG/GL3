@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { players } from "./identity.js";
-import { locations } from "./content.js";
+import { items, locations } from "./content.js";
 
 export const gangs = pgTable("gangs", {
   id: uuid("id").primaryKey(),
@@ -100,3 +100,32 @@ export const gameNews = pgTable("game_news", {
   body: text("body").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * One row per SHOT, not per kill — `fatal` marks the last one. Misses are
+ * logged too: "someone shot at me and missed" is information the bounty and
+ * detective clusters will both want, and it is where death attribution lives
+ * now that V2's `US_shotBy` is gone (spec §2.5 dropped it).
+ *
+ * NO `location_id`, deliberately. These FKs are taken while the transaction
+ * holds two `player_stats` rows FOR UPDATE; a `locations` FK would take
+ * FOR KEY SHARE on a location row at that point — player-then-location,
+ * the inverse of the location-first order `travel` and `bullets` follow, which
+ * closes an ABBA cycle (CLAUDE.md rule 6). The location is recoverable from
+ * context and is not worth an inverted lock order.
+ */
+export const combatLog = pgTable("combat_log", {
+  id: uuid("id").primaryKey(),
+  attackerId: uuid("attacker_id").notNull().references(() => players.id, { onDelete: "cascade" }),
+  targetId: uuid("target_id").notNull().references(() => players.id, { onDelete: "cascade" }),
+  hit: boolean("hit").notNull(),
+  damage: integer("damage").notNull().default(0),
+  fatal: boolean("fatal").notNull().default(false),
+  weaponItemId: uuid("weapon_item_id").references(() => items.id, { onDelete: "set null" }),
+  /** Cash taken from the victim. Non-zero only on a fatal row. */
+  payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  targetIdx: index("combat_log_target_idx").on(t.targetId, t.createdAt),
+  attackerIdx: index("combat_log_attacker_idx").on(t.attackerId, t.createdAt),
+}));

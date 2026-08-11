@@ -30,7 +30,13 @@
   export REDIS_URL=redis://localhost:6379
   ```
 - **Never run two full test suites at once.** Never run Redis `FLUSHALL`/`FLUSHDB` — Redis is shared across every test file and every concurrent agent.
-- **Baseline suite: 71 files / 588 tests**, green. Every task must leave it green.
+- **Call `testDb()` exactly once per test file, at module level.** `testDb()` calls `createDb()`, which opens a **new connection pool on every call** — only the module-level one is ended in `afterAll`, so a `testDb()` inside a test body leaks a pool for the rest of the run. Leaked pools are the shape that produces this repo's phantom hook timeouts. The file-level form, and the only one:
+  ```ts
+  const { db, sql: conn } = testDb();          // module level, NOT awaited
+  afterAll(async () => { await closeServer(); await conn.end(); });
+  ```
+  Seed helpers close over that `db` rather than taking it as a parameter. This plan originally had `const { db } = await testDb();` inside 59 test bodies; Task 6's implementer copied it faithfully and it was caught in review. All 59 have been removed — do not reintroduce one.
+- **Baseline suite: 76 files / 612 tests** as of Task 6's parent commit, green. Every task must leave it green. (The plan's original "71 files / 588 tests" was copied from a stale `docs/STATUS.md`; the real pre-branch baseline was 71/593. Task 15 must correct STATUS.md rather than propagate 588.)
 
 ### The eight registration sites for a new plugin package
 
@@ -133,13 +139,11 @@ import { testDb } from "./helpers/db.js";
 
 describe("loadSettings", () => {
   it("returns an empty record when the table is empty", async () => {
-    const { db } = await testDb();
     await db.delete(settings);
     expect(await loadSettings(db)).toEqual({});
   });
 
   it("reads every row into a key→value record", async () => {
-    const { db } = await testDb();
     await db.delete(settings);
     await db.insert(settings).values([
       { key: "combat.cooldown_seconds", value: "60" },
@@ -274,7 +278,6 @@ import { testDb } from "./helpers/db.js";
 
 describe("combat_log schema", () => {
   it("has the expected columns and types", async () => {
-    const { db } = await testDb();
     const rows = await db.execute(sql`
       SELECT column_name, data_type, is_nullable
       FROM information_schema.columns
@@ -299,7 +302,6 @@ describe("combat_log schema", () => {
   });
 
   it("has no location_id column (rule 6: a locations FK would invert the lock order)", async () => {
-    const { db } = await testDb();
     const rows = await db.execute(sql`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'combat_log' AND column_name = 'location_id'
@@ -308,7 +310,6 @@ describe("combat_log schema", () => {
   });
 
   it("indexes both participant columns for the log reads", async () => {
-    const { db } = await testDb();
     const rows = await db.execute(sql`
       SELECT indexname FROM pg_indexes WHERE tablename = 'combat_log'
     `);
@@ -470,14 +471,20 @@ import { players, playerStats, ranks } from "../src/db/schema/index.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "../src/game/hospital/status.js";
 import { testDb } from "./helpers/db.js";
 
+// NOTE on `.slice(-8)`, which every test helper in this plan uses: take the
+// uuid's TAIL, never `.slice(0, 8)`. A uuidv7's leading 48 bits are a
+// millisecond timestamp, so the first 8 hex chars are its top 32 bits and only
+// change every 2^16 ms (~65 seconds) — every row inserted inside the same
+// minute would collide. That is a hard failure on a unique column
+// (`players.username`, `gangs.name`) and confusing noise elsewhere.
 async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: { rankMaxHealth?: number }) {
   const id = uuidv7();
-  await db.insert(players).values({ id, username: `hp-${id.slice(0, 8)}` });
+  await db.insert(players).values({ id, username: `hp-${id.slice(-8)}` });
   let rankId: string | null = null;
   if (opts?.rankMaxHealth !== undefined) {
     rankId = uuidv7();
     await db.insert(ranks).values({
-      id: rankId, name: `r-${rankId.slice(0, 8)}`, expRequired: 0n, maxHealth: opts.rankMaxHealth,
+      id: rankId, name: `r-${rankId.slice(-8)}`, expRequired: 0n, maxHealth: opts.rankMaxHealth,
     });
   }
   await db.insert(playerStats).values({ playerId: id, health: 100, rankId });
@@ -486,13 +493,11 @@ async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: {
 
 describe("hospital status", () => {
   it("reports a free player as not hospitalised", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db);
     expect(await checkHospital(db, id)).toEqual({ hospitalised: false, until: null, remainingSeconds: 0 });
   });
 
   it("sendToHospital zeroes health and sets the deadline", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db);
 
     const until = await db.transaction((tx) => sendToHospital(tx, id, 300));
@@ -507,7 +512,6 @@ describe("hospital status", () => {
   });
 
   it("settleHospital leaves a live sentence alone", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db);
     await db.transaction((tx) => sendToHospital(tx, id, 300));
 
@@ -519,7 +523,6 @@ describe("hospital status", () => {
   });
 
   it("settleHospital restores full health once the sentence has elapsed", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db, { rankMaxHealth: 140 });
     await db.update(playerStats)
       .set({ health: 0, hospitalUntil: new Date(Date.now() - 1000) })
@@ -534,13 +537,11 @@ describe("hospital status", () => {
   });
 
   it("maxHealthFor falls back to 100 when the player has no rank", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db);
     expect(await db.transaction((tx) => maxHealthFor(tx, id))).toBe(100);
   });
 
   it("maxHealthFor reads the rank's max_health", async () => {
-    const { db } = await testDb();
     const id = await makePlayer(db, { rankMaxHealth: 175 });
     expect(await db.transaction((tx) => maxHealthFor(tx, id))).toBe(175);
   });
@@ -756,13 +757,16 @@ describe("accessInHospital gate", () => {
     });
     const body = res.json();
     token = body.token;
-    playerId = body.player.id;
+    // POST /api/auth/register answers 201 with a FLAT
+    // `{ token, playerId, username }` (auth/routes.ts:88) — there is no nested
+    // `player` object. Every test in this plan that registers a player uses
+    // this shape.
+    playerId = body.playerId;
   });
 
   afterAll(async () => { await close(); });
 
   it("defaults to true — an ungated route answers while hospitalised", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ hospitalUntil: new Date(Date.now() + 60_000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -775,7 +779,6 @@ describe("accessInHospital gate", () => {
   });
 
   it("answers 423 with retry-after when the route opts out", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ hospitalUntil: new Date(Date.now() + 60_000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -791,7 +794,6 @@ describe("accessInHospital gate", () => {
   });
 
   it("settles an elapsed sentence and lets the request through", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ hospitalUntil: new Date(Date.now() - 1000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -969,7 +971,6 @@ Create `apps/server/test/hospital.test.ts`. Copy the registration/auth preamble 
   });
 
   it("quotes a discharge cost proportional to the remaining sentence", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ hospitalUntil: new Date(Date.now() + 100_000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -987,7 +988,6 @@ Create `apps/server/test/hospital.test.ts`. Copy the registration/auth preamble 
   });
 
   it("discharges for cash, restores health, and ledgers the payment", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ cash: 500_000n, hospitalUntil: new Date(Date.now() + 60_000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -1014,7 +1014,6 @@ Create `apps/server/test/hospital.test.ts`. Copy the registration/auth preamble 
   });
 
   it("409s when the player cannot afford the discharge", async () => {
-    const { db } = await testDb();
     await db.update(playerStats)
       .set({ cash: 1n, hospitalUntil: new Date(Date.now() + 600_000), health: 0 })
       .where(eq(playerStats.playerId, playerId));
@@ -1421,7 +1420,7 @@ async function seedItem(
   effects: Record<string, unknown>,
 ): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `${itemType}-${id.slice(0, 8)}`, itemType, effects });
+  await db.insert(items).values({ id, name: `${itemType}-${id.slice(-8)}`, itemType, effects });
   return id;
 }
 
@@ -1446,11 +1445,10 @@ and the first two cases:
   });
 
   it("lists owned items with their effects, and hides zero-qty rows", async () => {
-    const { db } = await testDb();
-    const pistol = await seedItem(db, "weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
-    const gone = await seedItem(db, "consumable", { heal: 20 });
-    await grant(db, playerId, pistol, 1);
-    await grant(db, playerId, gone, 0);
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const gone = await seedItem("consumable", { heal: 20 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, gone, 0);
 
     const res = await app.inject({
       method: "GET", url: "/api/inventory",
@@ -1516,11 +1514,10 @@ Append to `apps/server/test/inventory.test.ts`:
 
 ```ts
   it("equips a weapon and an armor in one call", async () => {
-    const { db } = await testDb();
-    const pistol = await seedItem(db, "weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
-    const vest = await seedItem(db, "armor", { armor: 20 });
-    await grant(db, playerId, pistol, 1);
-    await grant(db, playerId, vest, 1);
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, vest, 1);
 
     const res = await app.inject({
       method: "PUT", url: "/api/inventory/equip",
@@ -1533,11 +1530,10 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("unequips with an explicit null and leaves an absent slot alone", async () => {
-    const { db } = await testDb();
-    const pistol = await seedItem(db, "weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
-    const vest = await seedItem(db, "armor", { armor: 20 });
-    await grant(db, playerId, pistol, 1);
-    await grant(db, playerId, vest, 1);
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, vest, 1);
     await app.inject({
       method: "PUT", url: "/api/inventory/equip",
       headers: { authorization: `Bearer ${token}` },
@@ -1555,8 +1551,7 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("409s an item the player does not own", async () => {
-    const { db } = await testDb();
-    const pistol = await seedItem(db, "weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
 
     const res = await app.inject({
       method: "PUT", url: "/api/inventory/equip",
@@ -1569,9 +1564,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("400s armor in the weapon slot", async () => {
-    const { db } = await testDb();
-    const vest = await seedItem(db, "armor", { armor: 20 });
-    await grant(db, playerId, vest, 1);
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, vest, 1);
 
     const res = await app.inject({
       method: "PUT", url: "/api/inventory/equip",
@@ -1584,11 +1578,10 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("409s a weapon whose minRankExp exceeds the player's exp", async () => {
-    const { db } = await testDb();
-    const cannon = await seedItem(db, "weapon", {
+    const cannon = await seedItem("weapon", {
       accuracy: 90, damageMin: 50, damageMax: 90, minRankExp: 1_000_000,
     });
-    await grant(db, playerId, cannon, 1);
+    await grant(playerId, cannon, 1);
     await db.update(playerStats).set({ exp: 10n }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
@@ -1741,9 +1734,8 @@ Append to `apps/server/test/inventory.test.ts`:
 
 ```ts
   it("heals a wounded player and consumes one unit", async () => {
-    const { db } = await testDb();
-    const medkit = await seedItem(db, "consumable", { heal: 30 });
-    await grant(db, playerId, medkit, 2);
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 2);
     await db.update(playerStats).set({ health: 50 }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
@@ -1756,9 +1748,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("caps the heal at the rank max health", async () => {
-    const { db } = await testDb();
-    const megadose = await seedItem(db, "consumable", { heal: 999 });
-    await grant(db, playerId, megadose, 1);
+    const megadose = await seedItem("consumable", { heal: 999 });
+    await grant(playerId, megadose, 1);
     await db.update(playerStats).set({ health: 90 }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
@@ -1771,9 +1762,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("409s a player already at full health", async () => {
-    const { db } = await testDb();
-    const medkit = await seedItem(db, "consumable", { heal: 30 });
-    await grant(db, playerId, medkit, 1);
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 1);
     await db.update(playerStats).set({ health: 100 }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
@@ -1786,9 +1776,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("400s a non-consumable", async () => {
-    const { db } = await testDb();
-    const pistol = await seedItem(db, "weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
-    await grant(db, playerId, pistol, 1);
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    await grant(playerId, pistol, 1);
     await db.update(playerStats).set({ health: 50 }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
@@ -1801,9 +1790,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("never drives qty below zero", async () => {
-    const { db } = await testDb();
-    const medkit = await seedItem(db, "consumable", { heal: 10 });
-    await grant(db, playerId, medkit, 1);
+    const medkit = await seedItem("consumable", { heal: 10 });
+    await grant(playerId, medkit, 1);
     await db.update(playerStats).set({ health: 10 }).where(eq(playerStats.playerId, playerId));
 
     const first = await app.inject({
@@ -1825,9 +1813,8 @@ Append to `apps/server/test/inventory.test.ts`:
   });
 
   it("423s a use attempt from hospital, so heal items cannot clear a sentence", async () => {
-    const { db } = await testDb();
-    const medkit = await seedItem(db, "consumable", { heal: 30 });
-    await grant(db, playerId, medkit, 1);
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 1);
     await db.update(playerStats)
       .set({ health: 0, hospitalUntil: new Date(Date.now() + 60_000) })
       .where(eq(playerStats.playerId, playerId));
@@ -1925,35 +1912,48 @@ Add `useRoute` to the manifest's `routes` array.
 
 - [ ] **Step 4: Seed the starter items**
 
-In `apps/server/src/db/seed.ts`, add two `items` rows following the file's existing insert style and its idempotency convention (`onConflictDoNothing` or the existing guard — match what neighbouring seeds do, and use fixed UUIDs so a re-run does not duplicate):
+In `apps/server/src/db/seed.ts`, add a `seedItems` function following the file's
+**actual** convention, verified against the source: every seed function generates
+ids with `uuidv7()` and guards re-runs with an "is this table already populated?"
+early return — **not** fixed UUID literals and **not** `onConflictDoNothing()`.
+Match `seedCrimes` / `seedRanks` / `seedLocations` exactly:
 
 ```ts
-// Two starter items so equip is not inert before a shop exists. Fixed ids so
-// re-seeding is idempotent, matching the other content seeds in this file.
-const STARTER_PISTOL_ID = "01920000-0000-7000-8000-000000000001";
-const STARTER_MEDKIT_ID = "01920000-0000-7000-8000-000000000002";
+/**
+ * Two starter items so equip is not inert before a shop exists: one weapon to
+ * fight with, one consumable to heal with.
+ *
+ * Same shape as the other seeds in this file — uuidv7 ids and an
+ * already-populated early return, so a re-run is a no-op rather than a
+ * duplicate.
+ */
+export async function seedItems(db: Db): Promise<void> {
+  const existing = await db.select({ id: items.id }).from(items).limit(1);
+  if (existing.length > 0) return;
 
-await db.insert(items).values([
-  {
-    id: STARTER_PISTOL_ID,
-    name: "Rusty Pistol",
-    itemType: "weapon",
-    effects: {
-      accuracy: 55, damageMin: 8, damageMax: 18,
-      bulletsPerShot: 1, critChance: 5, critMultiplier: 1.5,
-      armorPierce: 0, minRankExp: 0,
+  await db.insert(items).values([
+    {
+      id: uuidv7(),
+      name: "Rusty Pistol",
+      itemType: "weapon",
+      effects: {
+        accuracy: 55, damageMin: 8, damageMax: 18,
+        bulletsPerShot: 1, critChance: 5, critMultiplier: 1.5,
+        armorPierce: 0, minRankExp: 0,
+      },
     },
-  },
-  {
-    id: STARTER_MEDKIT_ID,
-    name: "First Aid Kit",
-    itemType: "consumable",
-    effects: { heal: 25 },
-  },
-]).onConflictDoNothing();
+    { id: uuidv7(), name: "First Aid Kit", itemType: "consumable", effects: { heal: 25 } },
+  ]);
+}
 ```
 
-Confirm the ids are valid UUIDs by running the seed; if the existing seeds use `uuidv7()` with an id map instead, follow that pattern rather than these literals.
+Add `items` to the file's schema import, and call `seedItems` from wherever
+`seedCrimes` / `seedRanks` / `seedLocations` are called (`apps/server/src/index.ts`
+imports all three — follow that).
+
+Note the consequence of the populated-guard convention: because the ids are
+generated, **no test may hardcode a starter item's id**. A test that needs one
+looks it up by `name`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -2241,17 +2241,30 @@ export interface CombatSettings {
  * Every key has a default, so a fresh database with an empty `settings` table
  * still plays. A malformed value falls back rather than throwing: `settings`
  * is admin-edited free text and a typo must not take the route down.
+ *
+ * The blank check is load-bearing, not defensive noise. BOTH parsers coerce an
+ * empty or whitespace-only string to ZERO rather than rejecting it —
+ * `Number("") === 0` and `BigInt("") === 0n` — and zero passes the `>= 0`
+ * guard, so without this line a cleared setting field silently means "zero"
+ * instead of "use the default". That is not hypothetical: an empty
+ * `combat.newbie_exp_threshold` would disable newbie protection for the whole
+ * game, and an empty `combat.unarmed.accuracy` would make every unarmed
+ * attack miss forever. Both fail silently, with no error anywhere.
  */
+function blank(raw: string | null): raw is null {
+  return raw === null || raw.trim() === "";
+}
+
 function num(get: (key: string) => string | null, key: string, fallback: number): number {
   const raw = get(key);
-  if (raw === null) return fallback;
+  if (blank(raw)) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
 function big(get: (key: string) => string | null, key: string, fallback: bigint): bigint {
   const raw = get(key);
-  if (raw === null) return fallback;
+  if (blank(raw)) return fallback;
   try {
     const parsed = BigInt(raw);
     return parsed >= 0n ? parsed : fallback;
@@ -2384,7 +2397,7 @@ async function makeAttackable(
 ): Promise<string> {
   const locationId = uuidv7();
   await db.insert(locations).values({
-    id: locationId, name: `loc-${locationId.slice(0, 8)}`,
+    id: locationId, name: `loc-${locationId.slice(-8)}`,
     travelCost: 0n, travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 1n,
   });
   await db.update(playerStats)
@@ -2399,7 +2412,7 @@ async function equipWeapon(
   playerId: string, effects: Record<string, unknown>,
 ): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `w-${id.slice(0, 8)}`, itemType: "weapon", effects });
+  await db.insert(items).values({ id, name: `w-${id.slice(-8)}`, itemType: "weapon", effects });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));
   return id;
@@ -2419,7 +2432,6 @@ The cases:
 
 ```ts
   it("400s an attack on yourself", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     const res = await attack(attackerId);
     expect(res.statusCode).toBe(400);
@@ -2427,7 +2439,6 @@ The cases:
   });
 
   it("404s an unknown target", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     const res = await attack(uuidv7());
     expect(res.statusCode).toBe(404);
@@ -2435,7 +2446,6 @@ The cases:
   });
 
   it("409s a hospitalised target", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.update(playerStats)
       .set({ hospitalUntil: new Date(Date.now() + 60_000), health: 0 })
@@ -2446,7 +2456,6 @@ The cases:
   });
 
   it("409s a jailed target", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.update(playerStats)
       .set({ jailedUntil: new Date(Date.now() + 60_000) })
@@ -2457,11 +2466,10 @@ The cases:
   });
 
   it("409s a target in another location", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     const elsewhere = uuidv7();
     await db.insert(locations).values({
-      id: elsewhere, name: `far-${elsewhere.slice(0, 8)}`,
+      id: elsewhere, name: `far-${elsewhere.slice(-8)}`,
       travelCost: 0n, travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 1n,
     });
     await db.update(playerStats).set({ locationId: elsewhere })
@@ -2472,10 +2480,9 @@ The cases:
   });
 
   it("409s a gang mate", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     const gangId = uuidv7();
-    await db.insert(gangs).values({ id: gangId, name: `g-${gangId.slice(0, 8)}`, bossPlayerId: attackerId });
+    await db.insert(gangs).values({ id: gangId, name: `g-${gangId.slice(-8)}`, bossPlayerId: attackerId });
     await db.insert(gangMembers).values([
       { gangId, playerId: attackerId }, { gangId, playerId: targetId },
     ]);
@@ -2487,7 +2494,6 @@ The cases:
   });
 
   it("409s when the TARGET is below the newbie threshold", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, targetId));
     const res = await attack(targetId);
@@ -2496,7 +2502,6 @@ The cases:
   });
 
   it("409s when the ATTACKER is below the newbie threshold — protection is mutual", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, attackerId));
     const res = await attack(targetId);
@@ -2505,7 +2510,6 @@ The cases:
   });
 
   it("409s when the attacker is out of bullets", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 1, damageMax: 1, bulletsPerShot: 5 });
     await db.update(playerStats).set({ bullets: 4n }).where(eq(playerStats.playerId, attackerId));
@@ -2515,7 +2519,6 @@ The cases:
   });
 
   it("429s a second attack inside the cooldown", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 1, damageMax: 1 });
     const first = await attack(targetId);
@@ -2527,7 +2530,6 @@ The cases:
   });
 
   it("burns the cooldown even when the attack is illegal", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 1, damageMax: 1 });
     await db.update(playerStats)
@@ -2543,7 +2545,6 @@ The cases:
   });
 
   it("debits bullets on a miss", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 0, damageMin: 5, damageMax: 5, bulletsPerShot: 3 });
     await db.update(playerStats).set({ bullets: 10n }).where(eq(playerStats.playerId, attackerId));
@@ -2751,7 +2752,6 @@ Append to `apps/server/test/combat.test.ts`:
 
 ```ts
   it("lands a pinned hit and reduces the target's health", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 25, damageMax: 25 });
 
@@ -2767,7 +2767,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("subtracts the target's equipped armor", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 30, damageMax: 30 });
     const vest = uuidv7();
@@ -2781,7 +2780,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("reports a fully-absorbed hit as a hit with zero damage, not a miss", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 5, damageMax: 5 });
     const plate = uuidv7();
@@ -2795,7 +2793,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("applies armorPierce against the target's armor", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, {
       accuracy: 100, damageMin: 30, damageMax: 30, armorPierce: 10,
@@ -2811,7 +2808,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("crits when critChance is pinned to 100", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, {
       accuracy: 100, damageMin: 20, damageMax: 20, critChance: 100, critMultiplier: 2,
@@ -2823,7 +2819,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("uses the unarmed profile when nothing is equipped", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.update(playerStats).set({ weaponItemId: null }).where(eq(playerStats.playerId, attackerId));
 
@@ -2839,7 +2834,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("logs every shot, hit or miss", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 7, damageMax: 7 });
 
@@ -2853,7 +2847,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("publishes player.attacked to the attacker, with damage 0 on a miss", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 0, damageMin: 5, damageMax: 5 });
 
@@ -2998,7 +2991,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
 
 ```ts
   it("kills, takes all on-hand cash, spares the bank, and hospitalises", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
     await db.update(playerStats).set({ cash: 0n }).where(eq(playerStats.playerId, attackerId));
@@ -3023,7 +3015,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
   });
 
   it("ledgers both sides of the transfer", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
     await db.update(playerStats).set({ cash: 0n }).where(eq(playerStats.playerId, attackerId));
@@ -3040,7 +3031,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
   });
 
   it("writes a fatal log row carrying the payout", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
     await db.update(playerStats).set({ cash: 5_000n }).where(eq(playerStats.playerId, targetId));
@@ -3053,7 +3043,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
   });
 
   it("publishes player.killed after player.attacked", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
 
@@ -3065,7 +3054,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
   });
 
   it("kills a victim with no cash without writing a spurious ledger row", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
     await db.update(playerStats).set({ cash: 0n }).where(eq(playerStats.playerId, targetId));
@@ -3078,7 +3066,6 @@ Create `apps/server/test/combat-kill.test.ts`. Reuse the two-player preamble and
   });
 
   it("blocks a follow-up attack on the now-hospitalised victim", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await equipWeapon(db, attackerId, { accuracy: 100, damageMin: 500, damageMax: 500 });
 
@@ -3202,7 +3189,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("returns shots both taken and received, newest first", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     // Two rows inserted directly so ordering is deterministic without
     // fighting the cooldown.
@@ -3227,7 +3213,6 @@ Append to `apps/server/test/combat.test.ts`:
   });
 
   it("caps the log at 50 entries", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, attackerId, targetId);
     await db.insert(combatLog).values(
       Array.from({ length: 60 }, (_, i) => ({
@@ -3333,7 +3318,6 @@ Create `apps/server/test/combat-lock-order.test.ts`. Two players in one location
 
 ```ts
   it("survives A-shoots-B and B-shoots-A fired simultaneously", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, playerA, playerB);
     await equipWeapon(db, playerA, { accuracy: 100, damageMin: 1, damageMax: 1 });
     await equipWeapon(db, playerB, { accuracy: 100, damageMin: 1, damageMax: 1 });
@@ -3399,7 +3383,6 @@ Create `apps/server/test/combat-concurrency.test.ts`. Three players: two attacke
 
 ```ts
   it("pays exactly one killer when two shots land on a 1-hp victim", async () => {
-    const { db } = await testDb();
     await makeAttackable(db, killer1, victim);
     await makeAttackable(db, killer2, victim);
     await equipWeapon(db, killer1, { accuracy: 100, damageMin: 50, damageMax: 50 });

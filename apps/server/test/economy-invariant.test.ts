@@ -1,11 +1,20 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { crimes, locations, players, playerStats, transactions } from "../src/db/schema/index.js";
+import {
+  crimes,
+  items,
+  locations,
+  playerItems,
+  players,
+  playerStats,
+  transactions,
+} from "../src/db/schema/index.js";
 import { seedCrimes, seedLocations, seedRanks } from "../src/db/seed.js";
 import bankPlugin from "@gl3/plugin-bank";
 import bulletsPlugin from "@gl3/plugin-bullets";
+import combatPlugin from "@gl3/plugin-combat";
 import travelPlugin from "@gl3/plugin-travel";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
@@ -52,6 +61,29 @@ beforeAll(async () => {
     await db.insert(playerStats).values({ playerId: id, cash: STARTING_CASH });
     playerIds.push(id);
   }
+
+  // Combat's preconditions that are the same for every kill op: an equipped
+  // weapon and enough exp to clear newbie protection. Neither is money, so
+  // seeding them with raw statements leaves `sum(ledger) == balance`
+  // untouched — the payout is the only part of combat that moves cash, and it
+  // goes through `applyBalanceChange` like every other path here.
+  const weaponId = uuidv7();
+  await db.insert(items).values({
+    id: weaponId,
+    name: `invariant-weapon-${weaponId.slice(-8)}`,
+    itemType: "weapon",
+    // Accuracy 100 and a flat 100 damage against a full-health target: every
+    // shot lands and every shot kills, so the payout runs on every kill op
+    // rather than on whatever subset the dice allow. A sweep whose money path
+    // fires one time in three is a weaker test for no gain in realism —
+    // combat-resolve.test.ts is where the roll itself is exercised.
+    effects: { accuracy: 100, damageMin: 100, damageMax: 100 },
+  });
+  await db.insert(playerItems).values(playerIds.map((id) => ({ playerId: id, itemId: weaponId, qty: 1 })));
+  await db
+    .update(playerStats)
+    .set({ weaponItemId: weaponId, exp: 1000n })
+    .where(inArray(playerStats.playerId, playerIds));
 });
 afterAll(async () => {
   // Best-effort: only ever removes this run's own namespaced keys, never
@@ -72,6 +104,17 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/**
+ * NOT covered here: hospital's paid discharge (`hospital.discharge`), the one
+ * other money path added by the PvP work. It is a CORE route, not a plugin
+ * route, so `callPluginRoute` cannot drive it and this file boots no server to
+ * `app.inject` against. Faking it with a direct `applyBalanceChange` would
+ * prove only that the ledger works, which the `points` op already covers.
+ * `sum(ledger) == balance` for that path is asserted directly in
+ * `test/hospital.test.ts` ("discharges for cash, restores health, and ledgers
+ * the payment"), which seeds its starting cash through the ledger for exactly
+ * that reason.
+ */
 describe("economy invariant across every M2 money path", () => {
   // 1000 sequential in-process DB ops comfortably clears the default 5s
   // vitest timeout under load; the brief's own "well under a minute" budget
@@ -82,9 +125,9 @@ describe("economy invariant across every M2 money path", () => {
 
     // Op-type/outcome tallies purely for the assertion below and the task
     // report — not part of the invariant itself.
-    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points"] as const;
-    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0 };
-    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0 };
+    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points", "kill"] as const;
+    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0 };
+    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0 };
 
     for (let i = 0; i < OP_COUNT; i += 1) {
       const playerId = pick(playerIds);
@@ -131,6 +174,44 @@ describe("economy invariant across every M2 money path", () => {
           // code path.
           await callPluginRoute(bulletsPlugin, "POST", "/api/bullets/buy", {
             db, redis, leaderboardPrefix, playerId, body: { quantity },
+          });
+        } else if (opName === "kill") {
+          // The kill payout is the first money movement in the game that is a
+          // transfer between two players rather than a player and the house,
+          // so it is the one path where a bug could balance the ATTACKER's
+          // ledger while leaving the victim's short — the per-player assertion
+          // below is what catches that.
+          const victimId = pick(playerIds.filter((id) => id !== playerId));
+          // Every precondition forced, all of them non-money columns: same
+          // location, both out of hospital and jail, full health (100 damage
+          // then kills outright), bullets in hand. All seven of the route's
+          // legality rules are satisfied deterministically, which is why none
+          // of combat's error codes joins the accept-list below — a
+          // PluginError from here is a real failure, not an expected reject.
+          await db
+            .update(playerStats)
+            .set({
+              locationId: pick(locationIds),
+              health: 100,
+              bullets: 100n,
+              hospitalUntil: null,
+              jailedUntil: null,
+            })
+            .where(inArray(playerStats.playerId, [playerId, victimId]));
+          // Targeted DEL of this attacker's own key, never FLUSHDB — Redis is
+          // shared with every other file. The sweep is single-threaded, so
+          // nothing can re-take the cooldown between here and the call.
+          await redis.del(cooldownKey(playerId, "combat.attack"));
+          await callPluginRoute(combatPlugin, "POST", "/api/combat/attack/:targetId", {
+            db, redis, leaderboardPrefix, playerId,
+            params: { targetId: victimId },
+            // Pinned rather than left to the 100n default: if that default
+            // ever rises above the seeded exp, every kill op would answer
+            // `protected`, and this op's coverage would vanish behind a green
+            // run. Written prefixed, as the `settings` table stores it: the
+            // plugin asks for the bare `newbie_exp_threshold` and the SDK
+            // prepends its own id.
+            settings: { "combat.newbie_exp_threshold": "100" },
           });
         } else {
           const direction = rand() < 0.5 ? "credit" : "debit";
@@ -190,6 +271,20 @@ describe("economy invariant across every M2 money path", () => {
     // still satisfy the other kinds and pass silently with zero travel
     // coverage — assert it moved at least once.
     expect(succeeded.travel).toBeGreaterThan(0);
+    // Kills throw nothing by construction (see the op above), so this only
+    // guards the op being picked at all — a future OP_NAMES edit that drops
+    // `kill` would otherwise leave the transfer path silently uncovered.
+    expect(succeeded.kill).toBe(attempted.kill);
+    expect(succeeded.kill).toBeGreaterThan(0);
+    // A succeeded kill is not the same as money moving: a victim who is
+    // already broke pays out 0, and combat skips both ledger writes at zero.
+    // Without this, a run where every victim happened to be empty would count
+    // 170 kills and exercise the transfer not once.
+    const payouts = await db
+      .select({ amount: transactions.amount })
+      .from(transactions)
+      .where(eq(transactions.reason, "combat.kill_payout"));
+    expect(payouts.filter((p) => p.amount > 0n).length).toBeGreaterThan(0);
 
     for (const playerId of playerIds) {
       const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

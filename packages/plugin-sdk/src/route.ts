@@ -12,6 +12,13 @@ export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny> {
   auth?: "player" | "public";
   /** V2 module.json parity. Default true — only actions gate on jail. */
   accessInJail?: boolean;
+  /**
+   * Whether the route answers while the player is in hospital. Defaults to
+   * `true`, so every route that predates the hospital facility is unaffected.
+   * An action a wounded player should not be able to take sets `false` and
+   * the loader answers 423 + `retry-after`.
+   */
+  accessInHospital?: boolean;
   params?: P;
   body?: B;
   handler: (ctx: PluginCtx, input: { params: z.infer<P>; body: z.infer<B> }) => Promise<RouteResult>;
@@ -29,6 +36,7 @@ export interface PluginRoute {
   path: string;
   auth: "player" | "public";
   accessInJail: boolean;
+  accessInHospital: boolean;
   params: z.ZodTypeAny;
   body: z.ZodTypeAny;
   handler(ctx: PluginCtx, input: { params: unknown; body: unknown }): Promise<RouteResult>;
@@ -42,6 +50,7 @@ export function route<P extends z.ZodTypeAny = z.ZodUnknown, B extends z.ZodType
     path: def.path,
     auth: def.auth ?? "player",
     accessInJail: def.accessInJail ?? true,
+    accessInHospital: def.accessInHospital ?? true,
     params: def.params ?? z.unknown(),
     body: def.body ?? z.unknown(),
     handler: def.handler,
