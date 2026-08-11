@@ -187,6 +187,7 @@ export default defineWorkspace([
         "test/plugin-runtime-schema.test.ts",
         "test/settings-load.test.ts",
         "test/combat-log-schema.test.ts",
+        "test/hospital-status.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
