@@ -1,6 +1,47 @@
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
 import { and, eq, gt } from "drizzle-orm";
+import {
+  ArmorEffectsSchema,
+  ConsumableEffectsSchema,
+  ITEM_TYPE_ARMOR,
+  ITEM_TYPE_CONSUMABLE,
+  ITEM_TYPE_WEAPON,
+  WeaponEffectsSchema,
+} from "./effects.js";
 import { items, playerItems, playerStats } from "./schema.js";
+
+/**
+ * `items.effects` is jsonb an admin can put anything in, so it is parsed
+ * rather than forwarded raw. Parsing also fills the weapon defaults
+ * (`bulletsPerShot`, `critChance`, `critMultiplier`, `armorPierce`,
+ * `minRankExp`), so a client rendering weapon stats sees the same numbers
+ * combat will use instead of having to know the defaults itself — a migrated
+ * V2 item carries none of them.
+ *
+ * `item_type` is unconstrained text (`content.ts:64`) and V2 shipped types
+ * beyond these three, so an unrecognised type is passed through untouched:
+ * this plugin has no schema for it and nothing here interprets it. A KNOWN
+ * type that fails to parse yields `null`, which is the same "unusable rather
+ * than a 500" answer the equip route gives.
+ */
+function readEffects(itemType: string, effects: unknown): unknown {
+  switch (itemType) {
+    case ITEM_TYPE_WEAPON: {
+      const parsed = WeaponEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_ARMOR: {
+      const parsed = ArmorEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_CONSUMABLE: {
+      const parsed = ConsumableEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    default:
+      return effects;
+  }
+}
 
 const listRoute = route({
   method: "GET",
@@ -33,7 +74,7 @@ const listRoute = route({
       return {
         status: 200,
         body: {
-          items: owned,
+          items: owned.map((row) => ({ ...row, effects: readEffects(row.itemType, row.effects) })),
           equipped: {
             weaponItemId: stats?.weaponItemId ?? null,
             armorItemId: stats?.armorItemId ?? null,
