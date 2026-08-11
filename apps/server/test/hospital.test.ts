@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { playerStats, transactions } from "../src/db/schema/index.js";
+import { playerStats, settings, transactions } from "../src/db/schema/index.js";
 import { applyBalanceChange } from "../src/economy/ledger.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -109,5 +110,78 @@ describe("hospital routes", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "insufficient_funds" });
+  });
+});
+
+/**
+ * Every other test in this file runs with the setting ABSENT, so none of them
+ * reach a fallback branch. These do: each boots its own app against a row that
+ * is present but unusable, and asserts the DEFAULT cost is quoted.
+ *
+ * The blank case is the one that actually shipped broken — `BigInt("")`
+ * returns 0n rather than throwing, so it slipped past the try/catch and made
+ * discharge free. The other two prove the branches that were merely assumed
+ * to work.
+ */
+describe.each([
+  { label: "blank", value: "" },
+  { label: "non-numeric", value: "abc" },
+  { label: "negative", value: "-5" },
+])("unusable hospital.discharge_cost_per_second ($label)", ({ value }) => {
+  it("quotes the default cost rather than parsing the setting", async () => {
+    // Settings are read once at boot (loadSettings' own doc comment), so this
+    // needs a fresh app built AFTER the row lands — the shared `app` from
+    // beforeEach already booted against an empty settings table.
+    await db.insert(settings).values({ key: "hospital.discharge_cost_per_second", value });
+
+    const { buildApp } = await import("../src/app.js");
+    const { loadConfig } = await import("../src/config.js");
+    const { createRedis } = await import("../src/redis.js");
+    const { loadPlugins } = await import("../src/plugins/loader.js");
+    const { withCorePlugins } = await import("../src/plugins/core-plugins.js");
+    const { loadSettings } = await import("../src/settings/load.js");
+
+    const config = loadConfig({ ...process.env, NODE_ENV: "test" });
+    const redis = createRedis(config.redisUrl);
+    // uuid TAIL, not head: a uuidv7's leading bytes are a millisecond
+    // timestamp and collide for rows created within the same ~65s.
+    const suffix = uuidv7().slice(-12);
+    const leaderboardPrefix = `hospital-fallback-${suffix}`;
+    const loaded = await loadPlugins(
+      { db, redis, settings: await loadSettings(db), leaderboardPrefix },
+      withCorePlugins([]),
+      `plugin-hospital-fallback-${suffix}-`,
+    );
+    const freshApp = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loaded });
+
+    try {
+      const reg = await freshApp.inject({
+        method: "POST", url: "/api/auth/register",
+        payload: { username: `HospFb${suffix}`, password: "hunter2hunter2" },
+      });
+      const { token: freshToken, playerId: freshPlayerId } = reg.json();
+
+      await db.update(playerStats)
+        .set({ hospitalUntil: new Date(Date.now() + 100_000), health: 0 })
+        .where(eq(playerStats.playerId, freshPlayerId));
+
+      const res = await freshApp.inject({
+        method: "GET", url: "/api/hospital",
+        headers: { authorization: `Bearer ${freshToken}` },
+      });
+
+      const body = res.json();
+      expect(body.hospitalised).toBe(true);
+      // 100s remaining × the default 1000/second. A bare `BigInt("")` would
+      // yield 0 here, and an honoured "-5" would yield a negative. Same
+      // one-second-drift allowance as the non-blank quote test above.
+      expect(BigInt(body.dischargeCost)).toBeGreaterThanOrEqual(99_000n);
+      expect(BigInt(body.dischargeCost)).toBeLessThanOrEqual(100_000n);
+    } finally {
+      await freshApp.close();
+      for (const w of loaded.workers) await w.close();
+      for (const q of loaded.queues.values()) await q.close();
+      redis.disconnect();
+    }
   });
 });
