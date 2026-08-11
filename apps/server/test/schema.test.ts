@@ -109,9 +109,9 @@ describe("core schema", () => {
     const byRule = Object.fromEntries(rows.map((r) => [r.confdeltype, Number(r.count)]));
     const totalForeignKeys = Object.values(byRule).reduce((sum, n) => sum + n, 0);
 
-    expect(totalForeignKeys).toBe(44);
-    expect(byRule["c"]).toBe(28); // ON DELETE CASCADE
-    expect(byRule["n"]).toBe(16); // ON DELETE SET NULL
+    expect(totalForeignKeys).toBe(47);
+    expect(byRule["c"]).toBe(30); // ON DELETE CASCADE
+    expect(byRule["n"]).toBe(17); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
       SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'
@@ -134,7 +134,7 @@ describe("core schema", () => {
         WHERE c.contype = 'p' AND c.conname = i.indexname
       )
     `);
-    expect(Number(count)).toBe(29);
+    expect(Number(count)).toBe(31);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
