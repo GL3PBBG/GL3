@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-11, M5 stage 10 (gangs port).
-Branch: `feat/plugin-gangs-port`.
+Last updated: 2026-08-11, M5 — PvP combat (the first non-port gameplay).
+Branch: `feat/pvp-combat`.
 
 ---
 
@@ -14,9 +14,11 @@ Branch: `feat/plugin-gangs-port`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) is the first gameplay cluster that is *not* a port |
 
-**Suite: 71 files / 588 tests**, green across repeated back-to-back runs.
+**Suite: 83 files / 707 tests**, green across repeated back-to-back runs.
+(The pre-`feat/pvp-combat` baseline was 71 files / 593 tests; the **588** this
+line carried through the gangs port was already stale when it was written.)
 The `mail` port added no new test file — the existing `mail.test.ts` is
 **unchanged** and is the proof (all `app.inject`, no service block, zero
 edits to the test file; the routes are byte-identical and served at the same
@@ -53,6 +55,16 @@ membership change appends a gang log row.
 
 They can also send threaded mail, read and mark notifications, view any player's
 public profile, and read game news.
+
+They can now shoot each other. A player equips a weapon and armor from their
+inventory, then fires one shot per request at another player in the same
+location — accuracy decides whether it lands, damage minus the target's armor
+decides how much it takes off, and both sides get a `player.attacked` event
+live over the WebSocket. A killing shot takes the victim's **on-hand** cash
+(their bank is untouched) and puts them in hospital for a fixed sentence.
+From hospital they can wait it out, use a heal item to restore health, or pay
+cash to be discharged early — heal items restore health but do **not** end the
+sentence.
 
 Every balance movement anywhere is an append-only ledger row inside the same
 transaction as the balance update.
@@ -597,6 +609,94 @@ test covers it; no code was changed to produce or suppress it.
 
 This closes M5's module-port track: nine of nine.
 
+### PvP combat — the first gameplay that is not a port
+
+Design: `docs/superpowers/specs/2026-08-11-pvp-combat-design.md`. Plan:
+`docs/superpowers/plans/2026-08-11-pvp-combat.md`, 15 tasks, branch
+`feat/pvp-combat`.
+
+Nine ports preserved core's wire contract byte for byte, and every one of
+them could be checked against a predecessor. This cluster has none. It is new
+GL3-native gameplay written on GL2-derived columns (`items.effects`,
+`player_stats.weapon_item_id` / `armor_item_id` / `hospital_until`), so the
+schema is the only fixed constraint — the behaviour was decided here and the
+tests are the whole specification.
+
+**What shipped:**
+
+- **`packages/plugins/combat`** — `POST /api/combat/attack/:targetId` (one
+  shot per request; hit roll against accuracy, then damage minus armor) and
+  `GET /api/combat/log`. All seven target-legality rules: not yourself, not
+  hospitalised, not jailed, same location, not a gang-mate, both sides above
+  the newbie exp threshold, enough bullets. A kill transfers the victim's
+  **on-hand cash only** — the bank is safe, which is what makes depositing
+  real counterplay — and sends them to hospital.
+- **`packages/plugins/inventory`** — `GET /api/inventory`,
+  `PUT /api/inventory/equip`, `POST /api/inventory/use`. Equip and heal live
+  here, not in combat: they are inventory operations that combat happens to
+  read the result of.
+- **Core hospital** (`apps/server/src/game/hospital/`) — `GET /api/hospital`
+  and `POST /api/hospital/discharge` (paid, ledgered as
+  `hospital.discharge`), plus `settleHospital`, which clears an elapsed
+  sentence on the player's next request.
+- **Core `combat_log`** (`db/schema/social.ts`) with
+  `combat_log_attacker_idx` and `combat_log_target_idx`, each on
+  `(player, created_at)`, so the log route's attacker-or-target OR is
+  index-covered in both directions.
+- **SDK `accessInHospital`** (the route gate, alongside `accessInJail`) and
+  **`tx.hospital.sendToHospital`**.
+- **Settings are actually loaded.** `ctx.settings.get()` was dead surface
+  until this work: `PluginCtxDeps.settings` was `{}` at every construction
+  site, so every plugin that read a setting got `null` and silently took its
+  default. `buildApp` and `bootTestServer` now load the `settings` table at
+  boot (`257a91b`, `e9450b7`).
+
+**Jail and hospital are core state facilities, not plugins.** A facility
+gates *every* plugin's routes, and that gate has to live with the route
+loader — a third-party plugin can hold a player through a ctx capability
+(`tx.hospital.sendToHospital`) but cannot make other plugins' routes refuse
+them. Combat is a plugin because it is gameplay; hospital is core because it
+is a rule about all gameplay.
+
+**`combat_log` has no `location_id`, deliberately** — this is the entry a
+future reader is most likely to "fix". Adding one makes every log insert take
+a `FOR KEY SHARE` on the `locations` row (CLAUDE.md rule 6: a foreign key is
+a lock), inside a transaction that already holds two `player_stats` rows FOR
+UPDATE. That is a player→location order, the exact inverse of the
+locations-first order bullets and travel are held to, and it would reopen the
+deadlock class those two were fixed for. The location a fight happened in is
+recoverable from the participants; the lock order is not negotiable.
+
+**Player↔player is now a live lock pair** — the third alongside gang↔player
+and location↔player. Every combat path takes both rows through
+`tx.locks.player([...])` → `lockPlayersForUpdate`, which dedupes, sorts
+ascending and locks in one ordered statement, so A-shoots-B and B-shoots-A
+cannot form an ABBA cycle. The three orders do not intersect: combat takes no
+gang or location lock at all, only reads.
+
+Two regression tests, both demonstrated red before being accepted:
+
+- `test/combat-lock-order.test.ts` — A→B and B→A released together from a
+  barrier that holds both rows in ascending order, so the interleaving is
+  forced rather than hoped for. Under caller-order locking this produces a
+  real `40P01` (captured in `/var/log/postgresql/postgresql-16-main.log`,
+  surfacing as HTTP 500). The barrier deliberately locks in the *same* order
+  the shipped helper does: an adversary locking B-then-A would deadlock the
+  correct code too, and would prove the opposite of what it claims.
+- `test/combat-concurrency.test.ts` — two killers, one victim on 1 hp holding
+  300k. Exactly one 200 and one 409 `target_hospitalised`, one `combat_log`
+  row, and `c1 + c2 == 300_000n`. Without the lock the second payout was
+  stopped only by the ledger's overdraw guard, not by anything in the route.
+
+`test/economy-invariant.test.ts` gained a **`kill`** op — 171 of 1000 ops in
+the recorded run, all succeeding, 94 of them with a non-zero payout. It is
+the first money movement in the game that is a transfer between two players
+rather than between a player and the house, which is the case where a bug
+could balance the attacker's ledger and leave the victim's short. Hospital's
+paid discharge is **not** in that sweep and the file says so: it is a core
+route, `callPluginRoute` cannot drive it, and `hospital.test.ts` already
+asserts `sum(ledger) == balance` for it directly.
+
 ## Starting M4
 
 Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
@@ -782,6 +882,29 @@ web image serves only the SPA's own assets.
   `crimes` (one job); neither `mail` nor `gangs` declares any job, so nine of
   nine module ports have now shipped without triggering it — still open for
   the first plugin that declares two.
+- **`GET /api/combat/log` is bounded at 50 but not paginated.** Bounded from
+  the first commit, deliberately — unlike mail and notifications above — but
+  there is no way to page further back, so a player's older fights are simply
+  unreachable over the API.
+- **Settings are read once, at boot.** `buildApp` loads the `settings` table
+  into `PluginCtxDeps.settings` and nothing refreshes it, so changing a
+  `combat.*` or `hospital.*` row needs a server restart to take effect. Fine
+  for admin-edited config; surprising to anyone expecting live tuning.
+- **`effects.ts` is duplicated** between `packages/plugins/combat` and
+  `packages/plugins/inventory` (weapon/armor/consumable effect schemas and the
+  item-type constants). A plugin may not import another plugin, so the two
+  copies are kept in step **by hand and nothing enforces it** — a drift shows
+  up as combat reading an item inventory wrote differently. The natural fix is
+  the equipment/inventory split the design defers to the item-economy cluster.
+- **`player_stats.backfire` is still unused.** The V2-derived column exists
+  (integer, default 0) and nothing in combat reads or writes it. The backfire
+  mechanic is not implemented.
+- **No kills leaderboard.** `combat_log` has everything needed to build one;
+  nothing does. Deferred with the rest of the leaderboard work.
+- **Deliberate scope note: there is no way to *obtain* an item.** No
+  blackmarket, no trading, no shops — the only items in the game are the two
+  seeded starter rows and whatever an admin inserts directly. The item economy
+  is its own cluster, deferred.
 - **Queue-prefix isolation stops at Redis.** Two `loadPlugins`/`bootTestServer`
   boots in one test file get separate prefixed queues (ids restart at 1) but
   share one database, so the second boot's first job would be swallowed as
