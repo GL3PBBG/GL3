@@ -215,6 +215,7 @@ export default defineWorkspace([
         "test/gangs.test.ts",
         "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
+        "test/hospital.test.ts",
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
