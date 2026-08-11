@@ -64,10 +64,13 @@ async function loadWeapon(
 
   const parsed = WeaponEffectsSchema.safeParse(row.effects);
   // A malformed weapon falls back to unarmed rather than 500ing: the jsonb is
-  // an external boundary. A V2-migrated item with no accuracy is the expected
-  // case for the settings fallback below, not this branch.
+  // an external boundary.
   if (!parsed.success) return unarmed;
-  return parsed.data;
+
+  // The one field a migrated V2 item never carries — `itemEffects` has no
+  // accuracy column. `??`, not `||`: a weapon that states `accuracy: 0` means
+  // it, and `||` would silently upgrade it to the default.
+  return { ...parsed.data, accuracy: parsed.data.accuracy ?? config.defaultWeaponAccuracy };
 }
 
 /**
