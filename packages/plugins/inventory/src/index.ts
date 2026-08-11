@@ -1,5 +1,5 @@
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   ArmorEffectsSchema,
@@ -9,7 +9,7 @@ import {
   ITEM_TYPE_WEAPON,
   WeaponEffectsSchema,
 } from "./effects.js";
-import { items, playerItems, playerStats } from "./schema.js";
+import { items, playerItems, playerStats, ranks } from "./schema.js";
 
 /**
  * `items.effects` is jsonb an admin can put anything in, so it is parsed
@@ -172,11 +172,78 @@ const equipRoute = route({
   },
 });
 
+const useRoute = route({
+  method: "POST",
+  path: "/api/inventory/use/:itemId",
+  accessInJail: false,
+  // What structurally enforces "a heal item does not get you out of hospital":
+  // the loader answers 423 before this handler runs.
+  accessInHospital: false,
+  params: z.object({ itemId: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      await tx.locks.player([player.id]);
+
+      const [owned] = await tx.db
+        .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
+        .from(playerItems)
+        .innerJoin(items, eq(items.id, playerItems.itemId))
+        .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, params.itemId)));
+      if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
+      if (owned.itemType !== ITEM_TYPE_CONSUMABLE) throw new PluginError("wrong_slot", 400);
+
+      const parsed = ConsumableEffectsSchema.safeParse(owned.effects);
+      if (!parsed.success) throw new PluginError("wrong_slot", 400);
+
+      const [stats] = await tx.db
+        .select({ health: playerStats.health, maxHealth: ranks.maxHealth })
+        .from(playerStats)
+        .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
+        .where(eq(playerStats.playerId, player.id));
+      if (!stats) throw new PluginError("unauthorized", 401);
+
+      // 100 matches core's `ranks.max_health` column default and
+      // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player has no
+      // rank row yet. A plugin cannot import that constant from apps/server,
+      // so the two must be kept in step by hand.
+      const maxHealth = stats.maxHealth ?? 100;
+      if (stats.health >= maxHealth) throw new PluginError("already_full", 409);
+
+      // The decrement is the guard, not a preceding read: `qty > 0` in the
+      // WHERE makes a concurrent second use match zero rows instead of driving
+      // the count negative. Same reasoning as NOTES.md rule 2's ban on
+      // check-then-act, applied to Postgres.
+      const decremented = await tx.db
+        .update(playerItems)
+        .set({ qty: sql`${playerItems.qty} - 1` })
+        .where(and(
+          eq(playerItems.playerId, player.id),
+          eq(playerItems.itemId, params.itemId),
+          gt(playerItems.qty, 0),
+        ))
+        .returning({ qty: playerItems.qty });
+      const remaining = decremented[0]?.qty;
+      if (remaining === undefined) throw new PluginError("not_owned", 409);
+
+      const health = Math.min(maxHealth, stats.health + parsed.data.heal);
+      await tx.db.update(playerStats).set({ health }).where(eq(playerStats.playerId, player.id));
+
+      return {
+        status: 200,
+        body: { health, healed: health - stats.health, qty: remaining },
+      };
+    });
+  },
+});
+
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
   basePaths: ["/api/inventory"],
-  routes: [listRoute, equipRoute],
+  routes: [listRoute, equipRoute, useRoute],
   // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a core
