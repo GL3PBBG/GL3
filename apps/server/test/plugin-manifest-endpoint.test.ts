@@ -84,13 +84,28 @@ describe("GET /api/plugins", () => {
   // `deps.plugins` undefined, which is the branch this case exists for.
   // Passing `{ plugins: [] }` would run the loader and reach the endpoint
   // through the *defined* branch, proving nothing about a plugin-less boot.
+  //
+  // "No plugins loaded" is about that branch, not an actually-empty plugin
+  // set: `bootTestServer()`'s no-arg path still merges `CORE_PLUGINS` via
+  // `withCorePlugins`, so any core plugin's own menu/pages/events surface
+  // here. `inventory` declares the `purchased` event (`shop.ts`), the first
+  // core plugin to declare any — hence the non-empty `events` array below.
   it("returns an empty 200 payload when no plugins are loaded", async () => {
     const { app, close } = await bootTestServer();
     try {
       const { token } = await register(app);
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ menu: [], pages: [], events: [] });
+      expect(res.json()).toEqual({
+        menu: [],
+        pages: [],
+        events: [{
+          pluginId: "inventory",
+          name: "purchased",
+          describe: "Bought {qty}x {name}",
+          invalidates: ["inventory", "me"],
+        }],
+      });
     } finally {
       await close();
     }
