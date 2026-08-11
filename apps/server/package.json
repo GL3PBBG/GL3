@@ -14,6 +14,7 @@
     "@gl3/plugin-bullets": "*",
     "@gl3/plugin-crimes": "*",
     "@gl3/plugin-gangs": "*",
+    "@gl3/plugin-inventory": "*",
     "@gl3/plugin-mail": "*",
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-ranks": "*",

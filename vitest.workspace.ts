@@ -51,6 +51,9 @@ const srcAliases = {
       "@gl3/plugin-gangs": fileURLToPath(
         new URL("./packages/plugins/gangs/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-inventory": fileURLToPath(
+        new URL("./packages/plugins/inventory/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -216,6 +219,7 @@ export default defineWorkspace([
         "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
         "test/hospital.test.ts",
+        "test/inventory.test.ts",
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
