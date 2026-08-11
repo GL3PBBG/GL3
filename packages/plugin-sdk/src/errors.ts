@@ -47,9 +47,9 @@ export class JobAlreadyAppliedError extends Error {
  *
  * Deliberately NOT mapped to a status by the route loader: three modules
  * answer 409 `insufficient_funds` (bank, travel, bullets) and one answers 400
- * `insufficient_cash` (gangs, `game/gangs/routes.ts:789`). A central mapping
- * would have to change one of them, so each plugin catches this and throws its
- * own `PluginError`.
+ * `insufficient_cash` (gangs' bank-deposit route, `packages/plugins/gangs/src/index.ts`'s
+ * `depositRoute`). A central mapping would have to change one of them, so
+ * each plugin catches this and throws its own `PluginError`.
  */
 export class InsufficientFundsError extends Error {
   constructor(
@@ -70,9 +70,9 @@ export class InsufficientFundsError extends Error {
  *
  * Deliberately NOT mapped to a status by the route loader, for the same
  * reason `InsufficientFundsError` is not: the gang bank answers
- * `400 insufficient_gang_funds` (`game/gangs/routes.ts:833`) where the player
- * legs of other modules answer 409, so each plugin catches this and throws
- * its own `PluginError`.
+ * `400 insufficient_gang_funds` (`packages/plugins/gangs/src/index.ts`'s
+ * `withdrawRoute`) where the player legs of other modules answer 409, so
+ * each plugin catches this and throws its own `PluginError`.
  */
 export class InsufficientGangFundsError extends Error {
   constructor(

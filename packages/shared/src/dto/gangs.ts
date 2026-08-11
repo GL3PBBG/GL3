@@ -35,23 +35,11 @@ export type GangLogDto = z.infer<typeof GangLogDtoSchema>;
 export const GangLogListResponseSchema = z.object({ logs: z.array(GangLogDtoSchema) });
 export type GangLogListResponse = z.infer<typeof GangLogListResponseSchema>;
 
-// Not persisted, but reaches Postgres as an `eq(players.username, ...)`
-// lookup parameter — Postgres rejects an embedded NUL in any text
-// parameter, not just one being written, so this needs noNulByte too.
-export const InvitePlayerRequestSchema = z.object({ username: noNulByte(z.string().min(3).max(30)) });
-export type InvitePlayerRequest = z.infer<typeof InvitePlayerRequestSchema>;
-
 // The server's own GANG_PERMISSIONS tuple (game/gangs/permissions.ts) is the
 // list this mirrors; they must stay in step, and gang-members.test.ts asserts
 // they do rather than leaving it to a reader.
 export const GangPermissionSchema = z.enum(["invite", "kick", "bank.withdraw", "edit_info", "grant_permissions"]);
 export type GangPermission = z.infer<typeof GangPermissionSchema>;
-
-export const GrantPermissionRequestSchema = z.object({
-  playerId: IdSchema,
-  permission: GangPermissionSchema,
-});
-export type GrantPermissionRequest = z.infer<typeof GrantPermissionRequestSchema>;
 
 // Role is derived, never stored: gangs.boss_player_id / underboss_player_id
 // against a plain gang_members row. A client cannot compute it from GangDto
@@ -83,9 +71,6 @@ export type GangInviteDto = z.infer<typeof GangInviteDtoSchema>;
 
 export const GangInviteListResponseSchema = z.object({ invites: z.array(GangInviteDtoSchema) });
 export type GangInviteListResponse = z.infer<typeof GangInviteListResponseSchema>;
-
-export const TransferBossRequestSchema = z.object({ playerId: IdSchema });
-export type TransferBossRequest = z.infer<typeof TransferBossRequestSchema>;
 
 export const GangBankTransferRequestSchema = z.object({
   amount: MoneySchema.refine((v) => BigInt(v) > 0n, "amount must be positive"),
