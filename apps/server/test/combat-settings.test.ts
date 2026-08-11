@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { readCombatSettings } from "@gl3/plugin-combat";
 
-/** Builds the `get` the reader takes: a key→value map, missing keys null. */
+/**
+ * Builds the `get` the reader takes: a key→value map, missing keys null.
+ *
+ * Keys here are BARE, matching what the reader asks for. The SDK prepends the
+ * plugin id, so the row in the `settings` table is `combat.cooldown_seconds`
+ * while the reader asks for `cooldown_seconds`. That seam is invisible to
+ * this file — a stub `get` answers whatever it is asked — which is exactly
+ * how the double-prefix bug survived every test here. `combat.test.ts`'s
+ * "reads the unarmed profile from the settings table" is the one that covers
+ * it, and it has to go through a real HTTP request to do so.
+ */
 function getter(values: Record<string, string>): (key: string) => string | null {
   return (key) => values[key] ?? null;
 }
@@ -21,14 +31,14 @@ describe("readCombatSettings", () => {
 
   it("takes every key from the database when all are set", () => {
     const settings = readCombatSettings(getter({
-      "combat.cooldown_seconds": "90",
-      "combat.hospital_seconds": "300",
-      "combat.newbie_exp_threshold": "250",
-      "combat.default_weapon_accuracy": "70",
-      "combat.unarmed.accuracy": "40",
-      "combat.unarmed.damage_min": "2",
-      "combat.unarmed.damage_max": "8",
-      "combat.unarmed.bullets_per_shot": "3",
+      "cooldown_seconds": "90",
+      "hospital_seconds": "300",
+      "newbie_exp_threshold": "250",
+      "default_weapon_accuracy": "70",
+      "unarmed.accuracy": "40",
+      "unarmed.damage_min": "2",
+      "unarmed.damage_max": "8",
+      "unarmed.bullets_per_shot": "3",
     }));
 
     expect(settings).toEqual({
@@ -48,9 +58,9 @@ describe("readCombatSettings", () => {
     // accuracy would make every unarmed attack miss forever, both with no
     // error anywhere.
     const settings = readCombatSettings(getter({
-      "combat.newbie_exp_threshold": "",
-      "combat.unarmed.accuracy": "   ",
-      "combat.default_weapon_accuracy": "\t\n",
+      "newbie_exp_threshold": "",
+      "unarmed.accuracy": "   ",
+      "default_weapon_accuracy": "\t\n",
     }));
 
     expect(settings.newbieExpThreshold).toBe(100n);
@@ -62,9 +72,9 @@ describe("readCombatSettings", () => {
     // `settings` is admin-edited free text; a typo must not take the attack
     // route down for everyone.
     const settings = readCombatSettings(getter({
-      "combat.cooldown_seconds": "soon",
-      "combat.newbie_exp_threshold": "lots",
-      "combat.unarmed.damage_max": "NaN",
+      "cooldown_seconds": "soon",
+      "newbie_exp_threshold": "lots",
+      "unarmed.damage_max": "NaN",
     }));
 
     expect(settings.cooldownSeconds).toBe(60);
@@ -74,8 +84,8 @@ describe("readCombatSettings", () => {
 
   it("rejects a negative value in favour of the default", () => {
     const settings = readCombatSettings(getter({
-      "combat.hospital_seconds": "-1",
-      "combat.newbie_exp_threshold": "-5",
+      "hospital_seconds": "-1",
+      "newbie_exp_threshold": "-5",
     }));
 
     expect(settings.hospitalSeconds).toBe(600);
@@ -83,23 +93,23 @@ describe("readCombatSettings", () => {
   });
 
   it("floors a fractional value so no float reaches the arithmetic", () => {
-    expect(readCombatSettings(getter({ "combat.unarmed.damage_max": "7.9" })).unarmed.damageMax)
+    expect(readCombatSettings(getter({ "unarmed.damage_max": "7.9" })).unarmed.damageMax)
       .toBe(7);
   });
 
   it("never yields a zero cooldown, which Redis SET EX would reject", () => {
     // travel_cooldown_seconds = 0 is a live crash for exactly this reason
     // (docs/STATUS.md); the floor is here so combat does not inherit it.
-    expect(readCombatSettings(getter({ "combat.cooldown_seconds": "0" })).cooldownSeconds).toBe(1);
-    expect(readCombatSettings(getter({ "combat.hospital_seconds": "0" })).hospitalSeconds).toBe(1);
-    expect(readCombatSettings(getter({ "combat.unarmed.bullets_per_shot": "0" }))
+    expect(readCombatSettings(getter({ "cooldown_seconds": "0" })).cooldownSeconds).toBe(1);
+    expect(readCombatSettings(getter({ "hospital_seconds": "0" })).hospitalSeconds).toBe(1);
+    expect(readCombatSettings(getter({ "unarmed.bullets_per_shot": "0" }))
       .unarmed.bulletsPerShot).toBe(1);
   });
 
   it("clamps an accuracy above 100 so a typo cannot make every shot certain", () => {
     const settings = readCombatSettings(getter({
-      "combat.default_weapon_accuracy": "1000",
-      "combat.unarmed.accuracy": "150",
+      "default_weapon_accuracy": "1000",
+      "unarmed.accuracy": "150",
     }));
 
     expect(settings.defaultWeaponAccuracy).toBe(100);
@@ -110,7 +120,7 @@ describe("readCombatSettings", () => {
     // The threshold is compared against `player_stats.exp`, a bigint column;
     // routing it through Number() would lose precision at the top end.
     const huge = "9007199254740993"; // Number.MAX_SAFE_INTEGER + 2
-    expect(readCombatSettings(getter({ "combat.newbie_exp_threshold": huge })).newbieExpThreshold)
+    expect(readCombatSettings(getter({ "newbie_exp_threshold": huge })).newbieExpThreshold)
       .toBe(9007199254740993n);
   });
 });

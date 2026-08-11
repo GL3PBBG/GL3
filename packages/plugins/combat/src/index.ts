@@ -1,9 +1,10 @@
 import { definePlugin, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
-import type { WeaponProfile } from "./resolve.js";
-import { items, playerStats, ranks } from "./schema.js";
+import { uuidv7 } from "uuidv7";
+import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
+import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
+import { combatLog, items, players, playerStats, ranks } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -67,6 +68,23 @@ async function loadWeapon(
   // case for the settings fallback below, not this branch.
   if (!parsed.success) return unarmed;
   return parsed.data;
+}
+
+/**
+ * The target's equipped armor rating, or 0 when unarmored, wrong-typed or
+ * malformed. Same external-boundary reasoning as `loadWeapon`: `armor_item_id`
+ * is an unconstrained FK to `items` and the jsonb is admin-editable, so an
+ * unusable row means "no armor", never a 500 in the middle of a shot.
+ */
+async function loadArmor(tx: PluginTx, armorItemId: string | null): Promise<number> {
+  if (armorItemId === null) return 0;
+  const [row] = await tx.db
+    .select({ effects: items.effects, itemType: items.itemType })
+    .from(items)
+    .where(eq(items.id, armorItemId));
+  if (!row || row.itemType !== ITEM_TYPE_ARMOR) return 0;
+  const parsed = ArmorEffectsSchema.safeParse(row.effects);
+  return parsed.success ? parsed.data.armor : 0;
 }
 
 const attackRoute = route({
@@ -143,10 +161,70 @@ const attackRoute = route({
         .set({ bullets: sql`${playerStats.bullets} - ${weapon.bulletsPerShot}` })
         .where(eq(playerStats.playerId, player.id));
 
-      // Task 11 replaces this stub with the resolution, log and events.
+      const targetArmor = await loadArmor(tx, target.armorItemId);
+      const outcome = resolveShot(weapon, targetArmor, rollFor(weapon));
+
+      const targetHealth = Math.max(0, target.health - outcome.damage);
+      // Skipped on a zero-damage hit: armor held, so the row is unchanged and
+      // there is nothing to write.
+      if (outcome.damage > 0) {
+        await tx.db
+          .update(playerStats)
+          .set({ health: targetHealth })
+          .where(eq(playerStats.playerId, params.targetId));
+      }
+
+      // Task 12 sets `fatal` and `payout` on the death path.
+      await tx.db.insert(combatLog).values({
+        id: uuidv7(),
+        attackerId: player.id,
+        targetId: params.targetId,
+        hit: outcome.hit,
+        damage: outcome.damage,
+        fatal: false,
+        weaponItemId: attacker.weaponItemId,
+        payout: 0n,
+      });
+
+      const [targetRow] = await tx.db
+        .select({ username: players.username })
+        .from(players)
+        .where(eq(players.id, params.targetId));
+
+      // Attacker AND victim, never global: a global audience would broadcast
+      // every shot to every socket and leak position to anyone watching the
+      // firehose. Two calls because `AudienceSchema` has no two-player kind.
+      // A miss publishes too, with damage 0 — the victim needs to know
+      // someone is shooting at them.
+      //
+      // Inside the transaction only in appearance: the loader buffers these
+      // and publishes after commit, discarding them on rollback (SDK
+      // `ctx.ts`), which is what keeps CLAUDE.md rule 5 satisfied while
+      // preserving publish ORDER for the death events Task 12 adds after.
+      for (const audienceId of [player.id, params.targetId]) {
+        await tx.events.publishCore({
+          type: "player.attacked",
+          actorId: player.id,
+          actorName: player.username,
+          audience: { kind: "player", playerId: audienceId },
+          targetId: params.targetId,
+          targetName: targetRow?.username ?? "unknown",
+          damage: outcome.damage,
+        });
+      }
+
       return {
         status: 200,
-        body: { hit: false, damage: 0, bulletsSpent: weapon.bulletsPerShot },
+        body: {
+          hit: outcome.hit,
+          crit: outcome.crit,
+          damage: outcome.damage,
+          armorAbsorbed: outcome.armorAbsorbed,
+          targetHealth,
+          targetKilled: false,
+          payout: "0",
+          bulletsSpent: outcome.bulletsSpent,
+        },
       };
     });
   },

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
@@ -51,14 +52,22 @@ export const gangMembers = pgTable("gang_members", {
   playerId: uuid("player_id").notNull(),
 });
 
+/**
+ * The four defaults are not decoration: drizzle makes a `notNull` column with
+ * no default REQUIRED on insert, so without them `createdAt` would have to be
+ * passed by hand on every write — a clock read in application code where
+ * Postgres' `now()` is both correct and already the column default. They match
+ * `social.ts:117-131` exactly, which is what this mirror promises above.
+ */
 export const combatLog = pgTable("combat_log", {
   id: uuid("id").primaryKey(),
   attackerId: uuid("attacker_id").notNull(),
   targetId: uuid("target_id").notNull(),
   hit: boolean("hit").notNull(),
-  damage: integer("damage").notNull(),
-  fatal: boolean("fatal").notNull(),
+  damage: integer("damage").notNull().default(0),
+  fatal: boolean("fatal").notNull().default(false),
   weaponItemId: uuid("weapon_item_id"),
-  payout: bigint("payout", { mode: "bigint" }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  // `sql\`0\``, never `0n` — drizzle-kit's serialiser crashes on BigInt.
+  payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
