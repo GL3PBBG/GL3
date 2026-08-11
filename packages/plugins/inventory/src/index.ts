@@ -1,5 +1,6 @@
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
 import { and, eq, gt } from "drizzle-orm";
+import { z } from "zod";
 import {
   ArmorEffectsSchema,
   ConsumableEffectsSchema,
@@ -85,11 +86,97 @@ const listRoute = route({
   },
 });
 
+/**
+ * `.optional().nullable()` on both, because `undefined` and `null` mean
+ * different things here and must not collapse: an absent key leaves the slot
+ * alone, an explicit `null` unequips it. The handler distinguishes them with
+ * an `in` check, not a truthiness test.
+ */
+const EquipSchema = z.object({
+  weaponItemId: z.string().uuid().nullable().optional(),
+  armorItemId: z.string().uuid().nullable().optional(),
+});
+
+const equipRoute = route({
+  method: "PUT",
+  path: "/api/inventory/equip",
+  accessInJail: false,
+  accessInHospital: false,
+  body: EquipSchema,
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const wantsWeapon = "weaponItemId" in body;
+    const wantsArmor = "armorItemId" in body;
+
+    return ctx.transaction(async (tx) => {
+      // The player's own row only — no second participant, so the single-id
+      // form of the standard ascending-order lock. The UPDATE below also
+      // takes FOR KEY SHARE on the referenced items row through
+      // player_stats' weapon_item_id/armor_item_id FKs (NOTES.md rule 6);
+      // nothing in the codebase locks an items row, so there is no path to
+      // invert against.
+      await tx.locks.player([player.id]);
+
+      const [stats] = await tx.db
+        .select({
+          exp: playerStats.exp,
+          weaponItemId: playerStats.weaponItemId,
+          armorItemId: playerStats.armorItemId,
+        })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (!stats) throw new PluginError("unauthorized", 401);
+
+      /** Verifies ownership, slot, and (for weapons) the rank gate. */
+      const validate = async (itemId: string, slot: "weapon" | "armor"): Promise<void> => {
+        const [owned] = await tx.db
+          .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
+          .from(playerItems)
+          .innerJoin(items, eq(items.id, playerItems.itemId))
+          .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, itemId)));
+
+        if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
+
+        const expectedType = slot === "weapon" ? ITEM_TYPE_WEAPON : ITEM_TYPE_ARMOR;
+        if (owned.itemType !== expectedType) throw new PluginError("wrong_slot", 400);
+
+        if (slot === "weapon") {
+          const parsed = WeaponEffectsSchema.safeParse(owned.effects);
+          // A malformed weapon is unusable rather than a 500: the jsonb is an
+          // external boundary and an admin can put anything in it.
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
+          if (BigInt(parsed.data.minRankExp) > stats.exp) {
+            throw new PluginError("rank_too_low", 409);
+          }
+        } else {
+          const parsed = ArmorEffectsSchema.safeParse(owned.effects);
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
+        }
+      };
+
+      const nextWeapon = wantsWeapon ? (body.weaponItemId ?? null) : stats.weaponItemId;
+      const nextArmor = wantsArmor ? (body.armorItemId ?? null) : stats.armorItemId;
+
+      if (wantsWeapon && body.weaponItemId != null) await validate(body.weaponItemId, "weapon");
+      if (wantsArmor && body.armorItemId != null) await validate(body.armorItemId, "armor");
+
+      await tx.db
+        .update(playerStats)
+        .set({ weaponItemId: nextWeapon, armorItemId: nextArmor })
+        .where(eq(playerStats.playerId, player.id));
+
+      return { status: 200, body: { weaponItemId: nextWeapon, armorItemId: nextArmor } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
   basePaths: ["/api/inventory"],
-  routes: [listRoute],
+  routes: [listRoute, equipRoute],
   // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a core

@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { items, playerItems } from "../src/db/schema/index.js";
+import { items, playerItems, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -123,5 +124,88 @@ describe("GET /api/inventory", () => {
     });
 
     expect(res.json().items).toEqual([]);
+  });
+});
+
+describe("PUT /api/inventory/equip", () => {
+  it("equips a weapon and an armor in one call", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, vest, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol, armorItemId: vest },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ weaponItemId: pistol, armorItemId: vest });
+  });
+
+  it("unequips with an explicit null and leaves an absent slot alone", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, vest, 1);
+    await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol, armorItemId: vest },
+    });
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: null },
+    });
+
+    // weapon cleared by the explicit null; armor untouched because absent.
+    expect(res.json()).toEqual({ weaponItemId: null, armorItemId: vest });
+  });
+
+  it("409s an item the player does not own", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "not_owned" });
+  });
+
+  it("400s armor in the weapon slot", async () => {
+    const vest = await seedItem("armor", { armor: 20 });
+    await grant(playerId, vest, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: vest },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "wrong_slot" });
+  });
+
+  it("409s a weapon whose minRankExp exceeds the player's exp", async () => {
+    const cannon = await seedItem("weapon", {
+      accuracy: 90, damageMin: 50, damageMax: 90, minRankExp: 1_000_000,
+    });
+    await grant(playerId, cannon, 1);
+    await db.update(playerStats).set({ exp: 10n }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: cannon },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "rank_too_low" });
   });
 });
