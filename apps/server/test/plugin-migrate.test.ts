@@ -1,6 +1,8 @@
+import inventoryPlugin from "@gl3/plugin-inventory";
 import { definePlugin } from "@gl3/plugin-sdk";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
+import { seedItems, seedLocations } from "../src/db/seed.js";
 import { pluginMigrations } from "../src/db/schema/index.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { testDb } from "./helpers/db.js";
@@ -68,5 +70,38 @@ describe("runPluginMigrations", () => {
     const fixed = plugin("m3", [{ name: "0001", sql: "CREATE TABLE p_m3_a (id text)" }]);
     expect(await runPluginMigrations(db, [fixed])).toEqual(["m3:0001"]);
     await db.execute(sql`select 1 from p_m3_a limit 1`);
+  });
+});
+
+describe("inventory shop stock migrations", () => {
+  it("creates the table and seeds one row per (location, seeded item), once", async () => {
+    // The seed migration joins core content BY NAME because ids are uuidv7,
+    // so the real seeders have to have run first — exactly the production
+    // order in apps/server/src/index.ts (seed, then loadPlugins).
+    await seedItems(db);
+    await seedLocations(db);
+
+    const applied = await runPluginMigrations(db, [inventoryPlugin]);
+    expect(applied).toEqual(["inventory:0001_shop_stock", "inventory:0002_shop_stock_seed"]);
+
+    const rows = await db.execute<{ name: string; price: string; stock: number }>(
+      sql`select i.name, s.price::text as price, s.stock
+          from p_inventory_shop_stock s
+          join items i on i.id = s.item_id
+          order by i.name`,
+    );
+    // 3 seeded locations x 2 seeded items.
+    expect(rows.length).toBe(6);
+    expect(rows.filter((r) => r.name === "Rusty Pistol")).toHaveLength(3);
+    expect(rows[0]?.price).toBe("500");
+    expect(rows[0]?.stock).toBe(25);
+
+    // Second boot: the tracking rows mean neither migration re-runs, so the
+    // seed does not double the stock rows.
+    expect(await runPluginMigrations(db, [inventoryPlugin])).toEqual([]);
+    const again = await db.execute<{ n: string }>(
+      sql`select count(*)::text as n from p_inventory_shop_stock`,
+    );
+    expect(again[0]?.n).toBe("6");
   });
 });

@@ -27,6 +27,7 @@ export const playerStats = pgTable("player_stats", {
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
   rankId: uuid("rank_id"),
+  locationId: uuid("location_id"),
   weaponItemId: uuid("weapon_item_id"),
   armorItemId: uuid("armor_item_id"),
 });
