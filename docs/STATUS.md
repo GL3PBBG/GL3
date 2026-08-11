@@ -21,8 +21,10 @@ The `mail` port added no new test file — the existing `mail.test.ts` is
 **unchanged** and is the proof (all `app.inject`, no service block, zero
 edits to the test file; the routes are byte-identical and served at the same
 path, so no retargeting was needed). The `gangs` port likewise added no new
-test file — all 8 pre-existing gang test files pass unedited against the
-plugin.
+test file — all 8 pre-existing gang test files pass unedited (7 route files
+plus `acceptance/m3-acceptance.test.ts` exercise the plugin over HTTP;
+`gang-ledger.test.ts` calls `economy/ledger.ts` directly and was never
+retargeted, since this port did not touch that file).
 
 ---
 
@@ -257,10 +259,11 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
   overdraft was a 500**. `plugins/ctx.ts` now translates core's into the SDK's,
   which the plugin catches. Deliberately **not** mapped centrally by the loader:
   `bank`, `travel` and `bullets` answer 409 `insufficient_funds` but `gangs`
-  answers 400 `insufficient_cash` (`game/gangs/routes.ts:789`), so a central
-  mapping would have to change one of them. Only `applyBalanceChange` is
-  wrapped — `InsufficientGangFundsError` has the identical gap and is deferred
-  to the `gangs` port, which is the plan that can prove it end to end.
+  answers 400 `insufficient_cash` (now `packages/plugins/gangs/src/index.ts`'s
+  `depositRoute`), so a central mapping would have to change one of them.
+  Only `applyBalanceChange` is wrapped — `InsufficientGangFundsError` has the
+  identical gap and is deferred to the `gangs` port, which is the plan that
+  can prove it end to end.
   **Closed by the `gangs` port** (Plan 10): `InsufficientGangFundsError` is
   now in the SDK and translated by `plugins/ctx.ts` the same way, proven end
   to end by `plugin-ctx-transaction.test.ts`'s overdraft case and by
@@ -277,10 +280,10 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
   reuse it.
 - **The gang bank routes are NOT part of this port.** `game/bank/` was
   player-only; the routes CLAUDE.md rule 6 describes are
-  `POST /api/gangs/:gangId/bank/{deposit,withdraw}` at `game/gangs/routes.ts:751`
-  and `:795`, and they ship with `gangs`. Splitting them out would put
-  gang↔player lock ordering under two owners — the split-brain shape M3's
-  deadlock came from.
+  `POST /api/gangs/:gangId/bank/{deposit,withdraw}` (now
+  `packages/plugins/gangs/src/index.ts`'s `depositRoute` and `withdrawRoute`),
+  and they ship with `gangs`. Splitting them out would put gang↔player lock
+  ordering under two owners — the split-brain shape M3's deadlock came from.
 
 Five module ports remained: `bullets`, `travel`, `crimes`, `mail`, `gangs`. All
 were unblocked. `bullets` and `travel` were the natural next two: single-player
@@ -570,11 +573,17 @@ type guard rather than a cast (CLAUDE.md: no casts in `packages/*`).
 Cutover proof: registering `gangsPlugin` in `CORE_PLUGINS` before removing
 `registerGangRoutes` from `app.ts` made `gangs.test.ts` fail at boot with
 `FastifyError: Method 'GET' already declared for route '/api/gangs/:gangId'`
-— proof the plugin was genuinely answering, not dead code. All 8 pre-existing
-gang test files (`gangs`, `gang-bank`, `gang-members`, `gang-lock-order`,
-`gang-invites`, `gang-membership`, `gang-transfer`, plus
+— proof the plugin was genuinely answering, not dead code. All 7
+pre-existing gang **route** test files (`gangs`, `gang-bank`, `gang-members`,
+`gang-lock-order`, `gang-invites`, `gang-membership`, `gang-transfer`, plus
 `acceptance/m3-acceptance.test.ts`'s create→invite→accept→deposit→withdraw
-flow) then passed unedited against the plugin — the wire-contract proof.
+flow) then passed unedited against the plugin — the wire-contract proof,
+since every one of them drives the HTTP surface via `app.inject`.
+`gang-ledger.test.ts` is the eighth gang test file but is not part of that
+proof: it calls `applyGangBalanceChange`/`lockGangAndPlayerForUpdate` in
+`economy/ledger.ts` directly, never `/api/gangs`, so it is unaffected by
+(and says nothing about) the HTTP cutover; it also passed unedited, but
+that was never in question since this port did not touch `economy/ledger.ts`.
 
 **A structural behavioural difference, not a choice.** The gang bank
 deposit/withdraw routes now write the player cash leaderboard, where core's

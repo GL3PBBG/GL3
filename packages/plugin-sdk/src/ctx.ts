@@ -176,8 +176,9 @@ export interface PluginTx {
    * is what lets a caller do the lock-then-recheck TOCTOU defence
    * (CLAUDE.md rule 2): call it once before `locks.gangAndPlayer` for the
    * unlocked pre-check, and again after for a read that observes post-lock,
-   * post-commit state. Core's withdraw route
-   * (`game/gangs/routes.ts:823`) depends on exactly this.
+   * post-commit state. The gang bank's withdraw route
+   * (`packages/plugins/gangs/src/index.ts`'s `withdrawRoute`, guarding
+   * `bank.withdraw`) depends on exactly this.
    */
   readonly gangs: {
     hasPermission(gangId: string, playerId: string, permission: string): Promise<boolean>;

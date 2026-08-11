@@ -83,10 +83,12 @@ const AmountBodySchema = z.object({
 
 /**
  * drizzle re-throws the driver's `PostgresError` either directly or wrapped
- * as an `Error` whose `cause` is it — core handled both (`routes.ts:149-161`)
- * and so must this. Read as a duck-typed property rather than an
- * `instanceof postgres.PostgresError`: no plugin depends on `postgres`, which
- * is an `apps/server` transport concern. Guards, not casts (`packages/*`).
+ * as an `Error` whose `cause` is it — the core route this was ported from
+ * handled both shapes wherever it mapped a Postgres error code to a
+ * `PluginError` (unique-name collisions, dangling foreign keys), and so must
+ * this. Read as a duck-typed property rather than an `instanceof
+ * postgres.PostgresError`: no plugin depends on `postgres`, which is an
+ * `apps/server` transport concern. Guards, not casts (`packages/*`).
  */
 function pgErrorCode(value: unknown): string | null {
   if (typeof value !== "object" || value === null || !("code" in value)) return null;
@@ -586,11 +588,12 @@ const kickRoute = route({
       await removeMember(tx, gangId, targetId,
         `kicked by ${requester.id === gang.boss ? "the boss" : "a permitted member"}`);
 
-      // gang.memberLeft's actor is the member who left — for a kick that is
-      // the KICKED player, not the kicker, matching gang.memberJoined's actor
-      // being the joiner rather than whoever sent the invite. So this one
-      // route still reads `players`, and the membership tests assert it via
-      // awaitOwnEvent(subscriber, kickedPlayerId).
+      // gang.memberLeft's actor is the member who left (events.ts) — for a
+      // kick that is the KICKED player, not the kicker, matching
+      // gang.memberJoined's actor being the joiner rather than whoever sent
+      // the invite. So this one route still reads `players`. Pinned by
+      // gang-membership.test.ts's "publishes gang.memberLeft with the
+      // kicked player, not the kicker, as actor".
       const [actor] = await tx.db.select({ username: players.username }).from(players)
         .where(eq(players.id, targetId));
       await tx.events.publishCore({
