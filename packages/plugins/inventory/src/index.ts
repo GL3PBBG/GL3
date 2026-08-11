@@ -9,6 +9,7 @@ import {
   ITEM_TYPE_WEAPON,
   WeaponEffectsSchema,
 } from "./effects.js";
+import { SHOP_MIGRATIONS } from "./migrations.js";
 import { items, playerItems, playerStats, ranks } from "./schema.js";
 
 /**
@@ -243,6 +244,8 @@ export default definePlugin({
   id: "inventory",
   version: "1.0.0",
   basePaths: ["/api/inventory"],
+  tables: { shopStock: "p_inventory_shop_stock" },
+  migrations: SHOP_MIGRATIONS,
   routes: [listRoute, equipRoute, useRoute],
   // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
