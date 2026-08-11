@@ -1,11 +1,16 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import { gangInvites, gangPermissions, playerStats } from "../src/db/schema/index.js";
+import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let bossToken: string;
@@ -40,7 +45,7 @@ beforeEach(async () => {
   ({ token: memberToken, playerId: memberId } = await joinGang("Sonny"));
 });
 
-afterAll(async () => { await closeServer(); await conn.end(); });
+afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
 describe("POST /api/gangs/:gangId/leave", () => {
   it("removes membership and clears player_stats.gang_id", async () => {
@@ -94,6 +99,29 @@ describe("DELETE /api/gangs/:gangId/members/:playerId", () => {
       headers: { authorization: `Bearer ${memberToken}` },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  // Regression coverage: gang.memberLeft's actor is documented (events.ts)
+  // as "the member who joined / left" — for a kick that is the KICKED
+  // player, not the kicker, matching gang.memberJoined's actor being the
+  // joiner rather than whoever sent the invite. actorId drives
+  // awaitOwnEvent filtering and the WS fan-out (NOTES.md rule 4), so if
+  // this ever flipped to the kicker's id, the kicked player would silently
+  // stop receiving the event telling them they were kicked, and nothing
+  // else in this suite would catch it.
+  it("publishes gang.memberLeft with the kicked player, not the kicker, as actor", async () => {
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const received = awaitOwnEvent(subscriber, memberId);
+
+    const res = await app.inject({
+      method: "DELETE", url: `/api/gangs/${gangId}/members/${memberId}`, headers: { authorization: `Bearer ${bossToken}` },
+    });
+    expect(res.statusCode).toBe(204);
+
+    const event = await received;
+    expect(event.type).toBe("gang.memberLeft");
+    expect(event.actorId).toBe(memberId);
+    expect(event.actorId).not.toBe(bossId);
   });
 
   it("404s kicking a player who belongs to a different gang, and does not clear their real membership", async () => {

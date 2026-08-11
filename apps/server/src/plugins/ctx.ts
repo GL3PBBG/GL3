@@ -4,6 +4,7 @@ import type {
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
+  InsufficientGangFundsError as SdkInsufficientGangFundsError,
   JobAlreadyAppliedError,
   runFilterChain,
 } from "@gl3/plugin-sdk";
@@ -17,11 +18,12 @@ import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange, InsufficientFundsError,
-  lockGangAndPlayerForUpdate, lockLocationForUpdate, lockLocationsForUpdate, lockPlayersForUpdate,
-  type Tx,
+  InsufficientGangFundsError, lockGangAndPlayerForUpdate, lockLocationForUpdate,
+  lockLocationsForUpdate, lockPlayersForUpdate, type Tx,
 } from "../economy/ledger.js";
 import { applyExpAndRankUp } from "../economy/ranks.js";
 import { appendGangLog } from "../game/gangs/logs.js";
+import { GANG_PERMISSIONS, hasGangPermission, type GangPermission } from "../game/gangs/permissions.js";
 import {
   acquireCooldown, cooldownKey, peekCooldown, releaseCooldown,
 } from "../game/cooldown.js";
@@ -121,7 +123,25 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               if (change.kind !== "points") bufferScore(change.kind, change.playerId, after);
               return after;
             },
-            applyGangBalanceChange: (change) => applyGangBalanceChange(tx, change),
+            // The gang-side mirror of the applyBalanceChange wrap above, and
+            // the same reason: a plugin package cannot import core's class,
+            // so without this every gang overdraft escapes the loader's
+            // PluginError catch and Fastify 500s where core's withdraw route
+            // answered 400 insufficient_gang_funds. Everything else
+            // propagates untouched.
+            //
+            // No bufferScore, unlike the player wrap: gang balances have no
+            // leaderboard — LeaderboardKind is cash/bank/exp on a PLAYER.
+            applyGangBalanceChange: async (change) => {
+              try {
+                return await applyGangBalanceChange(tx, change);
+              } catch (error) {
+                if (error instanceof InsufficientGangFundsError) {
+                  throw new SdkInsufficientGangFundsError(change.gangId, change.kind);
+                }
+                throw error;
+              }
+            },
             addExp: async (playerId, amount) => {
               await addExp(tx, playerId, amount);
               // A zero gain is core's own no-op (economy/ledger.ts) — no
@@ -157,6 +177,23 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             gangAndPlayer: (gangId, playerId) => lockGangAndPlayerForUpdate(tx, gangId, playerId),
             location: (locationId) => lockLocationForUpdate(tx, locationId),
             locations: (locationIds) => lockLocationsForUpdate(tx, locationIds),
+          },
+          /**
+           * `tx`, never `db`. Defined inside this closure, so every call
+           * reads through the live transaction — which is what makes a
+           * post-lock recheck observe post-lock state (SDK ctx.ts, and
+           * core's former withdraw route, now ported to @gl3/plugin-gangs).
+           *
+           * A guard rather than a cast: `hasGangPermission` takes core's
+           * `GangPermission` union, the SDK hands over a `string`, and
+           * `packages/*` forbids casts. An unknown permission answers false,
+           * which is what the underlying query would have answered.
+           */
+          gangs: {
+            hasPermission: async (gangId, playerId, permission) => {
+              if (!isGangPermission(permission)) return false;
+              return await hasGangPermission(tx, gangId, playerId, permission);
+            },
           },
           gangLog: (entry) => appendGangLog(tx, entry.gangId, entry.playerId, entry.message),
           /**
@@ -272,10 +309,15 @@ async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash
   return row;
 }
 
+/** Narrows the SDK's `string` to core's `GangPermission` without a cast. */
+function isGangPermission(value: string): value is GangPermission {
+  return GANG_PERMISSIONS.some((permission) => permission === value);
+}
+
 /**
- * `id`/`at` are built exactly as core's own emitters build them (see
- * game/gangs/routes.ts) — uuidv7 and an ISO string — so a plugin event is
- * indistinguishable in shape from a core one on the wire.
+ * `id`/`at` are built exactly as core's own emitters built them — uuidv7 and
+ * an ISO string — so a plugin event is indistinguishable in shape from a
+ * core one on the wire.
  */
 function toEnvelope(pluginId: string, event: PluginEventInput): GameEvent {
   return {

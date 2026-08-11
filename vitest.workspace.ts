@@ -48,6 +48,9 @@ const srcAliases = {
       "@gl3/plugin-mail": fileURLToPath(
         new URL("./packages/plugins/mail/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-gangs": fileURLToPath(
+        new URL("./packages/plugins/gangs/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
