@@ -44,6 +44,7 @@ export const items = pgTable("items", {
 
 export const ranks = pgTable("ranks", {
   id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
   maxHealth: integer("max_health").notNull(),
 });
 
