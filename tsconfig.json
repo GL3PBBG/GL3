@@ -12,6 +12,7 @@
     { "path": "./packages/plugins/travel" },
     { "path": "./packages/plugins/mail" },
     { "path": "./packages/plugins/gangs" },
+    { "path": "./packages/plugins/inventory" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }
