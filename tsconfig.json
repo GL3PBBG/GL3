@@ -11,6 +11,7 @@
     { "path": "./packages/plugins/crimes" },
     { "path": "./packages/plugins/travel" },
     { "path": "./packages/plugins/mail" },
+    { "path": "./packages/plugins/gangs" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }
