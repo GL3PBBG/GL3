@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { InsufficientGangFundsError as SdkInsufficientGangFundsError } from "@gl3/plugin-sdk";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { gangLogs, gangs, players, playerStats, transactions } from "../src/db/schema/index.js";
@@ -171,6 +172,39 @@ describe("ctx.transaction", () => {
     const logs = await db.select().from(gangLogs).where(eq(gangLogs.gangId, gangId));
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatchObject({ gangId, playerId: player.id, message: "plugin withdrew 125" });
+  });
+
+  // The gap the bank port deferred: without the ctx wrap, core's own
+  // InsufficientGangFundsError escapes the loader's PluginError catch as an
+  // unrecognised error and Fastify answers 500, where core's withdraw route
+  // answered 400 insufficient_gang_funds. A plugin package cannot import
+  // core's class, so the only way a ported gangs plugin can catch this is if
+  // the ctx translates it into the SDK one on the way out.
+  it("translates a gang overdraft into the SDK's InsufficientGangFundsError", async () => {
+    const gangId = uuidv7();
+    // Whole uuid, not a prefix, for the same reason createPlayer's username
+    // is: uuidv7's leading hex is the millisecond timestamp truncated to a
+    // ~65s bucket, so an 8-char slice collides with the "moves gang money"
+    // case above when both run in the same file within that window.
+    await db.insert(gangs).values({ id: gangId, name: `g${gangId}`, bank: 100n });
+    const ctx = createPluginCtx(deps(), opts);
+
+    const thrown = await ctx.transaction(async (tx) => {
+      try {
+        await tx.economy.applyGangBalanceChange({
+          gangId, amount: -500n, kind: "bank", reason: "plugin_gang_overdraft_test",
+        });
+        return null;
+      } catch (error) {
+        return error;
+      }
+    });
+
+    expect(thrown).toBeInstanceOf(SdkInsufficientGangFundsError);
+    expect(thrown).toMatchObject({ gangId, kind: "bank" });
+    // The balance is untouched: applyGangBalanceChange refuses before writing.
+    const [gang] = await db.select().from(gangs).where(eq(gangs.id, gangId));
+    expect(gang?.bank).toBe(100n);
   });
 
   it("reads settings under the plugin's own prefix and nowhere else", async () => {
