@@ -17,14 +17,16 @@ export { readCombatSettings } from "./settings.js";
 export type { CombatSettings } from "./settings.js";
 
 /**
- * The target's elapsed sentence, cleared inside the caller's lock. Duplicates
+ * One player's elapsed sentence, cleared inside the caller's lock. Duplicates
  * core's `settleHospital` because a plugin may not import from `apps/server`;
  * kept to the same two statements so the two cannot diverge in behaviour.
  *
- * Without this, an elapsed sentence is only settled by the VICTIM's own next
+ * Without this, an elapsed sentence is only settled by that player's own next
  * request — until then they sit at 0 health and are one hit from dying again.
+ * Called for BOTH parties: the target for that reason, the attacker so the
+ * re-check below cannot 423 someone whose sentence has already run out.
  */
-async function settleTargetHospital(tx: PluginTx, targetId: string): Promise<void> {
+async function settleHospitalIfElapsed(tx: PluginTx, targetId: string): Promise<void> {
   const [row] = await tx.db
     .select({ hospitalUntil: playerStats.hospitalUntil, maxHealth: ranks.maxHealth })
     .from(playerStats)
@@ -118,11 +120,12 @@ const attackRoute = route({
       // makes A-shoots-B and B-shoots-A safe against each other (no ABBA).
       await tx.locks.player([player.id, params.targetId]);
 
-      // The attacker's own hospital state was settled by the loader gate
-      // before this handler ran. The target's must be settled HERE, inside
-      // the lock: a target whose sentence just elapsed otherwise sits at
-      // health 0 and is instantly re-killable.
-      await settleTargetHospital(tx, params.targetId);
+      // Both settled HERE, inside the lock. A target whose sentence just
+      // elapsed otherwise sits at health 0 and is instantly re-killable; the
+      // attacker is settled so the re-check below reads a current row rather
+      // than a stale sentence the loader gate would have cleared.
+      await settleHospitalIfElapsed(tx, params.targetId);
+      await settleHospitalIfElapsed(tx, player.id);
 
       const [attacker] = await tx.db
         .select()
@@ -136,6 +139,17 @@ const attackRoute = route({
       if (!target) throw new PluginError("no_such_target", 404);
 
       const now = Date.now();
+      // The attacker's own sentence, re-checked under the lock. The loader
+      // gate (`plugins/routes.ts`) runs BEFORE the transaction, so between it
+      // and these locks the victim's gangmate can hospitalise or jail the
+      // attacker — and the shot fires anyway. Same 423 + code the gate would
+      // have sent, so a caller cannot tell which layer refused.
+      if (attacker.hospitalUntil && attacker.hospitalUntil.getTime() > now) {
+        throw new PluginError("hospitalised", 423);
+      }
+      if (attacker.jailedUntil && attacker.jailedUntil.getTime() > now) {
+        throw new PluginError("jailed", 423);
+      }
       if (target.hospitalUntil && target.hospitalUntil.getTime() > now) {
         throw new PluginError("target_hospitalised", 409);
       }
