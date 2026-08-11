@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { seedItems, seedLocations } from "../src/db/seed.js";
 import { pluginMigrations } from "../src/db/schema/index.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
-import { testDb } from "./helpers/db.js";
+import { resetDb, testDb } from "./helpers/db.js";
 import { pgErrorCode, rejectionOf } from "./helpers/pg-error.js";
 
 // testDb() returns { db, sql } — createDb's pair, not a drizzle db. Destructure
@@ -103,5 +103,48 @@ describe("inventory shop stock migrations", () => {
       sql`select count(*)::text as n from p_inventory_shop_stock`,
     );
     expect(again[0]?.n).toBe("6");
+  });
+
+  /**
+   * Regression for the 42P07 combat.test.ts hit while diagnosing an unrelated
+   * task: resetDb() (helpers/db.ts) TRUNCATEs every public table for test
+   * isolation between test bodies, `plugin_migrations` included. TRUNCATE
+   * empties the tracking row but leaves `p_inventory_shop_stock` standing —
+   * plain `CREATE TABLE`, no `IF NOT EXISTS` (migrations.ts:21, deliberately;
+   * see that file's comment) — so a second `runPluginMigrations` call (what
+   * any test that reboots the server mid-file does) reran the DDL against a
+   * table that was never dropped and threw `relation already exists`.
+   *
+   * The fix is in resetDb, not here: migration bookkeeping is not test data,
+   * so it is preserved the same way `__drizzle_migrations` already is. This
+   * test would 42P07 on that second `runPluginMigrations` call without it.
+   */
+  it("survives a resetDb() between boots without re-running a migration", async () => {
+    await seedItems(db);
+    await seedLocations(db);
+    await runPluginMigrations(db, [inventoryPlugin]);
+
+    const before = await db.execute<{ n: string }>(
+      sql`select count(*)::text as n from p_inventory_shop_stock`,
+    );
+    expect(before[0]?.n).toBe("6");
+
+    await resetDb(db);
+
+    // The tracking rows must have survived resetDb, so this must be a no-op
+    // — not a re-application (which would 42P07 on the standing table) and
+    // not silently swallowed data loss on plugin_migrations itself.
+    expect(await runPluginMigrations(db, [inventoryPlugin])).toEqual([]);
+
+    // resetDb DOES truncate p_inventory_shop_stock itself — it is game data,
+    // not migration bookkeeping — and since the seed migration correctly did
+    // NOT re-run, those rows do not silently come back. A test that needs
+    // shop stock after a reset must seed it itself, exactly as shop.test.ts
+    // already does via its own seedShop() helper rather than relying on the
+    // migration seed.
+    const afterReset = await db.execute<{ n: string }>(
+      sql`select count(*)::text as n from p_inventory_shop_stock`,
+    );
+    expect(afterReset[0]?.n).toBe("0");
   });
 });
