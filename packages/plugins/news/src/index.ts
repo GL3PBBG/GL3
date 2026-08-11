@@ -76,7 +76,7 @@ export default definePlugin({
           // commands (NOTES.md rule 5). events.ts documents news.posted as
           // "actor = the author", audience global. Falls back to "unknown"
           // rather than "", matching every other event-publishing site in
-          // this codebase (gangs/routes.ts, mail/routes.ts) and core's prior
+          // this codebase (gangs/routes.ts) and core's prior
           // news route.
           await tx.events.publishCore({
             type: "news.posted",

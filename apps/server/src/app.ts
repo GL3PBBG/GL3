@@ -8,7 +8,6 @@ import { registerGangRoutes } from "./game/gangs/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
-import { registerMailRoutes } from "./game/mail/routes.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
@@ -59,7 +58,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerGangRoutes(app, deps.db, deps.redis, requireAuth);
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
-  registerMailRoutes(app, deps.db, deps.redis, requireAuth);
   registerProfileRoutes(app, deps.db, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 

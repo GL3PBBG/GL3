@@ -5,8 +5,9 @@
 # The builder runs `tsc --build` against @gl3/server, which follows its
 # tsconfig references to @gl3/shared, @gl3/plugin-sdk, @gl3/plugin-ranks,
 # @gl3/plugin-notifications, @gl3/plugin-news, @gl3/plugin-bank,
-# @gl3/plugin-bullets, @gl3/plugin-travel and @gl3/hello-plugin and emits all
-# ten dist/ dirs in one step — so no separate `build -w` is needed here
+# @gl3/plugin-bullets, @gl3/plugin-travel, @gl3/plugin-crimes,
+# @gl3/plugin-mail and @gl3/hello-plugin and emits all
+# twelve dist/ dirs in one step — so no separate `build -w` is needed here
 # (unlike Dockerfile.web, where Vite — not tsc — resolves @gl3/shared and
 # needs dist present before the web build starts).
 #
@@ -14,13 +15,15 @@
 # and tsconfig both: tsc reads the referenced tsconfig even for a type-only
 # import and fails with TS5083 if it is missing. @gl3/hello-plugin,
 # @gl3/plugin-ranks, @gl3/plugin-notifications, @gl3/plugin-news,
-# @gl3/plugin-bank and @gl3/plugin-bullets are also RUNTIME requirements —
+# @gl3/plugin-bank, @gl3/plugin-bullets, @gl3/plugin-travel,
+# @gl3/plugin-crimes and @gl3/plugin-mail are also RUNTIME requirements —
 # src/index.ts imports @gl3/hello-plugin statically for the optional-plugin
 # import map, and src/plugins/core-plugins.ts imports @gl3/plugin-ranks,
-# @gl3/plugin-notifications, @gl3/plugin-news, @gl3/plugin-bank and
-# @gl3/plugin-bullets statically as ported core modules (a dynamic
+# @gl3/plugin-notifications, @gl3/plugin-news, @gl3/plugin-bank,
+# @gl3/plugin-bullets, @gl3/plugin-travel, @gl3/plugin-crimes and
+# @gl3/plugin-mail statically as ported core modules (a dynamic
 # import(pluginId) is deliberately not used for any of them, so the
-# dependency-direction check stays compiler-enforceable). Without all six in
+# dependency-direction check stays compiler-enforceable). Without all nine in
 # the runtime stage the server cannot boot, even with PLUGIN_IDS empty — core
 # plugins are never optional.
 #
@@ -54,6 +57,7 @@ COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY packages/plugins/bullets/package.json packages/plugins/bullets/
 COPY packages/plugins/travel/package.json packages/plugins/travel/
 COPY packages/plugins/crimes/package.json packages/plugins/crimes/
+COPY packages/plugins/mail/package.json packages/plugins/mail/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -79,6 +83,8 @@ COPY packages/plugins/travel/tsconfig.json packages/plugins/travel/tsconfig.json
 COPY packages/plugins/travel/src packages/plugins/travel/src
 COPY packages/plugins/crimes/tsconfig.json packages/plugins/crimes/tsconfig.json
 COPY packages/plugins/crimes/src packages/plugins/crimes/src
+COPY packages/plugins/mail/tsconfig.json packages/plugins/mail/tsconfig.json
+COPY packages/plugins/mail/src packages/plugins/mail/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -122,6 +128,7 @@ COPY packages/plugins/bank/package.json packages/plugins/bank/
 COPY packages/plugins/bullets/package.json packages/plugins/bullets/
 COPY packages/plugins/travel/package.json packages/plugins/travel/
 COPY packages/plugins/crimes/package.json packages/plugins/crimes/
+COPY packages/plugins/mail/package.json packages/plugins/mail/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 
@@ -139,6 +146,7 @@ COPY --from=builder /app/packages/plugins/bank/dist packages/plugins/bank/dist
 COPY --from=builder /app/packages/plugins/bullets/dist packages/plugins/bullets/dist
 COPY --from=builder /app/packages/plugins/travel/dist packages/plugins/travel/dist
 COPY --from=builder /app/packages/plugins/crimes/dist packages/plugins/crimes/dist
+COPY --from=builder /app/packages/plugins/mail/dist packages/plugins/mail/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist

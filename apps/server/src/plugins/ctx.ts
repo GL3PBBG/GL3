@@ -181,7 +181,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                 type: "notification.created",
                 actorId: playerId,
                 // "unknown" is the fallback every other event-publishing site
-                // in this codebase uses (gangs/routes.ts, mail/routes.ts).
+                // in this codebase uses (gangs/routes.ts).
                 actorName: target?.username ?? "unknown",
                 audience: { kind: "player", playerId },
                 notificationId,
@@ -274,7 +274,7 @@ async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash
 
 /**
  * `id`/`at` are built exactly as core's own emitters build them (see
- * game/mail/routes.ts) — uuidv7 and an ISO string — so a plugin event is
+ * game/gangs/routes.ts) — uuidv7 and an ISO string — so a plugin event is
  * indistinguishable in shape from a core one on the wire.
  */
 function toEnvelope(pluginId: string, event: PluginEventInput): GameEvent {

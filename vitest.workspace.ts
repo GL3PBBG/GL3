@@ -45,6 +45,9 @@ const srcAliases = {
       "@gl3/plugin-travel": fileURLToPath(
         new URL("./packages/plugins/travel/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-mail": fileURLToPath(
+        new URL("./packages/plugins/mail/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
