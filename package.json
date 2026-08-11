@@ -10,6 +10,7 @@
     "test:nodb": "vitest run --project @gl3/server:unit --project @gl3/shared --project @gl3/plugin-sdk --project @gl3/web",
     "verify": "npm run typecheck && npm run test",
     "verify:ci": "npm run typecheck && npm run test:nodb",
+    "db:clean-clones": "node scripts/drop-stale-test-clones.mjs",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down -v"
   },
