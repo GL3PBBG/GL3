@@ -162,6 +162,26 @@ export interface PluginTx {
     location(locationId: string): Promise<void>;
     locations(locationIds: readonly (string | null)[]): Promise<void>;
   };
+  /**
+   * Reads core's three-layer gang permission mask
+   * (`game/gangs/permissions.ts`): boss/underboss bypass, then a
+   * `gang_permissions` row that must join a live `gang_members` row.
+   *
+   * `permission` is `string`, not core's `GangPermission` union — that type
+   * lives in `apps/server` and the SDK may not import it. A value outside the
+   * known set answers `false`, which is what the underlying query would have
+   * answered anyway; a plugin validates the enum on its own route param.
+   *
+   * Always reads through the LIVE TRANSACTION, never a fresh connection. That
+   * is what lets a caller do the lock-then-recheck TOCTOU defence
+   * (CLAUDE.md rule 2): call it once before `locks.gangAndPlayer` for the
+   * unlocked pre-check, and again after for a read that observes post-lock,
+   * post-commit state. Core's withdraw route
+   * (`game/gangs/routes.ts:823`) depends on exactly this.
+   */
+  readonly gangs: {
+    hasPermission(gangId: string, playerId: string, permission: string): Promise<boolean>;
+  };
   gangLog(entry: GangLogEntry): Promise<void>;
   notify(playerId: string, body: string): Promise<void>;
   /**
