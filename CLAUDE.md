@@ -13,15 +13,15 @@ is), then `docs/ENGINEERING-NOTES.md` (why the code looks the way it does).
 ## Current state
 
 M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
-(SDK + loader + example) and the web page renderer have shipped; eight of the
-twelve `game/*` module ports have shipped (`ranks`, `notifications`, `news`,
-`bank`, `bullets`, `travel`, `crimes`, `mail`). The event-envelope blocker is **resolved** — `tx.events.publishCore`
-lets a plugin publish any of the 19 core `GameEvent` variants verbatim, so the
-one remaining port (`gangs`) is
-unblocked (`profile`, `leaderboard`, `jail` are deliberate non-ports — see
-`docs/STATUS.md`). M4 (migration CLI) is planned and blocked on a
-MariaDB install. Suite: **71 files / 587 tests**, green across repeated
-back-to-back runs.
+(SDK + loader + example) and the web page renderer have shipped; all nine
+module ports have shipped (`ranks`, `notifications`, `news`, `bank`,
+`bullets`, `travel`, `crimes`, `mail`, `gangs`) — M5's module-port track is
+complete. The event-envelope blocker that unblocked the last of them is
+**resolved** — `tx.events.publishCore` lets a plugin publish any of the 19
+core `GameEvent` variants verbatim. `profile`, `leaderboard` and `jail`
+remain deliberate non-ports — see `docs/STATUS.md`. M4 (migration CLI) is
+planned and blocked on a MariaDB install. Suite: **71 files / 588 tests**,
+green across repeated back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

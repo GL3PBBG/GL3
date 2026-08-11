@@ -182,7 +182,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
            * `tx`, never `db`. Defined inside this closure, so every call
            * reads through the live transaction — which is what makes a
            * post-lock recheck observe post-lock state (SDK ctx.ts, and
-           * core's own withdraw route at game/gangs/routes.ts:823).
+           * core's former withdraw route, now ported to @gl3/plugin-gangs).
            *
            * A guard rather than a cast: `hasGangPermission` takes core's
            * `GangPermission` union, the SDK hands over a `string`, and
@@ -315,9 +315,9 @@ function isGangPermission(value: string): value is GangPermission {
 }
 
 /**
- * `id`/`at` are built exactly as core's own emitters build them (see
- * game/gangs/routes.ts) — uuidv7 and an ISO string — so a plugin event is
- * indistinguishable in shape from a core one on the wire.
+ * `id`/`at` are built exactly as core's own emitters built them — uuidv7 and
+ * an ISO string — so a plugin event is indistinguishable in shape from a
+ * core one on the wire.
  */
 function toEnvelope(pluginId: string, event: PluginEventInput): GameEvent {
   return {

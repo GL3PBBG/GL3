@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-11, M5 stage 9 (mail port).
-Branch: `feat/plugin-mail-port`.
+Last updated: 2026-08-11, M5 stage 10 (gangs port).
+Branch: `feat/plugin-gangs-port`.
 
 ---
 
@@ -14,13 +14,15 @@ Branch: `feat/plugin-mail-port`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); eight of twelve module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`); one port remains (`gangs`), unblocked. `profile`/`leaderboard`/`jail` are deliberate non-ports |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports |
 
-**Suite: 71 files / 587 tests**, green across repeated back-to-back runs.
+**Suite: 71 files / 588 tests**, green across repeated back-to-back runs.
 The `mail` port added no new test file — the existing `mail.test.ts` is
 **unchanged** and is the proof (all `app.inject`, no service block, zero
 edits to the test file; the routes are byte-identical and served at the same
-path, so no retargeting was needed).
+path, so no retargeting was needed). The `gangs` port likewise added no new
+test file — all 8 pre-existing gang test files pass unedited against the
+plugin.
 
 ---
 
@@ -259,6 +261,10 @@ Design: `docs/superpowers/specs/2026-08-10-plugin-bank-port-design.md`. Plan:
   mapping would have to change one of them. Only `applyBalanceChange` is
   wrapped — `InsufficientGangFundsError` has the identical gap and is deferred
   to the `gangs` port, which is the plan that can prove it end to end.
+  **Closed by the `gangs` port** (Plan 10): `InsufficientGangFundsError` is
+  now in the SDK and translated by `plugins/ctx.ts` the same way, proven end
+  to end by `plugin-ctx-transaction.test.ts`'s overdraft case and by
+  `gang-bank.test.ts` against the real route.
 - **`callPluginRoute` test helper** (`test/helpers/plugin-route.ts`). Three core
   test files imported `performBankTransaction` directly — `news` had no such
   coupling, which is why `news.test.ts` needed no edit. They now drive the real
@@ -504,7 +510,7 @@ commits: `f537ecf` (loader retry fix), `72f28e8` (scaffold), `8af0ff6`
   "Known issues and watch items" below — the bullet that used to record this
   is removed.
 
-One module port remains: `gangs`.
+One module port remained: `gangs`. See below.
 
 ### The `mail` port (Plan 9)
 
@@ -532,7 +538,55 @@ No lock-order test, deliberately — mail takes no `FOR UPDATE`, only implicit
 
 No `economy-invariant.test.ts` edit — mail moves no money.
 
-One port remains: `gangs`.
+### The gangs port (Plan 10)
+
+Design: `docs/superpowers/specs/2026-08-11-plugin-gangs-port-design.md`. Three
+commits: `d32068f` (SDK — `InsufficientGangFundsError` + `tx.gangs.hasPermission`),
+`15fc85a` (the plugin package), and this cutover.
+
+`gangs` ported to `packages/plugins/gangs` — all **15** routes (create, get,
+list-mine, invite, accept/decline invite, leave, kick, grant/revoke
+permission, deposit, withdraw, plus the remaining reads) answer from the
+plugin; `apps/server/src/game/gangs/routes.ts` no longer exists.
+`permissions.ts` and `logs.ts` in the same directory are deliberately left in
+core — `apps/server/src/plugins/ctx.ts` imports `hasGangPermission`,
+`GANG_PERMISSIONS` and `appendGangLog` from both, so only the route file
+moved.
+
+One `ctx.transaction` per route, preserving the pre-check/recheck lock
+distinction core's routes made (an early permission check before acquiring
+the lock, followed by the authoritative check after). No new lock-order
+test — `gang-lock-order.test.ts` predates this port and is unchanged; it
+already exercises `lockGangAndPlayerForUpdate`, which the ported routes call
+through unmodified. No `economy-invariant.test.ts` edit either;
+`gang-bank.test.ts`'s own 100-op deposit/withdraw sweep is the proof the
+ported bank routes keep `sum(ledger) == balance`.
+
+`tx.gangs.hasPermission` (Plan 10 Task 1, SDK) is the one new ctx capability
+this port needed — three positional strings in, `Promise<boolean>` out,
+narrowing the SDK's plain `string` to core's `GangPermission` union with a
+type guard rather than a cast (CLAUDE.md: no casts in `packages/*`).
+
+Cutover proof: registering `gangsPlugin` in `CORE_PLUGINS` before removing
+`registerGangRoutes` from `app.ts` made `gangs.test.ts` fail at boot with
+`FastifyError: Method 'GET' already declared for route '/api/gangs/:gangId'`
+— proof the plugin was genuinely answering, not dead code. All 8 pre-existing
+gang test files (`gangs`, `gang-bank`, `gang-members`, `gang-lock-order`,
+`gang-invites`, `gang-membership`, `gang-transfer`, plus
+`acceptance/m3-acceptance.test.ts`'s create→invite→accept→deposit→withdraw
+flow) then passed unedited against the plugin — the wire-contract proof.
+
+**A structural behavioural difference, not a choice.** The gang bank
+deposit/withdraw routes now write the player cash leaderboard, where core's
+gang bank routes did not. `tx.economy.applyBalanceChange` buffers one
+leaderboard score per changed kind and flushes it after commit
+(`plugins/ctx.ts`); core's gang routes called `applyBalanceChange` directly
+and never touched `recordScore`. Same shape as the `bullets`/`crimes` ports'
+leaderboard pickup — inherent to routing through the SDK wrapper, not a
+decision made for gangs specifically. Almost certainly an improvement; no
+test covers it; no code was changed to produce or suppress it.
+
+This closes M5's module-port track: nine of nine.
 
 ## Starting M4
 
@@ -663,6 +717,18 @@ web image serves only the SPA's own assets.
   the app**, and it runs a four-table join per anonymous hit. Reviewed and accepted:
   the join is keyed on a primary key with at most one result row, so the exposure is
   amplification at request rate, not enumeration. Revisit before deployment.
+- **Create-gang's duck-typed unique-violation check tests only `code === "23505"`,
+  not `constraint_name`.** `gangs_name_unique` is the sole unique constraint
+  reachable on that insert path today, so any `23505` there is unambiguous —
+  but the check would misattribute a different constraint's violation to
+  "name taken" if a second one is ever added to `gangs`. Narrow the check
+  (match `constraint_name` too) if that happens.
+- **`GANG_PERMISSIONS` now exists in three places**: `packages/shared/src/dto/gangs.ts`,
+  core's `apps/server/src/game/gangs/permissions.ts`, and
+  `packages/plugins/gangs/src/index.ts`. The enum-sync test
+  (`gang-members.test.ts:52`) guards shared↔core only; shared↔plugin drift
+  would surface at runtime as a `z.enum` mismatch on the PUT/DELETE
+  permission param, not at compile time or in that test.
 - **`RegisterRequestSchema.email` has no explicit `noNulByte` guard.** It is safe
   only *incidentally*, because zod's `.email()` regex happens to reject NUL — verified
   independently across local-part, domain, leading and trailing positions. Fragile
@@ -697,14 +763,16 @@ web image serves only the SPA's own assets.
   everything after — no error, no retry, no log. A boolean latch on the ctx
   throwing a distinct, non-swallowed error would close it. The `crimes` port
   hit this during development; every job handler shipped so far uses exactly
-  one `ctx.transaction`, so it is latent, not live, until `mail` or `gangs`
-  needs a second.
+  one `ctx.transaction`, so it is latent, not live. Neither `mail` nor
+  `gangs` declares a job, so both closed without exercising this — still
+  open for whichever future plugin needs a second.
 - **`plugin_job_runs`'s PK omits the job name.** `apps/server/src/db/schema/plugins.ts`
   keys on `(plugin_id, job_id)`, but BullMQ ids are per-QUEUE counters starting
   at 1. A plugin declaring two jobs would have both queues issue id `"1"`, and
   the second would be silently swallowed as already-applied. Latent for
-  `crimes` (one job); a live hazard for the first plugin — `mail` or `gangs`
-  — that declares two.
+  `crimes` (one job); neither `mail` nor `gangs` declares any job, so nine of
+  nine module ports have now shipped without triggering it — still open for
+  the first plugin that declares two.
 - **Queue-prefix isolation stops at Redis.** Two `loadPlugins`/`bootTestServer`
   boots in one test file get separate prefixed queues (ids restart at 1) but
   share one database, so the second boot's first job would be swallowed as

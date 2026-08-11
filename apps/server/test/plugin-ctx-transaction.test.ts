@@ -177,9 +177,9 @@ describe("ctx.transaction", () => {
   // The gap the bank port deferred: without the ctx wrap, core's own
   // InsufficientGangFundsError escapes the loader's PluginError catch as an
   // unrecognised error and Fastify answers 500, where core's withdraw route
-  // answered 400 insufficient_gang_funds (game/gangs/routes.ts:833). A plugin
-  // package cannot import core's class, so the only way a ported gangs plugin
-  // can catch this is if the ctx translates it into the SDK one on the way out.
+  // answered 400 insufficient_gang_funds. A plugin package cannot import
+  // core's class, so the only way a ported gangs plugin can catch this is if
+  // the ctx translates it into the SDK one on the way out.
   it("translates a gang overdraft into the SDK's InsufficientGangFundsError", async () => {
     const gangId = uuidv7();
     // Whole uuid, not a prefix, for the same reason createPlayer's username
