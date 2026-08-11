@@ -7,43 +7,12 @@ import {
   ITEM_TYPE_ARMOR,
   ITEM_TYPE_CONSUMABLE,
   ITEM_TYPE_WEAPON,
+  readEffects,
   WeaponEffectsSchema,
 } from "./effects.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
 import { items, playerItems, playerStats, ranks } from "./schema.js";
-
-/**
- * `items.effects` is jsonb an admin can put anything in, so it is parsed
- * rather than forwarded raw. Parsing also fills the weapon defaults
- * (`bulletsPerShot`, `critChance`, `critMultiplier`, `armorPierce`,
- * `minRankExp`), so a client rendering weapon stats sees the same numbers
- * combat will use instead of having to know the defaults itself — a migrated
- * V2 item carries none of them.
- *
- * `item_type` is unconstrained text (`content.ts:64`) and V2 shipped types
- * beyond these three, so an unrecognised type is passed through untouched:
- * this plugin has no schema for it and nothing here interprets it. A KNOWN
- * type that fails to parse yields `null`, which is the same "unusable rather
- * than a 500" answer the equip route gives.
- */
-function readEffects(itemType: string, effects: unknown): unknown {
-  switch (itemType) {
-    case ITEM_TYPE_WEAPON: {
-      const parsed = WeaponEffectsSchema.safeParse(effects);
-      return parsed.success ? parsed.data : null;
-    }
-    case ITEM_TYPE_ARMOR: {
-      const parsed = ArmorEffectsSchema.safeParse(effects);
-      return parsed.success ? parsed.data : null;
-    }
-    case ITEM_TYPE_CONSUMABLE: {
-      const parsed = ConsumableEffectsSchema.safeParse(effects);
-      return parsed.success ? parsed.data : null;
-    }
-    default:
-      return effects;
-  }
-}
+import { shopListRoute } from "./shop.js";
 
 const listRoute = route({
   method: "GET",
@@ -243,10 +212,10 @@ const useRoute = route({
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
-  basePaths: ["/api/inventory"],
+  basePaths: ["/api/inventory", "/api/shop"],
   tables: { shopStock: "p_inventory_shop_stock" },
   migrations: SHOP_MIGRATIONS,
-  routes: [listRoute, equipRoute, useRoute],
+  routes: [listRoute, equipRoute, useRoute, shopListRoute],
   // No `menu`, `pages`, `events` or `jobs`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a core
