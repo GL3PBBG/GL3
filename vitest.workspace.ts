@@ -54,6 +54,9 @@ const srcAliases = {
       "@gl3/plugin-inventory": fileURLToPath(
         new URL("./packages/plugins/inventory/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-combat": fileURLToPath(
+        new URL("./packages/plugins/combat/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -157,6 +160,8 @@ export default defineWorkspace([
       name: "@gl3/server:unit",
       root: "./apps/server",
       include: [
+        "test/combat-resolve.test.ts",
+        "test/combat-settings.test.ts",
         "test/config.test.ts",
         "test/password.test.ts",
         "test/plugin-validate.test.ts",
