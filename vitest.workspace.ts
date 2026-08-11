@@ -186,6 +186,7 @@ export default defineWorkspace([
         "test/plugin-migrate.test.ts",
         "test/plugin-runtime-schema.test.ts",
         "test/settings-load.test.ts",
+        "test/combat-log-schema.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
