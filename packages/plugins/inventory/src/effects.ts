@@ -49,3 +49,36 @@ export type ConsumableEffects = z.infer<typeof ConsumableEffectsSchema>;
 export const ITEM_TYPE_WEAPON = "weapon";
 export const ITEM_TYPE_ARMOR = "armor";
 export const ITEM_TYPE_CONSUMABLE = "consumable";
+
+/**
+ * `items.effects` is jsonb an admin can put anything in, so it is parsed
+ * rather than forwarded raw. Parsing also fills the weapon defaults
+ * (`bulletsPerShot`, `critChance`, `critMultiplier`, `armorPierce`,
+ * `minRankExp`), so a client rendering weapon stats sees the same numbers
+ * combat will use instead of having to know the defaults itself — a migrated
+ * V2 item carries none of them.
+ *
+ * `item_type` is unconstrained text (`content.ts:64`) and V2 shipped types
+ * beyond these three, so an unrecognised type is passed through untouched:
+ * this plugin has no schema for it and nothing here interprets it. A KNOWN
+ * type that fails to parse yields `null`, which is the same "unusable rather
+ * than a 500" answer the equip route gives.
+ */
+export function readEffects(itemType: string, effects: unknown): unknown {
+  switch (itemType) {
+    case ITEM_TYPE_WEAPON: {
+      const parsed = WeaponEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_ARMOR: {
+      const parsed = ArmorEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    case ITEM_TYPE_CONSUMABLE: {
+      const parsed = ConsumableEffectsSchema.safeParse(effects);
+      return parsed.success ? parsed.data : null;
+    }
+    default:
+      return effects;
+  }
+}
