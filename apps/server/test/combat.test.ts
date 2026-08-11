@@ -680,3 +680,147 @@ describe("POST /api/combat/attack/:targetId — resolution", () => {
     expect(audiences).toContainEqual({ kind: "player", playerId: targetId });
   });
 });
+
+describe("GET /api/combat/log", () => {
+  const readLog = () =>
+    app.inject({
+      method: "GET",
+      url: "/api/combat/log",
+      headers: { authorization: `Bearer ${attackerToken}` },
+    });
+
+  it("returns an empty log for a player who has never fought", async () => {
+    const res = await readLog();
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ entries: [] });
+  });
+
+  it("returns shots both taken and received, newest first", async () => {
+    await makeAttackable();
+    // Two rows inserted directly so ordering is deterministic without fighting
+    // the cooldown — one shot per request means a route-driven pair would need
+    // the cooldown key deleted between them for no gain here.
+    const older = uuidv7();
+    const newer = uuidv7();
+    await db.insert(combatLog).values([
+      {
+        id: older,
+        attackerId,
+        targetId,
+        hit: true,
+        damage: 5,
+        fatal: false,
+        payout: 0n,
+        createdAt: new Date(Date.now() - 60_000),
+      },
+      // Reversed: the caller is the TARGET of this one. A filter that only
+      // matched `attacker_id` would drop it and this test would see one row.
+      {
+        id: newer,
+        attackerId: targetId,
+        targetId: attackerId,
+        hit: false,
+        damage: 0,
+        fatal: false,
+        payout: 0n,
+        createdAt: new Date(),
+      },
+    ]);
+
+    const res = await readLog();
+
+    const { entries } = res.json();
+    expect(entries).toHaveLength(2);
+    expect(entries[0].id).toBe(newer);
+    expect(entries[1].id).toBe(older);
+  });
+
+  it("sends the payout as a decimal string, never a JSON number", async () => {
+    // `payout` is bigint in Postgres. A JSON number reintroduces floating
+    // point and silently truncates past 2^53 — the exact bug MoneySchema
+    // exists to prevent, and one no other assertion in this file would catch.
+    await makeAttackable();
+    await db.insert(combatLog).values({
+      id: uuidv7(),
+      attackerId,
+      targetId,
+      hit: true,
+      damage: 99,
+      fatal: true,
+      payout: 9_007_199_254_740_993n,
+    });
+
+    const { entries } = (await readLog()).json();
+    expect(entries[0].payout).toBe("9007199254740993");
+  });
+
+  it("does not leak a fight between two other players", async () => {
+    await makeAttackable();
+    const stranger = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { username: "Luca", password: "hunter2hunter2" },
+    });
+    const strangerId: string = stranger.json().playerId;
+    await db.insert(combatLog).values({
+      id: uuidv7(),
+      attackerId: targetId,
+      targetId: strangerId,
+      hit: true,
+      damage: 7,
+      fatal: false,
+      payout: 0n,
+    });
+
+    // A route that dropped its WHERE entirely would still pass every ordering
+    // and cap assertion above; only this one turns red.
+    expect((await readLog()).json()).toEqual({ entries: [] });
+  });
+
+  it("answers while the caller is in hospital", async () => {
+    // The primary reader of this log is someone who just died and wants to
+    // know who did it. The route therefore keeps the SDK's default
+    // `accessInHospital: true`; the attack route sets false. A 423 here would
+    // mean the gate was copied across from the action route by reflex.
+    await makeAttackable();
+    await db.insert(combatLog).values({
+      id: uuidv7(),
+      attackerId: targetId,
+      targetId: attackerId,
+      hit: true,
+      damage: 100,
+      fatal: true,
+      payout: 4_000n,
+    });
+    await db
+      .update(playerStats)
+      .set({ health: 0, hospitalUntil: new Date(Date.now() + 600_000) })
+      .where(eq(playerStats.playerId, attackerId));
+
+    const res = await readLog();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().entries).toHaveLength(1);
+  });
+
+  it("caps the log at 50 entries", async () => {
+    // Bounded from the start. GET /api/mail and GET /api/notifications are
+    // both unbounded and unpaginated (docs/STATUS.md, open issue) — this does
+    // not become the third.
+    await makeAttackable();
+    await db.insert(combatLog).values(
+      Array.from({ length: 60 }, (_, i) => ({
+        id: uuidv7(),
+        attackerId,
+        targetId,
+        hit: true,
+        damage: 1,
+        fatal: false,
+        payout: 0n,
+        createdAt: new Date(Date.now() - i * 1000),
+      })),
+    );
+
+    expect((await readLog()).json().entries).toHaveLength(50);
+  });
+});
