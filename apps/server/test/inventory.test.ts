@@ -63,4 +63,65 @@ describe("GET /api/inventory", () => {
     expect(body.items[0]).toMatchObject({ itemId: pistol, itemType: "weapon", qty: 1 });
     expect(body.items[0].effects).toMatchObject({ accuracy: 60, damageMin: 5, damageMax: 15 });
   });
+
+  it("fills the weapon defaults a migrated V2 item does not carry", async () => {
+    // V2's itemEffects had a bare `damage` and none of the rest, so the
+    // client must not have to know which fields default to what.
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    await grant(playerId, pistol, 1);
+
+    const res = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.json().items[0].effects).toEqual({
+      accuracy: 60, damageMin: 5, damageMax: 15,
+      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+    });
+  });
+
+  it("nulls the effects of a known item type whose jsonb does not parse", async () => {
+    const junk = await seedItem("armor", { armor: "not a number" });
+    await grant(playerId, junk, 1);
+
+    const res = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.json().items[0]).toMatchObject({ itemId: junk, effects: null });
+  });
+
+  it("passes through the effects of an unrecognised item type untouched", async () => {
+    // `item_type` is unconstrained text and V2 shipped types beyond the
+    // three this plugin models, so an unknown type must not be nulled.
+    const car = await seedItem("car", { topSpeed: 180, plate: "GL3" });
+    await grant(playerId, car, 1);
+
+    const res = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.json().items[0].effects).toEqual({ topSpeed: 180, plate: "GL3" });
+  });
+
+  it("does not list another player's items", async () => {
+    // The where clause is two conjuncts and only `qty > 0` was covered; this
+    // one fails if `playerId` is ever dropped from it.
+    const other = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Tony", password: "hunter2hunter2" },
+    });
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    await grant(other.json().playerId, pistol, 1);
+
+    const res = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.json().items).toEqual([]);
+  });
 });
