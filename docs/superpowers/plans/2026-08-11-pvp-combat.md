@@ -762,7 +762,11 @@ describe("accessInHospital gate", () => {
     });
     const body = res.json();
     token = body.token;
-    playerId = body.player.id;
+    // POST /api/auth/register answers 201 with a FLAT
+    // `{ token, playerId, username }` (auth/routes.ts:88) — there is no nested
+    // `player` object. Every test in this plan that registers a player uses
+    // this shape.
+    playerId = body.playerId;
   });
 
   afterAll(async () => { await close(); });
