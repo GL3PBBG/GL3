@@ -181,7 +181,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                 type: "notification.created",
                 actorId: playerId,
                 // "unknown" is the fallback every other event-publishing site
-                // in this codebase uses (gangs/routes.ts, mail/routes.ts).
+                // in this codebase uses (gangs/routes.ts).
                 actorName: target?.username ?? "unknown",
                 audience: { kind: "player", playerId },
                 notificationId,

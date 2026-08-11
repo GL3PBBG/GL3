@@ -9,15 +9,18 @@ import { mailMessages, players } from "./schema.js";
  * byte-identical. `apps/server/test/mail.test.ts` is unchanged and is the
  * proof (all `app.inject`, written against core).
  *
- * Two deliberate differences (design §3.5, §5):
+ * Four deliberate differences (design §3.1, §3.5, §5, plus the batch-lookup form below):
  *  - `POST`'s re-`select` after insert becomes `.insert(...).returning()` —
- *    same row, one fewer round trip.
+ *    same row, one fewer round trip (design §3.5).
  *  - A 400 from a bad body carries `{ error: "invalid_request" }` with no
  *    `issues` array, because the plugin route layer owns body validation
  *    (`apps/server/src/plugins/routes.ts`). Nothing in `@gl3/web` reads
- *    `issues`. Identical to what `news` documented.
+ *    `issues`. Identical to what `news` documented (design §5).
  *  - `actorName` comes from `ctx.player.username` — no `players` read for the
- *    sender (core did one at routes.ts:62).
+ *    sender, where core did one at routes.ts:62 (design §3.1).
+ *  - Batch sender-name lookups use `inArray` instead of core's
+ *    `or(...senderIds.map((id) => eq(players.id, id)))` — single `= ANY(...)`
+ *    vs a nested OR chain, same result. `news` already used this form.
  *
  * `@gl3/shared` is off-limits to a plugin package, so `IdSchema` and
  * `noNulByte` are restated below. The NUL guard is load-bearing: Postgres
