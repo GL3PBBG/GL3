@@ -1931,35 +1931,48 @@ Add `useRoute` to the manifest's `routes` array.
 
 - [ ] **Step 4: Seed the starter items**
 
-In `apps/server/src/db/seed.ts`, add two `items` rows following the file's existing insert style and its idempotency convention (`onConflictDoNothing` or the existing guard — match what neighbouring seeds do, and use fixed UUIDs so a re-run does not duplicate):
+In `apps/server/src/db/seed.ts`, add a `seedItems` function following the file's
+**actual** convention, verified against the source: every seed function generates
+ids with `uuidv7()` and guards re-runs with an "is this table already populated?"
+early return — **not** fixed UUID literals and **not** `onConflictDoNothing()`.
+Match `seedCrimes` / `seedRanks` / `seedLocations` exactly:
 
 ```ts
-// Two starter items so equip is not inert before a shop exists. Fixed ids so
-// re-seeding is idempotent, matching the other content seeds in this file.
-const STARTER_PISTOL_ID = "01920000-0000-7000-8000-000000000001";
-const STARTER_MEDKIT_ID = "01920000-0000-7000-8000-000000000002";
+/**
+ * Two starter items so equip is not inert before a shop exists: one weapon to
+ * fight with, one consumable to heal with.
+ *
+ * Same shape as the other seeds in this file — uuidv7 ids and an
+ * already-populated early return, so a re-run is a no-op rather than a
+ * duplicate.
+ */
+export async function seedItems(db: Db): Promise<void> {
+  const existing = await db.select({ id: items.id }).from(items).limit(1);
+  if (existing.length > 0) return;
 
-await db.insert(items).values([
-  {
-    id: STARTER_PISTOL_ID,
-    name: "Rusty Pistol",
-    itemType: "weapon",
-    effects: {
-      accuracy: 55, damageMin: 8, damageMax: 18,
-      bulletsPerShot: 1, critChance: 5, critMultiplier: 1.5,
-      armorPierce: 0, minRankExp: 0,
+  await db.insert(items).values([
+    {
+      id: uuidv7(),
+      name: "Rusty Pistol",
+      itemType: "weapon",
+      effects: {
+        accuracy: 55, damageMin: 8, damageMax: 18,
+        bulletsPerShot: 1, critChance: 5, critMultiplier: 1.5,
+        armorPierce: 0, minRankExp: 0,
+      },
     },
-  },
-  {
-    id: STARTER_MEDKIT_ID,
-    name: "First Aid Kit",
-    itemType: "consumable",
-    effects: { heal: 25 },
-  },
-]).onConflictDoNothing();
+    { id: uuidv7(), name: "First Aid Kit", itemType: "consumable", effects: { heal: 25 } },
+  ]);
+}
 ```
 
-Confirm the ids are valid UUIDs by running the seed; if the existing seeds use `uuidv7()` with an id map instead, follow that pattern rather than these literals.
+Add `items` to the file's schema import, and call `seedItems` from wherever
+`seedCrimes` / `seedRanks` / `seedLocations` are called (`apps/server/src/index.ts`
+imports all three — follow that).
+
+Note the consequence of the populated-guard convention: because the ids are
+generated, **no test may hardcode a starter item's id**. A test that needs one
+looks it up by `name`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
