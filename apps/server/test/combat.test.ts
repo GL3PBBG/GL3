@@ -2,7 +2,10 @@ import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import {
+  combatLog,
   gangMembers,
   gangs,
   items,
@@ -10,11 +13,15 @@ import {
   playerItems,
   playerStats,
   ranks,
+  settings,
 } from "../src/db/schema/index.js";
+import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let attackerToken: string;
@@ -104,7 +111,27 @@ beforeEach(async () => {
 afterAll(async () => {
   await closeServer();
   await conn.end();
+  subscriber.disconnect();
 });
+
+/** Seeds an armor item and equips it on `playerId`. Returns the item id. */
+async function equipArmor(playerId: string, armor: number): Promise<string> {
+  const id = uuidv7();
+  await db.insert(items).values({
+    id,
+    name: `a-${id.slice(-8)}`,
+    itemType: "armor",
+    effects: { armor },
+  });
+  await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
+  await db.update(playerStats).set({ armorItemId: id }).where(eq(playerStats.playerId, playerId));
+  return id;
+}
+
+const healthOf = async (playerId: string): Promise<number | undefined> => {
+  const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+  return row?.health;
+};
 
 describe("POST /api/combat/attack/:targetId — legality", () => {
   it("400s an attack on yourself", async () => {
@@ -327,5 +354,270 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ bulletsSpent: 1 });
     expect(await bulletsOf(attackerId)).toBe(9n);
+  });
+});
+
+describe("POST /api/combat/attack/:targetId — resolution", () => {
+  it("lands a pinned hit and reduces the target's health", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 25, damageMax: 25 });
+
+    const res = await attack(targetId);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      hit: true,
+      crit: false,
+      damage: 25,
+      armorAbsorbed: 0,
+      targetHealth: 75,
+      targetKilled: false,
+      payout: "0",
+      bulletsSpent: 1,
+    });
+    expect(await healthOf(targetId)).toBe(75);
+  });
+
+  it("subtracts the target's equipped armor", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 30, damageMax: 30 });
+    await equipArmor(targetId, 12);
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ hit: true, damage: 18, armorAbsorbed: 12, targetHealth: 82 });
+    expect(await healthOf(targetId)).toBe(82);
+  });
+
+  it("reports a fully-absorbed hit as a hit with zero damage, not a miss", async () => {
+    // "Your armor held" is different information from "he missed" — and the
+    // health UPDATE is skipped entirely on a zero-damage hit.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 5, damageMax: 5 });
+    await equipArmor(targetId, 99);
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ hit: true, damage: 0, armorAbsorbed: 5, targetHealth: 100 });
+    expect(await healthOf(targetId)).toBe(100);
+  });
+
+  it("applies armorPierce against the target's armor", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, {
+      accuracy: 100,
+      damageMin: 30,
+      damageMax: 30,
+      armorPierce: 10,
+    });
+    await equipArmor(targetId, 12);
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ damage: 28, armorAbsorbed: 2, targetHealth: 72 });
+  });
+
+  it("ignores a non-armor item in the armor slot rather than 500ing", async () => {
+    // Same external-boundary reasoning as the weapon fallback: armor_item_id
+    // is an unconstrained FK to items and the jsonb is admin-editable. Armor
+    // 0 is the discriminator — a full 30 through means the row was ignored.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 30, damageMax: 30 });
+    const junk = uuidv7();
+    await db.insert(items).values({
+      id: junk,
+      name: `j-${junk.slice(-8)}`,
+      itemType: "consumable",
+      effects: { armor: 25 },
+    });
+    await db.insert(playerItems).values({ playerId: targetId, itemId: junk, qty: 1 });
+    await db.update(playerStats).set({ armorItemId: junk }).where(eq(playerStats.playerId, targetId));
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ damage: 30, armorAbsorbed: 0, targetHealth: 70 });
+  });
+
+  it("crits when critChance is pinned to 100", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, {
+      accuracy: 100,
+      damageMin: 20,
+      damageMax: 20,
+      critChance: 100,
+      critMultiplier: 2,
+    });
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ crit: true, damage: 40, targetHealth: 60 });
+  });
+
+  it("blunts a crit with armor rather than letting the crit bypass it", async () => {
+    // Crit multiplies BEFORE armor subtracts: 20 x 2 = 40, less 15 armor = 25.
+    // The other order (armor first) would give (20-15) x 2 = 10.
+    await makeAttackable();
+    await equipWeapon(attackerId, {
+      accuracy: 100,
+      damageMin: 20,
+      damageMax: 20,
+      critChance: 100,
+      critMultiplier: 2,
+    });
+    await equipArmor(targetId, 15);
+
+    const res = await attack(targetId);
+
+    expect(res.json()).toMatchObject({ crit: true, damage: 25, armorAbsorbed: 15 });
+  });
+
+  it("uses the unarmed profile when nothing is equipped", async () => {
+    await makeAttackable();
+
+    const res = await attack(targetId);
+
+    // Unarmed defaults: accuracy 25, damage 1-5, 1 bullet. The outcome is
+    // random, so assert only the invariants that hold either way — and the
+    // health readback, which ties the body to the row and is what stops this
+    // passing against a stub that always returns zero.
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.bulletsSpent).toBe(1);
+    expect(body.damage).toBeGreaterThanOrEqual(0);
+    expect(body.damage).toBeLessThanOrEqual(5);
+    expect(body.hit).toBe(body.damage > 0 || body.armorAbsorbed > 0);
+    expect(await healthOf(targetId)).toBe(100 - body.damage);
+  });
+
+  it("reads the unarmed profile from the settings table", async () => {
+    // The test the settings layer did not have. `readCombatSettings`'s own
+    // tests hand it a stub `get`, so they answer whatever they are asked and
+    // cannot see the SDK's `<pluginId>.` prefix. Combat asked for
+    // `combat.unarmed.accuracy`, the SDK looked up
+    // `combat.combat.unarmed.accuracy`, and every setting silently fell back
+    // to its default. Only a real request against a real row catches that.
+    //
+    // Rows are prefixed; the reader asks bare. Pinning accuracy to 100 also
+    // makes the otherwise-random unarmed shot deterministic.
+    await makeAttackable();
+    await db.insert(settings).values([
+      { key: "combat.unarmed.accuracy", value: "100" },
+      { key: "combat.unarmed.damage_min", value: "4" },
+      { key: "combat.unarmed.damage_max", value: "4" },
+      { key: "combat.unarmed.bullets_per_shot", value: "2" },
+    ]);
+    // Settings are read into a snapshot at boot, so the row must predate the
+    // server this request runs against.
+    const { app: freshApp, close } = await bootTestServer();
+    try {
+      const res = await freshApp.inject({
+        method: "POST",
+        url: `/api/combat/attack/${targetId}`,
+        headers: { authorization: `Bearer ${attackerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        hit: true,
+        damage: 4,
+        targetHealth: 96,
+        bulletsSpent: 2,
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it("logs a hit", async () => {
+    await makeAttackable();
+    const weaponId = await equipWeapon(attackerId, {
+      accuracy: 100,
+      damageMin: 7,
+      damageMax: 7,
+    });
+
+    await attack(targetId);
+
+    const rows = await db.select().from(combatLog).where(eq(combatLog.targetId, targetId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      attackerId,
+      targetId,
+      hit: true,
+      damage: 7,
+      fatal: false,
+      weaponItemId: weaponId,
+      payout: 0n,
+    });
+  });
+
+  it("logs a miss too — every shot is a row", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 0, damageMin: 5, damageMax: 5 });
+
+    await attack(targetId);
+
+    const rows = await db.select().from(combatLog).where(eq(combatLog.targetId, targetId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ hit: false, damage: 0, fatal: false, payout: 0n });
+  });
+
+  it("publishes player.attacked with damage 0 on a miss", async () => {
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 0, damageMin: 5, damageMax: 5 });
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+
+    // Rule 4: filter by our OWN actorId — game:events is global across files.
+    // The promise is armed BEFORE the request, or the frame lands first.
+    const received = awaitOwnEvent(subscriber, attackerId);
+    await attack(targetId);
+    const event = await received;
+
+    expect(event).toMatchObject({ type: "player.attacked", targetId, damage: 0 });
+  });
+
+  it("addresses the event to attacker and victim only, never globally", async () => {
+    // The position leak: a global audience broadcasts every shot to every
+    // socket, so anyone watching the firehose learns who is where.
+    // `awaitOwnEvent` cannot prove this — it settles on the first frame and
+    // both frames carry the attacker's actorId — so collect both here.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 3, damageMax: 3 });
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+
+    const audiences = await new Promise<unknown[]>((resolve, reject) => {
+      const seen: unknown[] = [];
+      const onMessage = (channel: string, raw: string): void => {
+        if (channel !== GAME_EVENTS_CHANNEL) return;
+        const frame: unknown = JSON.parse(raw);
+        // Same global-channel hazard as rule 4: ignore other files' traffic.
+        if (
+          typeof frame !== "object" ||
+          frame === null ||
+          !("actorId" in frame) ||
+          frame.actorId !== attackerId ||
+          !("type" in frame) ||
+          frame.type !== "player.attacked"
+        ) {
+          return;
+        }
+        seen.push("audience" in frame ? frame.audience : null);
+        if (seen.length === 2) {
+          clearTimeout(timer);
+          subscriber.off("message", onMessage);
+          resolve(seen);
+        }
+      };
+      const timer = setTimeout(() => {
+        subscriber.off("message", onMessage);
+        reject(new Error(`expected 2 player.attacked frames, saw ${seen.length}`));
+      }, 5000);
+      subscriber.on("message", onMessage);
+      void attack(targetId);
+    });
+
+    expect(audiences).toHaveLength(2);
+    expect(audiences).toContainEqual({ kind: "player", playerId: attackerId });
+    expect(audiences).toContainEqual({ kind: "player", playerId: targetId });
   });
 });

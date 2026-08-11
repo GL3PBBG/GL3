@@ -48,21 +48,30 @@ function big(get: (key: string) => string | null, key: string, fallback: bigint)
 }
 
 /**
+ * Keys are BARE — `cooldown_seconds`, not `combat.cooldown_seconds`. The SDK
+ * namespaces them: `ctx.settings.get` looks up `<pluginId>.<key>`
+ * (`apps/server/src/plugins/ctx.ts:289`), which is what stops one plugin
+ * reading another's configuration. Passing an already-prefixed key here
+ * resolves `combat.combat.cooldown_seconds`, which never exists, so every
+ * setting silently falls back to its default — no error, no log line. The
+ * rows in the `settings` table are still `combat.cooldown_seconds`, exactly
+ * as the design doc lists them; the prefix is just added on the other side.
+ *
  * `cooldownSeconds` is floored at 1 deliberately: a zero TTL makes Redis
  * `SET ... EX 0` fail, which is the exact live crash `travel_cooldown_seconds
  * = 0` still has (see `docs/STATUS.md`). Not copied into a new module.
  */
 export function readCombatSettings(get: (key: string) => string | null): CombatSettings {
   return {
-    cooldownSeconds: Math.max(1, num(get, "combat.cooldown_seconds", 60)),
-    hospitalSeconds: Math.max(1, num(get, "combat.hospital_seconds", 600)),
-    newbieExpThreshold: big(get, "combat.newbie_exp_threshold", 100n),
-    defaultWeaponAccuracy: Math.min(100, num(get, "combat.default_weapon_accuracy", 50)),
+    cooldownSeconds: Math.max(1, num(get, "cooldown_seconds", 60)),
+    hospitalSeconds: Math.max(1, num(get, "hospital_seconds", 600)),
+    newbieExpThreshold: big(get, "newbie_exp_threshold", 100n),
+    defaultWeaponAccuracy: Math.min(100, num(get, "default_weapon_accuracy", 50)),
     unarmed: {
-      accuracy: Math.min(100, num(get, "combat.unarmed.accuracy", 25)),
-      damageMin: num(get, "combat.unarmed.damage_min", 1),
-      damageMax: num(get, "combat.unarmed.damage_max", 5),
-      bulletsPerShot: Math.max(1, num(get, "combat.unarmed.bullets_per_shot", 1)),
+      accuracy: Math.min(100, num(get, "unarmed.accuracy", 25)),
+      damageMin: num(get, "unarmed.damage_min", 1),
+      damageMax: num(get, "unarmed.damage_max", 5),
+      bulletsPerShot: Math.max(1, num(get, "unarmed.bullets_per_shot", 1)),
     },
   };
 }
