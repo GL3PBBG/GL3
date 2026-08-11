@@ -1,5 +1,5 @@
 import { definePlugin, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
-import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
@@ -345,9 +345,105 @@ const logRoute = route({
   },
 });
 
+/**
+ * Who the caller could shoot, here, right now.
+ *
+ * Read-only: no locks, no cooldown consumed. That last part is the point of
+ * the route. `attack` claims its Redis cooldown BEFORE the transaction and
+ * deliberately never releases it on a 4xx, so firing at an illegal target
+ * costs the attacker a full cooldown. A pre-evaluated list is what stops the
+ * UI from spending a player's cooldown to discover a rule.
+ *
+ * ADVISORY ONLY. `attack` re-checks every rule under the lock; nothing here is
+ * trusted. `target_elsewhere` has no `reason` because such a player is simply
+ * absent from the list.
+ *
+ * Bounded at 50 and NOT paginated — the same deliberate limitation
+ * GET /api/combat/log has, recorded here rather than discovered later.
+ */
+const targetsRoute = route({
+  method: "GET",
+  path: "/api/combat/targets",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const config = readCombatSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      const [me] = await tx.db
+        .select()
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (!me) throw new PluginError("unauthorized", 401);
+      if (me.locationId === null) return { status: 200, body: { targets: [] } };
+
+      const rows = await tx.db
+        .select({
+          playerId: playerStats.playerId,
+          username: players.username,
+          rank: ranks.name,
+          health: playerStats.health,
+          maxHealth: ranks.maxHealth,
+          gangId: playerStats.gangId,
+          exp: playerStats.exp,
+          jailedUntil: playerStats.jailedUntil,
+          hospitalUntil: playerStats.hospitalUntil,
+        })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
+        .where(and(
+          eq(playerStats.locationId, me.locationId),
+          ne(playerStats.playerId, player.id),
+        ))
+        .orderBy(desc(playerStats.exp))
+        .limit(50);
+
+      const now = Date.now();
+      // The caller being under the threshold makes EVERY row illegal —
+      // protection is mutual, so a newbie can neither be attacked nor attack.
+      const selfProtected = me.exp < config.newbieExpThreshold;
+
+      return {
+        status: 200,
+        body: {
+          targets: rows.map((row) => {
+            // Evaluated in the same order attack's checks run, so the reason a
+            // player sees here is the one they would actually get back.
+            const reason =
+              row.hospitalUntil && row.hospitalUntil.getTime() > now ? "hospitalised"
+              : row.jailedUntil && row.jailedUntil.getTime() > now ? "jailed"
+              : me.gangId !== null && me.gangId === row.gangId ? "gang_mate"
+              : selfProtected ? "newbie_self"
+              : row.exp < config.newbieExpThreshold ? "newbie_protected"
+              : null;
+            return {
+              playerId: row.playerId,
+              username: row.username,
+              rank: row.rank,
+              health: row.health,
+              // 100 matches core's ranks.max_health default and
+              // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player
+              // has no rank row yet. A plugin cannot import that constant from
+              // apps/server, so the two are kept in step by hand.
+              maxHealth: row.maxHealth ?? 100,
+              attackable: reason === null,
+              // null, not absent, when attackable: a nullable field is
+              // friendlier to zod and to exactOptionalPropertyTypes than an
+              // optional one, and the DTO stays a closed union plus null.
+              reason,
+            };
+          }),
+        },
+      };
+    });
+  },
+});
+
 export default definePlugin({
   id: "combat",
   version: "1.0.0",
   basePaths: ["/api/combat"],
-  routes: [attackRoute, logRoute],
+  routes: [attackRoute, logRoute, targetsRoute],
 });

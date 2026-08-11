@@ -13,6 +13,7 @@ import {
   items,
   locations,
   playerItems,
+  players,
   playerStats,
   ranks,
   settings,
@@ -36,8 +37,18 @@ let attackerToken: string;
 let attackerId: string;
 let targetId: string;
 
-/** Puts both players in the same location with enough exp to clear newbie protection. */
-async function makeAttackable(): Promise<string> {
+/**
+ * Puts every given player in the same, fresh location with enough exp to
+ * clear newbie protection. Defaults to the module-level attacker/target pair
+ * when called with no arguments — every pre-existing call site in this file
+ * relies on that default. Variadic (not two fixed ids) so a single call can
+ * co-locate more than two players atomically: calling it once per pair would
+ * each time mint a NEW location and silently move the shared party out of the
+ * previous pair's location, which is not "same location" for anyone but the
+ * last pair.
+ */
+async function makeAttackable(...ids: string[]): Promise<string> {
+  const players_ = ids.length > 0 ? ids : [attackerId, targetId];
   const locationId = uuidv7();
   await db.insert(locations).values({
     id: locationId,
@@ -58,7 +69,7 @@ async function makeAttackable(): Promise<string> {
       jailedUntil: null,
       hospitalUntil: null,
     })
-    .where(inArray(playerStats.playerId, [attackerId, targetId]));
+    .where(inArray(playerStats.playerId, players_));
   return locationId;
 }
 
@@ -85,6 +96,40 @@ const attack = (id: string) =>
     url: `/api/combat/attack/${id}`,
     headers: { authorization: `Bearer ${attackerToken}` },
   });
+
+/**
+ * Registers a fresh player and returns their id, bearer token and username.
+ * POST /api/auth/register is rate-limited to 5/hour/IP
+ * (`auth/routes.ts:51`), and the outer `beforeEach` above already spends 2 of
+ * those 5 registering the module-level attacker/target before every test
+ * body runs — so a single test has 3 of its own `register()` calls to spend,
+ * not 5. A test that needs more players than that should use `makeStranger`
+ * for any of them that never need to authenticate.
+ */
+async function register(): Promise<{ id: string; token: string; username: string }> {
+  const username = `p-${uuidv7().slice(-8)}`;
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/auth/register",
+    payload: { username, password: "hunter2hunter2" },
+  });
+  const body = res.json<{ token: string; playerId: string; username: string }>();
+  return { id: body.playerId, token: body.token, username: body.username };
+}
+
+/**
+ * Inserts a bare player + stats row directly, bypassing both password
+ * hashing and the registration rate limit above. Used for targets that are
+ * only ever read, never authenticated as, in a test — a test needing several
+ * such players in one body would otherwise blow the register() budget.
+ */
+async function makeStranger(): Promise<{ id: string; username: string }> {
+  const id = uuidv7();
+  const username = `s-${id.slice(-8)}`;
+  await db.insert(players).values({ id, username });
+  await db.insert(playerStats).values({ playerId: id });
+  return { id, username };
+}
 
 const bulletsOf = async (playerId: string): Promise<bigint | undefined> => {
   const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
@@ -902,5 +947,145 @@ describe("GET /api/combat/log", () => {
     );
 
     expect((await readLog()).json().entries).toHaveLength(50);
+  });
+});
+
+describe("GET /api/combat/targets", () => {
+  const targets = (token: string) =>
+    app.inject({
+      method: "GET",
+      url: "/api/combat/targets",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  type Target = {
+    playerId: string;
+    username: string;
+    rank: string | null;
+    health: number;
+    maxHealth: number;
+    attackable: boolean;
+    reason: string | null;
+  };
+
+  it("lists a co-located player as attackable, with reason null", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+
+    const res = await targets(attacker.token);
+    expect(res.statusCode).toBe(200);
+    const list = res.json<{ targets: Target[] }>().targets;
+    const row = list.find((t) => t.playerId === victim.id);
+    expect(row).toMatchObject({ attackable: true, reason: null, username: victim.username });
+    expect(row?.maxHealth).toBeGreaterThan(0);
+  });
+
+  it("excludes the caller's own row", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+
+    const list = (await targets(attacker.token)).json<{ targets: Target[] }>().targets;
+    expect(list.map((t) => t.playerId)).not.toContain(attacker.id);
+  });
+
+  it("excludes a player in another city", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+    // A fresh, real location — location_id is FK-constrained to `locations`,
+    // so an arbitrary uuid the row-lock test elsewhere relies on would fail
+    // the insert rather than exercise the case.
+    const elsewhere = uuidv7();
+    await db.insert(locations).values({
+      id: elsewhere,
+      name: `far-${elsewhere.slice(-8)}`,
+      travelCost: 0n,
+      travelCooldownSeconds: 60,
+      bulletStock: 0,
+      bulletCost: 1n,
+    });
+    await db.update(playerStats).set({ locationId: elsewhere }).where(eq(playerStats.playerId, victim.id));
+
+    const list = (await targets(attacker.token)).json<{ targets: Target[] }>().targets;
+    expect(list.map((t) => t.playerId)).not.toContain(victim.id);
+  });
+
+  it("reports each illegal reason", async () => {
+    // Module-level attacker/target plus four DIRECTLY-INSERTED strangers, not
+    // six register() calls: registration is capped at 5/hour/IP
+    // (`auth/routes.ts:51`) and the outer beforeEach already spends 2 of
+    // those on attacker/target before this body even runs. None of the four
+    // below ever authenticates, so makeStranger (a bare row insert) is both
+    // sufficient and what keeps this under the cap.
+    const hospitalised = await makeStranger();
+    const jailed = await makeStranger();
+    const mate = await makeStranger();
+    const newbie = await makeStranger();
+    // One call, all five ids: co-locates everyone in a SINGLE shared location.
+    // Calling makeAttackable once per pair would each time mint a new
+    // location and move the attacker out of the previous pair's location.
+    await makeAttackable(attackerId, hospitalised.id, jailed.id, mate.id, newbie.id);
+
+    await db
+      .update(playerStats)
+      .set({ hospitalUntil: new Date(Date.now() + 60 * 60_000) })
+      .where(eq(playerStats.playerId, hospitalised.id));
+    await db
+      .update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() + 60 * 60_000) })
+      .where(eq(playerStats.playerId, jailed.id));
+    const gangId = uuidv7();
+    await db.insert(gangs).values({
+      id: gangId,
+      name: `g-${gangId.slice(-8)}`,
+      bossPlayerId: attackerId,
+    });
+    await db
+      .update(playerStats)
+      .set({ gangId })
+      .where(inArray(playerStats.playerId, [attackerId, mate.id]));
+    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, newbie.id));
+
+    const list = (await targets(attackerToken)).json<{ targets: Target[] }>().targets;
+    const reasonOf = (id: string) => list.find((t) => t.playerId === id)?.reason;
+    expect(reasonOf(hospitalised.id)).toBe("hospitalised");
+    expect(reasonOf(jailed.id)).toBe("jailed");
+    expect(reasonOf(mate.id)).toBe("gang_mate");
+    expect(reasonOf(newbie.id)).toBe("newbie_protected");
+    expect(list.every((t) => (t.reason === null) === t.attackable)).toBe(true);
+  });
+
+  it("reports newbie_self on every row when the CALLER is under the threshold", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, attacker.id));
+
+    const list = (await targets(attacker.token)).json<{ targets: Target[] }>().targets;
+    expect(list.every((t) => t.reason === "newbie_self")).toBe(true);
+  });
+
+  it("consumes no cooldown", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+    await equipWeapon(attacker.id, { accuracy: 100, damageMin: 1, damageMax: 1 });
+
+    expect((await targets(attacker.token)).statusCode).toBe(200);
+    expect((await targets(attacker.token)).statusCode).toBe(200);
+    // The route must not have claimed combat.attack's Redis key: a subsequent
+    // attack still succeeds rather than 429ing.
+    const shot = await app.inject({
+      method: "POST",
+      url: `/api/combat/attack/${victim.id}`,
+      headers: { authorization: `Bearer ${attacker.token}` },
+    });
+    expect(shot.statusCode).toBe(200);
+  });
+
+  it("answers 401 without a session", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/combat/targets" })).statusCode).toBe(401);
   });
 });
