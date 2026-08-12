@@ -17,7 +17,7 @@ M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
 module ports have shipped (`ranks`, `notifications`, `news`, `bank`,
 `bullets`, `travel`, `crimes`, `mail`, `gangs`) — M5's module-port track is
 complete. The event-envelope blocker that unblocked the last of them is
-**resolved** — `tx.events.publishCore` lets a plugin publish any of the 19
+**resolved** — `tx.events.publishCore` lets a plugin publish any of the 21
 core `GameEvent` variants verbatim. `profile`, `leaderboard` and `jail`
 remain deliberate non-ports — see `docs/STATUS.md`. **PvP combat** has since
 shipped on `feat/pvp-combat`: the `combat` and `inventory` plugins plus core
@@ -31,8 +31,15 @@ system's first live consumer (combat's `killResolved` filter point). The
 **detectives** plugin has since shipped on `feat/detectives`: cross-location
 hunting with a paid seeded search, time-gated reveal (in place of delayed
 jobs), and live-location tracking; spec and tests are its behaviour record.
+The **organized crime** plugin has since shipped on `feat/organized-crime`:
+four-role heists (mastermind/driver/gunman/hacker) with buy-in escrow, a
+leader-fired seeded BullMQ job resolving one shared outcome (equal-split payout
+or mass jail), one-active-heist-per-player via a partial unique index, and a
+heist-row-FOR-UPDATE-first lock order that shares no edge with the existing
+three (gang↔player, location↔player, player↔player); spec and tests are its
+behaviour record.
 M4 (migration CLI) is planned and blocked on a MariaDB install. Suite:
-**93 files / 790 tests**, green across repeated back-to-back runs.
+**98 files / 845 tests**, green across repeated back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
