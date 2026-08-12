@@ -68,7 +68,7 @@ export const shopListRoute = route({
  * Published to the buyer alone. A purchase is private — the same audience
  * `bullets.purchased` uses.
  *
- * A plugin event, not `publishCore`: none of the 19 core `GameEvent` variants
+ * A plugin event, not `publishCore`: none of the 21 core `GameEvent` variants
  * covers a shop purchase, and adding one to `@gl3/shared` for one plugin's
  * feature is a core schema change this does not need.
  */

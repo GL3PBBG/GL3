@@ -79,6 +79,11 @@ export function invalidationKeys(
     case "bounty.claimed":
       // Audience is killer + placer; the killer's cash moved.
       return [keys.bounties(), keys.me()];
+    case "oc.updated":
+    case "oc.resolved":
+      // OC state is gang-scoped; the /oc page and gang roster are stale.
+      // Task 9 will add keys.oc() and refine these.
+      return [keys.profile(viewerId)];
     case "chat.message":
     case "player.joined":
       return [];

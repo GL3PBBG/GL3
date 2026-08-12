@@ -98,16 +98,17 @@ describe("GameEventSchema", () => {
   });
 
   // M5 adds exactly one name — the envelope every plugin event travels in. The
-  // nineteen core names stay closed: a ported core module gets its own variant,
+  // twenty-one core names stay closed: a ported core module gets its own variant,
   // not a plugin.event, so this census failing is how an accidental widening of
   // the core union is caught.
-  it("covers the nineteen core event names plus M5's plugin envelope", () => {
+  it("covers the twenty-one core event names plus M5's plugin envelope", () => {
     expect(new Set(GameEventSchema.options.map((o) => o.shape.type.value))).toEqual(new Set([
       "crime.resolved", "player.jailed", "player.released", "player.travelled",
       "player.attacked", "player.killed", "bounty.placed", "bounty.claimed",
       "gang.created", "gang.memberJoined", "gang.memberLeft", "mail.received",
       "notification.created", "news.posted", "chat.message", "player.joined",
       "player.rankedUp", "bank.transacted", "bullets.purchased",
+      "oc.updated", "oc.resolved",
       "plugin.event",
     ]));
   });
