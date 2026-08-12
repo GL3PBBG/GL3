@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-12, bounties — kill contracts and the first cross-plugin filter.
-Branch: `feat/bounties`.
+Last updated: 2026-08-12, detectives — cross-location hunting via time-gated reveal.
+Branch: `feat/detectives`.
 
 ---
 
@@ -14,9 +14,9 @@ Branch: `feat/bounties`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), and **bounties** (kill contracts, first live cross-plugin filter — `killResolved`) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), and **detectives** (cross-location hunting, time-gated reveal, live-location tracking) have since shipped |
 
-**Suite: 91 files / 767 tests**, green across repeated back-to-back runs.
+**Suite: 93 files / 790 tests**, green across repeated back-to-back runs.
 (The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded
@@ -791,6 +791,74 @@ Four new test files: `test/bounties.test.ts` (place + list), `test/bounties-clai
 (claim sweep on kill), `test/bounties-lock-order.test.ts` (concurrency guard),
 `test/combat-kill-filter.test.ts` (the filter point itself).
 
+### Detectives — cross-location hunting via time-gated reveal
+
+Design: `docs/superpowers/specs/2026-08-12-detectives-design.md`. Plan:
+`docs/superpowers/plans/2026-08-12-detectives.md`, 8 tasks, branch
+`feat/detectives`.
+
+The second real user of the plugin job system (after `crimes`). A player
+hires detectives to locate a target who may be in a different city. The
+search uses a seeded PRNG (deterministic and reproducible) in the
+`resolve` worker — a deliberate deviation from V2's hire-time roll (spec
+§0), identical in player experience because the outcome is hidden behind
+a time-gated reveal until `ends_at`. No location is ever stored; a
+successful report shows the target's **current** location via an un-cached
+live JOIN on `player_stats.location_id`, only while the report is active
+(`now < ends_at + expire`).
+
+**What shipped:**
+
+- **`packages/plugins/detectives`** — `POST /api/detectives` (debit via
+  `applyBalanceChange`, insert search row with `succeeded = NULL` and
+  `ends_at = now + duration × hours`, enqueue-after-commit `resolve`
+  job), `GET /api/detectives` (list the hiring player's searches with
+  time-gated reveal and live-location tracking), `DELETE
+  /api/detectives/:searchId` (remove; ownership predicate inside the
+  DELETE itself, so foreign and nonexistent rows answer identically — no
+  existence leak). Uses core's existing `detective_searches` table
+  (core migration 0000: `id, player_id, target_player_id, detectives,
+  started_at, ends_at, succeeded bool nullable`). No plugin-owned table,
+  no plugin migrations.
+- **`resolve` job** — seeded `ctx.job.rng`, success iff `rng.int(0,100)
+  < detectives × 4 × hours` (0..99 draw, so 5×4×5 = 100% always
+  succeeds). The worker UPDATEs `succeeded`; a lost resolve (enqueue
+  failure) leaves `succeeded = NULL`, which the list route reads as
+  failed past `ends_at` — no row can hang pending forever. Idempotent via
+  `plugin_job_runs (plugin_id, job_id)`. This is the second single-job
+  plugin after `crimes`, so the `plugin_job_runs` PK gap (missing
+  `job_name`) remains a watch item — see below.
+- **Time-gated reveal** — the list route hides `succeeded` until `now ≥
+  ends_at`; a NULL `succeeded` past `ends_at` reads as failed. A successful
+  report shows the target's current location via an un-cached LEFT JOIN on
+  `player_stats.location_id` → `locations`, gated on `now < ends_at +
+  expire`. No location column exists — live tracking is just the join.
+- **Settings:** `detectives.cost` (price per detective per hour-unit;
+  total = cost x detectives x hours, default 125000),
+  `detectives.duration` (seconds per hour-unit; ends_at = now + duration x
+  hours, default 3600), `detectives.expire` (seconds after ends_at that a
+  successful report keeps showing the target's live location, default 600).
+  Bare keys plugin-side — the spec's V2 names adapted to the `ctx` prefix.
+- **No lock-order test, deliberately.** Detectives touches only the hiring
+  player's own row — no location lock, no gang lock, no second-player lock.
+  `applyBalanceChange` locks that one row internally; the detective INSERT's
+  FK on `players` takes `FOR KEY SHARE` on the target, but the target row is
+  never locked FOR UPDATE, so there is no ABBA surface.
+- **No combat coupling.** Unlike bounties, detectives does not subscribe to
+  `killResolved` or any other filter point. It is self-contained.
+- **No WS events.** The list page polls; no live push on hire or reveal.
+- **No target notification.** The target is never informed that a detective
+  was hired on them — spec requirement.
+
+**Deliberate absences:** no lock-order test (single-player lock only), no
+combat coupling (no filter-point subscription), no WS events (polling only),
+no target notification (silent by design).
+
+Two new test files: `test/detectives.test.ts` (hire + list + reveal +
+remove), `test/detectives-worker.test.ts` (worker determinism, idempotency,
+4%/100% boundary cases). `economy-invariant.test.ts` gained a `detectiveHire`
+op. The web page is at `/detectives` (`apps/web/src/pages/`).
+
 ## Starting M4
 
 Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
@@ -976,6 +1044,10 @@ web image serves only the SPA's own assets.
   `crimes` (one job); neither `mail` nor `gangs` declares any job, so nine of
   nine module ports have now shipped without triggering it — still open for
   the first plugin that declares two.
+- **`detective_searches.player_id` has no index** for the list route's
+  `WHERE player_id = ?` (bounties got `bounties_target_idx` for its
+  equivalent). Table is core-owned (migration 0000), so the fix is a core
+  migration — out of scope for this plugin branch.
 - **`GET /api/combat/log` is bounded at 50 but not paginated.** Bounded from
   the first commit, deliberately — unlike mail and notifications above — but
   there is no way to page further back, so a player's older fights are simply

@@ -27,9 +27,12 @@ on `feat/item-economy`: a per-location shop in the `inventory` plugin (its
 first table and first migrations) and four web pages (`/inventory`,
 `/shop`, `/combat`, `/hospital`). The **bounties** plugin has since shipped
 on `feat/bounties`: kill contracts placed and claimed via the SDK filter
-system's first live consumer (combat's `killResolved` filter point). M4
-(migration CLI) is planned and blocked on a MariaDB install. Suite:
-**91 files / 767 tests**, green across repeated back-to-back runs.
+system's first live consumer (combat's `killResolved` filter point). The
+**detectives** plugin has since shipped on `feat/detectives`: cross-location
+hunting with a paid seeded search, time-gated reveal (in place of delayed
+jobs), and live-location tracking; spec and tests are its behaviour record.
+M4 (migration CLI) is planned and blocked on a MariaDB install. Suite:
+**93 files / 790 tests**, green across repeated back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

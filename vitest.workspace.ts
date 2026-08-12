@@ -60,6 +60,9 @@ const srcAliases = {
       "@gl3/plugin-bounties": fileURLToPath(
         new URL("./packages/plugins/bounties/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-detectives": fileURLToPath(
+        new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -224,6 +227,8 @@ export default defineWorkspace([
         "test/combat.test.ts",
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
+        "test/detectives-worker.test.ts",
+        "test/detectives.test.ts",
         "test/economy-invariant.test.ts",
         "test/gang-bank.test.ts",
         "test/gang-invites.test.ts",
