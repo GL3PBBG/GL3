@@ -252,6 +252,7 @@ export default defineWorkspace([
         "test/oc-worker.test.ts",
         "test/oc-concurrency.test.ts",
         "test/oc.test.ts",
+        "test/oc-ledger.test.ts",
         "test/oc-lock-order.test.ts",
         "test/notifications.test.ts",
         "test/plugin-ctx-core-events.test.ts",
