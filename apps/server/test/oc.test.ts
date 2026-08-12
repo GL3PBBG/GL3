@@ -367,10 +367,9 @@ describe("POST /api/oc/:heistId/invite", () => {
     expect(res2.json().error).toBe("already_invited");
   });
 
-  // role_taken needs an accepted non-leader row, which needs the accept route.
+  // role_taken needs an accepted non-leader row — covered by accept tests below.
   // The leader's own accepted mastermind row can't stand in: inviting for
   // mastermind hits invalid_role before the role_taken check.
-  it.todo("accepted role is taken: 409 role_taken — needs accept route, Task 5");
 });
 
 describe("POST /api/oc/:heistId/decline", () => {
@@ -397,5 +396,353 @@ describe("POST /api/oc/:heistId/decline", () => {
     const res = await inject("POST", `/api/oc/${heistId}/decline`, otherToken);
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("not_invited");
+  });
+});
+
+// ── helpers ──────────────────────────────────────────────────────────
+/** Register a player with the given username, assign shared location, return token + id. */
+async function registerPlayer(username: string): Promise<{ token: string; playerId: string }> {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/auth/register",
+    payload: { username, password: "hunter2hunter2" },
+  });
+  const { token, playerId } = res.json();
+  await db.update(playerStats).set({ locationId }).where(eq(playerStats.playerId, playerId));
+  return { token, playerId };
+}
+
+/** Register a player, fund them, invite them to a heist role. Does NOT accept. */
+async function invitePlayer(
+  heistId: string,
+  username: string,
+  role: string,
+  cash = 100_000n,
+): Promise<{ token: string; playerId: string }> {
+  const p = await registerPlayer(username);
+  await db.update(playerStats).set({ cash }).where(eq(playerStats.playerId, p.playerId));
+  const inv = await inject("POST", `/api/oc/${heistId}/invite`, leaderToken, {
+    targetUsername: username, role,
+  });
+  expect(inv.statusCode).toBe(201);
+  return p;
+}
+
+describe("POST /api/oc/:heistId/accept", () => {
+  it("accept escrows the buy-in and fills the slot", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "Driver1", "driver");
+
+    const res = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().cash).toBeDefined();
+
+    // Exactly one ledger row for oc.buyin
+    const ledgerRows = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, driverId), eq(transactions.reason, "oc.buyin")));
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]!.amount).toBe(-5000n);
+
+    // Member row flipped to accepted
+    const state = (await inject("GET", "/api/oc", driverToken)).json();
+    expect(state.heist.members).toContainEqual(
+      expect.objectContaining({ playerId: driverId, role: "driver", state: "accepted" }),
+    );
+  });
+
+  it("accept publishes oc.updated to the accepted member list", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "Driver2", "driver");
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const waiting = awaitOwnEvent(subscriber, driverId);
+
+    const res = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(res.statusCode).toBe(200);
+
+    const event = await waiting;
+    expect(event).toMatchObject({ type: "oc.updated", heistId, status: "open" });
+  });
+
+  it("accept clears the player's other pending invites (gang-invite precedent)", async () => {
+    // Create two heists with different leaders, invite same driver to both
+    const heistId1 = await createHeist();
+    const leader2 = await registerPlayer("Boss2");
+    await db.update(playerStats).set({ cash: 10_000n })
+      .where(eq(playerStats.playerId, leader2.playerId));
+    const heist2Res = await inject("POST", "/api/oc", leader2.token, { buyIn: "5000" });
+    expect(heist2Res.statusCode).toBe(201);
+    const heistId2 = heist2Res.json().heistId;
+
+    const { token: driverToken, playerId: driverId } = await registerPlayer("ClearInviteDriver");
+    await db.update(playerStats).set({ cash: 200_000n })
+      .where(eq(playerStats.playerId, driverId));
+
+    // Invite to heist1 as driver
+    const inv1 = await inject("POST", `/api/oc/${heistId1}/invite`, leaderToken, {
+      targetUsername: "ClearInviteDriver", role: "driver",
+    });
+    expect(inv1.statusCode).toBe(201);
+    // Invite to heist2 as gunman
+    const inv2 = await inject("POST", `/api/oc/${heistId2}/invite`, leader2.token, {
+      targetUsername: "ClearInviteDriver", role: "gunman",
+    });
+    expect(inv2.statusCode).toBe(201);
+
+    // Accept heist1
+    const acc = await inject("POST", `/api/oc/${heistId1}/accept`, driverToken);
+    expect(acc.statusCode).toBe(200);
+
+    // The other invite (heist2, gunman) should be gone
+    const state = (await inject("GET", "/api/oc", driverToken)).json();
+    expect(state.invites).toEqual([]);
+    // No pending rows for driverId with state invited
+    const pending = await db.select().from(ocMembers).where(and(
+      eq(ocMembers.playerId, driverId), eq(ocMembers.state, "invited"),
+    ));
+    expect(pending).toHaveLength(0);
+  });
+
+  it("accept while already in another heist: 409 already_in_heist, no second buyin row", async () => {
+    const heistId1 = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId1, "DoubleAccept", "driver");
+    // Accept heist1
+    const acc1 = await inject("POST", `/api/oc/${heistId1}/accept`, driverToken);
+    expect(acc1.statusCode).toBe(200);
+
+    // Invite to a second heist (different leader — the original leader is in heist1)
+    const leader2 = await registerPlayer("Boss2");
+    await db.update(playerStats).set({ cash: 10_000n })
+      .where(eq(playerStats.playerId, leader2.playerId));
+    const heist2Res = await inject("POST", "/api/oc", leader2.token, { buyIn: "5000" });
+    expect(heist2Res.statusCode).toBe(201);
+    const heistId2 = heist2Res.json().heistId;
+    const inv = await inject("POST", `/api/oc/${heistId2}/invite`, leader2.token, {
+      targetUsername: "DoubleAccept", role: "gunman",
+    });
+    expect(inv.statusCode).toBe(201);
+
+    // Try to accept — partial unique index blocks it
+    const res = await inject("POST", `/api/oc/${heistId2}/accept`, driverToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("already_in_heist");
+
+    // Only one buyin row total (from heist1 accept)
+    const buyinRows = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, driverId), eq(transactions.reason, "oc.buyin")));
+    expect(buyinRows).toHaveLength(1);
+  });
+
+  it("accept with insufficient funds: 409, invite row still invited, no ledger row", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "BrokeDriver", "driver", 100n);
+
+    const res = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("insufficient_funds");
+
+    // Invite row still present as invited
+    const rows = await db.select().from(ocMembers).where(and(
+      eq(ocMembers.heistId, heistId), eq(ocMembers.playerId, driverId),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.state).toBe("invited");
+
+    // No ledger row
+    const ledgerRows = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, driverId), eq(transactions.reason, "oc.buyin")));
+    expect(ledgerRows).toHaveLength(0);
+  });
+
+  it("not invited: 404 not_invited", async () => {
+    const heistId = await createHeist();
+    const res = await inject("POST", `/api/oc/${heistId}/accept`, otherToken);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("not_invited");
+  });
+
+  it("accepted role is taken: 409 role_taken", async () => {
+    // Invite A as driver, A accepts. Invite B as driver, B tries to accept.
+    const heistId = await createHeist();
+    const pA = await invitePlayer(heistId, "DriverA", "driver");
+    const pB = await invitePlayer(heistId, "DriverB", "driver");
+
+    // A accepts
+    const accA = await inject("POST", `/api/oc/${heistId}/accept`, pA.token);
+    expect(accA.statusCode).toBe(200);
+
+    // B tries to accept — seat taken
+    const accB = await inject("POST", `/api/oc/${heistId}/accept`, pB.token);
+    expect(accB.statusCode).toBe(409);
+    expect(accB.json().error).toBe("role_taken");
+  });
+
+  it("heist not found: 404 heist_not_found", async () => {
+    const fakeId = uuidv7();
+    const res = await inject("POST", `/api/oc/${fakeId}/accept`, otherToken);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("heist_not_found");
+  });
+
+  it("heist not open: 409 heist_not_open", async () => {
+    const heistId = await createHeist();
+    await db.update(ocHeists).set({ status: "cancelled" }).where(eq(ocHeists.id, heistId));
+
+    const { token: driverToken, playerId: driverId } = await registerPlayer("ClosedHeistDriver");
+    await db.update(playerStats).set({ cash: 100_000n })
+      .where(eq(playerStats.playerId, driverId));
+    // Insert an invited row directly for the test
+    await db.insert(ocMembers).values({
+      heistId, playerId: driverId, role: "driver", state: "invited",
+    });
+
+    const res = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("heist_not_open");
+  });
+});
+
+describe("POST /api/oc/:heistId/leave", () => {
+  it("leave refunds and frees the slot", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "LeaveDriver", "driver");
+    // Accept first
+    const acc = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(acc.statusCode).toBe(200);
+
+    const res = await inject("POST", `/api/oc/${heistId}/leave`, driverToken);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().cash).toBeDefined();
+
+    // One refund row
+    const refunds = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, driverId), eq(transactions.reason, "oc.refund")));
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]!.amount).toBe(5000n);
+
+    // Member row deleted
+    const rows = await db.select().from(ocMembers).where(and(
+      eq(ocMembers.heistId, heistId), eq(ocMembers.playerId, driverId),
+    ));
+    expect(rows).toHaveLength(0);
+
+    // No longer appears in heist state
+    const state = (await inject("GET", "/api/oc", driverToken)).json();
+    expect(state.heist).toBeNull();
+  });
+
+  it("leader cannot leave: 403 leader_cannot_leave", async () => {
+    const heistId = await createHeist();
+    const res = await inject("POST", `/api/oc/${heistId}/leave`, leaderToken);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("leader_cannot_leave");
+  });
+
+  it("not a member: 404 not_member", async () => {
+    const heistId = await createHeist();
+    const res = await inject("POST", `/api/oc/${heistId}/leave`, otherToken);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("not_member");
+  });
+
+  it("heist not open: 409 heist_not_open", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken } = await invitePlayer(heistId, "LeaveClosedDriver", "driver");
+    const acc = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(acc.statusCode).toBe(200);
+    // Cancel the heist via DB
+    await db.update(ocHeists).set({ status: "cancelled" }).where(eq(ocHeists.id, heistId));
+
+    const res = await inject("POST", `/api/oc/${heistId}/leave`, driverToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("heist_not_open");
+  });
+});
+
+describe("POST /api/oc/:heistId/cancel", () => {
+  it("cancels and refunds every accepted member; invited-only members get nothing", async () => {
+    const heistId = await createHeist();
+    // Accept driver
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "CancelDriver", "driver");
+    const accD = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(accD.statusCode).toBe(200);
+    // Invite gunman but do NOT accept
+    const gunman = await invitePlayer(heistId, "CancelGunman", "gunman");
+
+    const res = await inject("POST", `/api/oc/${heistId}/cancel`, leaderToken);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ cancelled: true });
+
+    // Leader has one oc.refund
+    const leaderRefunds = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, leaderId), eq(transactions.reason, "oc.refund")));
+    expect(leaderRefunds).toHaveLength(1);
+    expect(leaderRefunds[0]!.amount).toBe(5000n);
+
+    // Driver has one oc.refund
+    const driverRefunds = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, driverId), eq(transactions.reason, "oc.refund")));
+    expect(driverRefunds).toHaveLength(1);
+    expect(driverRefunds[0]!.amount).toBe(5000n);
+
+    // Gunman has NO refund (was only invited)
+    const gunmanRefunds = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, gunman.playerId), eq(transactions.reason, "oc.refund")));
+    expect(gunmanRefunds).toHaveLength(0);
+
+    // Heist status cancelled
+    const [heist] = await db.select().from(ocHeists).where(eq(ocHeists.id, heistId));
+    expect(heist!.status).toBe("cancelled");
+
+    // All member rows released
+    const members = await db.select().from(ocMembers).where(eq(ocMembers.heistId, heistId));
+    for (const m of members) expect(m.released).toBe(true);
+  });
+
+  it("after cancel, a former member can create their own heist", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken, playerId: driverId } = await invitePlayer(heistId, "ReuseDriver", "driver");
+    const acc = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(acc.statusCode).toBe(200);
+
+    // Cancel
+    const cancel = await inject("POST", `/api/oc/${heistId}/cancel`, leaderToken);
+    expect(cancel.statusCode).toBe(200);
+
+    // Former driver can now create their own heist (partial index released)
+    await db.update(playerStats).set({ cash: 100_000n })
+      .where(eq(playerStats.playerId, driverId));
+    const create = await inject("POST", "/api/oc", driverToken, { buyIn: "5000" });
+    expect(create.statusCode).toBe(201);
+    expect(create.json().heistId).toBeDefined();
+  });
+
+  it("non-leader cannot cancel: 403 not_leader", async () => {
+    const heistId = await createHeist();
+    const { token: driverToken } = await invitePlayer(heistId, "NotLeaderDriver", "driver");
+    const acc = await inject("POST", `/api/oc/${heistId}/accept`, driverToken);
+    expect(acc.statusCode).toBe(200);
+
+    const res = await inject("POST", `/api/oc/${heistId}/cancel`, driverToken);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("not_leader");
+  });
+
+  it("heist not found: 404 heist_not_found", async () => {
+    const fakeId = uuidv7();
+    const res = await inject("POST", `/api/oc/${fakeId}/cancel`, leaderToken);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("heist_not_found");
+  });
+
+  it("heist not open: 409 heist_not_open", async () => {
+    const heistId = await createHeist();
+    // Cancel it once
+    const cancel1 = await inject("POST", `/api/oc/${heistId}/cancel`, leaderToken);
+    expect(cancel1.statusCode).toBe(200);
+
+    // Try again
+    const cancel2 = await inject("POST", `/api/oc/${heistId}/cancel`, leaderToken);
+    expect(cancel2.statusCode).toBe(409);
+    expect(cancel2.json().error).toBe("heist_not_open");
   });
 });
