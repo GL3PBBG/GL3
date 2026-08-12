@@ -261,3 +261,52 @@ describe("GET /api/detectives — reveal gating and live tracking", () => {
     expect((await app.inject({ method: "GET", url: "/api/detectives" })).statusCode).toBe(401);
   });
 });
+
+describe("DELETE /api/detectives/:searchId — remove", () => {
+  const remove = (token: string, id: string) =>
+    app.inject({
+      method: "DELETE",
+      url: `/api/detectives/${id}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  const insertOwn = async (playerId: string): Promise<string> => {
+    const id = uuidv7();
+    await db.insert(detectiveSearches).values({
+      id, playerId, targetPlayerId: playerId === hirerId ? targetId : hirerId,
+      detectives: 1, endsAt: new Date(Date.now() - 1_000), succeeded: false,
+    });
+    return id;
+  };
+
+  it("removes the caller's own row", async () => {
+    const id = await insertOwn(hirerId);
+    const res = await remove(hirerToken, id);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ removed: true });
+    expect(await db.select().from(detectiveSearches)
+      .where(eq(detectiveSearches.id, id))).toHaveLength(0);
+  });
+
+  it("404s a foreign row identically to a nonexistent one — no existence leak", async () => {
+    const foreign = await insertOwn(targetId);
+    const onForeign = await remove(hirerToken, foreign);
+    const onMissing = await remove(hirerToken, uuidv7());
+    expect(onForeign.statusCode).toBe(404);
+    expect(onMissing.statusCode).toBe(404);
+    expect(onForeign.json().error).toBe("not_found");
+    expect(onForeign.json().error).toBe(onMissing.json().error);
+    // The foreign row survives.
+    expect(await db.select().from(detectiveSearches)
+      .where(eq(detectiveSearches.id, foreign))).toHaveLength(1);
+  });
+
+  it("400s a non-UUID param at the zod boundary", async () => {
+    expect((await remove(hirerToken, "not-a-uuid")).statusCode).toBe(400);
+  });
+
+  it("401s without auth", async () => {
+    const res = await app.inject({ method: "DELETE", url: `/api/detectives/${uuidv7()}` });
+    expect(res.statusCode).toBe(401);
+  });
+});
