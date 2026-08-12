@@ -21,6 +21,7 @@ import { MailThread } from "./pages/MailThread.js";
 import { News } from "./pages/News.js";
 import { NotFound } from "./pages/NotFound.js";
 import { Notifications } from "./pages/Notifications.js";
+import { OrganizedCrime } from "./pages/OrganizedCrime.js";
 import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
@@ -55,6 +56,7 @@ export function App(): JSX.Element {
           <Route path="combat" element={<Combat />} />
           <Route path="bounties" element={<Bounties />} />
           <Route path="detectives" element={<Detectives />} />
+          <Route path="oc" element={<OrganizedCrime />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
           <Route path="gang" element={<Gang />} />

@@ -156,4 +156,11 @@ describe("invalidationKeys", () => {
       keys.bounties(), keys.me(),
     ]);
   });
+
+  it("refreshes the oc page and wallet on a heist update", () => {
+    expect(invalidationKeys(event("oc.updated"), VIEWER)).toEqual([keys.oc(), keys.me()]);
+  });
+  it("refreshes the oc page and wallet on a heist resolution", () => {
+    expect(invalidationKeys(event("oc.resolved"), VIEWER)).toEqual([keys.oc(), keys.me()]);
+  });
 });

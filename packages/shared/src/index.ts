@@ -17,6 +17,7 @@ export * from "./dto/leaderboard.js";
 export * from "./dto/mail.js";
 export * from "./dto/news.js";
 export * from "./dto/notifications.js";
+export * from "./dto/oc.js";
 export * from "./dto/profile.js";
 export * from "./dto/plugins.js";
 export * from "./dto/rank.js";

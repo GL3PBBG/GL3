@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import {
   AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
@@ -10,7 +11,8 @@ import {
   InventoryResponseSchema, JailStatusSchema,
   LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
-  NewsListResponseSchema, NotificationListResponseSchema, PlaceBountyResponseSchema,
+  NewsListResponseSchema, NotificationListResponseSchema, OcCashResponseSchema,
+  OcCreateResponseSchema, OcStateResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
@@ -28,8 +30,9 @@ import {
   type HospitalStatus, type InventoryResponse,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
-  type NewsListResponse, type NotificationListResponse, type PlaceBountyRequest,
-  type PlaceBountyResponse, type PluginsPayload,
+  type NewsListResponse, type NotificationListResponse,
+  type OcCashResponse, type OcCreateResponse, type OcStateResponse,
+  type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
   type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
   type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
@@ -613,6 +616,102 @@ export function useRemoveDetectiveSearch() {
       })),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.detectives() });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Organized Crime (heists)
+// ---------------------------------------------------------------------------
+
+export function useOc() {
+  return useQuery<OcStateResponse>({
+    queryKey: keys.oc(),
+    queryFn: async () => OcStateResponseSchema.parse(await api("/api/oc")),
+  });
+}
+
+export function useCreateHeist() {
+  const queryClient = useQueryClient();
+  return useMutation<OcCreateResponse, Error, { buyIn: string }>({
+    mutationFn: async (input) =>
+      OcCreateResponseSchema.parse(await api("/api/oc", {
+        method: "POST", body: JSON.stringify(input),
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useInvite(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ invited: boolean }, Error, { targetUsername: string; role: string }>({
+    mutationFn: async (input) =>
+      z.object({ invited: z.boolean() }).parse(await api(`/api/oc/${heistId}/invite`, {
+        method: "POST", body: JSON.stringify(input),
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+    },
+  });
+}
+
+export function useAccept(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<OcCashResponse, Error, void>({
+    mutationFn: async () =>
+      OcCashResponseSchema.parse(await api(`/api/oc/${heistId}/accept`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useDecline(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ declined: boolean }, Error, void>({
+    mutationFn: async () =>
+      z.object({ declined: z.boolean() }).parse(await api(`/api/oc/${heistId}/decline`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+    },
+  });
+}
+
+export function useLeave(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<OcCashResponse, Error, void>({
+    mutationFn: async () =>
+      OcCashResponseSchema.parse(await api(`/api/oc/${heistId}/leave`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useCancel(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ cancelled: boolean }, Error, void>({
+    mutationFn: async () =>
+      z.object({ cancelled: z.boolean() }).parse(await api(`/api/oc/${heistId}/cancel`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useExecute(heistId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ jobId: string }, Error, void>({
+    mutationFn: async () =>
+      z.object({ jobId: z.string() }).parse(await api(`/api/oc/${heistId}/execute`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.oc() });
     },
   });
 }
