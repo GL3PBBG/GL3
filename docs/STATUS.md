@@ -21,7 +21,7 @@ Branch: `feat/item-economy`.
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded
 `economy-invariant.test.ts`, `plugin-migrate.test.ts` (+2),
-`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`.
+`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`).
 
 ---
 
