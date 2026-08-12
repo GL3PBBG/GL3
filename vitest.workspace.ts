@@ -213,6 +213,7 @@ export default defineWorkspace([
       include: [
         "test/auth.test.ts",
         "test/bank.test.ts",
+        "test/bounties-claim.test.ts",
         "test/bounties.test.ts",
         "test/bounties-lock-order.test.ts",
         "test/bullets.test.ts",
