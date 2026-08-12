@@ -214,6 +214,7 @@ export default defineWorkspace([
         "test/auth.test.ts",
         "test/bank.test.ts",
         "test/bounties.test.ts",
+        "test/bounties-lock-order.test.ts",
         "test/bullets.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill.test.ts",
