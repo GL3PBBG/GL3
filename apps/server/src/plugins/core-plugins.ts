@@ -1,5 +1,6 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import bankPlugin from "@gl3/plugin-bank";
+import bountiesPlugin from "@gl3/plugin-bounties";
 import bulletsPlugin from "@gl3/plugin-bullets";
 import newsPlugin from "@gl3/plugin-news";
 import notificationsPlugin from "@gl3/plugin-notifications";
@@ -27,7 +28,7 @@ import combatPlugin from "@gl3/plugin-combat";
  */
 export const CORE_PLUGINS: readonly PluginManifest[] = [
   rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin, travelPlugin, crimesPlugin,
-  mailPlugin, gangsPlugin, inventoryPlugin, combatPlugin,
+  mailPlugin, gangsPlugin, inventoryPlugin, combatPlugin, bountiesPlugin,
 ];
 
 /**

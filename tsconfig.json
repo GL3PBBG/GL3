@@ -14,6 +14,7 @@
     { "path": "./packages/plugins/gangs" },
     { "path": "./packages/plugins/inventory" },
     { "path": "./packages/plugins/combat" },
+    { "path": "./packages/plugins/bounties" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./examples/hello-plugin" }
