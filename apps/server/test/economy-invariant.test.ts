@@ -23,6 +23,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import crimesPlugin from "@gl3/plugin-crimes";
+import detectivesPlugin from "@gl3/plugin-detectives";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
@@ -43,6 +44,7 @@ const leaderboardPrefix = `invariant-test-${uuidv7()}`;
 const pluginJobDeps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
 
 let playerIds: string[] = [];
+const usernameById = new Map<string, string>();
 let crimeIds: string[] = [];
 let locationIds: string[] = [];
 let shopItemId: string;
@@ -73,7 +75,9 @@ beforeAll(async () => {
 
   for (let i = 0; i < PLAYER_COUNT; i += 1) {
     const id = uuidv7();
-    await db.insert(players).values({ id, username: `invariant${i}-${Date.now()}` });
+    const username = `invariant${i}-${Date.now()}`;
+    await db.insert(players).values({ id, username });
+    usernameById.set(id, username);
     // Funded well above any single op's cost so most ops succeed and the
     // invariant is exercised under real balance movement, not mostly-rejects.
     await db.insert(playerStats).values({ playerId: id, cash: STARTING_CASH });
@@ -143,9 +147,9 @@ describe("economy invariant across every M2 money path", () => {
 
     // Op-type/outcome tallies purely for the assertion below and the task
     // report — not part of the invariant itself.
-    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points", "kill", "shopBuy"] as const;
-    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0 };
-    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0 };
+    const OP_NAMES = ["crime", "bank", "travel", "bullets", "points", "kill", "shopBuy", "detectiveHire"] as const;
+    const attempted = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0, detectiveHire: 0 };
+    const succeeded = { crime: 0, bank: 0, travel: 0, bullets: 0, points: 0, kill: 0, shopBuy: 0, detectiveHire: 0 };
 
     for (let i = 0; i < OP_COUNT; i += 1) {
       const playerId = pick(playerIds);
@@ -240,6 +244,25 @@ describe("economy invariant across every M2 money path", () => {
             // prepends its own id.
             settings: { "combat.newbie_exp_threshold": "100" },
           });
+        } else if (opName === "detectiveHire") {
+          // Pure money sink to the house, same class as the travel fare. Cost
+          // pinned low (settings written PREFIXED, as the settings table
+          // stores them; the plugin asks for bare `cost`) so the sweep mostly
+          // succeeds instead of mostly 409ing. The post-commit enqueue fails
+          // by construction — deps.queues is an empty Map — and the route
+          // logs-and-swallows that, which is exactly the "lost resolve" path
+          // the list route reads as failed. The DEBIT is the invariant's
+          // whole interest here; expect one logged enqueue error per op.
+          const detTargetId = pick(playerIds.filter((id) => id !== playerId));
+          await callPluginRoute(detectivesPlugin, "POST", "/api/detectives", {
+            db, redis, leaderboardPrefix, playerId,
+            body: {
+              targetUsername: usernameById.get(detTargetId)!,
+              detectives: 1 + Math.floor(rand() * 5),
+              hours: 1 + Math.floor(rand() * 5),
+            },
+            settings: { "detectives.cost": "50" },
+          });
         } else {
           const direction = rand() < 0.5 ? "credit" : "debit";
           const amount = BigInt(1 + Math.floor(rand() * 100));
@@ -303,6 +326,11 @@ describe("economy invariant across every M2 money path", () => {
     // in the run) are in the accept-list too, so a regression that made every
     // purchase fail would otherwise pass silently on the aggregate ratio alone.
     expect(succeeded.shopBuy).toBeGreaterThan(0);
+    // Same reasoning as bullets/travel/shopBuy: detectiveHire's expected
+    // rejection (insufficient_funds late in the run) is in the accept-list,
+    // so a regression that made every hire fail would otherwise pass silently
+    // on the aggregate ratio alone.
+    expect(succeeded.detectiveHire).toBeGreaterThan(0);
     // Kills throw nothing by construction (see the op above), so this only
     // guards the op being picked at all — a future OP_NAMES edit that drops
     // `kill` would otherwise leave the transfer path silently uncovered.
