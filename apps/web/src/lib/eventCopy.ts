@@ -5,7 +5,7 @@ import { formatMoney } from "./money.js";
 /**
  * One line of copy per event type. Exhaustive over the union — an unhandled
  * type is a compile error rather than a raw `event.type` string on screen,
- * which is what the previous `default:` branch produced for 18 of the 20 types.
+ * which is what the previous `default:` branch produced for 20 of the 22 types.
  *
  * `eventMetas` is the manifest's event metadata, which only `plugin.event`
  * consults. It is a parameter rather than a `usePlugins()` call inside this
@@ -62,6 +62,14 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
       return `Bank ${event.direction}: ${formatMoney(event.amount)}`;
     case "bullets.purchased":
       return `Bought ${event.quantity} bullets for ${formatMoney(event.cost)}`;
+    case "oc.updated":
+      // State-refresh signal (slot filled, status flip) — the page re-renders
+      // via invalidation, no toast needed.
+      return "";
+    case "oc.resolved":
+      return event.success
+        ? `Heist succeeded — your share: ${formatMoney(event.share)}.`
+        : "Heist failed — you were jailed.";
     case "plugin.event": {
       // The copy is the plugin's own `describe` template from GET /api/plugins;
       // only the manifest knows how to word a plugin's event. Matched on

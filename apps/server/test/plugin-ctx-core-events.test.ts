@@ -91,12 +91,14 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "player.rankedUp", audience: { kind: "global" }, rankId: UUID_A, rankName: "Thug", cashReward: "250", bulletReward: "5", maxHealth: 120 },
   { type: "bank.transacted", audience: { kind: "player", playerId: UUID_A }, direction: "deposit", amount: "100", cash: "900", bank: "100" },
   { type: "bullets.purchased", audience: { kind: "player", playerId: UUID_A }, locationId: UUID_A, quantity: 5, cost: "500", cash: "500", bullets: "5" },
+  { type: "oc.updated", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, status: "open" },
+  { type: "oc.resolved", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, success: true, share: "2500", jailSeconds: 0 },
 ];
 
 describe("tx.events.publishCore", () => {
   /**
    * The drift guard. `CoreEventInput` is DERIVED from `GameEventSchema`, so a
-   * twentieth core variant reaches the SDK for free — and would reach the wire
+   * twenty-second core variant reaches the SDK for free — and would reach the wire
    * completely untested. This fails the moment a variant is added without a
    * corpus entry, which is the prompt to add one.
    */

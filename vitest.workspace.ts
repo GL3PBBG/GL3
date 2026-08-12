@@ -60,6 +60,9 @@ const srcAliases = {
       "@gl3/plugin-bounties": fileURLToPath(
         new URL("./packages/plugins/bounties/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-oc": fileURLToPath(
+        new URL("./packages/plugins/oc/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-detectives": fileURLToPath(
         new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
       ),
@@ -246,6 +249,11 @@ export default defineWorkspace([
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
         "test/news.test.ts",
+        "test/oc-worker.test.ts",
+        "test/oc-concurrency.test.ts",
+        "test/oc.test.ts",
+        "test/oc-ledger.test.ts",
+        "test/oc-lock-order.test.ts",
         "test/notifications.test.ts",
         "test/plugin-ctx-core-events.test.ts",
         "test/plugin-ctx-port-prereqs.test.ts",
