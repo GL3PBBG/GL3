@@ -34,4 +34,13 @@ export const keys = {
   // metadata arrive from `GET /api/plugins` in a single payload, so splitting
   // them would only buy three refetches of the same response.
   plugins: () => ["plugins"] as const,
+
+  // Pass 4 (items and combat). `shop` is not keyed by location: the route
+  // answers for wherever the caller currently is, and travelling invalidates
+  // it through player.travelled anyway.
+  inventory: () => ["inventory"] as const,
+  shop: () => ["shop"] as const,
+  combatTargets: () => ["combat", "targets"] as const,
+  combatLog: () => ["combat", "log"] as const,
+  hospital: () => ["hospital"] as const,
 };

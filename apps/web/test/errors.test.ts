@@ -38,7 +38,7 @@ describe("describeError", () => {
       "Not ready yet — 12s to go.",
     );
     expect(describeError(new ApiError(409, "insufficient_stock", { available: 3 }))).toBe(
-      "Only 3 bullets left here.",
+      "Only 3 left in stock here.",
     );
   });
 
@@ -51,5 +51,16 @@ describe("describeError", () => {
     expect(describeError(new Error("boom"))).toBe("boom");
     expect(describeError("boom")).toBe("Something went wrong.");
     expect(describeError(null)).toBe("Something went wrong.");
+  });
+
+  it("describes insufficient_stock without naming bullets", () => {
+    const message = describeError(new ApiError(409, "insufficient_stock", { available: 3 }));
+    expect(message).toContain("3");
+    expect(message).not.toContain("bullets");
+  });
+
+  it("describes not_sold_here and no_location", () => {
+    expect(describeError(new ApiError(409, "not_sold_here"))).toBeTruthy();
+    expect(describeError(new ApiError(409, "no_location"))).toBeTruthy();
   });
 });
