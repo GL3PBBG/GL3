@@ -1,7 +1,8 @@
 import type { InventoryItem } from "@gl3/shared";
-import { useInventory, useEquip, useMe, useUseItem } from "../api/queries.js";
-import { describeError } from "../lib/errors.js";
+import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.js";
+import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
 import { numericEffect } from "../lib/effects.js";
+import styles from "./pages.module.css";
 
 /**
  * The three item types this page renders specially. Anything else is listed
@@ -13,37 +14,40 @@ const WEAPON = "weapon";
 const ARMOR = "armor";
 const CONSUMABLE = "consumable";
 
-function ItemStats({ item }: { item: InventoryItem }) {
+function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
   if (item.itemType === WEAPON) {
     const min = numericEffect(item.effects, "damageMin");
     const max = numericEffect(item.effects, "damageMax");
-    if (min === null || max === null) return <span className="muted">unusable</span>;
-    return <span className="muted">{min}–{max} damage</span>;
+    if (min === null || max === null) return <span className={styles.muted}>unusable</span>;
+    return <span className={styles.muted}>{min}–{max} damage</span>;
   }
   if (item.itemType === ARMOR) {
     const armor = numericEffect(item.effects, "armor");
-    if (armor === null) return <span className="muted">unusable</span>;
-    return <span className="muted">{armor} armor</span>;
+    if (armor === null) return <span className={styles.muted}>unusable</span>;
+    return <span className={styles.muted}>{armor} armor</span>;
   }
   if (item.itemType === CONSUMABLE) {
     const heal = numericEffect(item.effects, "heal");
-    if (heal === null) return <span className="muted">unusable</span>;
-    return <span className="muted">heals {heal}</span>;
+    if (heal === null) return <span className={styles.muted}>unusable</span>;
+    return <span className={styles.muted}>heals {heal}</span>;
   }
   return null;
 }
 
 export function Inventory(): JSX.Element {
   const inventory = useInventory();
-  const me = useMe();
+  const hospital = useHospital();
   const equip = useEquip();
   const useItem = useUseItem();
 
-  if (inventory.isLoading) return <p>Loading…</p>;
-  if (inventory.error) return <p className="error">{describeError(inventory.error)}</p>;
-  if (!inventory.data) return <></>;
+  if (inventory.isLoading || hospital.isLoading) return <Loading what="inventory" />;
+  if (inventory.error) return <ErrorText error={inventory.error} />;
+  if (!inventory.data) return <Loading what="inventory" />;
 
   const { items, equipped } = inventory.data;
+  const health = hospital.data?.health;
+  const maxHealth = hospital.data?.maxHealth;
+  const full = health !== undefined && maxHealth !== undefined && health >= maxHealth;
 
   const weapons = items.filter((i) => i.itemType === WEAPON);
   const armors = items.filter((i) => i.itemType === ARMOR);
@@ -58,119 +62,135 @@ export function Inventory(): JSX.Element {
   const actionError = equip.error ?? useItem.error;
 
   return (
-    <section>
-      <h1>Inventory</h1>
-      {actionError ? <p className="error">{describeError(actionError)}</p> : null}
-
-      <h2>Equipped</h2>
-      <ul>
-        <li>
-          Weapon: {equipped.weaponItemId
-            ? items.find((i) => i.itemId === equipped.weaponItemId)?.name ?? "unknown"
-            : "none"}
-          {equipped.weaponItemId ? (
-            <button
-              type="button"
-              disabled={equip.isPending}
-              // Explicit null unequips. Omitting the key would leave the slot
-              // alone — that distinction is the whole reason the request
-              // schema is `.nullable().optional()`.
-              onClick={() => equip.mutate({ weaponItemId: null })}
-            >
-              Unequip
-            </button>
-          ) : null}
-        </li>
-        <li>
-          Armor: {equipped.armorItemId
-            ? items.find((i) => i.itemId === equipped.armorItemId)?.name ?? "unknown"
-            : "none"}
-          {equipped.armorItemId ? (
-            <button
-              type="button"
-              disabled={equip.isPending}
-              onClick={() => equip.mutate({ armorItemId: null })}
-            >
-              Unequip
-            </button>
-          ) : null}
-        </li>
-      </ul>
-
-      {items.length === 0 ? (
-        <p>You own nothing. Buy something at the shop.</p>
+    <Panel title="Inventory">
+      {health !== undefined && maxHealth !== undefined ? (
+        <p className={styles.meta}>
+          Health <Amount value={String(health)} /> / <Amount value={String(maxHealth)} />
+        </p>
       ) : null}
+      <ErrorText error={actionError} />
 
-      {weapons.length > 0 ? (
-        <>
-          <h2>Weapons</h2>
-          <ul>
-            {weapons.map((item) => (
-              <li key={item.itemId}>
-                {item.name} ×{item.qty} <ItemStats item={item} />
+      <div className={styles.stack}>
+        <div>
+          <h3 className={styles.meta}>Equipped</h3>
+          <ul className={styles.rows}>
+            <li className={styles.row}>
+              <span>Weapon: {equipped.weaponItemId
+                ? items.find((i) => i.itemId === equipped.weaponItemId)?.name ?? "unknown"
+                : "none"}</span>
+              {equipped.weaponItemId ? (
                 <button
                   type="button"
-                  disabled={equip.isPending || item.itemId === equipped.weaponItemId}
-                  onClick={() => equip.mutate({ weaponItemId: item.itemId })}
+                  disabled={equip.isPending}
+                  onClick={() => equip.mutate({ weaponItemId: null })}
                 >
-                  {item.itemId === equipped.weaponItemId ? "Equipped" : "Equip"}
+                  Unequip
                 </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
-
-      {armors.length > 0 ? (
-        <>
-          <h2>Armor</h2>
-          <ul>
-            {armors.map((item) => (
-              <li key={item.itemId}>
-                {item.name} ×{item.qty} <ItemStats item={item} />
+              ) : null}
+            </li>
+            <li className={styles.row}>
+              <span>Armor: {equipped.armorItemId
+                ? items.find((i) => i.itemId === equipped.armorItemId)?.name ?? "unknown"
+                : "none"}</span>
+              {equipped.armorItemId ? (
                 <button
                   type="button"
-                  disabled={equip.isPending || item.itemId === equipped.armorItemId}
-                  onClick={() => equip.mutate({ armorItemId: item.itemId })}
+                  disabled={equip.isPending}
+                  onClick={() => equip.mutate({ armorItemId: null })}
                 >
-                  {item.itemId === equipped.armorItemId ? "Equipped" : "Equip"}
+                  Unequip
                 </button>
-              </li>
-            ))}
+              ) : null}
+            </li>
           </ul>
-        </>
-      ) : null}
+        </div>
 
-      {consumables.length > 0 ? (
-        <>
-          <h2>Consumables</h2>
-          <ul>
-            {consumables.map((item) => (
-              <li key={item.itemId}>
-                {item.name} ×{item.qty} <ItemStats item={item} />
-                <button
-                  type="button"
-                  disabled={useItem.isPending}
-                  onClick={() => useItem.mutate(item.itemId)}
-                >
-                  Use
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
+        {items.length === 0 ? (
+          <p className={styles.meta}>You own nothing. Buy something at the shop.</p>
+        ) : null}
 
-      {others.length > 0 ? (
-        <>
-          <h2>Other</h2>
-          <ul>
-            {others.map((item) => (
-              <li key={item.itemId}>{item.name} ×{item.qty}</li>
-            ))}
-          </ul>
-        </>
-      ) : null}
-    </section>
+        {weapons.length > 0 ? (
+          <div>
+            <h3 className={styles.meta}>Weapons</h3>
+            <ul className={styles.rows}>
+              {weapons.map((item) => (
+                <li key={item.itemId} className={styles.row}>
+                  <span>
+                    {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
+                  </span>
+                  <button
+                    type="button"
+                    disabled={equip.isPending || item.itemId === equipped.weaponItemId}
+                    onClick={() => equip.mutate({ weaponItemId: item.itemId })}
+                  >
+                    {item.itemId === equipped.weaponItemId ? "Equipped" : "Equip"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {armors.length > 0 ? (
+          <div>
+            <h3 className={styles.meta}>Armor</h3>
+            <ul className={styles.rows}>
+              {armors.map((item) => (
+                <li key={item.itemId} className={styles.row}>
+                  <span>
+                    {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
+                  </span>
+                  <button
+                    type="button"
+                    disabled={equip.isPending || item.itemId === equipped.armorItemId}
+                    onClick={() => equip.mutate({ armorItemId: item.itemId })}
+                  >
+                    {item.itemId === equipped.armorItemId ? "Equipped" : "Equip"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {consumables.length > 0 ? (
+          <div>
+            <h3 className={styles.meta}>Consumables</h3>
+            {full ? <p className={styles.bad}>You're at full health — nothing to heal.</p> : null}
+            <ul className={styles.rows}>
+              {consumables.map((item) => (
+                <li key={item.itemId} className={styles.row}>
+                  <span>
+                    {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
+                  </span>
+                  <button
+                    type="button"
+                    disabled={useItem.isPending || full}
+                    onClick={() => useItem.mutate(item.itemId)}
+                  >
+                    Use
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {others.length > 0 ? (
+          <div>
+            <h3 className={styles.meta}>Other</h3>
+            <ul className={styles.rows}>
+              {others.map((item) => (
+                <li key={item.itemId} className={styles.row}>
+                  <span>
+                    {item.name} ×<Amount value={String(item.qty)} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Panel>
   );
 }
