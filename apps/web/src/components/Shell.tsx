@@ -19,6 +19,7 @@ const LINKS: ReadonlyArray<readonly [string, string]> = [
   ["/bullets", "Bullets"],
   ["/shop", "Shop"],
   ["/inventory", "Inventory"],
+  ["/combat", "Combat"],
   ["/ranks", "Ranks"],
   ["/leaderboards", "Leaderboards"],
   ["/gang", "Gang"],
