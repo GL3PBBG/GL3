@@ -3,6 +3,7 @@ import { useMe } from "./api/queries.js";
 import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
 import { Bank } from "./pages/Bank.js";
+import { Bounties } from "./pages/Bounties.js";
 import { Bullets } from "./pages/Bullets.js";
 import { Combat } from "./pages/Combat.js";
 import { Crimes } from "./pages/Crimes.js";
@@ -51,6 +52,7 @@ export function App(): JSX.Element {
           <Route path="shop" element={<Shop />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="combat" element={<Combat />} />
+          <Route path="bounties" element={<Bounties />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
           <Route path="gang" element={<Gang />} />
