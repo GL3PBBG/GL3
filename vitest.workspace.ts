@@ -60,6 +60,9 @@ const srcAliases = {
       "@gl3/plugin-bounties": fileURLToPath(
         new URL("./packages/plugins/bounties/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-oc": fileURLToPath(
+        new URL("./packages/plugins/oc/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-detectives": fileURLToPath(
         new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
       ),
