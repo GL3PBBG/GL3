@@ -358,6 +358,20 @@ const logRoute = route({
  * trusted. `target_elsewhere` has no `reason` because such a player is simply
  * absent from the list.
  *
+ * Does NOT evaluate the CALLER's own `hospitalUntil`/`jailedUntil` — only
+ * each row's. `attack` checks the attacker's own sentence first (423,
+ * before ever looking at the target: lines 147-152 above) and this route has
+ * no reason member for that in the brief's `TargetReason` enum, so a
+ * hospitalised or jailed caller (this route sets neither `accessInJail` nor
+ * `accessInHospital`, so both default to open — see `logRoute`'s comment)
+ * sees ordinary rows here that `attack` would still 423 on their own status
+ * alone. That gap does not cost a cooldown either way — the loader gate and
+ * `attack`'s own re-check both run before the Redis claim — so the advisory
+ * purpose (never spend a cooldown to learn a rule) still holds; it is only
+ * this route's per-target `hospitalised`/`jailed` reasons that reuse those
+ * names for the TARGET's sentence, matching `attack`'s `target_hospitalised`/
+ * `target_jailed` 409s, not its own-status 423s.
+ *
  * Bounded at 50 and NOT paginated — the same deliberate limitation
  * GET /api/combat/log has, recorded here rather than discovered later.
  */
@@ -409,8 +423,10 @@ const targetsRoute = route({
         status: 200,
         body: {
           targets: rows.map((row) => {
-            // Evaluated in the same order attack's checks run, so the reason a
-            // player sees here is the one they would actually get back.
+            // Evaluated in the same order attack's PER-TARGET checks run
+            // (hospitalised/jailed here read the ROW's own sentence, same as
+            // attack's target_hospitalised/target_jailed). The caller's OWN
+            // sentence is not represented at all — see the docblock above.
             const reason =
               row.hospitalUntil && row.hospitalUntil.getTime() > now ? "hospitalised"
               : row.jailedUntil && row.jailedUntil.getTime() > now ? "jailed"
