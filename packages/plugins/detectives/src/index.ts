@@ -109,13 +109,6 @@ const hireRoute = route({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Resolve job — the roll happens HERE, seeded, not at hire time (spec §2):
-// a BullMQ retry replays the same seed and the plugin_job_runs claim aborts
-// it anyway. The outcome sits hidden in the row until ends_at (time-gated
-// reveal) — no delayed job needed.
-// ---------------------------------------------------------------------------
-
 const listRoute = route({
   method: "GET",
   path: "/api/detectives",
@@ -207,6 +200,13 @@ const removeRoute = route({
     });
   },
 });
+
+// ---------------------------------------------------------------------------
+// Resolve job — the roll happens HERE, seeded, not at hire time (spec §2):
+// a BullMQ retry replays the same seed and the plugin_job_runs claim aborts
+// it anyway. The outcome sits hidden in the row until ends_at (time-gated
+// reveal) — no delayed job needed.
+// ---------------------------------------------------------------------------
 
 async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
   const searchId = String(data["searchId"]);
