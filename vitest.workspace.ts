@@ -213,6 +213,7 @@ export default defineWorkspace([
       include: [
         "test/auth.test.ts",
         "test/bank.test.ts",
+        "test/bounties.test.ts",
         "test/bullets.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill.test.ts",
