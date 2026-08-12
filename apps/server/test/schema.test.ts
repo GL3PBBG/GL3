@@ -134,7 +134,9 @@ describe("core schema", () => {
         WHERE c.contype = 'p' AND c.conname = i.indexname
       )
     `);
-    expect(Number(count)).toBe(31);
+    // 31 shipped through 0005; migration 0006 dropped crime_log_job_id_unique
+    // (a core-era idempotency key the crimes plugin's job ids collide with).
+    expect(Number(count)).toBe(30);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

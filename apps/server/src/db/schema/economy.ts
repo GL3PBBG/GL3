@@ -63,17 +63,17 @@ export const crimeLog = pgTable("crime_log", {
   success: boolean("success").notNull(),
   payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
   /**
-   * BullMQ job id. Nullable + unique (not unique-and-not-null): Postgres
-   * unique indexes treat NULLs as distinct from one another, so this only
-   * ever rejects a *second* row for the same job — it never collides
-   * legacy/hand-inserted rows that have no job id. The crime worker inserts
-   * this row first, keyed to job.id; a retry of the same job hits the
-   * unique violation and is treated as "already paid", never crediting the
-   * ledger twice (spec §7 idempotency — see game/crimes/worker.ts).
+   * BullMQ job id — a trace column, NOT an idempotency guard. It was unique
+   * while the deleted core worker keyed its replay check on it; the crimes
+   * plugin's guard is `plugin_job_runs` (structural in ctx.transaction), and
+   * the plugin's queue (`crimes-commit`) numbers jobs from 1 independently of
+   * the retired core queue (`bull:crime`), so a live DB's core-era rows
+   * collide with plugin-era ids. Migration 0006 dropped the unique index for
+   * exactly that reason — the first plugin-era commit on a live game failed
+   * all three attempts against core-era job 1.
    */
   jobId: text("job_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   playerIdx: index("crime_log_player_idx").on(t.playerId, t.createdAt),
-  jobIdUnique: uniqueIndex("crime_log_job_id_unique").on(t.jobId),
 }));
