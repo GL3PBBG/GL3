@@ -827,10 +827,12 @@ gate opens.
   omits the location. After it opens, a JOIN on `player_stats.location_id`
   provides the target's **current** location (live tracking), which may
   differ from the seeded result — that is by design.
-- **Settings:** `detectives.cost` (hire price, default 5000),
-  `detectives.duration` (reveal delay in seconds, default 300),
-  `detectives.expire` (auto-cleanup age in seconds, default 86400). Bare
-  keys plugin-side — the spec's V2 names adapted to the `ctx` prefix.
+- **Settings:** `detectives.cost` (price per detective per hour-unit;
+  total = cost x detectives x hours, default 125000),
+  `detectives.duration` (seconds per hour-unit; ends_at = now + duration x
+  hours, default 3600), `detectives.expire` (seconds after ends_at that a
+  successful report keeps showing the target's live location, default 600).
+  Bare keys plugin-side — the spec's V2 names adapted to the `ctx` prefix.
 - **No lock-order test, deliberately.** Detectives touches only the hiring
   player's own row — no location lock, no gang lock, no second-player lock.
   `applyBalanceChange` locks that one row internally; the detective INSERT's
