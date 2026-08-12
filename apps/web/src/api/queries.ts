@@ -506,10 +506,13 @@ export function useAttack() {
       AttackResponseSchema.parse(await api(`/api/combat/attack/${targetId}`, { method: "POST" })),
     onSuccess: () => {
       // Bullets and (on a kill) cash moved; the target's health and the log
-      // both changed.
+      // both changed. A kill also hospitalises the target, which the WS
+      // player.killed event covers for onlookers, but the attacker's own
+      // mutation response is what has to refresh their own view of it here.
       void queryClient.invalidateQueries({ queryKey: keys.me() });
       void queryClient.invalidateQueries({ queryKey: keys.combatTargets() });
       void queryClient.invalidateQueries({ queryKey: keys.combatLog() });
+      void queryClient.invalidateQueries({ queryKey: keys.hospital() });
     },
   });
 }
