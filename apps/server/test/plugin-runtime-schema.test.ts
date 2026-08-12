@@ -9,7 +9,21 @@ const { db, sql: conn } = testDb();
 // isolated-db.setup.ts gives this file its own database but does not clear it
 // between tests, so the first test's row would otherwise be counted by the
 // second test's `name = '0001_init'` select.
-beforeEach(async () => { await resetDb(db); });
+//
+// resetDb() deliberately excludes `plugin_migrations` (helpers/db.ts): that
+// table is migration bookkeeping everywhere else, and truncating it there
+// left a plugin's already-applied DDL (e.g. inventory's
+// p_inventory_shop_stock) standing while wiping the record of it, causing a
+// second boot's CREATE TABLE to 42P07 (see plugin-migrate.test.ts's "survives
+// a resetDb()" regression test). This file is the one exception: it inserts
+// synthetic rows straight into `plugin_migrations` (pluginId "hello"/"a"/"b")
+// to prove the composite primary key, never through `runPluginMigrations` and
+// never alongside any real DDL — so nothing here depends on tracking state
+// surviving a reset, and clearing it explicitly cannot reintroduce that bug.
+beforeEach(async () => {
+  await resetDb(db);
+  await db.execute(sql`truncate table plugin_migrations`);
+});
 afterAll(async () => { await conn.end(); });
 
 /**
