@@ -1,4 +1,4 @@
-import { definePlugin, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
+import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
 import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
@@ -15,6 +15,16 @@ export { resolveShot, rollFor } from "./resolve.js";
 export type { Rolls, ShotOutcome, WeaponProfile } from "./resolve.js";
 export { readCombatSettings } from "./settings.js";
 export type { CombatSettings } from "./settings.js";
+
+/**
+ * Fired after a fatal attack's transaction has COMMITTED — the V2
+ * `userKilled` hook. Filters run outside transactions (SDK rule): a
+ * subscriber that moves money opens its own transaction, and a subscriber
+ * that dies loses nothing durable — bounties' sweep, the first consumer,
+ * stays open and the next kill claims it.
+ */
+export interface KillResolved { killerId: string; victimId: string }
+export const killResolved = filterPoint<KillResolved>("combat.killResolved");
 
 /**
  * One player's elapsed sentence, cleared inside the caller's lock. Duplicates
@@ -115,7 +125,7 @@ const attackRoute = route({
       throw new PluginError("cooldown", 429, {}, { "retry-after": String(remaining) });
     }
 
-    return ctx.transaction(async (tx) => {
+    const result = await ctx.transaction(async (tx) => {
       // FIRST statement. Ascending UUID via the shared helper, which is what
       // makes A-shoots-B and B-shoots-A safe against each other (no ABBA).
       await tx.locks.player([player.id, params.targetId]);
@@ -296,6 +306,18 @@ const attackRoute = route({
         },
       };
     });
+
+    if (result.body.targetKilled) {
+      try {
+        await ctx.filters.apply(killResolved, { killerId: player.id, victimId: params.targetId });
+      } catch (err) {
+        // The kill is already committed and earned; a subscriber's failure is
+        // its own problem. Log and return the response the transaction built.
+        ctx.log.error("combat.killResolved subscriber failed", { error: String(err) });
+      }
+    }
+
+    return result;
   },
 });
 
@@ -462,4 +484,5 @@ export default definePlugin({
   version: "1.0.0",
   basePaths: ["/api/combat"],
   routes: [attackRoute, logRoute, targetsRoute],
+  provides: [killResolved],
 });
