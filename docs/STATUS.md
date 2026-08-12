@@ -16,7 +16,7 @@ Branch: `feat/item-economy`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) and **item economy** (location shop, combat targets, four web pages) have since shipped |
 
-**Suite: 87 files / 746 tests**, green across repeated back-to-back runs.
+**Suite: 87 files / 747 tests**, green across repeated back-to-back runs.
 (The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded

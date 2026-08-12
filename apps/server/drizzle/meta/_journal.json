@@ -43,6 +43,13 @@
       "when": 1786465391000,
       "tag": "0005_combat_log",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786500874616,
+      "tag": "0006_drop_crime_log_job_id_unique",
+      "breakpoints": true
     }
   ]
 }

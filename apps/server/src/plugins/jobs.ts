@@ -88,7 +88,7 @@ export function createPluginWorkers(
   const workers: Worker[] = [];
   for (const manifest of manifests) {
     for (const name of Object.keys(manifest.jobs)) {
-      workers.push(new Worker(
+      const worker = new Worker(
         pluginQueueName(prefix, manifest.id, name),
         async (job) => { await runPluginJob(deps, manifest, name, job); },
         // concurrency:5 matches core's deleted crime worker (`startCrimeWorker`,
@@ -96,7 +96,22 @@ export function createPluginWorkers(
         // `createPluginQueues` above) — BullMQ's default is 1 (serial), which
         // would silently regress every plugin job to one-at-a-time processing.
         { connection: deps.redis, concurrency: 5 },
-      ));
+      );
+      // A job that exhausts its attempts otherwise dies in silence: BullMQ
+      // reports failures only through these events, and the player just sees
+      // a claimed cooldown and no resolution. The crime_log job-id collision
+      // (migration 0006) burned three attempts here without one log line —
+      // same console idiom as ctx.log (ctx.ts).
+      worker.on("failed", (job, error) => {
+        console.error(
+          { plugin: manifest.id, job: name, jobId: job?.id, attemptsMade: job?.attemptsMade, err: String(error) },
+          "plugin job failed",
+        );
+      });
+      worker.on("error", (error) => {
+        console.error({ plugin: manifest.id, job: name, err: String(error) }, "plugin worker error");
+      });
+      workers.push(worker);
     }
   }
   return workers;

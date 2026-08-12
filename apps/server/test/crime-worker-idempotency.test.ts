@@ -71,8 +71,9 @@ describe("plugin commit job idempotency", () => {
     // same job.id and the exact same seed — seed-determinism means it rolls
     // the identical outcome, but the `plugin_job_runs` idempotency guard
     // (structural, first write inside ctx.transaction) must stop it from
-    // crediting a second time. `crime_log.job_id` is still unique but is
-    // incidental to that guard, not the mechanism enforcing it.
+    // crediting a second time. `crime_log.job_id` is a plain trace column
+    // (migration 0006 dropped its unique index), so the guard is the only
+    // thing standing between a retry and a double credit.
     await runPluginJob(deps(), crimesPlugin, "commit", job);
 
     const logs = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));
@@ -93,6 +94,33 @@ describe("plugin commit job idempotency", () => {
     // plugin framework swallows the replay (JobAlreadyAppliedError aborts the
     // handler before any publishCore), so only the first run's event arrives.
     expect(events).toHaveLength(1);
+  });
+});
+
+describe("plugin commit job vs legacy core rows", () => {
+  // The deleted core worker's queue (`bull:crime`) and the plugin's queue
+  // (`crimes-commit`) number their jobs independently from 1, so a live DB
+  // carries core-era crime_log rows whose job_id values the plugin queue
+  // re-issues. Under the old `crime_log_job_id_unique` index the very first
+  // plugin-era commit collided with core-era job 1, failed all three BullMQ
+  // attempts, and the player saw a claimed cooldown and nothing else.
+  // plugin_job_runs — keyed (plugin_id, job_id) — is the idempotency guard;
+  // crime_log.job_id is a trace column and must tolerate the collision.
+  it("resolves a job whose BullMQ id collides with a core-era crime_log row", async () => {
+    await db.insert(crimeLog).values({
+      id: uuidv7(), playerId, crimeId, success: false, payout: 0n, jobId: "1",
+    });
+
+    const job = { id: "1", data: { playerId, crimeId, seed: "seed-legacy-collision" } };
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
+
+    const logs = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));
+    expect(logs).toHaveLength(2); // the core-era row plus this resolution
+
+    // The forced 100% chance means the payout must actually have landed —
+    // proving the job resolved rather than silently swallowing a failure.
+    const ledger = await db.select().from(transactions).where(eq(transactions.playerId, playerId));
+    expect(ledger).toHaveLength(1);
   });
 });
 
