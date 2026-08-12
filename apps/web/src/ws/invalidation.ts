@@ -79,6 +79,11 @@ export function invalidationKeys(
     case "bounty.claimed":
       // Audience is killer + placer; the killer's cash moved.
       return [keys.bounties(), keys.me()];
+    case "oc.updated":
+    case "oc.resolved":
+      // A heist crew is individual players, not a gang — refresh the /oc
+      // page (slot grid / invites) and the wallet (payout / refund moves cash).
+      return [keys.oc(), keys.me()];
     case "chat.message":
     case "player.joined":
       return [];

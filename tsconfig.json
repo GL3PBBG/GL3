@@ -15,6 +15,7 @@
     { "path": "./packages/plugins/inventory" },
     { "path": "./packages/plugins/combat" },
     { "path": "./packages/plugins/bounties" },
+    { "path": "./packages/plugins/oc" },
     { "path": "./packages/plugins/detectives" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },

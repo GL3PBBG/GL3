@@ -62,6 +62,7 @@ COPY packages/plugins/gangs/package.json packages/plugins/gangs/
 COPY packages/plugins/inventory/package.json packages/plugins/inventory/
 COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY packages/plugins/bounties/package.json packages/plugins/bounties/
+COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
@@ -98,6 +99,8 @@ COPY packages/plugins/combat/tsconfig.json packages/plugins/combat/tsconfig.json
 COPY packages/plugins/combat/src packages/plugins/combat/src
 COPY packages/plugins/bounties/tsconfig.json packages/plugins/bounties/tsconfig.json
 COPY packages/plugins/bounties/src packages/plugins/bounties/src
+COPY packages/plugins/oc/tsconfig.json packages/plugins/oc/tsconfig.json
+COPY packages/plugins/oc/src packages/plugins/oc/src
 COPY packages/plugins/detectives/tsconfig.json packages/plugins/detectives/tsconfig.json
 COPY packages/plugins/detectives/src packages/plugins/detectives/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
@@ -148,6 +151,7 @@ COPY packages/plugins/gangs/package.json packages/plugins/gangs/
 COPY packages/plugins/inventory/package.json packages/plugins/inventory/
 COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY packages/plugins/bounties/package.json packages/plugins/bounties/
+COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
@@ -171,6 +175,7 @@ COPY --from=builder /app/packages/plugins/gangs/dist packages/plugins/gangs/dist
 COPY --from=builder /app/packages/plugins/inventory/dist packages/plugins/inventory/dist
 COPY --from=builder /app/packages/plugins/combat/dist packages/plugins/combat/dist
 COPY --from=builder /app/packages/plugins/bounties/dist packages/plugins/bounties/dist
+COPY --from=builder /app/packages/plugins/oc/dist packages/plugins/oc/dist
 COPY --from=builder /app/packages/plugins/detectives/dist packages/plugins/detectives/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle

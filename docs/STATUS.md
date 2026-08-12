@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-12, detectives — cross-location hunting via time-gated reveal.
-Branch: `feat/detectives`.
+Last updated: 2026-08-13, organized crime — four-role heists with buy-in escrow and a shared-fate seeded job.
+Branch: `feat/organized-crime`.
 
 ---
 
@@ -16,14 +16,17 @@ Branch: `feat/detectives`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), and **detectives** (cross-location hunting, time-gated reveal, live-location tracking) have since shipped |
 
-**Suite: 93 files / 790 tests**, green across repeated back-to-back runs.
+**Suite: 98 files / 845 tests**, green across repeated back-to-back runs.
 (The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded
 `economy-invariant.test.ts`, `plugin-migrate.test.ts` (+2),
 `plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`.
 Bounties added four new test files / 20 tests net and introduced the SDK filter
-system's first live consumer.)
+system's first live consumer. Organized crime added five test files / 55 tests
+net — `oc.test.ts`, `oc-worker.test.ts`, `oc-concurrency.test.ts`,
+`oc-lock-order.test.ts`, `oc-ledger.test.ts` — plus two `invalidation.test.ts`
+cases and a shared `dto/oc.ts`.)
 
 ---
 
@@ -858,6 +861,110 @@ Two new test files: `test/detectives.test.ts` (hire + list + reveal +
 remove), `test/detectives-worker.test.ts` (worker determinism, idempotency,
 4%/100% boundary cases). `economy-invariant.test.ts` gained a `detectiveHire`
 op. The web page is at `/detectives` (`apps/web/src/pages/`).
+
+### Organized crime — four-role heists with buy-in escrow and shared fate
+
+Design: `docs/superpowers/specs/2026-08-12-organized-crime-design.md`. Plan:
+`docs/superpowers/plans/2026-08-12-organized-crime.md`, 10 tasks, branch
+`feat/organized-crime`. The second GL3-native gameplay cluster that owns its
+own tables with migrations (after `inventory`), and the third single-job
+plugin (after `crimes`, `detectives`).
+
+A leader (mastermind) creates a heist at their location with a buy-in, invites
+three more players to fixed crew roles (driver, gunman, hacker), and when the
+crew is full and co-located fires execution — a seeded BullMQ `resolve` job
+rolls **one** outcome for the whole crew: success splits the pot (buy-in × 4 ×
+multiplier) equally four ways, failure jails everyone and forfeits the
+buy-ins. Same shared fate either way.
+
+**What shipped:**
+
+- **`packages/plugins/oc`** — eight routes under `/api/oc`: `POST /` (create,
+  escrows the leader's buy-in), `GET /` (the viewer's active heist + pending
+  invites), `POST /:id/invite` + `/decline`, `/accept` (escrows buy-in, flips
+  the partial-unique-index-armed member row to `accepted`), `/leave` (refund),
+  `/cancel` (refund all, leader-only), `/execute` (202, enqueues `resolve`).
+  Two plugin-owned tables (`p_oc_heists`, `p_oc_members`), three migrations
+  (tables + the one-active-heist partial unique index). **No foreign keys** —
+  an FK is a lock, and OC must add no implicit `FOR KEY SHARE` edges against
+  core rows (the same decision `p_inventory_shop_stock` records).
+- **One-active-heist-per-player** is a partial unique index
+  (`p_oc_members_active_player ON p_oc_members (player_id) WHERE NOT released
+  AND state = 'accepted'`), not a check-then-act. It binds only on ACCEPTED,
+  unreleased rows, so multiple pending invites are fine. The create/accept
+  routes catch 23505 on this constraint name (`isActiveHeistConflict` walks
+  `err.cause` recursively — more robust than gangs' code-only check).
+- **`resolve` job** — exactly one `ctx.transaction` (a second self-collides
+  on `plugin_job_runs`, the crimes-port finding; the failure is silent
+  success). Seeded `ctx.job.rng.int(0, 10_000)` roll against
+  `oc.success_chance`; success pays `share = buyIn × 4 × multiplier / 4` per
+  member (a remainder-to-leader line is kept though provably 0 for integer
+  multipliers — bigint division truncates and a future fractional setting
+  would silently burn money without it); failure `tx.jail.sendToJail`s all
+  four. Rows released, heist marked done/failed, `oc.resolved` published per
+  member. Post-commit best-effort `SET NX EX` cooldown per member (rule 2 —
+  atomic; a crash there loses at most some cooldowns, never money).
+- **Lock order — a new root that shares no edge with the existing three.**
+  Every transaction that reads heist/slot state to decide takes the heist row
+  `FOR UPDATE` **first** (`lockHeist`), then `tx.locks.player([...])`
+  ascending. Because the OC tables carry no FKs, no OC insert takes an
+  implicit lock on a core row — so the heist→player order's only shared
+  surface with combat/gang/travel is the players suffix, which is always
+  ascending via the same helper, and no cycle can form. `POST /api/oc` is the
+  one exemption (it INSERTs its own heist row under a fresh uuidv7, the
+  `POST /api/gangs` argument). Regression tests at
+  `test/oc-concurrency.test.ts` (slot race, execute-vs-leave) and
+  `test/oc-lock-order.test.ts` (heist-first barrier), both demonstrated red
+  first (CLAUDE.md rule 6 corollary).
+- **`oc.updated` / `oc.resolved`** are two new core `GameEvent` variants
+  (21 total now). `oc.updated` is a state-refresh signal — no toast, just an
+  invalidation of the `/oc` query; `oc.resolved` carries the outcome copy.
+  `tx.events.publishCore` publishes them; the audience is `player` per member
+  (AudienceSchema has no multi-player kind).
+- **Settings:** `oc.buy_in_min` (1000), `oc.success_chance` (0.35),
+  `oc.payout_multiplier` (3), `oc.jail_seconds` (600),
+  `oc.cooldown_seconds` (1800). Read once at boot via `ctx.settings`; the
+  ctx prefixes `oc.`.
+- **`/oc` web page** (`apps/web/src/pages/OrganizedCrime.tsx`) — slot grid
+  for the four roles, invite cards, create/invite/accept/decline/leave/
+  cancel/execute mutations, leader-only invite forms, execute enabled only
+  at 4/4. Driven by the `["oc"]` query; `oc.updated`/`oc.resolved` invalidate
+  `["oc"]` + `["me"]`.
+- **`sum(ledger) == balance`** is proven for all four members across all three
+  outcomes (success, failure, cancel) in a dedicated `test/oc-ledger.test.ts`
+  (the async job needs its own file; `economy-invariant.test.ts`'s
+  synchronous sweep cannot drive it — the `hospital.test.ts` precedent).
+
+**Watch items:**
+
+- **Overlapping invites for one seat are by design** — two players may hold
+  invites for the same role; first to accept wins (the accept route checks
+  the role against ACCEPTED rows only, under the heist lock). A declined or
+  beaten loser's invite row lingers until they decline or accept elsewhere.
+- **The cooldown `peek` gate on create/accept is advisory** (documented in
+  code) — the worst race lets a player in a second early; it cannot lock
+  anyone out. The `SET` happens post-commit in the worker; a crash there
+  loses cooldowns, never money.
+- **`GET /api/oc` returns no resolved-heist history** — the outcome surface
+  is the `oc.resolved` event only. Once a heist resolves, the viewer's
+  `heist` goes null and the create form returns.
+- **The `plugin_job_runs` PK gap (missing `job_name`) does not bite here.**
+  OC declares exactly one job (`resolve`), so the `(plugin_id, job_id)` key
+  collision between two queues of one plugin is not reachable — same
+  reasoning as `crimes` and `detectives`. Do not declare a second OC job.
+- **The execute-while-`executing` re-fire is the crash-recovery path.** A
+  commit-then-crash between the execute transaction and the enqueue would
+  otherwise strand a heist at `executing` forever. Re-firing execute on a
+  status of `open` OR `executing` lets the second attempt re-enqueue; the
+  worker serializes on the heist `FOR UPDATE` and no-ops if the first already
+  resolved.
+
+Five new test files: `test/oc.test.ts` (all eight routes' contracts),
+`test/oc-worker.test.ts` (resolve job: success split, failure jails, retry
+idempotency, stale no-op, cooldown TTL), `test/oc-concurrency.test.ts` (slot
+race, execute-vs-leave), `test/oc-lock-order.test.ts` (heist-first barrier),
+`test/oc-ledger.test.ts` (sum(ledger)==balance across outcomes). Two
+`invalidation.test.ts` cases + a shared `dto/oc.ts`.
 
 ## Starting M4
 

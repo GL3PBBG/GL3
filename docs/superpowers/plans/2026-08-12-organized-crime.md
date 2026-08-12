@@ -45,13 +45,13 @@
 - Produces: `@gl3/plugin-oc` importable everywhere; drizzle objects exported from `schema.ts`: `ocHeists`, `ocMembers` (own tables), `players`, `playerStats` (core mirrors); `OC_MIGRATIONS` from `migrations.ts`; default-export manifest `{ id: "oc", basePaths: ["/api/oc"], migrations: OC_MIGRATIONS }`.
 - Consumes: nothing from other tasks.
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout main && git pull && git checkout -b feat/organized-crime
 ```
 
-- [ ] **Step 2: Package scaffold**
+- [x] **Step 2: Package scaffold**
 
 `packages/plugins/oc/package.json` (copy the exact dependency version specifiers from `packages/plugins/bounties/package.json` — do not guess):
 
@@ -80,7 +80,7 @@ git checkout main && git pull && git checkout -b feat/organized-crime
 }
 ```
 
-- [ ] **Step 3: Schema — own tables plus core mirrors**
+- [x] **Step 3: Schema — own tables plus core mirrors**
 
 `packages/plugins/oc/src/schema.ts`:
 
@@ -133,7 +133,7 @@ export const playerStats = pgTable("player_stats", {
 });
 ```
 
-- [ ] **Step 4: Migrations — one statement per entry**
+- [x] **Step 4: Migrations — one statement per entry**
 
 `packages/plugins/oc/src/migrations.ts`. Three entries, not one: `runPluginMigrations` issues exactly one `tx.execute(sql.raw(...))` per declared migration and postgres.js rejects multi-statement strings (the constraint `packages/plugins/inventory/src/migrations.ts` documents at length — read its header comment before editing this file).
 
@@ -174,7 +174,7 @@ export const OC_MIGRATIONS: { name: string; sql: string }[] = [
 ];
 ```
 
-- [ ] **Step 5: Routeless manifest**
+- [x] **Step 5: Routeless manifest**
 
 `packages/plugins/oc/src/index.ts`:
 
@@ -194,7 +194,7 @@ export default definePlugin({
 });
 ```
 
-- [ ] **Step 6: All eight registration sites**
+- [x] **Step 6: All eight registration sites**
 
 1. `apps/server/package.json` — add `"@gl3/plugin-oc": "*"` to dependencies, then `npm install`.
 2. `apps/server/tsconfig.json` — add `{ "path": "../../packages/plugins/oc" }` to references.
@@ -210,7 +210,7 @@ export default definePlugin({
 5. `apps/server/src/plugins/core-plugins.ts` — `import ocPlugin from "@gl3/plugin-oc";` and append `ocPlugin` to `CORE_PLUGINS`.
 6. `Dockerfile.server` — five COPY lines. Find each of the five `packages/plugins/bounties` lines (64, 98, 99, 147, 169) and add the `oc` equivalent directly below each.
 
-- [ ] **Step 7: Verify registration**
+- [x] **Step 7: Verify registration**
 
 ```bash
 grep -c "packages/plugins/oc" Dockerfile.server   # MUST print 5
@@ -218,7 +218,7 @@ npx tsc --build --force apps/server/tsconfig.json # the exact command CI's image
 npm run typecheck
 ```
 
-- [ ] **Step 8: Verify the migrations run**
+- [x] **Step 8: Verify the migrations run**
 
 ```bash
 npx vitest run --project @gl3/server:db apps/server/test/plugin-migrate.test.ts
@@ -226,7 +226,7 @@ npx vitest run --project @gl3/server:db apps/server/test/plugin-migrate.test.ts
 
 Expected: PASS (the migration runner test boots all core plugins; `oc`'s three migrations run and record in `plugin_migrations`). If that file's project name differs, find it in `vitest.workspace.ts`'s include lists first.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A
@@ -249,7 +249,7 @@ git commit -m "feat(oc): scaffold plugin package, tables and all eight registrat
   - `{ type: "oc.resolved", heistId: string, success: boolean, share: string (Money), jailSeconds: number }` + base fields
 - Consumed by: Tasks 3-6 (publish), Task 9 (web invalidation + copy).
 
-- [ ] **Step 1: Add the variants**
+- [x] **Step 1: Add the variants**
 
 In `packages/shared/src/events.ts`, alongside the `bounty.placed` variant at line 40:
 
@@ -260,18 +260,18 @@ z.object({ ...base, type: z.literal("oc.resolved"), heistId: IdSchema, success: 
 
 (Match the file's actual `base`/`IdSchema`/`MoneySchema` local names — read the file, follow the `bounty.placed` line's shape exactly.)
 
-- [ ] **Step 2: Check the drift-guard corpus**
+- [x] **Step 2: Check the drift-guard corpus**
 
 Read `apps/server/test/plugin-ctx-core-events.test.ts`. If its corpus enumerates every variant (the STATUS.md description suggests it covers the set), add one accept entry per new variant, following whatever shape the `bounty.placed` corpus entry has. If the corpus is a sample rather than an enumeration, no edit.
 
-- [ ] **Step 3: Event copy**
+- [x] **Step 3: Event copy**
 
 In `apps/web/src/lib/eventCopy.ts`, following the file's existing switch/map pattern for `bounty.placed`:
 
 - `oc.updated` → no toast (state-refresh signal only — return whatever the file's "silent" convention is; if every event must produce copy, use `"Heist update."` and note it)
 - `oc.resolved` → success: `` `Heist succeeded — your share: $${share}.` ``; failure: `` `Heist failed — you were jailed.` ``
 
-- [ ] **Step 4: Run the guards**
+- [x] **Step 4: Run the guards**
 
 ```bash
 npx vitest run --project @gl3/shared
@@ -281,7 +281,7 @@ npx vitest run --project @gl3/web
 
 Expected: PASS. If `plugin-ctx-core-events.test.ts` fails on a variant count, that is the enumeration case from Step 2 — add the entries.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -307,7 +307,7 @@ git commit -m "feat(shared): oc.updated and oc.resolved core event variants"
   - `POST /api/oc` `{buyIn: string}` → 201 `{heistId, cash}`; 409 `already_in_heist` / `below_minimum` / `insufficient_funds` / `on_cooldown` (429); 400 `amount_must_be_positive`.
   - `GET /api/oc` → 200 `{heist: {...} | null, invites: [...]}` (shape in Step 3).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to a new `apps/server/test/oc.test.ts`. Boot shape: copy the top of `apps/server/test/bounties.test.ts` verbatim (its `bootTestServer`/register-players/login helpers), adjusting names. Settings rows: insert into the `settings` table **before** boot (they are read once at boot — combat precedent), keys `oc.buy_in_min`, `oc.cooldown_seconds`.
 
@@ -348,7 +348,7 @@ it("refuses insufficient funds with 409 and no ledger row", async () => { /* poo
 it("GET /api/oc returns {heist: null, invites: []} for an uninvolved player", async () => { /* ... */ });
 ```
 
-- [ ] **Step 2: Register the test file and run it — expect FAIL**
+- [x] **Step 2: Register the test file and run it — expect FAIL**
 
 Add `"test/oc.test.ts"` to the full-stack project's include list in `vitest.workspace.ts` (the list containing `test/bounties.test.ts`).
 
@@ -358,7 +358,7 @@ npx vitest run --project @gl3/server apps/server/test/oc.test.ts
 
 Expected: FAIL — 404s (routes don't exist).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/plugins/oc/src/settings.ts`:
 
@@ -536,13 +536,13 @@ const stateRoute = route({
 
 Register both in the manifest's `routes` array. Imports needed: `InsufficientFundsError`, `PluginError`, `route` from `@gl3/plugin-sdk`; `and`, `eq` from `drizzle-orm`; `uuidv7`; `z`.
 
-- [ ] **Step 4: Run — expect PASS**
+- [x] **Step 4: Run — expect PASS**
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc.test.ts
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -566,7 +566,7 @@ git commit -m "feat(oc): create and state routes with escrow at creation"
 - **Deviation from spec §3, recorded here:** the invite body is `{targetUsername, role}` not `{playerId, role}` — the web form takes a username and the bounties place route set the username-resolution precedent (`bounties/src/index.ts:43-47`). Spec §6's form description already says username.
 - **Design decision, recorded here:** invite checks the role against **accepted** rows only — two invitees may hold invites for the same seat, first to accept wins (this is what makes Task 7's slot race a real race). `already_invited` guards the same player being invited twice to the same heist (the PK enforces it; the route answers 409 before the PK fires).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `oc.test.ts`:
 
@@ -599,7 +599,7 @@ it("decline with no invite: 404 not_invited", async () => { /* ... */ });
 
 Run: `npx vitest run --project @gl3/server apps/server/test/oc.test.ts` — expect FAIL (404s).
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```ts
 const IdSchema = z.string().uuid();
@@ -693,7 +693,7 @@ Add `PluginTx` to the `@gl3/plugin-sdk` type imports. If drizzle's `.for("update
 
 Register both routes.
 
-- [ ] **Step 3: Run — expect PASS, then commit**
+- [x] **Step 3: Run — expect PASS, then commit**
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc.test.ts
@@ -717,7 +717,7 @@ git commit -m "feat(oc): invite and decline routes"
   - `POST /api/oc/:heistId/cancel` → 200; 403 `not_leader`; 404 `heist_not_found`; 409 `heist_not_open`. Refunds every accepted member including the leader, sets `cancelled`, releases all rows.
   - `publishHeistUpdate(tx, actor, heist, memberIds)` helper: one `oc.updated` per member (audience `player` — `AudienceSchema` has no multi-player kind, the bounties-claim reasoning).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it("accept escrows the buy-in and fills the slot", async () => {
@@ -755,7 +755,7 @@ it("non-leader cannot cancel: 403 not_leader", async () => { /* ... */ });
 
 Run — expect FAIL.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```ts
 async function publishHeistUpdate(
@@ -849,7 +849,7 @@ Note on lock order in cancel/leave: `applyBalanceChange` locks each player's own
 
 Register all three routes.
 
-- [ ] **Step 3: Run — expect PASS, then commit**
+- [x] **Step 3: Run — expect PASS, then commit**
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc.test.ts
@@ -875,7 +875,7 @@ git commit -m "feat(oc): accept, leave and cancel with escrow and refunds"
 - **Decision, recorded here:** execute is allowed when status is `open` **or** `executing`. Re-firing while `executing` is the crash-recovery path (commit succeeded, enqueue failed/crashed): the second job serializes on the heist `FOR UPDATE` and no-ops if the first already resolved. This replaces the spec §4's implicit stuck-forever window; STATUS should record it (Task 10).
 - **`plugin_job_runs` PK watch item does not bite:** this plugin declares exactly one job (`resolve`), so the `(plugin_id, job_id)` key collision between two queues of one plugin (STATUS.md open item) is not reachable here. Do not declare a second job.
 
-- [ ] **Step 1: Write the failing route tests** (append to `oc.test.ts`)
+- [x] **Step 1: Write the failing route tests** (append to `oc.test.ts`)
 
 ```ts
 it("execute with a full, co-located crew: 202 with a jobId; status becomes executing", async () => { /* ... */ });
@@ -890,7 +890,7 @@ it("execute with a member elsewhere: 409 crew_not_assembled naming them", async 
 it("non-leader cannot execute: 403", async () => { /* ... */ });
 ```
 
-- [ ] **Step 2: Write the failing worker tests** (`apps/server/test/oc-worker.test.ts`)
+- [x] **Step 2: Write the failing worker tests** (`apps/server/test/oc-worker.test.ts`)
 
 Harness: copy `apps/server/test/crime-worker-idempotency.test.ts`'s structure — direct `runPluginJob(deps, ocPlugin, "resolve", job)` calls against `testDb()`, no HTTP boot. `deps.settings` carries the chance: `{ "oc.success_chance": "1" }` forces success, `"0"` forces failure (the `playerCrimeSkill chance: "100.00"` trick, adapted). Seed fixture: insert heist row (`status: "executing"`), four member rows (`accepted`), four players + stats co-located, and give each player a starting cash balance **through the ledger** (use whatever helper `oc.test.ts`'s fixture uses — balances not created via `applyBalanceChange` would fail the sum check in Task 8).
 
@@ -939,7 +939,7 @@ it("resolve sets the per-member oc cooldown", async () => {
 
 Register the file in `vitest.workspace.ts` (same project include list as `crime-worker-idempotency.test.ts`). Run both files — expect FAIL.
 
-- [ ] **Step 3: Implement the execute route**
+- [x] **Step 3: Implement the execute route**
 
 ```ts
 const executeRoute = route({
@@ -1020,7 +1020,7 @@ const executeRoute = route({
 
 Add `inArray` to the drizzle imports.
 
-- [ ] **Step 4: Implement the resolve job**
+- [x] **Step 4: Implement the resolve job**
 
 ```ts
 async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
@@ -1107,7 +1107,7 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
 
 Manifest gains `jobs: { resolve: resolveJob }`. Add `PluginCtx` to the type imports.
 
-- [ ] **Step 5: Run both files — expect PASS**
+- [x] **Step 5: Run both files — expect PASS**
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc.test.ts
@@ -1116,7 +1116,7 @@ npx vitest run --project @gl3/server apps/server/test/oc-worker.test.ts
 
 (Adjust `--project` per each file's actual workspace project.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -1138,7 +1138,7 @@ git commit -m "feat(oc): execute route and seeded resolve job with shared fate"
 
 **Every test in this task must be demonstrated red before it is accepted** — a concurrency test that has never failed proves nothing (CLAUDE.md working method; the corollary under rule 6).
 
-- [ ] **Step 1: Slot race**
+- [x] **Step 1: Slot race**
 
 Two invitees for one seat (Task 4's overlapping-invite design), both accept concurrently:
 
@@ -1160,7 +1160,7 @@ it("two accepts race one seat: exactly one 200, one 409 role_taken, one accepted
 
 **Red demonstration:** comment out `lockHeist` in the accept route (replace with a plain un-locked select), rerun ~20 iterations — both accepts succeed at least once (two accepted rows for one seat). Restore, rerun 20 iterations green. Record the red output in the task summary.
 
-- [ ] **Step 2: Execute-vs-leave race**
+- [x] **Step 2: Execute-vs-leave race**
 
 ```ts
 it("execute racing leave: never both a payout-eligible crew and a refund", async () => {
@@ -1182,13 +1182,13 @@ it("execute racing leave: never both a payout-eligible crew and a refund", async
 
 Run it in a loop (`for i in $(seq 20); do npx vitest run ... || break; done`) — both interleavings must be observed across runs (log which won).
 
-- [ ] **Step 3: Lock-order regression (`oc-lock-order.test.ts`)**
+- [x] **Step 3: Lock-order regression (`oc-lock-order.test.ts`)**
 
 Construction: follow `apps/server/test/combat-lock-order.test.ts`'s barrier pattern — read that file's header comment first and mirror its mechanism. The forced interleaving: transaction A is the real **execute** path (heist FOR UPDATE → players ascending); transaction B is the real **leave** path for a member (heist FOR UPDATE → that member's stats row via `applyBalanceChange`). Both are heist-first, so under the shipped code they serialize — assert both complete, no `40P01`.
 
 **Red demonstration:** invert `leave` to lock the player row before the heist row (temporarily insert `await tx.locks.player([player.id])` above `lockHeist` and move the refund before it), run the barrier test — a real `40P01` must appear (check `/var/log/postgresql/postgresql-16-main.log`), surfacing as an HTTP 500. Restore the shipped order, test green. If the barrier cannot force the window with the real routes (the travel-lock-order problem), fall back to that file's raw-SQL-adversary construction and document why at the top of the test file, as `travel-lock-order.test.ts` does.
 
-- [ ] **Step 4: Register both files, run, commit**
+- [x] **Step 4: Register both files, run, commit**
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc-concurrency.test.ts apps/server/test/oc-lock-order.test.ts
@@ -1210,7 +1210,7 @@ git commit -m "test(oc): slot-race, execute-vs-leave and heist-first lock-order 
 
 This is a **dedicated file, hospital-style**: the resolve job is async and `economy-invariant.test.ts`'s synchronous `callPluginRoute` sweep cannot drive it — state that in the file's header comment, exactly as `hospital.test.ts` is described doing (STATUS.md, PvP section). Do NOT edit `economy-invariant.test.ts`.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Full flow per outcome via `app.inject` + `runPluginJob` for the resolve step (deterministic seed, chance forced via settings rows inserted before boot — `oc.success_chance` = `1` for the success case's boot, a second boot or settings override for `0`; if one boot must serve both, drive resolve through `runPluginJob` with per-call `deps.settings`, which `crime-worker-idempotency.test.ts` proves works):
 
@@ -1241,13 +1241,13 @@ it("cancel outcome: every member reconciles (buyin + refund net zero)", async ()
 });
 ```
 
-- [ ] **Step 2: Register, run — expect PASS** (this task's tests are proven by Tasks 3-6's code; if any fails, the bug is in those tasks, fix there)
+- [x] **Step 2: Register, run — expect PASS** (this task's tests are proven by Tasks 3-6's code; if any fails, the bug is in those tasks, fix there)
 
 ```bash
 npx vitest run --project @gl3/server apps/server/test/oc-ledger.test.ts
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A
@@ -1270,11 +1270,11 @@ git commit -m "test(oc): sum(ledger) == balance for all members across all outco
 - Consumes: `GET /api/oc` response shape (Task 3), all mutation routes (Tasks 3-6), event variants (Task 2 — `eventCopy` entries already landed there).
 - Produces: user-visible page. **Follow the file conventions of `apps/web/src/pages/Bounties.tsx`** — same query/mutation/invalidations/form patterns, money as decimal strings end to end.
 
-- [ ] **Step 1: Queries + invalidation (with failing web test first)**
+- [x] **Step 1: Queries + invalidation (with failing web test first)**
 
 Add `oc.updated`/`oc.resolved` cases to `apps/web/test/invalidation.test.ts` mirroring its `bounty.placed` case (event in → expect the oc query key invalidated). Run `npx vitest run --project @gl3/web` — FAIL. Then add the query (key `["oc"]`, fetch `GET /api/oc`) and the invalidation mapping. PASS.
 
-- [ ] **Step 2: The page**
+- [x] **Step 2: The page**
 
 `OrganizedCrime.tsx`, driven entirely by the `["oc"]` query:
 
@@ -1285,7 +1285,7 @@ Add `oc.updated`/`oc.resolved` cases to `apps/web/test/invalidation.test.ts` mir
 - Per-control in-flight disable on every mutation (the established pattern).
 - All error bodies surfaced as inline text (`error` code string is enough — match `Bounties.tsx`).
 
-- [ ] **Step 3: Verify + commit**
+- [x] **Step 3: Verify + commit**
 
 ```bash
 npx vitest run --project @gl3/web
@@ -1305,7 +1305,7 @@ git commit -m "feat(web): heists page with slot grid, invites and execute flow"
 
 **Interfaces:** none — documentation and verification only.
 
-- [ ] **Step 1: Full verify — exit code, not summary**
+- [x] **Step 1: Full verify — exit code, not summary**
 
 ```bash
 npm run verify > /tmp/verify.log 2>&1; echo "exit=$?"
@@ -1313,7 +1313,7 @@ npm run verify > /tmp/verify.log 2>&1; echo "exit=$?"
 
 Any non-zero exit is a failure even if every test passed (the gateway `.catch` lesson). Run it twice back to back; both must be exit=0. **Ensure no agent or other suite is running first.**
 
-- [ ] **Step 2: STATUS.md**
+- [x] **Step 2: STATUS.md**
 
 Add an "Organized crime — heists" section after the detectives section, covering: the plugin and its two no-FK tables + partial unique index; the heist-first lock order and why it shares no edge with the existing three; the escrow/refund/payout ledger reasons; the execute-while-executing re-fire decision (crash recovery for the commit-then-crash window); the one-job constraint (why the `plugin_job_runs` PK watch item doesn't bite); test files added. Update the suite-count line with the real numbers from Step 1's log. New watch items to record:
 
@@ -1321,11 +1321,11 @@ Add an "Organized crime — heists" section after the detectives section, coveri
 - The cooldown `peek` gate on create/accept is advisory (documented in code); the SET happens post-commit in the worker and a crash there loses cooldowns, never money.
 - `GET /api/oc` returns no resolved-heist history; the outcome surface is the `oc.resolved` event only.
 
-- [ ] **Step 3: CLAUDE.md**
+- [x] **Step 3: CLAUDE.md**
 
 Extend the current-state paragraph with one sentence: organized crime shipped on `feat/organized-crime` (four-role heists, buy-in escrow, shared-fate seeded job; heist-first lock order). Update the suite count.
 
-- [ ] **Step 4: Commit and hand off**
+- [x] **Step 4: Commit and hand off**
 
 ```bash
 git add -A
