@@ -1,8 +1,9 @@
 import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
-import { eq } from "drizzle-orm";
+import { eq, isNull, desc } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { bounties, players, playerStats } from "./schema.js";
+import { bounties, players, playerStats, ranks } from "./schema.js";
 
 /**
  * `@gl3/shared` is off-limits to a plugin package, so `MoneySchema`'s regex is
@@ -97,9 +98,61 @@ const placeRoute = route({
   },
 });
 
+/**
+ * Open bounties, public to any logged-in player (spec §2: public placer).
+ * Bounded at 100 and NOT paginated — the same deliberate limitation
+ * GET /api/combat/log has; the list self-prunes on every claim.
+ */
+const listRoute = route({
+  method: "GET",
+  path: "/api/bounties",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const targetPlayers = alias(players, "target_players");
+      const placerPlayers = alias(players, "placer_players");
+      const rows = await tx.db
+        .select({
+          id: bounties.id,
+          amount: bounties.amount,
+          createdAt: bounties.createdAt,
+          targetId: bounties.target,
+          targetUsername: targetPlayers.username,
+          targetRank: ranks.name,
+          placerUsername: placerPlayers.username,
+        })
+        .from(bounties)
+        .innerJoin(targetPlayers, eq(targetPlayers.id, bounties.target))
+        .innerJoin(placerPlayers, eq(placerPlayers.id, bounties.placedBy))
+        .leftJoin(playerStats, eq(playerStats.playerId, bounties.target))
+        .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
+        .where(isNull(bounties.claimedBy))
+        .orderBy(desc(bounties.createdAt), desc(bounties.id))
+        .limit(100);
+
+      return {
+        status: 200,
+        body: {
+          bounties: rows.map((r) => ({
+            id: r.id,
+            amount: r.amount.toString(),
+            createdAt: r.createdAt.toISOString(),
+            targetId: r.targetId,
+            targetUsername: r.targetUsername,
+            targetRank: r.targetRank,
+            placerUsername: r.placerUsername,
+          })),
+        },
+      };
+    });
+  },
+});
+
 export default definePlugin({
   id: "bounties",
   version: "1.0.0",
   basePaths: ["/api/bounties"],
-  routes: [placeRoute],
+  routes: [placeRoute, listRoute],
 });

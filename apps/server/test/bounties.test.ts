@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { uuidv7 } from "uuidv7";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import {
@@ -145,5 +146,61 @@ describe("POST /api/bounties — placement", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("insufficient_funds");
     expect(await db.select().from(bounties)).toHaveLength(0);
+  });
+});
+
+describe("GET /api/bounties — open list", () => {
+  it("returns 401 without auth", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/bounties" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("lists open bounties newest-first with names, and hides claimed rows", async () => {
+    await db.insert(bounties).values([
+      { id: uuidv7(), placedBy: placerId, target: targetId, amount: 1000n },
+      { id: uuidv7(), placedBy: placerId, target: targetId, amount: 2000n },
+      { id: uuidv7(), placedBy: placerId, target: targetId, amount: 3000n, claimedBy: placerId },
+    ]);
+    const res = await app.inject({
+      method: "GET", url: "/api/bounties",
+      headers: { authorization: `Bearer ${placerToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { bounties: rows } = res.json();
+    expect(rows).toHaveLength(2); // claimed row hidden
+    expect(rows[0]).toMatchObject({
+      targetId, targetUsername: "Marked", placerUsername: "Placer", amount: "2000",
+    });
+    expect(rows.map((r: { amount: string }) => r.amount)).toEqual(["2000", "1000"]);
+  });
+
+  it("returns targetRank null when the target has no rank", async () => {
+    await db.insert(bounties).values([
+      { id: uuidv7(), placedBy: placerId, target: targetId, amount: 5000n },
+    ]);
+    const res = await app.inject({
+      method: "GET", url: "/api/bounties",
+      headers: { authorization: `Bearer ${placerToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { bounties: rows } = res.json();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].targetRank).toBeNull();
+  });
+
+  it("returns createdAt as an ISO string and amount as a decimal string", async () => {
+    await db.insert(bounties).values([
+      { id: uuidv7(), placedBy: placerId, target: targetId, amount: 7500n },
+    ]);
+    const res = await app.inject({
+      method: "GET", url: "/api/bounties",
+      headers: { authorization: `Bearer ${placerToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { bounties: rows } = res.json();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe("7500");
+    expect(typeof rows[0].createdAt).toBe("string");
+    expect(() => new Date(rows[0].createdAt)).not.toThrow();
   });
 });
