@@ -11,6 +11,7 @@ import { ApiError } from "../api/client.js";
  * so a Pass 2 page inherits the copy instead of regressing to raw codes.
  */
 const MESSAGES: Record<string, string> = {
+  already_full: "You're at full health.",
   already_in_a_gang: "You're already in a gang.",
   already_there: "You're already in that city.",
   amount_must_be_positive: "Enter an amount greater than zero.",
@@ -34,15 +35,18 @@ const MESSAGES: Record<string, string> = {
   mail_not_found: "That message is gone.",
   no_location: "Travel to a city first.",
   not_a_member: "You're not a member of that gang.",
+  not_owned: "You don't own that item.",
   not_sold_here: "This location doesn't stock that.",
   notification_not_found: "That notification is gone.",
   on_cooldown: "Not ready yet.",
   player_not_found: "No such player.",
+  rank_too_low: "You're not experienced enough to use that.",
   rate_limited: "Too many attempts — wait a moment.",
   recipient_not_found: "No such player.",
   unauthorized: "Your session expired — log in again.",
   unknown_error: "Something went wrong.",
   username_taken: "That username is taken.",
+  wrong_slot: "You can't equip that in that slot.",
 };
 
 /** "45s", "2m 05s" — used to make the timed errors say how long. */
