@@ -227,6 +227,8 @@ export default defineWorkspace([
         "test/combat.test.ts",
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
+        "test/detectives-worker.test.ts",
+        "test/detectives.test.ts",
         "test/economy-invariant.test.ts",
         "test/gang-bank.test.ts",
         "test/gang-invites.test.ts",
