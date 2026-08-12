@@ -1,5 +1,6 @@
-import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
-import { eq, isNull, desc } from "drizzle-orm";
+import { definePlugin, InsufficientFundsError, on, PluginError, route } from "@gl3/plugin-sdk";
+import { killResolved } from "@gl3/plugin-combat";
+import { and, eq, isNull, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -150,9 +151,72 @@ const listRoute = route({
   },
 });
 
+/**
+ * The V2 `userKilled` hook, GL3-shaped: combat applies `killResolved` after
+ * its kill transaction commits; this subscriber sweeps every open bounty on
+ * the victim to the killer in its OWN transaction. Idempotent by shape —
+ * `WHERE claimed_by IS NULL` claims each row exactly once — and crash-safe
+ * without a queue: if this never runs, the rows stay open and the next kill
+ * of the same target sweeps them (spec §3).
+ */
+const claimOnKill = on(killResolved, async (ctx, value) => {
+  await ctx.transaction(async (tx) => {
+    // Killer's row is about to take a balance write and a FOR KEY SHARE from
+    // the claimed_by FK; same first-statement lock rule as everywhere else.
+    await tx.locks.player([value.killerId]);
+
+    const claimed = await tx.db
+      .update(bounties)
+      .set({ claimedBy: value.killerId })
+      .where(and(eq(bounties.target, value.victimId), isNull(bounties.claimedBy)))
+      .returning({ id: bounties.id, amount: bounties.amount, placedBy: bounties.placedBy });
+    if (claimed.length === 0) return;
+
+    const total = claimed.reduce((sum, row) => sum + row.amount, 0n);
+    await tx.economy.applyBalanceChange({
+      playerId: value.killerId,
+      amount: total,
+      kind: "cash",
+      reason: "bounties.claimed",
+    });
+
+    const [killer] = await tx.db
+      .select({ username: players.username }).from(players)
+      .where(eq(players.id, value.killerId));
+    const [victim] = await tx.db
+      .select({ username: players.username }).from(players)
+      .where(eq(players.id, value.victimId));
+    const killerName = killer?.username ?? "unknown";
+    const victimName = victim?.username ?? "unknown";
+
+    // Killer and that row's placer, per row — AudienceSchema has no
+    // two-player kind (same reasoning as combat's player.attacked pair).
+    for (const row of claimed) {
+      for (const audienceId of [value.killerId, row.placedBy]) {
+        await tx.events.publishCore({
+          type: "bounty.claimed",
+          actorId: value.killerId,
+          actorName: killerName,
+          audience: { kind: "player", playerId: audienceId },
+          bountyId: row.id,
+          targetId: value.victimId,
+          targetName: victimName,
+          amount: row.amount.toString(),
+        });
+      }
+    }
+
+    for (const placerId of [...new Set(claimed.map((row) => row.placedBy))]) {
+      await tx.notify(placerId, `Your bounty on ${victimName} was claimed by ${killerName}.`);
+    }
+  });
+  return value;
+});
+
 export default definePlugin({
   id: "bounties",
   version: "1.0.0",
   basePaths: ["/api/bounties"],
   routes: [placeRoute, listRoute],
+  filters: [claimOnKill],
 });
