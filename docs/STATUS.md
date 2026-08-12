@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-11, M5 — PvP combat (the first non-port gameplay).
-Branch: `feat/pvp-combat`.
+Last updated: 2026-08-12, item economy — location shop, combat targets, four web pages.
+Branch: `feat/item-economy`.
 
 ---
 
@@ -14,19 +14,13 @@ Branch: `feat/pvp-combat`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) is the first gameplay cluster that is *not* a port |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) and **item economy** (location shop, combat targets, four web pages) have since shipped |
 
-**Suite: 83 files / 707 tests**, green across repeated back-to-back runs.
-(The pre-`feat/pvp-combat` baseline was 71 files / 593 tests; the **588** this
-line carried through the gangs port was already stale when it was written.)
-The `mail` port added no new test file — the existing `mail.test.ts` is
-**unchanged** and is the proof (all `app.inject`, no service block, zero
-edits to the test file; the routes are byte-identical and served at the same
-path, so no retargeting was needed). The `gangs` port likewise added no new
-test file — all 8 pre-existing gang test files pass unedited (7 route files
-plus `acceptance/m3-acceptance.test.ts` exercise the plugin over HTTP;
-`gang-ledger.test.ts` calls `economy/ledger.ts` directly and was never
-retargeted, since this port did not touch that file).
+**Suite: 87 files / 745 tests**, green across repeated back-to-back runs.
+(The pre-`feat/item-economy` baseline was 84 files / 707 tests; the item-economy
+work added `shop.test.ts`, `shop-concurrency.test.ts`, and `effects.test.ts` —
+four tests total across the three new files — plus `plugin-migrate.test.ts`
+gained an "inventory shop stock migrations" describe block with two tests.)
 
 ---
 
@@ -697,6 +691,53 @@ paid discharge is **not** in that sweep and the file says so: it is a core
 route, `callPluginRoute` cannot drive it, and `hospital.test.ts` already
 asserts `sum(ledger) == balance` for it directly.
 
+### Item economy — location shop, combat targets, and four web pages
+
+Branch `feat/item-economy`, forked from `main`. Plan:
+`docs/superpowers/plans/2026-08-12-item-economy.md`, 13 tasks.
+
+This cluster extends the PvP combat cluster: the shop gives players a way to
+obtain items (the gap the combat section recorded above), and the web pages
+give every combat-related surface a browser UI.
+
+**What shipped:**
+
+- **Location shop** (`packages/plugins/inventory`) — `GET /api/shop` returns
+  the stock for the player's current location; `POST /api/shop/buy` deducts
+  cash via `applyBalanceChange`, decrements stock under the existing
+  location→player lock order, and inserts an inventory row. No foreign keys
+  on `p_inventory_shop_stock`, so no new lock edges. The buy handler
+  exercises the economy invariant — `economy-invariant.test.ts` gained a
+  `shopBuy` op.
+- **`GET /api/combat/targets`** (`packages/plugins/combat`) — returns up to
+  50 players at the attacker's location who pass the seven target-legality
+  rules. Unpaginated, advisory: every rule is re-checked under the lock by
+  `attack`.
+- **Shared DTOs** (`packages/shared/src/dto/inventory.ts`,
+  `packages/shared/src/dto/combat.ts`) — wire types for inventory items,
+  shop stock, and combat targets, consumed by both the API routes and the
+  web pages.
+- **Four web pages** (`apps/web/src/pages/`):
+  `/inventory` (equipped items, inventory list, equip/use actions),
+  `/shop` (location stock with buy actions),
+  `/combat` (target list from `GET /api/combat/targets`, attack form),
+  `/hospital` (sentence timer, heal/discharge actions). All four render
+  through the plugin web renderer's `PageRenderer`.
+- **`p_inventory_shop_stock`** table with migrations (`inventory:0001_shop_stock`,
+  `inventory:0002_shop_stock_seed`). `inventory` is the first ported/gameplay
+  plugin to own a table and migrations. The seed migration populates one row
+  per (location, seeded item).
+- **Three new test files:** `packages/plugins/inventory/test/shop.test.ts`,
+  `packages/plugins/inventory/test/shop-concurrency.test.ts`,
+  `packages/plugins/inventory/test/effects.test.ts`. The concurrency test
+  was demonstrated red (stock going negative with the `stock >= quantity`
+  predicate removed). `economy-invariant.test.ts` gained `shopBuy` coverage,
+  demonstrated red when the buy handler bypassed `applyBalanceChange`.
+
+**`effects.ts` duplication** between `combat` and `inventory` is unchanged
+— this work did not make it worse and did not fix it. See the watch item
+below.
+
 ## Starting M4
 
 Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
@@ -901,10 +942,24 @@ web image serves only the SPA's own assets.
   mechanic is not implemented.
 - **No kills leaderboard.** `combat_log` has everything needed to build one;
   nothing does. Deferred with the rest of the leaderboard work.
-- **Deliberate scope note: there is no way to *obtain* an item.** No
-  blackmarket, no trading, no shops — the only items in the game are the two
-  seeded starter rows and whatever an admin inserts directly. The item economy
-  is its own cluster, deferred.
+- **The item economy is half-open.** A per-location shop inside the
+  `inventory` plugin (`GET /api/shop`, `POST /api/shop/buy`) now sells
+  weapons, armor, and consumables from `p_inventory_shop_stock`. Buy-only;
+  no player-to-player trading, no sell-back, no restocking, and no item drops
+  from crimes or kills yet. The seeded starter rows and admin inserts remain
+  the only other source. The `p_inventory_shop_stock` table carries no
+  foreign keys, so it adds no lock edges (design §4.1).
+- **`inventory` now owns a table and migrations.** It is the first ported or
+  gameplay plugin to do so — `p_inventory_shop_stock` (migration
+  `inventory:0001_shop_stock`) plus a seed migration (`inventory:0002_shop_stock_seed`)
+  that populates one row per (location, seeded item). The table has no
+  foreign keys by design; see above.
+- **`inventory` and `combat` now have web pages** (`/inventory`, `/shop`,
+  `/combat`), and core hospital has one too (`/hospital`). All four render
+  through the plugin web renderer's `PageRenderer`.
+- **`GET /api/combat/targets`** exists, bounded at 50, unpaginated, and
+  advisory — every target-legality rule is re-checked under the lock by
+  `POST /api/combat/attack/:targetId`.
 - **Queue-prefix isolation stops at Redis.** Two `loadPlugins`/`bootTestServer`
   boots in one test file get separate prefixed queues (ids restart at 1) but
   share one database, so the second boot's first job would be swallowed as

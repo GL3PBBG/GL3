@@ -22,8 +22,11 @@ core `GameEvent` variants verbatim. `profile`, `leaderboard` and `jail`
 remain deliberate non-ports — see `docs/STATUS.md`. **PvP combat** has since
 shipped on `feat/pvp-combat`: the `combat` and `inventory` plugins plus core
 hospital, the first gameplay cluster that is not a port, so its tests are the
-only specification of its behaviour. M4 (migration CLI) is
-planned and blocked on a MariaDB install. Suite: **83 files / 707 tests**,
+only specification of its behaviour. The **item economy** has since shipped
+on `feat/item-economy`: a per-location shop in the `inventory` plugin (its
+first table and first migrations) and four web pages (`/inventory`,
+`/shop`, `/combat`, `/hospital`). M4 (migration CLI) is
+planned and blocked on a MariaDB install. Suite: **87 files / 745 tests**,
 green across repeated back-to-back runs.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
