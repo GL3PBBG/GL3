@@ -49,7 +49,15 @@ describe("invalidationKeys", () => {
   });
 
   it("refreshes the wallet and locations on travel", () => {
-    expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([keys.me(), keys.locations()]);
+    expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([
+      keys.me(), keys.locations(), keys.shop(),
+    ]);
+  });
+
+  // Stock is per-location and the shop query is not keyed by location, so
+  // without this a traveller keeps seeing the city they left.
+  it("refreshes the shop on travel", () => {
+    expect(invalidationKeys(event("player.travelled"), VIEWER)).toContainEqual(keys.shop());
   });
 
   it("refreshes only the wallet on a bank transaction", () => {
@@ -63,6 +71,24 @@ describe("invalidationKeys", () => {
 
   it("refreshes the ladder on a rank up", () => {
     expect(invalidationKeys(event("player.rankedUp"), VIEWER)).toEqual([keys.me(), keys.ranks()]);
+  });
+
+  it("refreshes the combat surfaces when a shot lands", () => {
+    const got = invalidationKeys(
+      event("player.attacked", { targetId: "00000000-0000-7000-8000-000000000004", targetName: "B", damage: 12 }),
+      VIEWER,
+    );
+    expect(got).toContainEqual(keys.me());
+    expect(got).toContainEqual(keys.combatTargets());
+  });
+
+  it("refreshes hospital when someone is killed", () => {
+    const got = invalidationKeys(
+      event("player.killed", { victimId: "00000000-0000-7000-8000-000000000004", victimName: "B" }),
+      VIEWER,
+    );
+    expect(got).toContainEqual(keys.hospital());
+    expect(got).toContainEqual(keys.combatLog());
   });
 
   // The viewer's gang membership is on their profile, not on /api/auth/me, so

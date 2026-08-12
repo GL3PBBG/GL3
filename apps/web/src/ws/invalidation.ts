@@ -16,8 +16,8 @@ import { pluginInvalidationKeys } from "../plugins/invalidation.js";
  * went stale, and the only one this client caches for that purpose is its own.
  *
  * Returning an empty array is still a deliberate answer for the event types
- * whose surfaces have no server routes at all (attacks, bounties, chat): they
- * reach the event feed and invalidate nothing.
+ * whose surfaces have no server routes at all (bounties, chat): they reach
+ * the event feed and invalidate nothing.
  *
  * `eventMetas` is the manifest's event metadata, which only `plugin.event`
  * consults; it defaults to empty so every core call site stays a two-argument
@@ -35,7 +35,9 @@ export function invalidationKeys(
     case "player.released":
       return [keys.jail(), keys.crimes()];
     case "player.travelled":
-      return [keys.me(), keys.locations()];
+      // Stock is per-location and the shop query is not keyed by location, so
+      // without this a traveller keeps seeing the city they left.
+      return [keys.me(), keys.locations(), keys.shop()];
     case "bank.transacted":
       return [keys.me()];
     case "bullets.purchased":
@@ -44,8 +46,13 @@ export function invalidationKeys(
     case "player.rankedUp":
       return [keys.me(), keys.ranks()];
     case "player.attacked":
+      // Bullets moved and the target's health did, so the list a player is
+      // looking at is stale; the log gains a row for both parties.
+      return [keys.me(), keys.combatTargets(), keys.combatLog()];
     case "player.killed":
-      return [keys.me()];
+      // The victim is now hospitalised — for them that is the whole page, and
+      // for the killer it is why the target vanished from the list.
+      return [keys.me(), keys.combatTargets(), keys.combatLog(), keys.hospital()];
     case "gang.created":
       return [keys.profile(viewerId), keys.gang(event.gangId)];
     case "gang.memberJoined":

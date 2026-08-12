@@ -1,19 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AuthResponseSchema, BankStatusResponseSchema, BuyBulletsResponseSchema,
-  CommitCrimeResponseSchema, CrimeListResponseSchema, GangBankResponseSchema,
+  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema, BuyBulletsResponseSchema,
+  BuyItemResponseSchema, CombatLogResponseSchema, CombatTargetListResponseSchema,
+  CommitCrimeResponseSchema, CrimeListResponseSchema, DischargeResponseSchema,
+  EquipResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
-  GangMemberListResponseSchema, JailStatusSchema, LeaderboardResponseSchema,
+  GangMemberListResponseSchema, HospitalStatusSchema, InventoryResponseSchema, JailStatusSchema,
+  LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
   NewsListResponseSchema, NotificationListResponseSchema, PluginsPayloadSchema,
-  ProfileDtoSchema, RankListResponseSchema, TravelResponseSchema,
-  type BankStatusResponse, type BuyBulletsResponse, type CreateGangRequest,
-  type CrimeListResponse, type GangBankResponse, type GangDto, type GangInviteListResponse,
+  ProfileDtoSchema, RankListResponseSchema, ShopListResponseSchema, TravelResponseSchema,
+  UseItemResponseSchema,
+  type AttackResponse, type BankStatusResponse, type BuyBulletsResponse,
+  type BuyItemRequest, type BuyItemResponse, type CombatLogResponse,
+  type CombatTargetListResponse, type CreateGangRequest,
+  type CrimeListResponse, type DischargeResponse, type EquipRequest, type EquipResponse,
+  type GangBankResponse, type GangDto, type GangInviteListResponse,
   type GangLogListResponse, type GangMemberListResponse, type GangPermission,
+  type HospitalStatus, type InventoryResponse,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
   type NewsListResponse, type NotificationListResponse, type PluginsPayload,
-  type ProfileDto, type RankListResponse, type UpdateProfileRequest,
+  type ProfileDto, type RankListResponse, type ShopListResponse, type UpdateProfileRequest,
+  type UseItemResponse,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
 import { keys } from "./keys.js";
@@ -412,5 +421,117 @@ export function usePlugins() {
   return useQuery<PluginsPayload>({
     queryKey: keys.plugins(),
     queryFn: async () => PluginsPayloadSchema.parse(await api("/api/plugins")),
+  });
+}
+
+/* ------------------------------------------------------- items and combat */
+
+export function useInventory() {
+  return useQuery<InventoryResponse>({
+    queryKey: keys.inventory(),
+    queryFn: async () => InventoryResponseSchema.parse(await api("/api/inventory")),
+  });
+}
+
+export function useEquip() {
+  const queryClient = useQueryClient();
+  return useMutation<EquipResponse, Error, EquipRequest>({
+    mutationFn: async (request) =>
+      EquipResponseSchema.parse(
+        await api("/api/inventory/equip", { method: "PUT", body: JSON.stringify(request) }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.inventory() });
+    },
+  });
+}
+
+export function useUseItem() {
+  const queryClient = useQueryClient();
+  return useMutation<UseItemResponse, Error, string>({
+    mutationFn: async (itemId) =>
+      UseItemResponseSchema.parse(await api(`/api/inventory/use/${itemId}`, { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.inventory() });
+      // Health changed, and both of these show it.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.hospital() });
+    },
+  });
+}
+
+export function useShop() {
+  return useQuery<ShopListResponse>({
+    queryKey: keys.shop(),
+    queryFn: async () => ShopListResponseSchema.parse(await api("/api/shop")),
+    // A player who is nowhere gets a 409; that is a stable answer, not a
+    // transient failure, so do not retry it.
+    retry: false,
+  });
+}
+
+export function useBuyItem() {
+  const queryClient = useQueryClient();
+  return useMutation<BuyItemResponse, Error, BuyItemRequest>({
+    mutationFn: async (request) =>
+      BuyItemResponseSchema.parse(
+        await api("/api/shop/buy", { method: "POST", body: JSON.stringify(request) }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.shop() });
+      void queryClient.invalidateQueries({ queryKey: keys.inventory() });
+    },
+  });
+}
+
+export function useCombatTargets() {
+  return useQuery<CombatTargetListResponse>({
+    queryKey: keys.combatTargets(),
+    queryFn: async () => CombatTargetListResponseSchema.parse(await api("/api/combat/targets")),
+  });
+}
+
+export function useCombatLog() {
+  return useQuery<CombatLogResponse>({
+    queryKey: keys.combatLog(),
+    queryFn: async () => CombatLogResponseSchema.parse(await api("/api/combat/log")),
+  });
+}
+
+export function useAttack() {
+  const queryClient = useQueryClient();
+  return useMutation<AttackResponse, Error, string>({
+    mutationFn: async (targetId) =>
+      AttackResponseSchema.parse(await api(`/api/combat/attack/${targetId}`, { method: "POST" })),
+    onSuccess: () => {
+      // Bullets and (on a kill) cash moved; the target's health and the log
+      // both changed.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.combatTargets() });
+      void queryClient.invalidateQueries({ queryKey: keys.combatLog() });
+    },
+  });
+}
+
+export function useHospital() {
+  return useQuery<HospitalStatus>({
+    queryKey: keys.hospital(),
+    queryFn: async () => HospitalStatusSchema.parse(await api("/api/hospital")),
+    // Same reason as the jail query: nothing frees a player on a timer, so the
+    // page polls to notice the sentence elapsing.
+    refetchInterval: JAIL_POLL_MS,
+  });
+}
+
+export function useDischarge() {
+  const queryClient = useQueryClient();
+  return useMutation<DischargeResponse, Error, void>({
+    mutationFn: async () =>
+      DischargeResponseSchema.parse(await api("/api/hospital/discharge", { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.hospital() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
   });
 }

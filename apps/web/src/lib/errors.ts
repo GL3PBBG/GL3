@@ -24,7 +24,7 @@ const MESSAGES: Record<string, string> = {
   insufficient_cash: "You don't have enough cash on hand.",
   insufficient_funds: "You don't have enough money.",
   insufficient_gang_funds: "The gang doesn't have enough money.",
-  insufficient_stock: "Not enough bullets in stock.",
+  insufficient_stock: "Not enough in stock.",
   invalid_credentials: "Wrong username or password.",
   invalid_kind: "Unknown leaderboard.",
   invalid_request: "That request wasn't valid.",
@@ -34,6 +34,7 @@ const MESSAGES: Record<string, string> = {
   mail_not_found: "That message is gone.",
   no_location: "Travel to a city first.",
   not_a_member: "You're not a member of that gang.",
+  not_sold_here: "This location doesn't stock that.",
   notification_not_found: "That notification is gone.",
   on_cooldown: "Not ready yet.",
   player_not_found: "No such player.",
@@ -72,7 +73,7 @@ export function describeError(error: unknown): string {
     return `Not ready yet — ${formatDuration(error.retryAfter)} to go.`;
   }
   if (error.code === "insufficient_stock" && error.available !== undefined) {
-    return `Only ${error.available} bullets left here.`;
+    return `Only ${error.available} left in stock here.`;
   }
   return base;
 }
