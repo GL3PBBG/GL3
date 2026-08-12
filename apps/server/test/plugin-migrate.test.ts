@@ -119,6 +119,11 @@ describe("inventory shop stock migrations", () => {
    * so it is preserved the same way `__drizzle_migrations` already is. This
    * test would 42P07 on that second `runPluginMigrations` call without it.
    */
+  // This test calls resetDb inside the body (the thing under test), so it
+  // pays resetDb's full TRUNCATE-CASCADE cost on top of two seeds and two
+  // plugin-migration boots — too much for vitest's 5s default under full-suite
+  // load.  Same budget the workspace already grants resetDb in hooks
+  //  (dbHookTimeout).
   it("survives a resetDb() between boots without re-running a migration", async () => {
     await seedItems(db);
     await seedLocations(db);
@@ -146,5 +151,5 @@ describe("inventory shop stock migrations", () => {
       sql`select count(*)::text as n from p_inventory_shop_stock`,
     );
     expect(afterReset[0]?.n).toBe("0");
-  });
+  }, 30_000);
 });
