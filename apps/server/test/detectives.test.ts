@@ -164,3 +164,100 @@ describe("POST /api/detectives — hire", () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe("GET /api/detectives — reveal gating and live tracking", () => {
+  /** Insert a search row directly so no resolve job races the assertions. */
+  const insertSearch = async (over: {
+    endsAt: Date; succeeded?: boolean | null; playerId?: string;
+  }): Promise<string> => {
+    const id = uuidv7();
+    await db.insert(detectiveSearches).values({
+      id,
+      playerId: over.playerId ?? hirerId,
+      targetPlayerId: targetId,
+      detectives: 3,
+      endsAt: over.endsAt,
+      succeeded: over.succeeded ?? null,
+    });
+    return id;
+  };
+
+  it("hides `succeeded` while pending, even when the roll is already recorded", async () => {
+    // The worker resolves minutes early by design (time-gated reveal, spec
+    // §2): the row knows, the API must not say.
+    await insertSearch({ endsAt: new Date(Date.now() + 60_000), succeeded: true });
+    await db.update(playerStats).set({ locationId: chicagoId })
+      .where(eq(playerStats.playerId, targetId));
+
+    const res = await list(hirerToken);
+    expect(res.statusCode).toBe(200);
+    const { searches } = res.json();
+    expect(searches).toHaveLength(1);
+    expect(searches[0].succeeded).toBeNull();
+    expect(searches[0].targetLocationId).toBeNull();
+    expect(searches[0].targetLocationName).toBeNull();
+  });
+
+  it("reveals success and the target's CURRENT location after ends_at", async () => {
+    await insertSearch({ endsAt: new Date(Date.now() - 10_000), succeeded: true });
+    await db.update(playerStats).set({ locationId: chicagoId })
+      .where(eq(playerStats.playerId, targetId));
+
+    const first = list(hirerToken);
+    expect((await first).json().searches[0]).toMatchObject({
+      succeeded: true, targetLocationId: chicagoId, targetLocationName: "Chicago",
+    });
+
+    // Live tracking: the target travels; the next read shows the new place.
+    await db.update(playerStats).set({ locationId: miamiId })
+      .where(eq(playerStats.playerId, targetId));
+    const second = await list(hirerToken);
+    expect(second.json().searches[0]).toMatchObject({
+      targetLocationId: miamiId, targetLocationName: "Miami",
+    });
+  });
+
+  it("reveals a failure after ends_at, with no location", async () => {
+    await insertSearch({ endsAt: new Date(Date.now() - 10_000), succeeded: false });
+    const { searches } = (await list(hirerToken)).json();
+    expect(searches[0].succeeded).toBe(false);
+    expect(searches[0].targetLocationName).toBeNull();
+  });
+
+  it("reads a lost resolve (NULL past ends_at) as failed, never pending forever", async () => {
+    await insertSearch({ endsAt: new Date(Date.now() - 10_000), succeeded: null });
+    const { searches } = (await list(hirerToken)).json();
+    expect(searches[0].succeeded).toBe(false);
+  });
+
+  it("hides the location once the report expires (ends_at + expire)", async () => {
+    // Default expire is 600s; 700s past ends_at is expired.
+    await insertSearch({ endsAt: new Date(Date.now() - 700_000), succeeded: true });
+    await db.update(playerStats).set({ locationId: chicagoId })
+      .where(eq(playerStats.playerId, targetId));
+    const { searches } = (await list(hirerToken)).json();
+    expect(searches[0].succeeded).toBe(true);
+    expect(searches[0].targetLocationId).toBeNull();
+    expect(searches[0].targetLocationName).toBeNull();
+  });
+
+  it("lists only the caller's own searches, newest first, with cost", async () => {
+    const older = await insertSearch({ endsAt: new Date(Date.now() + 30_000) });
+    const newer = await insertSearch({ endsAt: new Date(Date.now() + 60_000) });
+    // A foreign row must not appear — silent to everyone but the hirer.
+    await insertSearch({ endsAt: new Date(Date.now() + 60_000), playerId: targetId });
+
+    const body = (await list(hirerToken)).json();
+    expect(body.cost).toBe("125000");
+    expect(body.searches).toHaveLength(2);
+    expect(body.searches.map((s: { id: string }) => s.id)).toEqual([newer, older]);
+    expect(body.searches[0].targetUsername).toBe("Fugitive");
+    expect(typeof body.searches[0].startedAt).toBe("string");
+    expect(typeof body.searches[0].endsAt).toBe("string");
+    expect(typeof body.searches[0].expiresAt).toBe("string");
+  });
+
+  it("401s without auth", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/detectives" })).statusCode).toBe(401);
+  });
+});
