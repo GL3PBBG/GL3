@@ -44,4 +44,5 @@ export const keys = {
   combatLog: () => ["combat", "log"] as const,
   hospital: () => ["hospital"] as const,
   bounties: () => ["bounties"] as const,
+  detectives: () => ["detectives"] as const,
 };
