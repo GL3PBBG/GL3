@@ -142,8 +142,18 @@ describe("invalidationKeys", () => {
   });
 
   it("invalidates nothing for surfaces that have no server routes at all", () => {
-    for (const type of ["chat.message", "bounty.placed", "bounty.claimed", "player.joined"] as const) {
+    for (const type of ["chat.message", "player.joined"] as const) {
       expect(invalidationKeys(event(type), VIEWER)).toEqual([]);
     }
+  });
+
+  it("refreshes the bounty list when a bounty is placed", () => {
+    expect(invalidationKeys(event("bounty.placed"), VIEWER)).toEqual([keys.bounties()]);
+  });
+
+  it("refreshes the bounty list and wallet when a bounty is claimed", () => {
+    expect(invalidationKeys(event("bounty.claimed"), VIEWER)).toEqual([
+      keys.bounties(), keys.me(),
+    ]);
   });
 });

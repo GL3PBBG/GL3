@@ -75,7 +75,10 @@ export function invalidationKeys(
     case "news.posted":
       return [keys.news()];
     case "bounty.placed":
+      return [keys.bounties()];
     case "bounty.claimed":
+      // Audience is killer + placer; the killer's cash moved.
+      return [keys.bounties(), keys.me()];
     case "chat.message":
     case "player.joined":
       return [];
