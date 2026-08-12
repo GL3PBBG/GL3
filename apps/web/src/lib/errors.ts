@@ -17,11 +17,14 @@ const MESSAGES: Record<string, string> = {
   amount_must_be_positive: "Enter an amount greater than zero.",
   boss_must_transfer_first: "A boss must hand the gang over before leaving.",
   cannot_kick_boss: "You can't kick the boss.",
+  cooldown: "You just fired — wait a moment.",
   crime_not_found: "That crime no longer exists.",
   email_taken: "That email is already registered.",
   forbidden: "You don't have permission to do that.",
   gang_name_taken: "That gang name is taken.",
   gang_not_found: "That gang no longer exists.",
+  hospitalised: "You're in hospital.",
+  insufficient_bullets: "You don't have enough bullets.",
   insufficient_cash: "You don't have enough cash on hand.",
   insufficient_funds: "You don't have enough money.",
   insufficient_gang_funds: "The gang doesn't have enough money.",
@@ -34,15 +37,22 @@ const MESSAGES: Record<string, string> = {
   location_not_found: "No such city.",
   mail_not_found: "That message is gone.",
   no_location: "Travel to a city first.",
+  no_such_target: "No such player.",
   not_a_member: "You're not a member of that gang.",
   not_owned: "You don't own that item.",
   not_sold_here: "This location doesn't stock that.",
   notification_not_found: "That notification is gone.",
   on_cooldown: "Not ready yet.",
   player_not_found: "No such player.",
+  protected: "That player is under protection.",
   rank_too_low: "You're not experienced enough to use that.",
   rate_limited: "Too many attempts — wait a moment.",
   recipient_not_found: "No such player.",
+  same_gang: "You can't shoot your own gang.",
+  target_elsewhere: "That player is elsewhere.",
+  target_hospitalised: "That player is in hospital.",
+  target_jailed: "That player is in jail.",
+  self_attack: "You can't shoot yourself.",
   unauthorized: "Your session expired — log in again.",
   unknown_error: "Something went wrong.",
   username_taken: "That username is taken.",
@@ -72,6 +82,9 @@ export function describeError(error: unknown): string {
   // The timed/quantified codes carry a number the base sentence should use.
   if (error.code === "jailed" && error.remainingSeconds !== undefined) {
     return `You're in jail for another ${formatDuration(error.remainingSeconds)}.`;
+  }
+  if (error.code === "cooldown" && error.retryAfter !== undefined) {
+    return `You just fired — ${formatDuration(error.retryAfter)} to go.`;
   }
   if (error.code === "on_cooldown" && error.retryAfter !== undefined) {
     return `Not ready yet — ${formatDuration(error.retryAfter)} to go.`;

@@ -4,6 +4,7 @@ import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
 import { Bank } from "./pages/Bank.js";
 import { Bullets } from "./pages/Bullets.js";
+import { Combat } from "./pages/Combat.js";
 import { Crimes } from "./pages/Crimes.js";
 import { Shop } from "./pages/Shop.js";
 import { Dashboard } from "./pages/Dashboard.js";
@@ -47,6 +48,7 @@ export function App(): JSX.Element {
           <Route path="bullets" element={<Bullets />} />
           <Route path="shop" element={<Shop />} />
           <Route path="inventory" element={<Inventory />} />
+          <Route path="combat" element={<Combat />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
           <Route path="gang" element={<Gang />} />
