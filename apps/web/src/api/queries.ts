@@ -1,30 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema, BountyListResponseSchema,
+  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
+  BountyListResponseSchema,
   BuyBulletsResponseSchema, BuyItemResponseSchema, CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
-  DischargeResponseSchema, EquipResponseSchema, GangBankResponseSchema,
+  DetectiveListResponseSchema, DischargeResponseSchema, EquipResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
-  GangMemberListResponseSchema, HospitalStatusSchema, InventoryResponseSchema, JailStatusSchema,
+  GangMemberListResponseSchema, HireDetectivesResponseSchema, HospitalStatusSchema,
+  InventoryResponseSchema, JailStatusSchema,
   LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
   NewsListResponseSchema, NotificationListResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
-  ProfileDtoSchema, RankListResponseSchema, ShopListResponseSchema, TravelResponseSchema,
+  ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
+  ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
   type AttackResponse, type BankStatusResponse, type BountyListResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse, type CombatLogResponse,
   type CombatTargetListResponse, type CreateGangRequest,
-  type CrimeListResponse, type DischargeResponse, type EquipRequest, type EquipResponse,
+  type CrimeListResponse,
+  type DetectiveListResponse, type DischargeResponse,
+  type EquipRequest, type EquipResponse,
   type GangBankResponse, type GangDto, type GangInviteListResponse,
   type GangLogListResponse, type GangMemberListResponse, type GangPermission,
+  type HireDetectivesRequest, type HireDetectivesResponse,
   type HospitalStatus, type InventoryResponse,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
   type NewsListResponse, type NotificationListResponse, type PlaceBountyRequest,
   type PlaceBountyResponse, type PluginsPayload,
-  type ProfileDto, type RankListResponse, type ShopListResponse, type UpdateProfileRequest,
+  type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
+  type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
@@ -560,6 +567,52 @@ export function usePlaceBounty() {
       // The placer's cash moved and the list gained a row.
       void queryClient.invalidateQueries({ queryKey: keys.me() });
       void queryClient.invalidateQueries({ queryKey: keys.bounties() });
+    },
+  });
+}
+
+export function useDetectives() {
+  return useQuery<DetectiveListResponse>({
+    queryKey: keys.detectives(),
+    queryFn: async () => DetectiveListResponseSchema.parse(await api("/api/detectives")),
+    // Reveal and live tracking are pure reads of server time (no WS event —
+    // silent to the target rules out broadcast, spec §3): poll while any row
+    // is pending or actively tracking, go quiet when all are settled.
+    refetchInterval: (query) => {
+      const rows = query.state.data?.searches ?? [];
+      const now = Date.now();
+      const live = rows.some(
+        (s) => s.succeeded === null || (s.succeeded === true && now < Date.parse(s.expiresAt)),
+      );
+      return live ? 5_000 : false;
+    },
+  });
+}
+
+export function useHireDetectives() {
+  const queryClient = useQueryClient();
+  return useMutation<HireDetectivesResponse, Error, HireDetectivesRequest>({
+    mutationFn: async (input) =>
+      HireDetectivesResponseSchema.parse(await api("/api/detectives", {
+        method: "POST", body: JSON.stringify(input),
+      })),
+    onSuccess: () => {
+      // The hirer's cash moved and the list gained a row.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.detectives() });
+    },
+  });
+}
+
+export function useRemoveDetectiveSearch() {
+  const queryClient = useQueryClient();
+  return useMutation<RemoveDetectiveSearchResponse, Error, string>({
+    mutationFn: async (searchId) =>
+      RemoveDetectiveSearchResponseSchema.parse(await api(`/api/detectives/${searchId}`, {
+        method: "DELETE",
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.detectives() });
     },
   });
 }
