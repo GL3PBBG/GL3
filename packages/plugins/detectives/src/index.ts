@@ -1,8 +1,8 @@
 import { definePlugin, InsufficientFundsError, PluginError, route, type PluginCtx } from "@gl3/plugin-sdk";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { detectiveSearches, players } from "./schema.js";
+import { detectiveSearches, locations, playerStats, players } from "./schema.js";
 
 /**
  * V2's detectives module, GL3-shaped: the cross-location hunting layer.
@@ -116,6 +116,73 @@ const hireRoute = route({
 // reveal) — no delayed job needed.
 // ---------------------------------------------------------------------------
 
+const listRoute = route({
+  method: "GET",
+  path: "/api/detectives",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const unitCost = readCost(ctx.settings);
+    const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
+
+    return ctx.transaction(async (tx) => {
+      // Live tracking is this un-cached join (spec §2): the target's CURRENT
+      // player_stats.location_id, resolved on every read. No state to keep.
+      const rows = await tx.db
+        .select({
+          id: detectiveSearches.id,
+          targetId: detectiveSearches.targetPlayerId,
+          targetUsername: players.username,
+          detectives: detectiveSearches.detectives,
+          startedAt: detectiveSearches.startedAt,
+          endsAt: detectiveSearches.endsAt,
+          succeeded: detectiveSearches.succeeded,
+          targetLocationId: playerStats.locationId,
+          targetLocationName: locations.name,
+        })
+        .from(detectiveSearches)
+        .innerJoin(players, eq(players.id, detectiveSearches.targetPlayerId))
+        .leftJoin(playerStats, eq(playerStats.playerId, detectiveSearches.targetPlayerId))
+        .leftJoin(locations, eq(locations.id, playerStats.locationId))
+        .where(eq(detectiveSearches.playerId, player.id))
+        // Bounded at 100 and NOT paginated — bounties' deliberate limitation.
+        .orderBy(desc(detectiveSearches.startedAt), desc(detectiveSearches.id))
+        .limit(100);
+
+      const now = Date.now();
+      return {
+        status: 200,
+        body: {
+          // Unit cost so the client can preview cost x dets x hours.
+          cost: unitCost.toString(),
+          searches: rows.map((r) => {
+            const ended = now >= r.endsAt.getTime();
+            const expiresAtMs = r.endsAt.getTime() + expireSeconds * 1000;
+            // Time-gated reveal (spec §2): before ends_at the recorded roll
+            // is never exposed. Past ends_at, NULL means the resolve job was
+            // lost — the gamble reads as failed, never as pending forever.
+            const succeeded = ended ? (r.succeeded ?? false) : null;
+            const active = succeeded === true && now < expiresAtMs;
+            return {
+              id: r.id,
+              targetId: r.targetId,
+              targetUsername: r.targetUsername,
+              detectives: r.detectives,
+              startedAt: r.startedAt.toISOString(),
+              endsAt: r.endsAt.toISOString(),
+              expiresAt: new Date(expiresAtMs).toISOString(),
+              succeeded,
+              targetLocationId: active ? r.targetLocationId : null,
+              targetLocationName: active ? r.targetLocationName : null,
+            };
+          }),
+        },
+      };
+    });
+  },
+});
+
 async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
   const searchId = String(data["searchId"]);
   const detectives = Number(data["detectives"]);
@@ -144,6 +211,6 @@ export default definePlugin({
   id: "detectives",
   version: "1.0.0",
   basePaths: ["/api/detectives"],
-  routes: [hireRoute],
+  routes: [hireRoute, listRoute],
   jobs: { resolve: resolveJob },
 });
