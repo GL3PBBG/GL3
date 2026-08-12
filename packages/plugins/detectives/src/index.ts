@@ -1,5 +1,5 @@
 import { definePlugin, InsufficientFundsError, PluginError, route, type PluginCtx } from "@gl3/plugin-sdk";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { detectiveSearches, locations, playerStats, players } from "./schema.js";
@@ -183,6 +183,31 @@ const listRoute = route({
   },
 });
 
+const RemoveParamsSchema = z.object({ searchId: z.string().uuid() });
+
+const removeRoute = route({
+  method: "DELETE",
+  path: "/api/detectives/:searchId",
+  params: RemoveParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const removed = await tx.db.delete(detectiveSearches)
+        .where(and(
+          eq(detectiveSearches.id, params.searchId),
+          eq(detectiveSearches.playerId, player.id),
+        ))
+        .returning({ id: detectiveSearches.id });
+      // Foreign and nonexistent answer identically (spec §4): the ownership
+      // predicate is in the DELETE itself, so there is no existence probe.
+      if (removed.length === 0) throw new PluginError("not_found", 404);
+      return { status: 200, body: { removed: true } };
+    });
+  },
+});
+
 async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
   const searchId = String(data["searchId"]);
   const detectives = Number(data["detectives"]);
@@ -211,6 +236,6 @@ export default definePlugin({
   id: "detectives",
   version: "1.0.0",
   basePaths: ["/api/detectives"],
-  routes: [hireRoute, listRoute],
+  routes: [hireRoute, listRoute, removeRoute],
   jobs: { resolve: resolveJob },
 });
