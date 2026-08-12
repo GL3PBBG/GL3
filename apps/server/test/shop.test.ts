@@ -110,6 +110,31 @@ describe("GET /api/shop", () => {
     expect(res.json<{ error: string }>().error).toBe("no_location");
   });
 
+  it("hides a zero-stock row while still showing stocked rows", async () => {
+    const player = await register();
+    const { locationId, itemId } = await seedShop(2500n, 10);
+    const outOfStock = await seedShop(500n, 5);
+    await moveTo(player.id, locationId);
+    // Move the second stock row to the same location so it competes in the
+    // same listing.
+    await db.execute(sql`
+      update p_inventory_shop_stock set location_id = ${locationId}
+      where item_id = ${outOfStock.itemId}`);
+    await db.execute(sql`
+      update p_inventory_shop_stock set stock = 0
+      where item_id = ${outOfStock.itemId}`);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/shop",
+      headers: { authorization: `Bearer ${player.token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ items: { itemId: string }[] }>();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.itemId).toBe(itemId);
+  });
+
   it("answers 401 without a session", async () => {
     const res = await app.inject({ method: "GET", url: "/api/shop" });
     expect(res.statusCode).toBe(401);
