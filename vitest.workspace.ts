@@ -57,6 +57,9 @@ const srcAliases = {
       "@gl3/plugin-combat": fileURLToPath(
         new URL("./packages/plugins/combat/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-bounties": fileURLToPath(
+        new URL("./packages/plugins/bounties/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
