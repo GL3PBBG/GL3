@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-12, bounties — kill contracts and the first cross-plugin filter.
-Branch: `feat/bounties`.
+Last updated: 2026-08-12, detectives — cross-location hunting via time-gated reveal.
+Branch: `feat/detectives`.
 
 ---
 
@@ -14,9 +14,9 @@ Branch: `feat/bounties`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), and **bounties** (kill contracts, first live cross-plugin filter — `killResolved`) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), and **detectives** (cross-location hunting, time-gated reveal, live-location tracking) have since shipped |
 
-**Suite: 91 files / 767 tests**, green across repeated back-to-back runs.
+**Suite: 93 files / 790 tests**, green across repeated back-to-back runs.
 (The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded
@@ -790,6 +790,66 @@ test (`test/bounties-lock-order.test.ts`) stays as a guard.
 Four new test files: `test/bounties.test.ts` (place + list), `test/bounties-claim.test.ts`
 (claim sweep on kill), `test/bounties-lock-order.test.ts` (concurrency guard),
 `test/combat-kill-filter.test.ts` (the filter point itself).
+
+### Detectives — cross-location hunting via time-gated reveal
+
+Design: `docs/superpowers/specs/2026-08-12-detectives-design.md`. Plan:
+`docs/superpowers/plans/2026-08-12-detectives.md`, 8 tasks, branch
+`feat/detectives`.
+
+The second real user of the plugin job system (after `crimes`). A player
+hires a detective to locate a target who may be in a different city. The
+search uses a seeded PRNG (deterministic and reproducible), with a
+configurable duration controlling how long until the result is revealed — a
+time-gated design in place of delayed jobs, so the result is computed at
+hire time and stored, and the reveal is a read gated by the configured
+elapsed time. The detective also tracks the target's live location at
+query time via a JOIN on `player_stats.location_id`, so a player who has
+moved since the search was seeded shows their current position once the
+gate opens.
+
+**What shipped:**
+
+- **`packages/plugins/detectives`** — `POST /api/detectives/hire` (debit
+  via `applyBalanceChange`, insert detective row with seeded result,
+  enqueue-after-commit `resolve` job), `GET /api/detectives` (list the
+  hiring player's detectives with time-gated reveal and live-location
+  tracking), `DELETE /api/detectives/:detectiveId` (remove, with existence
+  check that leaks no information about the target). Uses a plugin-owned
+  table (`p_detectives`) with plugin migrations (`detectives:0001_create`).
+- **`resolve` job** — seeded RNG determines the target's location at hire
+  time, stored in the `found_location_id` column. Idempotent via
+  `plugin_job_runs (plugin_id, job_id)`. This is the second single-job
+  plugin after `crimes`, so the `plugin_job_runs` PK gap (missing `job_name`)
+  remains a watch item — see below.
+- **Time-gated reveal** — the list route returns `found_location_id` only
+  when `now >= created_at + duration`. Before the gate opens, the response
+  omits the location. After it opens, a JOIN on `player_stats.location_id`
+  provides the target's **current** location (live tracking), which may
+  differ from the seeded result — that is by design.
+- **Settings:** `detectives.cost` (hire price, default 5000),
+  `detectives.duration` (reveal delay in seconds, default 300),
+  `detectives.expire` (auto-cleanup age in seconds, default 86400). Bare
+  keys plugin-side — the spec's V2 names adapted to the `ctx` prefix.
+- **No lock-order test, deliberately.** Detectives touches only the hiring
+  player's own row — no location lock, no gang lock, no second-player lock.
+  `applyBalanceChange` locks that one row internally; the detective INSERT's
+  FK on `players` takes `FOR KEY SHARE` on the target, but the target row is
+  never locked FOR UPDATE, so there is no ABBA surface.
+- **No combat coupling.** Unlike bounties, detectives does not subscribe to
+  `killResolved` or any other filter point. It is self-contained.
+- **No WS events.** The list page polls; no live push on hire or reveal.
+- **No target notification.** The target is never informed that a detective
+  was hired on them — spec requirement.
+
+**Deliberate absences:** no lock-order test (single-player lock only), no
+combat coupling (no filter-point subscription), no WS events (polling only),
+no target notification (silent by design).
+
+Two new test files: `test/detectives.test.ts` (hire + list + reveal +
+remove), `test/detectives-worker.test.ts` (worker determinism, idempotency,
+4%/100% boundary cases). `economy-invariant.test.ts` gained a `detectiveHire`
+op. The web page is at `/detectives` (`apps/web/src/pages/`).
 
 ## Starting M4
 
