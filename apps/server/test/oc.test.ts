@@ -746,3 +746,71 @@ describe("POST /api/oc/:heistId/cancel", () => {
     expect(cancel2.json().error).toBe("heist_not_open");
   });
 });
+
+describe("POST /api/oc/:heistId/execute", () => {
+  /** Build a full 4-member crew ready to execute, returns heistId + player infos. */
+  async function buildFullCrew(buyIn = "5000") {
+    const heistId = await createHeist(buyIn);
+    const driver = await invitePlayer(heistId, "ExecDriver", "driver");
+    await inject("POST", `/api/oc/${heistId}/accept`, driver.token);
+    const gunman = await invitePlayer(heistId, "ExecGunman", "gunman");
+    await inject("POST", `/api/oc/${heistId}/accept`, gunman.token);
+    const hacker = await invitePlayer(heistId, "ExecHacker", "hacker");
+    await inject("POST", `/api/oc/${heistId}/accept`, hacker.token);
+    return { heistId, driver, gunman, hacker };
+  }
+
+  it("execute with a full, co-located crew: 202 with a jobId; status becomes executing", async () => {
+    const { heistId } = await buildFullCrew();
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const waiting = awaitOwnEvent(subscriber, leaderId);
+
+    const res = await inject("POST", `/api/oc/${heistId}/execute`, leaderToken);
+    expect(res.statusCode).toBe(202);
+    const body = res.json();
+    expect(body.jobId).toBeDefined();
+
+    const [heist] = await db.select().from(ocHeists).where(eq(ocHeists.id, heistId));
+    expect(heist!.status).toBe("executing");
+
+    const event = await waiting;
+    expect(event).toMatchObject({ type: "oc.updated", heistId, status: "executing" });
+  });
+
+  it("execute with an unfilled slot: 409 crew_incomplete", async () => {
+    const heistId = await createHeist();
+    const driver = await invitePlayer(heistId, "IncDriver", "driver");
+    await inject("POST", `/api/oc/${heistId}/accept`, driver.token);
+
+    const res = await inject("POST", `/api/oc/${heistId}/execute`, leaderToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("crew_incomplete");
+  });
+
+  it("execute with a member elsewhere: 409 crew_not_assembled naming them", async () => {
+    const { heistId, gunman } = await buildFullCrew();
+
+    const otherLocationId = uuidv7();
+    await db.insert(locations).values({
+      id: otherLocationId, name: "NewYork", travelCost: 200n,
+      travelCooldownSeconds: 60, bulletStock: 500, bulletCost: 5n,
+    });
+    await db.update(playerStats).set({ locationId: otherLocationId })
+      .where(eq(playerStats.playerId, gunman.playerId));
+
+    const res = await inject("POST", `/api/oc/${heistId}/execute`, leaderToken);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("crew_not_assembled");
+    expect(res.json().absent).toContain("ExecGunman");
+  });
+
+  it("non-leader cannot execute: 403 not_leader", async () => {
+    const heistId = await createHeist();
+    const driver = await invitePlayer(heistId, "NotLeaderDriver", "driver");
+    await inject("POST", `/api/oc/${heistId}/accept`, driver.token);
+
+    const res = await inject("POST", `/api/oc/${heistId}/execute`, driver.token);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("not_leader");
+  });
+});
