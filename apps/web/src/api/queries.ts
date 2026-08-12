@@ -1,17 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema, BuyBulletsResponseSchema,
-  BuyItemResponseSchema, CombatLogResponseSchema, CombatTargetListResponseSchema,
-  CommitCrimeResponseSchema, CrimeListResponseSchema, DischargeResponseSchema,
-  EquipResponseSchema, GangBankResponseSchema,
+  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema, BountyListResponseSchema,
+  BuyBulletsResponseSchema, BuyItemResponseSchema, CombatLogResponseSchema,
+  CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
+  DischargeResponseSchema, EquipResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
   GangMemberListResponseSchema, HospitalStatusSchema, InventoryResponseSchema, JailStatusSchema,
   LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
-  NewsListResponseSchema, NotificationListResponseSchema, PluginsPayloadSchema,
+  NewsListResponseSchema, NotificationListResponseSchema, PlaceBountyResponseSchema,
+  PluginsPayloadSchema,
   ProfileDtoSchema, RankListResponseSchema, ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
-  type AttackResponse, type BankStatusResponse, type BuyBulletsResponse,
+  type AttackResponse, type BankStatusResponse, type BountyListResponse,
+  type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse, type CombatLogResponse,
   type CombatTargetListResponse, type CreateGangRequest,
   type CrimeListResponse, type DischargeResponse, type EquipRequest, type EquipResponse,
@@ -20,7 +22,8 @@ import {
   type HospitalStatus, type InventoryResponse,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
-  type NewsListResponse, type NotificationListResponse, type PluginsPayload,
+  type NewsListResponse, type NotificationListResponse, type PlaceBountyRequest,
+  type PlaceBountyResponse, type PluginsPayload,
   type ProfileDto, type RankListResponse, type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
 } from "@gl3/shared";
@@ -535,6 +538,28 @@ export function useDischarge() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.hospital() });
       void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useBounties() {
+  return useQuery<BountyListResponse>({
+    queryKey: keys.bounties(),
+    queryFn: async () => BountyListResponseSchema.parse(await api("/api/bounties")),
+  });
+}
+
+export function usePlaceBounty() {
+  const queryClient = useQueryClient();
+  return useMutation<PlaceBountyResponse, Error, PlaceBountyRequest>({
+    mutationFn: async (input) =>
+      PlaceBountyResponseSchema.parse(await api("/api/bounties", {
+        method: "POST", body: JSON.stringify(input),
+      })),
+    onSuccess: () => {
+      // The placer's cash moved and the list gained a row.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.bounties() });
     },
   });
 }

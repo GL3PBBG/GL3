@@ -57,6 +57,9 @@ const srcAliases = {
       "@gl3/plugin-combat": fileURLToPath(
         new URL("./packages/plugins/combat/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-bounties": fileURLToPath(
+        new URL("./packages/plugins/bounties/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -210,8 +213,12 @@ export default defineWorkspace([
       include: [
         "test/auth.test.ts",
         "test/bank.test.ts",
+        "test/bounties-claim.test.ts",
+        "test/bounties.test.ts",
+        "test/bounties-lock-order.test.ts",
         "test/bullets.test.ts",
         "test/combat-concurrency.test.ts",
+        "test/combat-kill-filter.test.ts",
         "test/combat-kill.test.ts",
         "test/combat-lock-order.test.ts",
         "test/combat.test.ts",

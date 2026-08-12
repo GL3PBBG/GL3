@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-12, item economy — location shop, combat targets, four web pages.
-Branch: `feat/item-economy`.
+Last updated: 2026-08-12, bounties — kill contracts and the first cross-plugin filter.
+Branch: `feat/bounties`.
 
 ---
 
@@ -14,14 +14,16 @@ Branch: `feat/item-economy`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) and **item economy** (location shop, combat targets, four web pages) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), and **bounties** (kill contracts, first live cross-plugin filter — `killResolved`) have since shipped |
 
-**Suite: 87 files / 747 tests**, green across repeated back-to-back runs.
+**Suite: 91 files / 767 tests**, green across repeated back-to-back runs.
 (The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
 line carried through `feat/pvp-combat` was already stale when it was written.
 The item-economy work added three new test files (19 tests) and expanded
 `economy-invariant.test.ts`, `plugin-migrate.test.ts` (+2),
-`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`).
+`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`.
+Bounties added four new test files / 20 tests net and introduced the SDK filter
+system's first live consumer.)
 
 ---
 
@@ -739,6 +741,55 @@ give every combat-related surface a browser UI.
 **`effects.ts` duplication** between `combat` and `inventory` is unchanged
 — this work did not make it worse and did not fix it. See the watch item
 below.
+
+### Bounties — kill contracts via cross-plugin filter
+
+Design: `docs/superpowers/specs/2026-08-12-bounties-design.md`. Plan:
+`docs/superpowers/plans/2026-08-12-bounties.md`, 8 tasks, branch
+`feat/bounties`.
+
+The first live consumer of the SDK filter system: the `combat` plugin exports
+`killResolved` (a `filterPoint<{killerId, victimId}>`), and the `bounties`
+plugin subscribes to it. When a kill lands, bounties sweeps all open contracts
+on the victim to the killer in a single `UPDATE`. This is the same shape as
+V2's `userKilled` hook — a plugin reacting to another plugin's event — but
+implemented through the SDK's typed filter rather than a global hook.
+
+**What shipped:**
+
+- **`packages/plugins/bounties`** — `POST /api/bounties` (place a contract:
+  escrow at placement, configurable minimum amount defaulting to 1000, no
+  self-bounty, no bounty on a gang-mate) and `GET /api/bounties` (open list,
+  newest first, limit 100). Uses the existing core `bounties` table
+  (migration 0000) — no new table, no plugin migrations.
+- **Claim sweep on kill** — subscribes to combat's `killResolved` filter
+  point. On a fatal attack, sweeps all open bounties on the victim to the
+  killer in one `UPDATE bounties SET claimed_by = $killer WHERE target =
+  $victim AND claimed_by IS NULL`. A throwing subscriber is caught by combat;
+  the kill response is unaffected.
+- **`/bounties` web page** — place form (amount + target) and open list,
+  first-party React in `apps/web/src/pages/`.
+- **`packages/plugins/combat`** now exports `killResolved` via the SDK
+  `filterPoint` API, applied post-commit on fatal attacks. This is the
+  filter system's first real consumer.
+
+**Crash safety:** the sweep is a single atomic `UPDATE ... WHERE claimed_by IS
+NULL` — idempotent and claim-once by shape, no queue. If the process dies
+between combat's commit and the filter run, the rows stay open and the next
+kill of the same target sweeps them. Money is never lost, only delayed.
+
+**Lock order:** placement locks `[placer, target]` ascending via
+`tx.locks.player` before its FK-bearing INSERT; the claim sweep locks
+`[killer]` only. An honest finding from development: the placement-vs-combat
+ABBA the spec worried about is not actually reachable, because `tx.locks.player`
+locks `player_stats` rows while the bounty INSERT's FKs take KEY SHARE on
+`players` rows — they don't contend on the same rows beyond the placer's own
+stats. The explicit lock call is still correct defense-in-depth; the regression
+test (`test/bounties-lock-order.test.ts`) stays as a guard.
+
+Four new test files: `test/bounties.test.ts` (place + list), `test/bounties-claim.test.ts`
+(claim sweep on kill), `test/bounties-lock-order.test.ts` (concurrency guard),
+`test/combat-kill-filter.test.ts` (the filter point itself).
 
 ## Starting M4
 
