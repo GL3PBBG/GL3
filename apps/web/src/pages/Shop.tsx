@@ -3,8 +3,8 @@ import type { ShopItem } from "@gl3/shared";
 import { useBuyItem, useMe, useShop } from "../api/queries.js";
 import { describeError } from "../lib/errors.js";
 import { numericEffect } from "../lib/effects.js";
-import { canAfford, formatMoney, multiplyMoney } from "../lib/money.js";
-import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { canAfford, multiplyMoney } from "../lib/money.js";
+import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
 function Stats({ item }: { item: ShopItem }) {
