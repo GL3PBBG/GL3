@@ -37,6 +37,7 @@ const MESSAGES: Record<string, string> = {
   location_not_found: "No such city.",
   mail_not_found: "That message is gone.",
   no_location: "Travel to a city first.",
+  not_hospitalised: "You're not in hospital.",
   no_such_target: "No such player.",
   not_a_member: "You're not a member of that gang.",
   not_owned: "You don't own that item.",

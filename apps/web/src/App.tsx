@@ -9,6 +9,7 @@ import { Crimes } from "./pages/Crimes.js";
 import { Shop } from "./pages/Shop.js";
 import { Dashboard } from "./pages/Dashboard.js";
 import { Gang } from "./pages/Gang.js";
+import { Hospital } from "./pages/Hospital.js";
 import { Inventory } from "./pages/Inventory.js";
 import { Jail } from "./pages/Jail.js";
 import { Leaderboards } from "./pages/Leaderboards.js";
@@ -43,6 +44,7 @@ export function App(): JSX.Element {
           <Route index element={<Dashboard />} />
           <Route path="crimes" element={<Crimes />} />
           <Route path="jail" element={<Jail />} />
+          <Route path="hospital" element={<Hospital />} />
           <Route path="bank" element={<Bank />} />
           <Route path="travel" element={<Travel />} />
           <Route path="bullets" element={<Bullets />} />
