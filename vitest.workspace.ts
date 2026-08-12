@@ -249,6 +249,7 @@ export default defineWorkspace([
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
         "test/news.test.ts",
+        "test/oc-worker.test.ts",
         "test/oc.test.ts",
         "test/notifications.test.ts",
         "test/plugin-ctx-core-events.test.ts",

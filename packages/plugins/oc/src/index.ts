@@ -1,10 +1,10 @@
-import { definePlugin, InsufficientFundsError, type PluginTx, PluginError, route } from "@gl3/plugin-sdk";
-import { and, eq } from "drizzle-orm";
+import { definePlugin, InsufficientFundsError, type PluginCtx, type PluginTx, PluginError, route } from "@gl3/plugin-sdk";
+import { and, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { OC_MIGRATIONS } from "./migrations.js";
 import { ocHeists, ocMembers, players, playerStats } from "./schema.js";
-import { readBigintSetting } from "./settings.js";
+import { readBigintSetting, readNumberSetting } from "./settings.js";
 
 export const ROLES = ["mastermind", "driver", "gunman", "hacker"] as const;
 export const LEADER_ROLE = "mastermind";
@@ -568,11 +568,192 @@ const cancelRoute = route({
   },
 });
 
+const executeRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/execute",
+  accessInJail: false,
+  accessInHospital: false,
+  params: HeistParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    await ctx.transaction(async (tx) => {
+      const heist = await lockHeist(tx, params.heistId);            // heist FIRST
+      if (!heist) throw new PluginError("heist_not_found", 404);
+      if (heist.leaderId !== player.id) throw new PluginError("not_leader", 403);
+      // "executing" is allowed: re-fire after a commit-then-crash (crash recovery).
+      if (heist.status !== "open" && heist.status !== "executing") {
+        throw new PluginError("heist_not_open", 409);
+      }
+
+      const members = await tx.db.select().from(ocMembers).where(and(
+        eq(ocMembers.heistId, heist.id), eq(ocMembers.state, "accepted"),
+      ));
+      if (members.length !== CREW_SIZE) throw new PluginError("crew_incomplete", 409);
+
+      // players SECOND — the declared heist→player order (spec §5).
+      const memberIds = members.map((m) => m.playerId);
+      await tx.locks.player(memberIds);
+
+      const stats = await tx.db
+        .select({
+          playerId: playerStats.playerId, locationId: playerStats.locationId,
+          jailedUntil: playerStats.jailedUntil, hospitalUntil: playerStats.hospitalUntil,
+          username: players.username,
+        })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .where(inArray(playerStats.playerId, memberIds));
+
+      const now = new Date();
+      const absent = stats
+        .filter((s) =>
+          s.locationId !== heist.locationId ||
+          (s.jailedUntil !== null && s.jailedUntil > now) ||
+          (s.hospitalUntil !== null && s.hospitalUntil > now))
+        .map((s) => s.username);
+      if (absent.length > 0) {
+        throw new PluginError("crew_not_assembled", 409, { absent });
+      }
+
+      await tx.db.update(ocHeists).set({ status: "executing" }).where(eq(ocHeists.id, heist.id));
+      await publishHeistUpdate(tx, player, heist.id, "executing", memberIds);
+    });
+
+    // Enqueue AFTER commit — a job that ran before commit would read status
+    // "open" and no-op, stranding the heist. On enqueue failure, compensate
+    // by reverting to open (the crimes cooldown-release shape); the re-fire
+    // rule above covers the crash-between-commit-and-enqueue window.
+    try {
+      const jobId = await ctx.jobs.enqueue("resolve", { heistId: params.heistId });
+      return { status: 202, body: { jobId } };
+    } catch (error) {
+      try {
+        await ctx.transaction(async (tx) => {
+          await tx.db.update(ocHeists).set({ status: "open" })
+            .where(and(eq(ocHeists.id, params.heistId), eq(ocHeists.status, "executing")));
+        });
+      } catch (revertError) {
+        ctx.log.error("failed to revert heist to open after enqueue failure",
+          { err: String(revertError), heistId: params.heistId });
+      }
+      throw error;
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Resolve job — seeded roll, shared fate for all crew
+// ---------------------------------------------------------------------------
+
+async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
+  const heistId = String(data["heistId"]);
+  const rng = ctx.job?.rng;
+  if (rng === undefined) throw new Error("resolve job ran without a seeded rng");
+
+  const successChance = readNumberSetting(ctx.settings, "success_chance", DEFAULT_SUCCESS_CHANCE);
+  const multiplier = readBigintSetting(ctx.settings, "payout_multiplier", DEFAULT_PAYOUT_MULTIPLIER);
+  const jailSeconds = Math.trunc(readNumberSetting(ctx.settings, "jail_seconds", DEFAULT_JAIL_SECONDS));
+  const cooldownSeconds = Math.trunc(readNumberSetting(ctx.settings, "cooldown_seconds", DEFAULT_COOLDOWN_SECONDS));
+
+  let cooldownIds: string[] = [];
+
+  // ONE ctx.transaction — a second self-collides on plugin_job_runs
+  // (the crimes-port finding).
+  await ctx.transaction(async (tx) => {
+    const heist = await lockHeist(tx, heistId);                     // heist FIRST
+    if (!heist || heist.status !== "executing") return;             // stale job: no-op
+
+    const members = await tx.db.select().from(ocMembers).where(and(
+      eq(ocMembers.heistId, heist.id), eq(ocMembers.state, "accepted"),
+    ));
+    if (members.length !== CREW_SIZE) return;                       // defensive; execute proved it
+
+    const memberIds = members.map((m) => m.playerId);
+    await tx.locks.player(memberIds);                               // players SECOND
+
+    const namedRows = await tx.db.select({ id: players.id, username: players.username })
+      .from(players).where(inArray(players.id, memberIds));
+    const nameById = new Map(namedRows.map((r) => [r.id, r.username]));
+    const leaderName = nameById.get(heist.leaderId) ?? "unknown";
+
+    // One shared roll (same scale as crimes': 0..10_000).
+    const roll = rng.int(0, 10_000);
+    const success = roll < Math.round(successChance * 10_000);
+
+    if (success) {
+      const pot = heist.buyIn * BigInt(CREW_SIZE);
+      const total = pot * multiplier;
+      const share = total / BigInt(CREW_SIZE);
+      // Remainder is provably 0 for integer multipliers (pot = buyIn*4 is
+      // always divisible by 4, and 4*k/4 = k). The line exists so a future
+      // fractional-multiplier setting cannot silently burn money — bigint
+      // division truncates.
+      const remainder = total - share * BigInt(CREW_SIZE);
+      for (const m of members) {
+        const amount = m.playerId === heist.leaderId ? share + remainder : share;
+        await tx.economy.applyBalanceChange({
+          playerId: m.playerId, amount, kind: "cash", reason: "oc.payout", refId: heist.id,
+        });
+      }
+    } else {
+      for (const m of members) {
+        await tx.jail.sendToJail(m.playerId, jailSeconds);
+      }
+    }
+
+    const status = success ? "done" : "failed";
+    await tx.db.update(ocHeists)
+      .set({ status, executedAt: new Date() })
+      .where(eq(ocHeists.id, heist.id));
+    await tx.db.update(ocMembers).set({ released: true }).where(eq(ocMembers.heistId, heist.id));
+
+    // Per-member resolved event
+    if (success) {
+      const pot = heist.buyIn * BigInt(CREW_SIZE);
+      const total = pot * multiplier;
+      const share = total / BigInt(CREW_SIZE);
+      for (const m of members) {
+        await tx.events.publishCore({
+          type: "oc.resolved",
+          actorId: heist.leaderId, actorName: leaderName,
+          audience: { kind: "player", playerId: m.playerId },
+          heistId: heist.id, success,
+          share: share.toString(),
+          jailSeconds: 0,
+        });
+      }
+    } else {
+      for (const m of members) {
+        await tx.events.publishCore({
+          type: "oc.resolved",
+          actorId: heist.leaderId, actorName: leaderName,
+          audience: { kind: "player", playerId: m.playerId },
+          heistId: heist.id, success,
+          share: "0",
+          jailSeconds,
+        });
+      }
+    }
+
+    cooldownIds = memberIds;
+  });
+
+  // Post-commit, best-effort: SET NX EX per member (rule 2 — atomic, no
+  // check-then-act). A crash here loses at most some cooldowns — a
+  // convenience guard, never money.
+  for (const id of cooldownIds) {
+    await ctx.cooldown.acquire("oc", id, cooldownSeconds);
+  }
+}
+
 export default definePlugin({
   id: "oc",
   version: "1.0.0",
   basePaths: ["/api/oc"],
-  routes: [createRoute, stateRoute, inviteRoute, declineRoute, acceptRoute, leaveRoute, cancelRoute],
+  routes: [createRoute, stateRoute, inviteRoute, declineRoute, acceptRoute, leaveRoute, cancelRoute, executeRoute],
+  jobs: { resolve: resolveJob },
   migrations: OC_MIGRATIONS,
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
