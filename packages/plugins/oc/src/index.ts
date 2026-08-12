@@ -320,11 +320,259 @@ const declineRoute = route({
   },
 });
 
+/**
+ * Publish one oc.updated per accepted member (audience player —
+ * AudienceSchema has no multi-player kind, the bounties-claim reasoning).
+ */
+async function publishHeistUpdate(
+  tx: PluginTx,
+  actor: { id: string; username: string },
+  heistId: string,
+  status: "open" | "executing" | "done" | "failed" | "cancelled",
+  memberIds: string[],
+): Promise<void> {
+  for (const playerId of memberIds) {
+    await tx.events.publishCore({
+      type: "oc.updated",
+      actorId: actor.id,
+      actorName: actor.username,
+      audience: { kind: "player", playerId },
+      heistId,
+      status,
+    });
+  }
+}
+
+const acceptRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/accept",
+  accessInJail: false,
+  accessInHospital: false,
+  params: HeistParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    // Cooldown gates JOINING the next heist (create and accept), set by the
+    // resolve job post-commit. peek is advisory-read-only by design.
+    const cd = await ctx.cooldown.peek("oc", player.id);
+    if (cd > 0) {
+      throw new PluginError(
+        "on_cooldown",
+        429,
+        { retryAfter: cd },
+        { "retry-after": String(Math.max(cd, 1)) },
+      );
+    }
+
+    try {
+      return await ctx.transaction(async (tx) => {
+        // Heist lock FIRST (spec §5): player locks come after, via
+        // applyBalanceChange internally. No explicit tx.locks.player here.
+        const heist = await lockHeist(tx, params.heistId);
+        if (!heist) throw new PluginError("heist_not_found", 404);
+        if (heist.status !== "open") throw new PluginError("heist_not_open", 409);
+
+        const [invite] = await tx.db
+          .select()
+          .from(ocMembers)
+          .where(
+            and(
+              eq(ocMembers.heistId, heist.id),
+              eq(ocMembers.playerId, player.id),
+              eq(ocMembers.state, "invited"),
+            ),
+          );
+        if (!invite) throw new PluginError("not_invited", 404);
+
+        // Under the heist lock: is the seat still free among ACCEPTED rows?
+        const taken = await tx.db
+          .select()
+          .from(ocMembers)
+          .where(
+            and(
+              eq(ocMembers.heistId, heist.id),
+              eq(ocMembers.role, invite.role),
+              eq(ocMembers.state, "accepted"),
+            ),
+          );
+        if (taken.length > 0) throw new PluginError("role_taken", 409);
+
+        let cash: bigint;
+        try {
+          cash = await tx.economy.applyBalanceChange({
+            playerId: player.id,
+            amount: -heist.buyIn,
+            kind: "cash",
+            reason: "oc.buyin",
+          });
+        } catch (err) {
+          if (err instanceof InsufficientFundsError) throw new PluginError("insufficient_funds", 409);
+          throw err;
+        }
+
+        // Flipping to accepted arms the partial unique index.
+        await tx.db
+          .update(ocMembers)
+          .set({ state: "accepted" })
+          .where(
+            and(
+              eq(ocMembers.heistId, heist.id),
+              eq(ocMembers.playerId, player.id),
+            ),
+          );
+
+        // Accepting clears the player's other pending invites (gang precedent).
+        await tx.db
+          .delete(ocMembers)
+          .where(
+            and(
+              eq(ocMembers.playerId, player.id),
+              eq(ocMembers.state, "invited"),
+            ),
+          );
+
+        const memberIds = (
+          await tx.db
+            .select({ playerId: ocMembers.playerId })
+            .from(ocMembers)
+            .where(
+              and(eq(ocMembers.heistId, heist.id), eq(ocMembers.state, "accepted")),
+            )
+        ).map((r) => r.playerId);
+        await publishHeistUpdate(tx, player, heist.id, "open", memberIds);
+
+        return { status: 200, body: { cash: cash.toString() } };
+      });
+    } catch (err) {
+      if (isActiveHeistConflict(err)) throw new PluginError("already_in_heist", 409);
+      throw err;
+    }
+  },
+});
+
+const leaveRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/leave",
+  params: HeistParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      // Heist lock FIRST (spec §5): applyBalanceChange locks player stats
+      // row internally after.
+      const heist = await lockHeist(tx, params.heistId);
+      if (!heist) throw new PluginError("heist_not_found", 404);
+      if (heist.status !== "open") throw new PluginError("heist_not_open", 409);
+
+      const [member] = await tx.db
+        .select()
+        .from(ocMembers)
+        .where(
+          and(
+            eq(ocMembers.heistId, heist.id),
+            eq(ocMembers.playerId, player.id),
+            eq(ocMembers.state, "accepted"),
+          ),
+        );
+      if (!member) throw new PluginError("not_member", 404);
+      if (heist.leaderId === player.id) throw new PluginError("leader_cannot_leave", 403);
+
+      const cash = await tx.economy.applyBalanceChange({
+        playerId: player.id,
+        amount: heist.buyIn,
+        kind: "cash",
+        reason: "oc.refund",
+      });
+
+      await tx.db
+        .delete(ocMembers)
+        .where(
+          and(
+            eq(ocMembers.heistId, heist.id),
+            eq(ocMembers.playerId, player.id),
+          ),
+        );
+
+      const remaining = (
+        await tx.db
+          .select({ playerId: ocMembers.playerId })
+          .from(ocMembers)
+          .where(
+            and(eq(ocMembers.heistId, heist.id), eq(ocMembers.state, "accepted")),
+          )
+      ).map((r) => r.playerId);
+      await publishHeistUpdate(tx, player, heist.id, "open", remaining);
+
+      return { status: 200, body: { cash: cash.toString() } };
+    });
+  },
+});
+
+const cancelRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/cancel",
+  params: HeistParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      // Heist lock FIRST (spec §5): applyBalanceChange locks each player's
+      // stats row internally after.
+      const heist = await lockHeist(tx, params.heistId);
+      if (!heist) throw new PluginError("heist_not_found", 404);
+      if (heist.leaderId !== player.id) throw new PluginError("not_leader", 403);
+      if (heist.status !== "open") throw new PluginError("heist_not_open", 409);
+
+      const accepted = await tx.db
+        .select()
+        .from(ocMembers)
+        .where(
+          and(eq(ocMembers.heistId, heist.id), eq(ocMembers.state, "accepted")),
+        );
+
+      // Refund every accepted member including the leader.
+      for (const m of accepted) {
+        await tx.economy.applyBalanceChange({
+          playerId: m.playerId,
+          amount: heist.buyIn,
+          kind: "cash",
+          reason: "oc.refund",
+        });
+      }
+
+      // Release all member rows.
+      await tx.db
+        .update(ocMembers)
+        .set({ released: true })
+        .where(eq(ocMembers.heistId, heist.id));
+
+      // Mark heist cancelled.
+      await tx.db
+        .update(ocHeists)
+        .set({ status: "cancelled" })
+        .where(eq(ocHeists.id, heist.id));
+
+      await publishHeistUpdate(
+        tx,
+        player,
+        heist.id,
+        "cancelled",
+        accepted.map((m) => m.playerId),
+      );
+
+      return { status: 200, body: { cancelled: true } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "oc",
   version: "1.0.0",
   basePaths: ["/api/oc"],
-  routes: [createRoute, stateRoute, inviteRoute, declineRoute],
+  routes: [createRoute, stateRoute, inviteRoute, declineRoute, acceptRoute, leaveRoute, cancelRoute],
   migrations: OC_MIGRATIONS,
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
