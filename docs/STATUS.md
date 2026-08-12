@@ -17,10 +17,11 @@ Branch: `feat/item-economy`.
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital) and **item economy** (location shop, combat targets, four web pages) have since shipped |
 
 **Suite: 87 files / 745 tests**, green across repeated back-to-back runs.
-(The pre-`feat/item-economy` baseline was 84 files / 707 tests; the item-economy
-work added `shop.test.ts`, `shop-concurrency.test.ts`, and `effects.test.ts` —
-four tests total across the three new files — plus `plugin-migrate.test.ts`
-gained an "inventory shop stock migrations" describe block with two tests.)
+(The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
+line carried through `feat/pvp-combat` was already stale when it was written.
+The item-economy work added three new test files (19 tests) and expanded
+`economy-invariant.test.ts`, `plugin-migrate.test.ts` (+2),
+`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`.
 
 ---
 
@@ -721,15 +722,16 @@ give every combat-related surface a browser UI.
   `/inventory` (equipped items, inventory list, equip/use actions),
   `/shop` (location stock with buy actions),
   `/combat` (target list from `GET /api/combat/targets`, attack form),
-  `/hospital` (sentence timer, heal/discharge actions). All four render
-  through the plugin web renderer's `PageRenderer`.
+  `/hospital` (sentence timer, heal/discharge actions). Ordinary first-party
+  React components in `apps/web/src/pages/`, routed in `App.tsx`, linked from
+  the Shell nav.
 - **`p_inventory_shop_stock`** table with migrations (`inventory:0001_shop_stock`,
   `inventory:0002_shop_stock_seed`). `inventory` is the first ported/gameplay
   plugin to own a table and migrations. The seed migration populates one row
   per (location, seeded item).
-- **Three new test files:** `packages/plugins/inventory/test/shop.test.ts`,
-  `packages/plugins/inventory/test/shop-concurrency.test.ts`,
-  `packages/plugins/inventory/test/effects.test.ts`. The concurrency test
+- **Three new test files:** `apps/server/test/shop.test.ts` (13 tests),
+  `apps/server/test/shop-concurrency.test.ts` (1 test),
+  `apps/web/test/effects.test.ts` (5 tests). The concurrency test
   was demonstrated red (stock going negative with the `stock >= quantity`
   predicate removed). `economy-invariant.test.ts` gained `shopBuy` coverage,
   demonstrated red when the buy handler bypassed `applyBalanceChange`.
@@ -955,8 +957,8 @@ web image serves only the SPA's own assets.
   that populates one row per (location, seeded item). The table has no
   foreign keys by design; see above.
 - **`inventory` and `combat` now have web pages** (`/inventory`, `/shop`,
-  `/combat`), and core hospital has one too (`/hospital`). All four render
-  through the plugin web renderer's `PageRenderer`.
+  `/combat`), and core hospital has one too (`/hospital`). Ordinary
+  first-party React pages in `apps/web/src/pages/`, routed in `App.tsx`.
 - **`GET /api/combat/targets`** exists, bounded at 50, unpaginated, and
   advisory — every target-legality rule is re-checked under the lock by
   `POST /api/combat/attack/:targetId`.
