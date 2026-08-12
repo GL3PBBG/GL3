@@ -1,5 +1,5 @@
 import type { AttackResponse, TargetReason } from "@gl3/shared";
-import { useAttack, useCombatLog, useCombatTargets, useMe } from "../api/queries.js";
+import { useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -37,6 +37,8 @@ export function Combat(): JSX.Element {
   const targets = useCombatTargets();
   const log = useCombatLog();
   const me = useMe();
+  const jail = useJail();
+  const hospital = useHospital();
   const attack = useAttack();
 
   if (targets.isLoading) return <Loading what="targets" />;
@@ -45,10 +47,18 @@ export function Combat(): JSX.Element {
   const rows = targets.data?.targets ?? [];
   const entries = log.data?.entries ?? [];
   const myId = me.data?.playerId;
+  // The server rejects these anyway, but the cooldown is claimed before the
+  // check — so an enabled button here would cost the player a wasted shot.
+  const jailed = jail.data?.jailed === true;
+  const hospitalised = hospital.data?.hospitalised === true;
+  const blocked = jailed || hospitalised;
 
   return (
     <Panel title="Combat">
       <ErrorText error={attack.error} />
+
+      {jailed ? <p className={styles.bad}>You can't shoot anyone from jail.</p> : null}
+      {!jailed && hospitalised ? <p className={styles.bad}>You can't shoot anyone from a hospital bed.</p> : null}
 
       {attack.data ? (
         <p className={styles.meta}><AttackResult data={attack.data} /></p>
@@ -74,7 +84,7 @@ export function Combat(): JSX.Element {
                   {target.attackable ? (
                     <button
                       type="button"
-                      disabled={attack.isPending}
+                      disabled={blocked || attack.isPending}
                       onClick={() => attack.mutate(target.playerId)}
                     >
                       Shoot
