@@ -144,6 +144,8 @@ describe("POST /api/detectives — hire", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("insufficient_funds");
     expect(await db.select().from(detectiveSearches)).toHaveLength(0);
+    expect(await db.select().from(transactions)
+      .where(eq(transactions.reason, "detectives.hire"))).toHaveLength(0);
   });
 
   it("is allowed from jail (V2 gated only on login)", async () => {
