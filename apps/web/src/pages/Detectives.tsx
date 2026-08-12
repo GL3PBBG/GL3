@@ -11,7 +11,10 @@ const UNITS = [1, 2, 3, 4, 5] as const;
 function rowState(row: DetectiveSearchRow, nowMs: number): "pending" | "failed" | "expired" | "active" {
   if (row.succeeded === null) return "pending";
   if (row.succeeded === false) return "failed";
-  return nowMs < Date.parse(row.expiresAt) ? "active" : "expired";
+  // Guard on targetLocationName so client-clock skew (client ahead of
+  // server) degrades to expired rendering instead of "spotted in ".
+  return nowMs < Date.parse(row.expiresAt) && row.targetLocationName !== null
+    ? "active" : "expired";
 }
 
 function SearchRow({ row }: { row: DetectiveSearchRow }): JSX.Element {
