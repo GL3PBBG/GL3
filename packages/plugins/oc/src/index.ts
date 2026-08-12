@@ -1,4 +1,4 @@
-import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
+import { definePlugin, InsufficientFundsError, type PluginTx, PluginError, route } from "@gl3/plugin-sdk";
 import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -206,11 +206,125 @@ const stateRoute = route({
   },
 });
 
+/**
+ * The plugin's lock-order root (spec §5): the heist row FOR UPDATE, taken
+ * FIRST by every transaction that reads slot state to decide. Player locks
+ * (tx.locks.player) come after, never before.
+ */
+async function lockHeist(tx: PluginTx, heistId: string) {
+  const [heist] = await tx.db
+    .select()
+    .from(ocHeists)
+    .where(eq(ocHeists.id, heistId))
+    .for("update");
+  return heist ?? null;
+}
+
+const IdSchema = z.string().uuid();
+const HeistParamsSchema = z.object({ heistId: IdSchema });
+const InviteBodySchema = z.object({
+  targetUsername: z.string().min(1).max(30),
+  role: z.string().min(1).max(20),
+});
+
+const inviteRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/invite",
+  accessInJail: false,
+  accessInHospital: false,
+  params: HeistParamsSchema,
+  body: InviteBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    if (body.role === LEADER_ROLE || !ROLES.includes(body.role as (typeof ROLES)[number])) {
+      throw new PluginError("invalid_role", 409);
+    }
+
+    return ctx.transaction(async (tx) => {
+      const heist = await lockHeist(tx, params.heistId);
+      if (!heist) throw new PluginError("heist_not_found", 404);
+      if (heist.leaderId !== player.id) throw new PluginError("not_leader", 403);
+      if (heist.status !== "open") throw new PluginError("heist_not_open", 409);
+
+      const [target] = await tx.db
+        .select({ id: players.id })
+        .from(players)
+        .where(eq(players.username, body.targetUsername));
+      if (!target) throw new PluginError("target_not_found", 404);
+      if (target.id === player.id) throw new PluginError("self_invite", 409);
+
+      const existing = await tx.db
+        .select()
+        .from(ocMembers)
+        .where(
+          and(eq(ocMembers.heistId, heist.id), eq(ocMembers.playerId, target.id)),
+        );
+      if (existing.length > 0) throw new PluginError("already_invited", 409);
+
+      // Role check against ACCEPTED rows only — overlapping invites for one
+      // seat are deliberate (first to accept wins; see Task 7).
+      const taken = await tx.db
+        .select()
+        .from(ocMembers)
+        .where(
+          and(
+            eq(ocMembers.heistId, heist.id),
+            eq(ocMembers.role, body.role),
+            eq(ocMembers.state, "accepted"),
+          ),
+        );
+      if (taken.length > 0) throw new PluginError("role_taken", 409);
+
+      await tx.db.insert(ocMembers).values({
+        heistId: heist.id,
+        playerId: target.id,
+        role: body.role,
+        state: "invited",
+      });
+
+      await tx.notify(
+        target.id,
+        `${player.username} invited you to a heist as ${body.role} (buy-in $${heist.buyIn.toString()}).`,
+      );
+
+      return { status: 201, body: { invited: true } };
+    });
+  },
+});
+
+const declineRoute = route({
+  method: "POST",
+  path: "/api/oc/:heistId/decline",
+  params: HeistParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      // No heist lock: decline reads no slot state to decide — it deletes
+      // the caller's own invited row unconditionally (spec §5).
+      const deleted = await tx.db
+        .delete(ocMembers)
+        .where(
+          and(
+            eq(ocMembers.heistId, params.heistId),
+            eq(ocMembers.playerId, player.id),
+            eq(ocMembers.state, "invited"),
+          ),
+        )
+        .returning({ playerId: ocMembers.playerId });
+      if (deleted.length === 0) throw new PluginError("not_invited", 404);
+      return { status: 200, body: { declined: true } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "oc",
   version: "1.0.0",
   basePaths: ["/api/oc"],
-  routes: [createRoute, stateRoute],
+  routes: [createRoute, stateRoute, inviteRoute, declineRoute],
   migrations: OC_MIGRATIONS,
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
