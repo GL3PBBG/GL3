@@ -798,35 +798,41 @@ Design: `docs/superpowers/specs/2026-08-12-detectives-design.md`. Plan:
 `feat/detectives`.
 
 The second real user of the plugin job system (after `crimes`). A player
-hires a detective to locate a target who may be in a different city. The
-search uses a seeded PRNG (deterministic and reproducible), with a
-configurable duration controlling how long until the result is revealed — a
-time-gated design in place of delayed jobs, so the result is computed at
-hire time and stored, and the reveal is a read gated by the configured
-elapsed time. The detective also tracks the target's live location at
-query time via a JOIN on `player_stats.location_id`, so a player who has
-moved since the search was seeded shows their current position once the
-gate opens.
+hires detectives to locate a target who may be in a different city. The
+search uses a seeded PRNG (deterministic and reproducible) in the
+`resolve` worker — a deliberate deviation from V2's hire-time roll (spec
+§0), identical in player experience because the outcome is hidden behind
+a time-gated reveal until `ends_at`. No location is ever stored; a
+successful report shows the target's **current** location via an un-cached
+live JOIN on `player_stats.location_id`, only while the report is active
+(`now < ends_at + expire`).
 
 **What shipped:**
 
-- **`packages/plugins/detectives`** — `POST /api/detectives/hire` (debit
-  via `applyBalanceChange`, insert detective row with seeded result,
-  enqueue-after-commit `resolve` job), `GET /api/detectives` (list the
-  hiring player's detectives with time-gated reveal and live-location
-  tracking), `DELETE /api/detectives/:detectiveId` (remove, with existence
-  check that leaks no information about the target). Uses a plugin-owned
-  table (`p_detectives`) with plugin migrations (`detectives:0001_create`).
-- **`resolve` job** — seeded RNG determines the target's location at hire
-  time, stored in the `found_location_id` column. Idempotent via
+- **`packages/plugins/detectives`** — `POST /api/detectives` (debit via
+  `applyBalanceChange`, insert search row with `succeeded = NULL` and
+  `ends_at = now + duration × hours`, enqueue-after-commit `resolve`
+  job), `GET /api/detectives` (list the hiring player's searches with
+  time-gated reveal and live-location tracking), `DELETE
+  /api/detectives/:searchId` (remove; ownership predicate inside the
+  DELETE itself, so foreign and nonexistent rows answer identically — no
+  existence leak). Uses core's existing `detective_searches` table
+  (core migration 0000: `id, player_id, target_player_id, detectives,
+  started_at, ends_at, succeeded bool nullable`). No plugin-owned table,
+  no plugin migrations.
+- **`resolve` job** — seeded `ctx.job.rng`, success iff `rng.int(0,100)
+  < detectives × 4 × hours` (0..99 draw, so 5×4×5 = 100% always
+  succeeds). The worker UPDATEs `succeeded`; a lost resolve (enqueue
+  failure) leaves `succeeded = NULL`, which the list route reads as
+  failed past `ends_at` — no row can hang pending forever. Idempotent via
   `plugin_job_runs (plugin_id, job_id)`. This is the second single-job
-  plugin after `crimes`, so the `plugin_job_runs` PK gap (missing `job_name`)
-  remains a watch item — see below.
-- **Time-gated reveal** — the list route returns `found_location_id` only
-  when `now >= created_at + duration`. Before the gate opens, the response
-  omits the location. After it opens, a JOIN on `player_stats.location_id`
-  provides the target's **current** location (live tracking), which may
-  differ from the seeded result — that is by design.
+  plugin after `crimes`, so the `plugin_job_runs` PK gap (missing
+  `job_name`) remains a watch item — see below.
+- **Time-gated reveal** — the list route hides `succeeded` until `now ≥
+  ends_at`; a NULL `succeeded` past `ends_at` reads as failed. A successful
+  report shows the target's current location via an un-cached LEFT JOIN on
+  `player_stats.location_id` → `locations`, gated on `now < ends_at +
+  expire`. No location column exists — live tracking is just the join.
 - **Settings:** `detectives.cost` (price per detective per hour-unit;
   total = cost x detectives x hours, default 125000),
   `detectives.duration` (seconds per hour-unit; ends_at = now + duration x
@@ -1038,6 +1044,10 @@ web image serves only the SPA's own assets.
   `crimes` (one job); neither `mail` nor `gangs` declares any job, so nine of
   nine module ports have now shipped without triggering it — still open for
   the first plugin that declares two.
+- **`detective_searches.player_id` has no index** for the list route's
+  `WHERE player_id = ?` (bounties got `bounties_target_idx` for its
+  equivalent). Table is core-owned (migration 0000), so the fix is a core
+  migration — out of scope for this plugin branch.
 - **`GET /api/combat/log` is bounded at 50 but not paginated.** Bounded from
   the first commit, deliberately — unlike mail and notifications above — but
   there is no way to page further back, so a player's older fights are simply
