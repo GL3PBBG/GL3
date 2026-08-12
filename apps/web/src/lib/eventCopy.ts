@@ -63,7 +63,9 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
     case "bullets.purchased":
       return `Bought ${event.quantity} bullets for ${formatMoney(event.cost)}`;
     case "oc.updated":
-      return "Heist update.";
+      // State-refresh signal (slot filled, status flip) — the page re-renders
+      // via invalidation, no toast needed.
+      return "";
     case "oc.resolved":
       return event.success
         ? `Heist succeeded — your share: ${formatMoney(event.share)}.`

@@ -81,9 +81,9 @@ export function invalidationKeys(
       return [keys.bounties(), keys.me()];
     case "oc.updated":
     case "oc.resolved":
-      // OC state is gang-scoped; the /oc page and gang roster are stale.
-      // Task 9 will add keys.oc() and refine these.
-      return [keys.profile(viewerId)];
+      // A heist crew is individual players, not a gang — refresh the /oc
+      // page (slot grid / invites) and the wallet (payout / refund moves cash).
+      return [keys.oc(), keys.me()];
     case "chat.message":
     case "player.joined":
       return [];
