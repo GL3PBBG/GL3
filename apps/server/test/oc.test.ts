@@ -367,20 +367,10 @@ describe("POST /api/oc/:heistId/invite", () => {
     expect(res2.json().error).toBe("already_invited");
   });
 
-  it("accepted role is taken: 409 role_taken", async () => {
-    const heistId = await createHeist();
-    // Leader is already accepted as mastermind — try inviting someone as mastermind
-    // (invalid_role catches that). Instead, test a crew role that's already accepted.
-    // We need to get someone accepted into the driver seat first.
-    // For now: invite as driver, then invite another as driver — second should be 409
-    // if the first was accepted. But invites are "invited" state not "accepted".
-    // So we test: the leader's mastermind seat shows as taken for the mastermind role,
-    // but that's caught by invalid_role. Let's test after accept (Task 5) — skip for now.
-    // Actually: leader IS accepted as mastermind. An invite for mastermind hits invalid_role.
-    // role_taken only fires when an accepted row exists for that role.
-    // We can't get an accepted non-leader row without the accept route (Task 5).
-    // Marking this as a deferred test — verified in Task 5 integration.
-  });
+  // role_taken needs an accepted non-leader row, which needs the accept route.
+  // The leader's own accepted mastermind row can't stand in: inviting for
+  // mastermind hits invalid_role before the role_taken check.
+  it.todo("accepted role is taken: 409 role_taken — needs accept route, Task 5");
 });
 
 describe("POST /api/oc/:heistId/decline", () => {
