@@ -1,7 +1,8 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
-import { ErrorText, Money, Panel } from "../components/ui.js";
+import { TableRowsResponseSchema } from "@gl3/shared";
+import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { togglePending } from "./pending.js";
 import type { RenderInstruction } from "./render.js";
 import styles from "../pages/pages.module.css";
@@ -54,6 +55,68 @@ function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup
 }
 
 /**
+ * Fetches rows for a `table` instruction. Re-fetches whenever `refetchSignal`
+ * increments (i.e. after any successful `runAction` on the same page), so
+ * mutation-then-view stays consistent without a full page reload.
+ *
+ * Uses plain `useState` + `useEffect` + `api()` — same pattern as the rest of
+ * `PageRenderer` — instead of react-query, which is not wired into plugin pages.
+ */
+function TableBlock({ source, columns, refetchSignal }: {
+  source: string;
+  columns: readonly { readonly key: string; readonly label: string }[];
+  refetchSignal: number;
+}): JSX.Element {
+  const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  // `source` is `"GET /api/..."` — strip the method prefix for `api()`.
+  const path = source.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api<unknown>(path)
+      .then((body) => {
+        if (cancelled) return;
+        const parsed = TableRowsResponseSchema.parse(body);
+        setRows(parsed.rows);
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(caught);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [path, refetchSignal]);
+
+  if (loading) return <Loading what="table" />;
+  if (error !== null) return <ErrorText error={error} />;
+  if (rows.length === 0) return <p className={styles.muted}>No data.</p>;
+
+  return (
+    <table className={styles.table}>
+      <thead>
+        <tr>
+          {columns.map((col) => <th key={col.key}>{col.label}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, rowIndex) => (
+          <tr key={rowIndex}>
+            {columns.map((col) => <td key={col.key}>{row[col.key] ?? ""}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
  * Renders a flat list of RenderInstructions. Button/form actions are sent via
  * `api()` (the actions are `"METHOD /path"` strings declared in the schema).
  */
@@ -68,6 +131,8 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
   // stable and unique across the whole page. One button in flight does not
   // disable the others (see `togglePending`) — only the control that fired.
   const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
+  // Incremented after every successful `runAction` so TableBlock re-fetches.
+  const [refetchSignal, setRefetchSignal] = useState(0);
 
   async function runAction(index: number, action: string, body?: Record<string, string>): Promise<void> {
     setError(null);
@@ -93,6 +158,9 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         method,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      // Any successful action may have mutated table-backed data — bump
+      // the signal so every TableBlock on this page re-fetches.
+      setRefetchSignal((n) => n + 1);
     } catch (caught) {
       // Kept as the thrown value, not flattened to `.message`: describeError
       // turns an ApiError into player copy ("Not ready yet — 30s to go.")
@@ -193,6 +261,15 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             })}
             <button type="submit" disabled={pending.has(index)}>{inst.submitLabel}</button>
           </form>
+        );
+      case "table":
+        return (
+          <TableBlock
+            key={index}
+            source={inst.source}
+            columns={inst.columns}
+            refetchSignal={refetchSignal}
+          />
         );
     }
   }

@@ -59,6 +59,17 @@ describe("renderNode", () => {
     }]);
   });
 
+  it("maps a table node to a table instruction", () => {
+    const out = renderNode({
+      kind: "table", source: "GET /api/admin/travel/locations",
+      columns: [{ key: "id", label: "Id" }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "table", source: "GET /api/admin/travel/locations",
+      columns: [{ key: "id", label: "Id" }],
+    }]);
+  });
+
   it("nests arbitrarily deep panels", () => {
     const node = {
       kind: "panel" as const, title: "outer",
