@@ -19,6 +19,7 @@
     { "path": "./packages/plugins/detectives" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
+    { "path": "./apps/migrate" },
     { "path": "./examples/hello-plugin" }
   ]
 }
