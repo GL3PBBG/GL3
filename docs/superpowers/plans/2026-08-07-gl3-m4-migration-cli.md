@@ -5159,8 +5159,13 @@ module tables, not migrated." Nothing here is fatal; check the report afterward.
   \`player_crime_skill\` rows.
 - Item EAV tables (\`itemEffects\`, \`itemMeta\`) merge into \`items.effects\` /
   \`items.meta\` JSONB columns.
-- \`transactions\` (the ledger) and \`crime_log\` are **not** backfilled — V2 keeps only
-  current balances, no per-transaction history. The ledger starts empty at cutover.
+- \`transactions\` (the ledger) has no per-transaction *history* to backfill — V2 keeps
+  only current balances. But the ledger cannot start empty: SPEC §2.3 requires every
+  balance to be explained by an append-only ledger insert (\`sum(ledger) == balance\`).
+  So the players migrator seeds one \`reason = "migration.opening_balance"\` row per
+  migrated player, per non-zero balance kind (cash/bank/points); zero balances get no
+  row (\`sum(∅) = 0\` already satisfies the invariant). \`crime_log\` is not migrated —
+  V2 keeps no history.
 - Forum tables, \`premiumMembership\`, and casino/blackmarket-style custom module
   tables have no GL3 schema in v1 (SPEC §5) and are reported, not migrated.
 \`\`\`
