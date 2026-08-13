@@ -260,6 +260,7 @@ export default defineWorkspace([
         "test/plugin-ctx-transaction.test.ts",
         "test/plugin-jobs.test.ts",
         "test/plugin-hospital-gate.test.ts",
+        "test/admin-validate.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",
