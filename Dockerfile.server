@@ -66,6 +66,11 @@ COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
+# Scoped registry for marketplace plugins. Inert until a `@gl3-plugins/*`
+# package is actually depended on, but the Dockerfile only copies what it
+# names, so an install added later would silently fall back to npmjs without
+# this line.
+COPY .npmrc ./
 
 RUN npm ci
 
@@ -155,6 +160,7 @@ COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
+COPY .npmrc ./
 
 RUN npm ci --omit=dev
 
