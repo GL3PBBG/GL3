@@ -380,3 +380,27 @@ describe("page path constraints", () => {
     );
   });
 });
+
+describe("table node", () => {
+  const page = (view: unknown) => ({ id: "p", path: "/admin/p", view });
+
+  it("accepts a table with a GET source and columns", () => {
+    expect(PageSchemaSchema.safeParse(page({
+      kind: "table",
+      source: "GET /api/admin/hello/things",
+      columns: [{ key: "id", label: "Id" }, { key: "name", label: "Name" }],
+    })).success).toBe(true);
+  });
+
+  it("rejects a non-GET source", () => {
+    expect(PageSchemaSchema.safeParse(page({
+      kind: "table", source: "POST /api/admin/hello/things", columns: [{ key: "id", label: "Id" }],
+    })).success).toBe(false);
+  });
+
+  it("rejects a table with unknown props", () => {
+    expect(PageSchemaSchema.safeParse(page({
+      kind: "table", source: "GET /api/x", columns: [], rows: [] ,
+    })).success).toBe(false);
+  });
+});

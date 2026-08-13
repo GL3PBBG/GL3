@@ -8,10 +8,11 @@ import {
 import { z } from "zod";
 
 /**
- * The v1 view vocabulary is exactly ten node kinds and does not grow: a core
- * page that needs more than this gets a bespoke React override rather than a
- * bigger schema. Eight of the ten are leaves; `panel` and `list` nest and so
- * live on `ViewNodeSchema` below.
+ * The view vocabulary is eleven node kinds and grows only when a plugin-contributed
+ * page needs data the static vocabulary cannot carry, as `table` did for admin
+ * lists. A core page that needs more than this gets a bespoke React override.
+ * Nine of the eleven are leaves; `panel` and `list` nest and so live on
+ * `ViewNodeSchema` below.
  *
  * Every node is `.strict()`. A typo'd prop on a node would otherwise be
  * silently dropped by the renderer, which is the failure mode hardest to spot
@@ -74,9 +75,21 @@ const leafOptions = [
       ),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("table"),
+      /**
+       * GET-only: a table renders data, it must never mutate on mount. The
+       * loader's containment pass treats this as a view action, so it must
+       * live under the plugin's basePaths like any button/form action.
+       */
+      source: z.string().regex(/^GET \/(?![/\\])[^\s\\]*$/, "table source must be `GET /absolute/path`"),
+      columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
+    })
+    .strict(),
 ] as const;
 
-/** Type-level only: `ViewNode` infers its eight non-nesting members from here. */
+/** Type-level only: `ViewNode` infers its nine non-nesting members from here. */
 const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
@@ -89,7 +102,7 @@ export type ViewNode =
  * type annotation zod requires for `z.lazy` — inference cannot close the loop
  * on its own.
  *
- * One flat `discriminatedUnion` over all ten kinds, rather than
+ * One flat `discriminatedUnion` over all eleven kinds, rather than
  * `union([Leaf, panel, list])`. The two are equivalent in what they accept and
  * reject; they are not equivalent in what they report. `ZodUnion` aborts on
  * failure and emits a single `invalid_union` issue at the path of the

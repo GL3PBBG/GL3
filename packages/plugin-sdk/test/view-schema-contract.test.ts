@@ -39,7 +39,7 @@ function dtoVerdict(node: unknown): string {
   return describeVerdict("DTO", result.success, result.success ? [] : result.error.issues);
 }
 
-/** Every one of the ten kinds, in the order the vocabulary declares them. */
+/** Every one of the eleven kinds, in the order the vocabulary declares them. */
 const ACCEPTED: readonly (readonly [string, unknown])[] = [
   ["text", { kind: "text", value: "A text leaf." }],
   ["money", { kind: "money", value: "1234567" }],
@@ -83,6 +83,7 @@ const ACCEPTED: readonly (readonly [string, unknown])[] = [
   ["panel", { kind: "panel", title: "Leaves", children: [{ kind: "text", value: "A leaf." }] }],
   ["panel with an empty body", { kind: "panel", title: "Empty", children: [] }],
   ["list", { kind: "list", items: [{ kind: "text", value: "An item." }] }],
+  ["table", { kind: "table", source: "GET /api/admin/things", columns: [{ key: "id", label: "Id" }] }],
 ];
 
 /**
@@ -143,7 +144,7 @@ const REJECTED: readonly (readonly [string, unknown])[] = [
 ];
 
 describe("view vocabulary contract between the SDK and the DTO", () => {
-  it("covers all ten kinds in the accept corpus", () => {
+  it("covers all eleven kinds in the accept corpus", () => {
     const kinds = new Set(
       ACCEPTED.map(([, node]) =>
         typeof node === "object" && node !== null && "kind" in node ? node.kind : undefined,
@@ -161,6 +162,7 @@ describe("view vocabulary contract between the SDK and the DTO", () => {
         "form",
         "panel",
         "list",
+        "table",
       ]),
     );
   });
