@@ -1,6 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import mysql from "mysql2/promise";
+import postgres from "postgres";
+import bountiesPlugin from "@gl3/plugin-bounties";
+import detectivesPlugin from "@gl3/plugin-detectives";
+import { createDb } from "../../../server/src/db/client.js";
+import { runPluginMigrations } from "../../../server/src/plugins/migrate.js";
 
 const SCHEMA_SQL = new URL("../fixtures/v2-schema.sql", import.meta.url);
 const SEED_SQL = new URL("../fixtures/v2-seed.sql", import.meta.url);
@@ -77,6 +84,60 @@ export async function createIsolatedMysqlFixture(): Promise<{ url: string; teard
           }
         }
         await dropAdmin.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
+      } finally {
+        await dropAdmin.end();
+      }
+    },
+  };
+}
+
+const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url).pathname;
+
+/**
+ * Creates a uniquely-named Postgres database, runs every core migration from
+ * apps/server/drizzle, then runs the bounties + detectives plugin migrations
+ * (the two plugin-owned target tables — "Known unknowns" item 8). Returns a
+ * connection URL plus a teardown function.
+ */
+export async function createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }> {
+  const adminUrl = requireEnv("DATABASE_URL");
+  const dbName = `gl3_test_migrate_pg_${randomBytes(8).toString("hex")}`;
+
+  const admin = postgres(adminUrl, { max: 1 });
+  try {
+    await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+  } finally {
+    await admin.end();
+  }
+
+  const target = new URL(adminUrl);
+  target.pathname = `/${dbName}`;
+
+  const migrator = postgres(target.toString(), { max: 1 });
+  try {
+    await migrate(drizzle(migrator), { migrationsFolder: PG_MIGRATIONS_FOLDER });
+  } finally {
+    await migrator.end();
+  }
+
+  // The two plugin-owned target tables ("Known unknowns" item 8), created the
+  // same way apps/server's loader creates them at boot.
+  const pluginDb = createDb(target.toString());
+  try {
+    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin]);
+  } finally {
+    await pluginDb.sql.end();
+  }
+
+  return {
+    url: target.toString(),
+    teardown: async () => {
+      const dropAdmin = postgres(adminUrl, { max: 1 });
+      try {
+        await dropAdmin.unsafe(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid()`,
+        );
+        await dropAdmin.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
       } finally {
         await dropAdmin.end();
       }
