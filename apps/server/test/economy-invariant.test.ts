@@ -54,11 +54,15 @@ beforeAll(async () => {
   await seedCrimes(db);
   await seedRanks(db);
   await seedLocations(db);
-  // p_inventory_shop_stock is a plugin-owned table (packages/plugins/inventory,
-  // via runPluginMigrations), not a core migration — this file drives plugin
-  // routes directly with callPluginRoute rather than bootTestServer, so
-  // nothing else here would apply the inventory plugin's migrations first.
-  await runPluginMigrations(db, [inventoryPlugin]);
+  // p_inventory_shop_stock and p_combat_log are plugin-owned tables (via
+  // runPluginMigrations), not core migrations — this file drives plugin routes
+  // directly with callPluginRoute rather than bootTestServer, so nothing else
+  // here would apply those plugins' migrations first. combat and detectives
+  // joined the list when core relinquished `combat_log` and
+  // `detective_searches` in 0007_relinquish_plugin_tables: the sweep's `kill`
+  // op writes a p_combat_log row on every fatal shot, and its `hire` op writes
+  // a p_detectives_searches row.
+  await runPluginMigrations(db, [inventoryPlugin, combatPlugin, detectivesPlugin]);
 
   // One item, stocked in every location, cheap and effectively unlimited so
   // the sweep's shopBuy op mostly succeeds rather than mostly 409ing.

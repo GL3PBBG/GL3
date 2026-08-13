@@ -3,8 +3,11 @@ import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg
 /**
  * Read/write mirrors of core-owned tables — the pattern
  * `packages/plugins/bounties/src/schema.ts` documents. Core owns and migrates
- * all four; `detective_searches` ships in core migration `0000`
- * (`apps/server/src/db/schema/social.ts:63`). Only touched columns listed.
+ * `players`, `player_stats` and `locations`; only touched columns are listed.
+ *
+ * `p_detectives_searches` is the exception and is NOT a mirror: this plugin
+ * owns and migrates it (`migrations.ts`). It was core-owned until core
+ * relinquished it in `0007_relinquish_plugin_tables`.
  */
 export const players = pgTable("players", {
   id: uuid("id").primaryKey(),
@@ -21,7 +24,7 @@ export const locations = pgTable("locations", {
   name: text("name").notNull(),
 });
 
-export const detectiveSearches = pgTable("detective_searches", {
+export const detectiveSearches = pgTable("p_detectives_searches", {
   id: uuid("id").primaryKey(),
   playerId: uuid("player_id").notNull(),
   targetPlayerId: uuid("target_player_id").notNull(),

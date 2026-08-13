@@ -5,10 +5,13 @@ import { bigint, boolean, integer, jsonb, pgTable, text, timestamp, uuid } from 
  * Read/write mirrors of core-owned tables — the pattern
  * `packages/plugins/bullets/src/schema.ts` established. Column names and
  * types match `apps/server/src/db/schema/*.ts` exactly, which is what lets
- * `tx.db.select` / `tx.db.update` type and serialise correctly. None is
- * declared in this plugin's manifest `tables` map and none gets a migration
- * here: core already owns and migrates all six, `combat_log` included (it
- * ships in migration `0005`).
+ * `tx.db.select` / `tx.db.update` type and serialise correctly. Core owns and
+ * migrates `players`, `player_stats`, `items` and `ranks`.
+ *
+ * `p_combat_log` is the exception and is NOT a mirror: this plugin owns and
+ * migrates it (`migrations.ts`). It was core-owned — it shipped in core
+ * migration `0005` — until core relinquished it in
+ * `0007_relinquish_plugin_tables`.
  *
  * Only the columns this plugin touches are listed. `player_stats` has ~9 more.
  *
@@ -53,9 +56,10 @@ export const ranks = pgTable("ranks", {
  * no default REQUIRED on insert, so without them `createdAt` would have to be
  * passed by hand on every write — a clock read in application code where
  * Postgres' `now()` is both correct and already the column default. They match
- * `social.ts:117-131` exactly, which is what this mirror promises above.
+ * the DDL in `migrations.ts`, which is now the definition rather than a copy
+ * of core's.
  */
-export const combatLog = pgTable("combat_log", {
+export const combatLog = pgTable("p_combat_log", {
   id: uuid("id").primaryKey(),
   attackerId: uuid("attacker_id").notNull(),
   targetId: uuid("target_id").notNull(),

@@ -1,13 +1,15 @@
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import detectivesPlugin from "@gl3/plugin-detectives";
 import { loadConfig } from "../src/config.js";
-import { detectiveSearches, players, playerStats, pluginJobRuns } from "../src/db/schema/index.js";
+import { players, playerStats, pluginJobRuns } from "../src/db/schema/index.js";
 import { createRng } from "../src/game/rng.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
+import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { detectiveSearches } from "./helpers/plugin-tables.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -42,6 +44,16 @@ function findSeed(want: boolean): string {
   }
   throw new Error(`no seed found for want=${want}`);
 }
+
+// `runPluginJob` drives the handler without booting a server, so nothing here
+// runs `loadPlugins` — and `p_detectives_searches` is created by the plugin's
+// own migrations, not by core's (core relinquished it in
+// 0007_relinquish_plugin_tables). The test template database is built from
+// core migrations only, so without this every test in the file dies on
+// 42P01 "relation does not exist".
+beforeAll(async () => {
+  await runPluginMigrations(db, [detectivesPlugin]);
+});
 
 beforeEach(async () => {
   await resetDb(db);

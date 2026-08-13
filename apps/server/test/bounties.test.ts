@@ -5,7 +5,6 @@ import { uuidv7 } from "uuidv7";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import {
-  bounties,
   gangMembers,
   gangs,
   playerStats,
@@ -13,6 +12,7 @@ import {
   transactions,
 } from "../src/db/schema/index.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
+import { bounties } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";

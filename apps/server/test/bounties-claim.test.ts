@@ -4,7 +4,6 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import {
-  bounties,
   items,
   locations,
   notifications,
@@ -16,6 +15,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { loadConfig } from "../src/config.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { bounties } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
