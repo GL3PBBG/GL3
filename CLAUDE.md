@@ -203,8 +203,15 @@ unavailable here.
   `detectives`, `combat`), so this catches far more files than it used to —
   `economy-invariant.test.ts` and `detectives-worker.test.ts` are the worked
   examples.
-- **A new plugin package has eight registration sites, three of which fail
-  silently or remotely.** `packages/plugins/<id>/` itself, then:
+- **A new *workspace-local* plugin package has eight registration sites, three
+  of which fail silently or remotely.** All eight are consequences of living in
+  the workspace; a plugin **installed from the registry** needs exactly two —
+  a dependency in `apps/server/package.json` and `npm run plugins:generate`,
+  which rewrites the generated `apps/server/src/plugins/installed-plugins.ts`.
+  It needs no tsconfig reference (it ships built `dist/`), no `srcAliases`
+  entry, and no Dockerfile COPY (it arrives through the existing `npm ci` in
+  both stages). The eight below are:
+  `packages/plugins/<id>/` itself, then:
   `apps/server/package.json` (+ `npm install`), `apps/server/tsconfig.json`
   references, root `tsconfig.json` references, `vitest.workspace.ts`
   `srcAliases`, `plugins/core-plugins.ts`, the old `app.ts` registration to

@@ -1,11 +1,12 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
-import helloPlugin from "@gl3/hello-plugin";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
+import { buildAvailablePlugins } from "./plugins/available.js";
 import { withCorePlugins } from "./plugins/core-plugins.js";
+import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
 import { loadPlugins } from "./plugins/loader.js";
 import { loadSettings } from "./settings/load.js";
 import { createRedis, createSubscriber } from "./redis.js";
@@ -19,8 +20,16 @@ import { attachGateway } from "./ws/gateway.js";
  * would bypass that check. Ported core modules are not looked up here — they
  * live in `CORE_PLUGINS` and load unconditionally, never gated by
  * `PLUGIN_IDS`.
+ *
+ * Those static imports are now GENERATED rather than hand-written:
+ * `installed-plugins.ts` is produced by `npm run plugins:generate` from
+ * apps/server's direct dependencies that declare `"gl3": { "plugin": true }`.
+ * Installing a marketplace plugin is therefore a dependency plus a regenerate
+ * — never an edit to this file, which is what stops every operator from
+ * forking core. The compiler check survives because the generated imports are
+ * still static; only the authorship changed.
  */
-const AVAILABLE_PLUGINS: Record<string, PluginManifest> = { hello: helloPlugin };
+const AVAILABLE_PLUGINS: Record<string, PluginManifest> = buildAvailablePlugins(INSTALLED_PLUGINS);
 
 const config = loadConfig(process.env);
 const { db } = createDb(config.databaseUrl);

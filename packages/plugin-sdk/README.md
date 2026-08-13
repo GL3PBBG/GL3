@@ -296,10 +296,12 @@ This is V2's `alterModuleData` pattern, generalised.
 ## Boot
 
 A plugin is loaded by id from `PLUGIN_IDS` (comma-separated, default empty).
-The server resolves each id to its manifest through a static import map in
-`apps/server/src/index.ts` — a dynamic `import(pluginId)` is deliberately not
-used, because a static import is what keeps the dependency-direction check
-enforceable by the compiler.
+The server resolves each id to its manifest through a static import map,
+`apps/server/src/plugins/installed-plugins.ts` — a dynamic `import(pluginId)`
+is deliberately not used, because a static import is what keeps the
+dependency-direction check enforceable by the compiler. That file is
+**generated** from the installed dependencies (see Installing a plugin); the
+imports are still static, only their authorship changed.
 
 Boot sequence:
 
@@ -315,6 +317,79 @@ Boot sequence:
 
 Every failure is a hard boot failure naming the plugin id. Discovery is a static
 deploy-time list — no filesystem scan, no hot reload, no runtime installation.
+
+## Publishing a plugin
+
+A plugin is an ordinary npm package. Three things make it installable as a GL3
+plugin:
+
+```json
+{
+  "name": "@acme/gl3-casino",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "gl3": { "plugin": true },
+  "publishConfig": { "registry": "https://npm.gl3.dev" },
+  "peerDependencies": { "@gl3/plugin-sdk": "^1.0.0" }
+}
+```
+
+1. **`"gl3": { "plugin": true }`** — the marker the server's generator looks
+   for. Without it the package installs and is simply never offered to
+   `PLUGIN_IDS`. It is a marker rather than a naming convention so that no npm
+   scope is mandated: publish under your own.
+2. **An `exports` map pointing at built output**, `dist/index.js` plus
+   `dist/index.d.ts`. Ship compiled JavaScript — the server does not compile
+   its dependencies. Every plugin package in this repo has exactly this shape;
+   `examples/hello-plugin` is the reference.
+3. **The default export is the manifest** returned by `definePlugin`.
+
+Caveat, and it is currently a blocking one: `@gl3/plugin-sdk` is `private: true`
+at version `0.0.0`, so it cannot be published or depended on from a registry
+yet. Until it is published there is no version for a third-party plugin to
+declare a peer range against. Plugins written today live inside this repo's
+workspace.
+
+## Installing a plugin
+
+For an operator running their own GL3 deployment, installing a plugin is three
+commands and a commit — never a source edit, so the deployment never forks
+core:
+
+```bash
+npm i @gl3-plugins/casino -w apps/server
+npm run plugins:generate
+git add package.json package-lock.json apps/server/package.json \
+        apps/server/src/plugins/installed-plugins.ts
+```
+
+Then enable it: `PLUGIN_IDS=casino`. Installing makes a plugin *available*;
+`PLUGIN_IDS` decides which of the available ones actually load. An id with no
+installed package is a hard boot failure, not a warning.
+
+`plugins:generate` rewrites `apps/server/src/plugins/installed-plugins.ts` from
+`apps/server`'s **direct** dependencies that carry the `gl3.plugin` marker — a
+transitive dependency can never smuggle itself into the boot. The file is
+committed rather than generated at build time so a fresh clone typechecks with
+no extra step and the install is a reviewable diff;
+`apps/server/test/plugin-map.test.ts` fails in CI if it is stale.
+
+The registry is wired up in the repo's committed `.npmrc`:
+
+```ini
+@gl3-plugins:registry=https://npm.gl3.dev
+```
+
+Scoped, never a bare `registry=` line — a global registry would route *every*
+dependency through that host. To install a plugin published under a different
+scope, add that scope's own line. If the registry ever requires auth for reads,
+add `//npm.gl3.dev/:_authToken=${NPM_TOKEN}` — commit the literal `${NPM_TOKEN}`,
+npm expands it at read time — and switch the two `COPY .npmrc` lines in
+`Dockerfile.server` to `RUN --mount=type=secret`, because a token baked into an
+image layer stays readable from the image forever.
+
+Removing a plugin is *not* symmetrical with installing one: it disables the
+code but leaves every table and row behind. See Uninstalling below.
 
 ## Uninstalling
 

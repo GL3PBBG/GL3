@@ -162,9 +162,10 @@ it later. Design: `docs/superpowers/specs/2026-08-09-plugin-sdk-design.md`.
   `plugin_migrations`).
 
 Plugins load only when `PLUGIN_IDS` is set (comma-separated ids; default empty
-= core-only boot, unchanged). Boot is a static import map in `index.ts` — a
-dynamic `import(pluginId)` is deliberately not used so the dependency-direction
-check stays compiler-enforceable.
+= core-only boot, unchanged). Boot is a static import map — a dynamic
+`import(pluginId)` is deliberately not used so the dependency-direction check
+stays compiler-enforceable. That map is now **generated** (see below), not
+hand-written.
 
 ### What has shipped (web renderer, Plan 2)
 
@@ -1090,6 +1091,52 @@ Suite went 966 → 968: `combat-log-schema.test.ts` gained the existence guard
 and the foreign-key assertion. `schema.test.ts`'s three census figures moved
 with the tables — 47 → 39 foreign keys (24 cascade, 15 set null) and 30 → 27
 non-primary-key indexes.
+
+### Installing a plugin without forking core
+
+The optional-plugin import map used to be a hand-written literal in
+`apps/server/src/index.ts` (`{ hello: helloPlugin }`), so installing a
+marketplace plugin meant editing core server source — every operator forks
+core, and every GL3 upgrade is a merge conflict in the one file they had to
+touch. The map is now generated:
+
+- **`scripts/generate-plugin-map.mjs`** (`npm run plugins:generate`, `--check`
+  to assert freshness) walks the **direct** dependencies of
+  `apps/server/package.json`, reads each installed `package.json`, and includes
+  those declaring `"gl3": { "plugin": true }`. Direct-only stops a transitive
+  dependency smuggling itself into the boot; a self-declared marker mandates no
+  npm scope, so operators publish under their own. The 14 ported core plugins
+  deliberately carry no marker — the marker means "optional, selectable via
+  `PLUGIN_IDS`", and core ports load unconditionally via `CORE_PLUGINS`.
+- **`apps/server/src/plugins/installed-plugins.ts`** is its committed output:
+  imports plus one array, no logic. Committed so a fresh clone typechecks with
+  no extra step and an install is a reviewable diff.
+- **`apps/server/src/plugins/available.ts`** — `buildAvailablePlugins` turns
+  that list into the id→manifest lookup, keyed by `manifest.id` (nothing
+  asserts the package name and the id match). It throws naming **both**
+  packages on a duplicate id; without that check one package silently shadows
+  the other before `validatePlugins` ever sees the pair.
+- **`.npmrc`** commits `@gl3-plugins:registry=https://npm.gl3.dev` — scoped,
+  never a bare `registry=` line, and with no `_authToken` (public-read). Inert
+  until a `@gl3-plugins/*` package is actually depended on. `Dockerfile.server`
+  copies it in both stages before their `npm ci`.
+- **`apps/server/test/plugin-map.test.ts`** (in `@gl3/server:unit`, so it runs
+  in `verify:ci` with no DB) covers discovery against a synthetic tmpdir root,
+  the identifier-collision and missing-package errors, the duplicate-id throw,
+  and staleness of the committed map.
+
+Installing a plugin is therefore `npm i` + `npm run plugins:generate` + commit,
+and enabling it is `PLUGIN_IDS`. Registry-installed plugins need **two**
+registration sites, not the eight CLAUDE.md lists for workspace-local ones —
+they ship built `dist/`, so no tsconfig reference, no `srcAliases` entry and no
+Dockerfile COPY. Two latent defects were fixed on the way: `@gl3/hello-plugin`
+and `@gl3/plugin-news` were imported by `apps/server/src/` but never declared
+as dependencies, resolving only through workspace hoisting.
+
+Still blocking a real marketplace: `@gl3/plugin-sdk` is `private: true` at
+`0.0.0`, so nothing can be published to or consumed from a registry yet, and
+third-party plugins have no SDK version to declare a peer range against. That
+is the next gap, not this one.
 
 ## What M3 established that later work must not undo
 
