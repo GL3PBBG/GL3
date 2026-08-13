@@ -1,6 +1,6 @@
 import {
-  definePlugin, InsufficientFundsError, PluginError, route,
-  type PlayerSnapshot, type PluginCtx, type RouteResult,
+  definePlugin, InsufficientFundsError, newId, PluginError, route,
+  type PageSchema, type PlayerSnapshot, type PluginCtx, type RouteResult,
 } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -15,6 +15,16 @@ import { locations, playerStats } from "./schema.js";
  * `@gl3/shared` is off-limits to a plugin package, so `IdSchema` is restated.
  */
 const IdSchema = z.string().uuid();
+
+// --- Admin schemas ---
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+const TownBodySchema = z.object({
+  name: z.string().min(1).max(80),
+  travelCost: AdminMoney,
+  travelCooldownSeconds: z.coerce.number().int().nonnegative(),
+}).strict();
+const TownUpdateSchema = TownBodySchema.extend({ id: z.string().uuid() }).strict();
 const TravelParamsSchema = z.object({ locationId: IdSchema });
 
 /** Max attempts before a caller who keeps moving gets a clean 409. */
@@ -254,13 +264,96 @@ async function attemptTravel(
   });
 }
 
+// --- Admin routes ---
+
+const adminListRoute = route({
+  method: "GET", path: "/api/admin/travel/locations", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(locations));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((l) => ({
+          id: l.id, name: l.name,
+          travelCost: l.travelCost.toString(),
+          travelCooldownSeconds: String(l.travelCooldownSeconds),
+        })),
+      },
+    };
+  },
+});
+
+const adminCreateRoute = route({
+  method: "POST", path: "/api/admin/travel/locations", auth: "admin",
+  body: TownBodySchema,
+  handler: async (ctx, { body }) => {
+    const id = newId();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(locations).values({
+        id, name: body.name,
+        travelCost: BigInt(body.travelCost),
+        travelCooldownSeconds: body.travelCooldownSeconds,
+        bulletStock: 0, bulletCost: 0n,
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminUpdateRoute = route({
+  method: "POST", path: "/api/admin/travel/locations/update", auth: "admin",
+  body: TownUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db.update(locations)
+        .set({
+          name: body.name,
+          travelCost: BigInt(body.travelCost),
+          travelCooldownSeconds: body.travelCooldownSeconds,
+        })
+        .where(eq(locations.id, body.id))
+        .returning({ id: locations.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("location_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminPage: PageSchema = {
+  id: "travel-admin",
+  path: "/admin/travel",
+  view: {
+    kind: "panel", title: "Towns",
+    children: [
+      { kind: "table", source: "GET /api/admin/travel/locations", columns: [
+        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "travelCost", label: "Travel cost" },
+        { key: "travelCooldownSeconds", label: "Cooldown (s)" },
+      ] },
+      { kind: "form", action: "POST /api/admin/travel/locations", submitLabel: "Add town", fields: [
+        { name: "name", label: "Name", type: "text" },
+        { name: "travelCost", label: "Travel cost", type: "money" },
+        { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+      ] },
+      { kind: "form", action: "POST /api/admin/travel/locations/update", submitLabel: "Update town", fields: [
+        { name: "id", label: "Town id (paste from table)", type: "text" },
+        { name: "name", label: "Name", type: "text" },
+        { name: "travelCost", label: "Travel cost", type: "money" },
+        { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+      ] },
+    ],
+  },
+};
+
 export default definePlugin({
   id: "travel",
   version: "1.0.0",
   // First port claiming two base paths; plugins/validate.ts checks each route
   // path is contained in one of them and that no other plugin claims either.
-  basePaths: ["/api/locations", "/api/travel"],
-  routes: [listRoute, travelRoute],
+  basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],
+  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute],
+  adminPages: [adminPage],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot if
