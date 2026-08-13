@@ -1,4 +1,4 @@
-import { bigint, integer, pgTable, uuid } from "drizzle-orm/pg-core";
+import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Read/write mirrors of two core-owned tables. Column names and types match
@@ -20,6 +20,7 @@ export const playerStats = pgTable("player_stats", {
 
 export const locations = pgTable("locations", {
   id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
   bulletStock: integer("bullet_stock").notNull(),
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull(),
 });

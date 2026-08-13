@@ -1,4 +1,7 @@
-import { definePlugin, InsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
+import {
+  definePlugin, InsufficientFundsError, PluginError, route,
+  type PageSchema,
+} from "@gl3/plugin-sdk";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { locations, playerStats } from "./schema.js";
@@ -13,6 +16,73 @@ import { locations, playerStats } from "./schema.js";
  * is restated rather than imported.
  */
 const BuyBulletsSchema = z.object({ quantity: z.number().int().positive() });
+
+// --- Admin schemas ---
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+const StockBodySchema = z.object({
+  locationId: z.string().uuid(),
+  bulletStock: z.coerce.number().int().nonnegative(),
+  bulletCost: AdminMoney,
+}).strict();
+
+// --- Admin routes ---
+
+const adminListRoute = route({
+  method: "GET", path: "/api/admin/bullets/stock", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(locations));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((l) => ({
+          id: l.id, name: l.name,
+          bulletStock: String(l.bulletStock),
+          bulletCost: l.bulletCost.toString(),
+        })),
+      },
+    };
+  },
+});
+
+const adminStockRoute = route({
+  method: "POST", path: "/api/admin/bullets/stock", auth: "admin",
+  body: StockBodySchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db.update(locations)
+        .set({
+          bulletStock: body.bulletStock,
+          bulletCost: BigInt(body.bulletCost),
+        })
+        .where(eq(locations.id, body.locationId))
+        .returning({ id: locations.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("location_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminPage: PageSchema = {
+  id: "bullets-admin",
+  path: "/admin/bullets",
+  view: {
+    kind: "panel", title: "Bullet stock",
+    children: [
+      { kind: "table", source: "GET /api/admin/bullets/stock", columns: [
+        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "bulletStock", label: "Stock" },
+        { key: "bulletCost", label: "Cost" },
+      ] },
+      { kind: "form", action: "POST /api/admin/bullets/stock", submitLabel: "Set stock", fields: [
+        { name: "locationId", label: "Location id (paste from table)", type: "text" },
+        { name: "bulletStock", label: "Bullet stock", type: "number" },
+        { name: "bulletCost", label: "Bullet cost", type: "money" },
+      ] },
+    ],
+  },
+};
 
 const buyRoute = route({
   method: "POST",
@@ -122,8 +192,9 @@ const buyRoute = route({
 export default definePlugin({
   id: "bullets",
   version: "1.0.0",
-  basePaths: ["/api/bullets"],
-  routes: [buyRoute],
+  basePaths: ["/api/bullets", "/api/admin/bullets"],
+  routes: [buyRoute, adminListRoute, adminStockRoute],
+  adminPages: [adminPage],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot
