@@ -4,6 +4,15 @@
  * its items with no separator (the renderer applies spacing). Keeping this a
  * pure transform is what makes it testable without a DOM.
  */
+/**
+ * A select field carries where its options come from; `allowEmpty` is
+ * normalised to a required boolean here so the renderer never re-derives the
+ * DTO's optionality.
+ */
+export type FormField =
+  | { name: string; label: string; type: "text" | "number" | "money" | "password" }
+  | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean };
+
 export type RenderInstruction =
   | { kind: "text"; value: string }
   | { kind: "money"; value: string }
@@ -12,7 +21,7 @@ export type RenderInstruction =
   | { kind: "button"; label: string; action: string }
   | { kind: "cooldownButton"; label: string; action: string; cooldownAction: string }
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
-  | { kind: "form"; action: string; submitLabel: string; fields: { name: string; label: string; type: "text" | "number" | "money" | "password" }[] }
+  | { kind: "form"; action: string; submitLabel: string; fields: FormField[] }
   | { kind: "table"; source: string; columns: { key: string; label: string }[] }
   | { kind: "panelHeader"; title: string };
 
@@ -67,11 +76,26 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     return [{ kind: "keyValue", rows }];
   }
   if (isNode(node, "form")) {
-    const fields = childArray(node.fields).map((f) => ({
-      name: isRecord(f) ? String(f.name) : "",
-      label: isRecord(f) ? String(f.label) : "",
-      type: isRecord(f) && isFieldType(f.type) ? f.type : ("text" as const),
-    }));
+    const fields = childArray(node.fields).map((f): FormField => {
+      const name = isRecord(f) ? String(f.name) : "";
+      const label = isRecord(f) ? String(f.label) : "";
+      if (isRecord(f) && f.type === "select") {
+        return {
+          name,
+          label,
+          type: "select",
+          optionsSource: String(f.optionsSource),
+          valueKey: String(f.valueKey),
+          labelKey: String(f.labelKey),
+          allowEmpty: f.allowEmpty === true,
+        };
+      }
+      return {
+        name,
+        label,
+        type: isRecord(f) && isFieldType(f.type) ? f.type : ("text" as const),
+      };
+    });
     return [{ kind: "form", action: String(node.action), submitLabel: String(node.submitLabel), fields }];
   }
   if (isNode(node, "table")) {

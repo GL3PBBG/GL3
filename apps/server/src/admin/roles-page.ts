@@ -18,7 +18,7 @@ export const rolesPage: PageSchema = {
       ] },
       { kind: "form", action: "POST /api/admin/roles/assign", submitLabel: "Assign role", fields: [
         { name: "username", label: "Username", type: "text" },
-        { name: "roleId", label: "Role id (empty clears)", type: "text" },
+        { name: "roleId", label: "Role (empty clears)", type: "select", optionsSource: "GET /api/admin/roles/table", valueKey: "id", labelKey: "name", allowEmpty: true },
       ] },
     ],
   },

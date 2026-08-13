@@ -59,6 +59,43 @@ describe("renderNode", () => {
     }]);
   });
 
+  it("renders a select field carrying its options wiring", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{
+        name: "thingId", label: "Thing", type: "select" as const,
+        optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+      }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{
+        name: "thingId", label: "Thing", type: "select",
+        optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+        allowEmpty: false,
+      }],
+    }]);
+  });
+
+  it("renders a select field's allowEmpty flag", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{
+        name: "thingId", label: "Thing (empty clears)", type: "select" as const,
+        optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+        allowEmpty: true,
+      }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{
+        name: "thingId", label: "Thing (empty clears)", type: "select",
+        optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+        allowEmpty: true,
+      }],
+    }]);
+  });
+
   it("maps a table node to a table instruction", () => {
     const out = renderNode({
       kind: "table", source: "GET /api/admin/travel/locations",

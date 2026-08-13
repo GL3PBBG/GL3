@@ -4,7 +4,7 @@ import { api } from "../api/client.js";
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { togglePending } from "./pending.js";
-import type { RenderInstruction } from "./render.js";
+import type { FormField, RenderInstruction } from "./render.js";
 import styles from "../pages/pages.module.css";
 
 /**
@@ -113,6 +113,68 @@ function TableBlock({ source, columns, refetchSignal }: {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * A form field's `select` widget: options fetched from `optionsSource`, the
+ * same shape and refetch behaviour as `TableBlock`, so a row added by a
+ * sibling form on the page (e.g. "Add town") appears in the select without a
+ * reload. Value state stays in the parent's `formValues` — this component owns
+ * only the options.
+ */
+function SelectField({ field, value, onChange, refetchSignal }: {
+  field: Extract<FormField, { type: "select" }>;
+  value: string;
+  onChange: (value: string) => void;
+  refetchSignal: number;
+}): JSX.Element {
+  const [options, setOptions] = useState<ReadonlyArray<{ value: string; label: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  const path = field.optionsSource.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api<unknown>(path)
+      .then((body) => {
+        if (cancelled) return;
+        const parsed = TableRowsResponseSchema.parse(body);
+        setOptions(parsed.rows.map((row) => ({
+          value: row[field.valueKey] ?? "",
+          label: row[field.labelKey] ?? row[field.valueKey] ?? "",
+        })));
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(caught);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [path, field.valueKey, field.labelKey, refetchSignal]);
+
+  if (error !== null) return <ErrorText error={error} />;
+
+  return (
+    <select
+      name={field.name}
+      value={value}
+      disabled={loading}
+      onChange={(event) => { onChange(event.target.value); }}
+    >
+      {/* The placeholder doubles as the "clear" option when allowEmpty: the
+          submitted "" is what the roles route maps to null. Without allowEmpty
+          it is only the unselected state — routes validate the UUID anyway. */}
+      <option value="">{field.allowEmpty ? "(none)" : loading ? "Loading…" : "Select…"}</option>
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
   );
 }
 
@@ -245,17 +307,28 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
               return (
                 <label key={field.name} className={styles.field}>
                   <span className={styles.meta}>{field.label}</span>
-                  <input
-                    name={field.name}
-                    // `money` is a decimal string on the wire, so it stays a text
-                    // input — a number input would round-trip it through Number.
-                    type={field.type === "money" ? "text" : field.type}
-                    value={formValues[key] ?? ""}
-                    onChange={(event) => {
-                      const { value } = event.target;
-                      setFormValues((previous) => ({ ...previous, [key]: value }));
-                    }}
-                  />
+                  {field.type === "select" ? (
+                    <SelectField
+                      field={field}
+                      value={formValues[key] ?? ""}
+                      onChange={(value) => {
+                        setFormValues((previous) => ({ ...previous, [key]: value }));
+                      }}
+                      refetchSignal={refetchSignal}
+                    />
+                  ) : (
+                    <input
+                      name={field.name}
+                      // `money` is a decimal string on the wire, so it stays a text
+                      // input — a number input would round-trip it through Number.
+                      type={field.type === "money" ? "text" : field.type}
+                      value={formValues[key] ?? ""}
+                      onChange={(event) => {
+                        const { value } = event.target;
+                        setFormValues((previous) => ({ ...previous, [key]: value }));
+                      }}
+                    />
+                  )}
                 </label>
               );
             })}

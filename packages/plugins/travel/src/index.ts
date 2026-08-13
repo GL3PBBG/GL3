@@ -337,7 +337,7 @@ const adminPage: PageSchema = {
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
       ] },
       { kind: "form", action: "POST /api/admin/travel/locations/update", submitLabel: "Update town", fields: [
-        { name: "id", label: "Town id (paste from table)", type: "text" },
+        { name: "id", label: "Town", type: "select", optionsSource: "GET /api/admin/travel/locations", valueKey: "id", labelKey: "name" },
         { name: "name", label: "Name", type: "text" },
         { name: "travelCost", label: "Travel cost", type: "money" },
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },

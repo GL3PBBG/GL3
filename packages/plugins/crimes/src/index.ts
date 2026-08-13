@@ -292,7 +292,7 @@ const adminCrimesPage: PageSchema = {
         { key: "jailSeconds", label: "Jail (s)" },
       ] },
       { kind: "form", action: "POST /api/admin/crimes/update", submitLabel: "Update crime", fields: [
-        { name: "id", label: "Crime id (paste from table)", type: "text" },
+        { name: "id", label: "Crime", type: "select", optionsSource: "GET /api/admin/crimes/list", valueKey: "id", labelKey: "name" },
         { name: "cooldownSeconds", label: "Cooldown seconds", type: "number" },
         { name: "minPayout", label: "Min payout", type: "money" },
         { name: "maxPayout", label: "Max payout", type: "money" },

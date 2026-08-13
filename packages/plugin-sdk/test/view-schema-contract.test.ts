@@ -80,6 +80,43 @@ const ACCEPTED: readonly (readonly [string, unknown])[] = [
       ],
     },
   ],
+  [
+    "form with a select field",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Submit form",
+      fields: [
+        {
+          name: "thingId",
+          label: "Thing",
+          type: "select",
+          optionsSource: "GET /api/hello/things",
+          valueKey: "id",
+          labelKey: "name",
+        },
+      ],
+    },
+  ],
+  [
+    "form with a select field allowing empty",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Submit form",
+      fields: [
+        {
+          name: "thingId",
+          label: "Thing (empty clears)",
+          type: "select",
+          optionsSource: "GET /api/hello/things",
+          valueKey: "id",
+          labelKey: "name",
+          allowEmpty: true,
+        },
+      ],
+    },
+  ],
   ["panel", { kind: "panel", title: "Leaves", children: [{ kind: "text", value: "A leaf." }] }],
   ["panel with an empty body", { kind: "panel", title: "Empty", children: [] }],
   ["list", { kind: "list", items: [{ kind: "text", value: "An item." }] }],
@@ -131,6 +168,62 @@ const REJECTED: readonly (readonly [string, unknown])[] = [
   [
     "a form whose fields are not an array",
     { kind: "form", action: "POST /api/hello/greet", submitLabel: "Go", fields: "none" },
+  ],
+  [
+    "a select field with no optionsSource",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{ name: "thingId", label: "Thing", type: "select", valueKey: "id", labelKey: "name" }],
+    },
+  ],
+  [
+    "a select optionsSource pointing at an absolute URL",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [
+        {
+          name: "thingId",
+          label: "Thing",
+          type: "select",
+          optionsSource: "GET https://evil.example/steal",
+          valueKey: "id",
+          labelKey: "name",
+        },
+      ],
+    },
+  ],
+  [
+    "a select optionsSource that is not a GET",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [
+        {
+          name: "thingId",
+          label: "Thing",
+          type: "select",
+          optionsSource: "POST /api/hello/things",
+          valueKey: "id",
+          labelKey: "name",
+        },
+      ],
+    },
+  ],
+  [
+    "a basic form field smuggling select-only properties",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [
+        { name: "note", label: "Note", type: "text", optionsSource: "GET /api/hello/things" },
+      ],
+    },
   ],
   [
     "a bad node nested inside a panel",

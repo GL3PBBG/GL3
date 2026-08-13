@@ -108,6 +108,37 @@ describe("inventory admin", () => {
     });
   });
 
+  describe("locations feed", () => {
+    // Feeds the shop form's location select. `GET /api/admin/inventory/shop`
+    // cannot serve that role: it lists existing stock rows, which is empty
+    // exactly when the admin stocks a location for the first time.
+    it("lists all locations as id/name rows", async () => {
+      const locationId = uuidv7();
+      await db.insert(locations).values({
+        id: locationId, name: "Palermo",
+        travelCost: 0n, travelCooldownSeconds: 0,
+        bulletStock: 0, bulletCost: 0n,
+      });
+      const res = await app.inject({
+        method: "GET", url: "/api/admin/inventory/locations", headers: auth(),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().rows).toEqual([{ id: locationId, name: "Palermo" }]);
+    });
+
+    it("403s a non-admin", async () => {
+      const p = await app.inject({
+        method: "POST", url: "/api/auth/register",
+        payload: { username: "Pleb", password: "hunter2hunter2" },
+      });
+      const res = await app.inject({
+        method: "GET", url: "/api/admin/inventory/locations",
+        headers: { authorization: `Bearer ${p.json().token}` },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
   describe("shop stock", () => {
     it("stocks the shop and the public listing sees it", async () => {
       // Seed a location via direct insert
