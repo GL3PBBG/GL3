@@ -1,7 +1,12 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
 
 /** Core owns these; a plugin claiming one is a hard boot failure (spec: Routes). */
-export const RESERVED_BASE_PATHS = ["/api/auth", "/api/ws", "/api/plugins", "/health"] as const;
+export const RESERVED_BASE_PATHS = [
+  "/api/auth", "/api/ws", "/api/plugins", "/health",
+  // Core admin shell endpoints. Deliberately NOT "/api/admin": plugins claim
+  // /api/admin/<their-id> for their own admin routes.
+  "/api/admin/plugins", "/api/admin/roles",
+] as const;
 
 function fail(message: string): never {
   throw new Error(`plugin validation failed — ${message}`);
@@ -95,6 +100,9 @@ function viewActions(view: ViewNode): string[] {
       case "form":
         actions.push(node.action);
         break;
+      case "table":
+        actions.push(node.source);
+        break;
       case "panel":
         for (const child of node.children) pending.push(child);
         break;
@@ -139,6 +147,14 @@ function routePath(route: unknown, pluginId: string): string {
     if (typeof path === "string") return path;
   }
   fail(`plugin "${pluginId}" declares a route with no string "path"`);
+}
+
+function routeAuth(route: unknown): string {
+  if (typeof route === "object" && route !== null && "auth" in route) {
+    const { auth } = route;
+    if (typeof auth === "string") return auth;
+  }
+  return "";
 }
 
 export function validatePlugins(manifests: readonly PluginManifest[]): void {
@@ -187,6 +203,13 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
       }
       claimedPages.set(page.id, manifest.id);
     }
+    for (const page of manifest.adminPages) {
+      const owner = claimedPages.get(page.id);
+      if (owner !== undefined) {
+        fail(`page id "${page.id}" is claimed by both "${owner}" and "${manifest.id}"`);
+      }
+      claimedPages.set(page.id, manifest.id);
+    }
   }
 
   // Containment runs second: every basePath is known by now, so a route or an
@@ -200,13 +223,19 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
       if (!containedIn(path, manifest.basePaths)) {
         fail(`plugin "${manifest.id}" registers "${path}", outside ${scope}`);
       }
+      if ((path === "/api/admin" || path.startsWith("/api/admin/")) && routeAuth(route) !== "admin") {
+        fail(`plugin "${manifest.id}" registers "${path}" under /api/admin/ and must declare auth "admin"`);
+      }
     }
 
     // A page is served under the plugin's name, so the endpoints it drives are
     // attributed to the plugin. `basePaths` is that attribution, and a view
     // action reaching past it makes the manifest a false account of what the
     // plugin touches — the route half of the same manifest has never allowed it.
-    for (const page of manifest.pages) {
+    // Admin pages share the same namespace: their view actions are still
+    // attributed to the plugin's basePaths.
+    const allPages = [...manifest.pages, ...manifest.adminPages];
+    for (const page of allPages) {
       for (const action of viewActions(page.view)) {
         const path = actionPath(action);
         if (hasDotSegment(path)) {
