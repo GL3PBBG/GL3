@@ -1,5 +1,5 @@
 import {
-  definePlugin, InsufficientFundsError, newId, PluginError, route,
+  definePlugin, newId, PluginError, route,
   type PageSchema,
 } from "@gl3/plugin-sdk";
 import { and, eq, gt, sql } from "drizzle-orm";
@@ -85,6 +85,12 @@ const equipRoute = route({
     const wantsArmor = "armorItemId" in body;
 
     return ctx.transaction(async (tx) => {
+      // The player's own row only — no second participant, so the single-id
+      // form of the standard ascending-order lock. The UPDATE below also
+      // takes FOR KEY SHARE on the referenced items row through
+      // player_stats' weapon_item_id/armor_item_id FKs (NOTES.md rule 6);
+      // nothing in the codebase locks an items row, so there is no path to
+      // invert against.
       await tx.locks.player([player.id]);
 
       const [stats] = await tx.db
@@ -112,6 +118,8 @@ const equipRoute = route({
 
         if (slot === "weapon") {
           const parsed = WeaponEffectsSchema.safeParse(owned.effects);
+          // A malformed weapon is unusable rather than a 500: the jsonb is an
+          // external boundary and an admin can put anything in it.
           if (!parsed.success) throw new PluginError("wrong_slot", 400);
           if (BigInt(parsed.data.minRankExp) > stats.exp) {
             throw new PluginError("rank_too_low", 409);
@@ -142,6 +150,8 @@ const useRoute = route({
   method: "POST",
   path: "/api/inventory/use/:itemId",
   accessInJail: false,
+  // What structurally enforces "a heal item does not get you out of hospital":
+  // the loader answers 423 before this handler runs.
   accessInHospital: false,
   params: z.object({ itemId: z.string().uuid() }),
   handler: async (ctx, { params }) => {
@@ -169,9 +179,17 @@ const useRoute = route({
         .where(eq(playerStats.playerId, player.id));
       if (!stats) throw new PluginError("unauthorized", 401);
 
+      // 100 matches core's `ranks.max_health` column default and
+      // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player has no
+      // rank row yet. A plugin cannot import that constant from apps/server,
+      // so the two must be kept in step by hand.
       const maxHealth = stats.maxHealth ?? 100;
       if (stats.health >= maxHealth) throw new PluginError("already_full", 409);
 
+      // The decrement is the guard, not a preceding read: `qty > 0` in the
+      // WHERE makes a concurrent second use match zero rows instead of driving
+      // the count negative. Same reasoning as NOTES.md rule 2's ban on
+      // check-then-act, applied to Postgres.
       const decremented = await tx.db
         .update(playerItems)
         .set({ qty: sql`${playerItems.qty} - 1` })
@@ -415,5 +433,10 @@ export default definePlugin({
     adminItemListRoute, adminItemCreateRoute, adminShopListRoute, adminShopUpsertRoute,
   ],
   events: [purchasedEvent],
+  // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts
+  // a no-arg boot answers GET /api/plugins with exactly
+  // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a
+  // core plugin declares jobs. `adminPages` is not `pages` — it is served
+  // separately by GET /api/admin/plugins and never reaches that payload.
   adminPages: [adminPage],
 });

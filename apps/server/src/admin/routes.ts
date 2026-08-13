@@ -1,9 +1,10 @@
-import { hasPermission, type PageSchema, type PluginManifest } from "@gl3/plugin-sdk";
+import { hasPermission, type PluginManifest } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import { players, roleModuleAccess, roles } from "../db/schema/index.js";
+import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { rolesPage } from "./roles-page.js";
 
@@ -24,14 +25,27 @@ export function registerAdminRoutes(
     const playerId = request.playerId;
     if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
     const grants = await loadGrants(db, playerId);
-    const sections: { pluginId: string; pages: PageSchema[] }[] = [];
+    // Field-by-field copy, never a spread of the manifest page: the client
+    // parses this with `AdminSectionsResponseSchema`, whose page schema is
+    // `.strict()` and requires `pluginId` — which a `PageSchema` does not
+    // carry, while its optional `menu` is a key strict would reject. Same
+    // shape as manifest-endpoint.ts's `/api/plugins` pages.
+    const sections: { pluginId: string; pages: PagePayload[] }[] = [];
     for (const manifest of manifests) {
       if (manifest.adminPages.length === 0) continue;
       if (!hasPermission(grants, manifest.id)) continue;
-      sections.push({ pluginId: manifest.id, pages: manifest.adminPages });
+      sections.push({
+        pluginId: manifest.id,
+        pages: manifest.adminPages.map((p) => ({
+          pluginId: manifest.id, id: p.id, path: p.path, view: p.view,
+        })),
+      });
     }
     if (hasPermission(grants, "roles")) {
-      sections.push({ pluginId: "roles", pages: [rolesPage] });
+      sections.push({
+        pluginId: "roles",
+        pages: [{ pluginId: "roles", id: rolesPage.id, path: rolesPage.path, view: rolesPage.view }],
+      });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });
     return reply.send({ sections });

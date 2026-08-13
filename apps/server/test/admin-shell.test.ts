@@ -1,4 +1,5 @@
 import { definePlugin } from "@gl3/plugin-sdk";
+import { AdminSectionsResponseSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
@@ -73,6 +74,21 @@ describe("GET /api/admin/plugins", () => {
     expect(ids).toContain("alpha");
     expect(ids).toContain("beta");
     expect(ids).toContain("roles");
+  });
+
+  // The seam that shipped broken once: the route sent manifest `PageSchema`s,
+  // which carry no `pluginId` and may carry a `menu` — both fatal to the
+  // `.strict()` client schema, so /admin rendered nothing at all. Parsing the
+  // real response with the real DTO is the only check that covers it.
+  it("serves a payload the client DTO accepts", async () => {
+    const founder = await register("Founder");
+    const res = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth(founder.token) });
+    expect(res.statusCode).toBe(200);
+    const parsed = AdminSectionsResponseSchema.parse(res.json());
+    expect(parsed.sections.map((s) => s.pluginId)).toContain("roles");
+    for (const section of parsed.sections) {
+      for (const page of section.pages) expect(page.pluginId).toBe(section.pluginId);
+    }
   });
 
   it("a plugin not loaded contributes no section", async () => {
