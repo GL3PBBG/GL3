@@ -38,7 +38,10 @@ describe("inventory admin", () => {
       const id: string = res.json().id;
       const [row] = await db.select().from(items).where(eq(items.id, id));
       expect(row?.itemType).toBe("weapon");
-      expect(row?.effects).toMatchObject({ damageMin: 10, damageMax: 20, accuracy: 65 });
+      expect(row?.effects).toEqual({
+        damageMin: 10, damageMax: 20, accuracy: 65,
+        bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+      });
     });
 
     it("creates an armor item", async () => {
