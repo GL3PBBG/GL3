@@ -106,7 +106,7 @@ plugin id in the message.
 | `version` | `string` | Semver `x.y.z`. |
 | `basePaths` | `string[]` | At least one, each `/api/<name>...`. Every route path must sit under one of these. `/api/auth`, `/api/ws`, `/api/plugins`, `/health` are reserved to core. Overlapping basePaths across plugins is a hard boot failure. |
 | `tables` | `Record<string, string>` | Maps your key to a SQL table name that **must** start with `p_<id-with-underscores>_` (e.g. id `hello` → prefix `p_hello_`). Enforced by the loader at boot. |
-| `migrations` | `{ name, sql }[]` | Plain SQL, no drizzle-kit. Applied once, tracked in `plugin_migrations`. Migration names must be unique within a plugin (checked at definition time). |
+| `migrations` | `{ name, sql }[]` | Plain SQL, no drizzle-kit. Applied once, tracked in `plugin_migrations`. Migration names must be unique within a plugin (checked at definition time). **One-way — there is no `down`**; see Uninstalling. |
 | `routes` | `PluginRoute[]` | Built with `route()` (below). |
 | `pages` | `PageSchema[]` | Declarative UI; see Pages. |
 | `events` | `PluginEventDecl[]` | Declares each event's payload schema, `describe` template, and query invalidations. |
@@ -315,6 +315,58 @@ Boot sequence:
 
 Every failure is a hard boot failure naming the plugin id. Discovery is a static
 deploy-time list — no filesystem scan, no hot reload, no runtime installation.
+
+## Uninstalling
+
+**Uninstalling a plugin removes its code, never its data.** Drop the id from
+`PLUGIN_IDS`, or remove the package from the build entirely, and the next boot
+un-registers:
+
+- its routes (404 afterwards),
+- its pages and its entry in the `/api/plugins` payload,
+- its BullMQ queues and workers — jobs already queued in Redis stay queued, with
+  nothing left to consume them,
+- its event declarations and filter subscriptions. A filter *point* disappearing
+  is silent for its subscribers; a subscriber disappearing is silent for the
+  point.
+
+Everything the plugin wrote stays in the database, permanently:
+
+| Survives | Why |
+|---|---|
+| `p_<id>_*` tables and every row in them | `PluginMigration` is `{ name, sql }`. There is no `down`, and the loader has no drop path — `runPluginMigrations` only ever applies. |
+| `plugin_migrations` rows (`plugin_id`, `name`) | Never deleted. A re-install applies nothing, because every name is still claimed. Editing a migration's SQL after it has run on a database means it will never run there. |
+| `plugin_job_runs` rows | The at-least-once idempotency keys, keyed `(plugin_id, job_id)`. |
+| Writes into core tables | `transactions` ledger rows and the balances they explain, `player_stats` columns, notifications, already-delivered events. Nothing marks these as plugin-authored — on the wire and in the schema they are indistinguishable from core's own writes. |
+
+This is deliberate, not an omission. For a live game, a package dropped from
+`package.json` for one deploy must not take a table of player property with it,
+and money already booked through `tx.economy` is explained by ledger rows that
+`sum(ledger) == balance` still has to account for
+(`test/economy-invariant.test.ts`). So **removal means disable, and only
+disable.**
+
+Deleting the data is a separate, manual operator step, taken deliberately and
+against a backup:
+
+```sql
+-- Example. Read the plugin's own migrations first and drop in FK order.
+DROP TABLE IF EXISTS p_bounties_bounties;
+DELETE FROM plugin_migrations WHERE plugin_id = 'bounties';
+```
+
+Drop the `plugin_migrations` rows in the same breath as the tables. Leave them
+behind and a later re-install of that plugin skips its own schema and dies on
+the first query with `42P01 relation does not exist`.
+
+Ledger rows are the exception: never delete from `transactions`. Reversing a
+plugin's economic effect means booking a compensating movement through
+`applyBalanceChange`, not erasing history.
+
+Core migration `0007_relinquish_plugin_tables` is the in-repo precedent — when
+`bounties`, `detective_searches` and `combat_log` moved from core to the plugins
+that consume them, the drop was written as an explicit, reviewed migration.
+Nothing derived it automatically, and nothing will.
 
 ## Constraints (from CLAUDE.md)
 
