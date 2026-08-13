@@ -388,7 +388,6 @@ const adminPage: PageSchema = {
         kind: "panel", title: "Items",
         children: [
           { kind: "table", source: "GET /api/admin/inventory/items", columns: [
-            { key: "id", label: "Id" },
             { key: "name", label: "Name" },
             { key: "itemType", label: "Type" },
             { key: "effects", label: "Effects" },
@@ -416,9 +415,7 @@ const adminPage: PageSchema = {
         kind: "panel", title: "Shop stock",
         children: [
           { kind: "table", source: "GET /api/admin/inventory/shop", columns: [
-            { key: "locationId", label: "Location id" },
             { key: "locationName", label: "Location" },
-            { key: "itemId", label: "Item id" },
             { key: "itemName", label: "Item" },
             { key: "price", label: "Price" },
             { key: "stock", label: "Stock" },

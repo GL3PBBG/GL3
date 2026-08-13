@@ -294,7 +294,7 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         return (
           <form
             key={index}
-            className={styles.form}
+            className={styles.formCard}
             onSubmit={(event) => {
               event.preventDefault();
               const body: Record<string, string> = {};

@@ -173,6 +173,7 @@ export default defineWorkspace([
         "test/combat-settings.test.ts",
         "test/config.test.ts",
         "test/password.test.ts",
+        "test/admin-ids-hidden.test.ts",
         "test/admin-validate.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",

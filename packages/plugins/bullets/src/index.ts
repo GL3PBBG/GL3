@@ -71,7 +71,7 @@ const adminPage: PageSchema = {
     kind: "panel", title: "Bullet stock",
     children: [
       { kind: "table", source: "GET /api/admin/bullets/stock", columns: [
-        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "name", label: "Name" },
         { key: "bulletStock", label: "Stock" },
         { key: "bulletCost", label: "Cost" },
       ] },

@@ -1,4 +1,4 @@
-import { definePlugin, PluginError, route, type PageSchema } from "@gl3/plugin-sdk";
+import { definePlugin, newId, PluginError, route, type PageSchema } from "@gl3/plugin-sdk";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { playerStats, ranks } from "./schema.js";
@@ -19,14 +19,16 @@ import { playerStats, ranks } from "./schema.js";
 // --- Admin schemas ---
 
 const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
-const RankUpdateSchema = z.object({
-  id: z.string().uuid(),
+/** The columns an admin edits, shared by create and update. */
+const RankFieldsSchema = z.object({
   name: z.string().min(1).max(80),
   expRequired: AdminMoney,
   cashReward: AdminMoney,
   bulletReward: z.coerce.number().int().nonnegative(),
   maxHealth: z.coerce.number().int().nonnegative(),
-}).strict();
+});
+const RankUpdateSchema = RankFieldsSchema.extend({ id: z.string().uuid() }).strict();
+const RankCreateSchema = RankFieldsSchema.strict();
 
 // --- Admin routes ---
 
@@ -48,6 +50,24 @@ const adminRanksListRoute = route({
         })),
       },
     };
+  },
+});
+
+const adminRanksCreateRoute = route({
+  method: "POST", path: "/api/admin/ranks", auth: "admin",
+  body: RankCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = newId();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(ranks).values({
+        id, name: body.name,
+        expRequired: BigInt(body.expRequired),
+        cashReward: BigInt(body.cashReward),
+        bulletReward: body.bulletReward,
+        maxHealth: body.maxHealth,
+      });
+    });
+    return { status: 201, body: { id } };
   },
 });
 
@@ -80,11 +100,18 @@ const adminRanksPage: PageSchema = {
     kind: "panel", title: "Ranks",
     children: [
       { kind: "table", source: "GET /api/admin/ranks/list", columns: [
-        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "name", label: "Name" },
         { key: "expRequired", label: "Exp required" },
         { key: "cashReward", label: "Cash reward" },
         { key: "bulletReward", label: "Bullets" },
         { key: "maxHealth", label: "Max health" },
+      ] },
+      { kind: "form", action: "POST /api/admin/ranks", submitLabel: "Add rank", fields: [
+        { name: "name", label: "Name", type: "text" },
+        { name: "expRequired", label: "Exp required", type: "money" },
+        { name: "cashReward", label: "Cash reward", type: "money" },
+        { name: "bulletReward", label: "Bullet reward", type: "number" },
+        { name: "maxHealth", label: "Max health", type: "number" },
       ] },
       { kind: "form", action: "POST /api/admin/ranks/update", submitLabel: "Update rank", fields: [
         { name: "id", label: "Rank", type: "select", optionsSource: "GET /api/admin/ranks/list", valueKey: "id", labelKey: "name" },
@@ -135,6 +162,7 @@ export default definePlugin({
       },
     }),
     adminRanksListRoute,
+    adminRanksCreateRoute,
     adminRanksUpdateRoute,
   ],
   adminPages: [adminRanksPage],

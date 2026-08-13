@@ -105,6 +105,78 @@ describe("crimes admin", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("creates a crime and lists it", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Bank job", description: "Walk in, walk out.",
+        cooldownSeconds: 300, minPayout: "1000", maxPayout: "5000",
+        minBullets: 0, maxBullets: 10, expReward: "50",
+        jailChancePercent: 25, jailSeconds: 600,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const { id } = res.json() as { id: string };
+
+    const [row] = await db.select().from(crimes).where(eq(crimes.id, id));
+    expect(row).toMatchObject({
+      name: "Bank job", description: "Walk in, walk out.",
+      cooldownSeconds: 300, minPayout: 1000n, maxPayout: 5000n,
+      minBullets: 0, maxBullets: 10, expReward: 50n,
+      jailChancePercent: 25, jailSeconds: 600,
+    });
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/crimes/list", headers: auth() });
+    expect(list.json().rows.map((r: { id: string }) => r.id)).toContain(id);
+  });
+
+  // `sort` is NOT NULL and orders the player-facing crime list, but the admin
+  // form does not ask for it — so create has to derive one. Appending after
+  // the current max is the only choice that never collides with a seeded row.
+  it("appends a created crime after the highest existing sort", async () => {
+    await db.insert(crimes).values({
+      id: uuidv7(), name: "Pickpocket", description: "Lift a wallet.",
+      cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
+      minBullets: 0, maxBullets: 0, expReward: 5n,
+      minRank: 0, sort: 42, jailChancePercent: 0, jailSeconds: 0,
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Bank job", description: "", cooldownSeconds: 300,
+        minPayout: "1000", maxPayout: "5000", minBullets: 0, maxBullets: 0,
+        expReward: "50", jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const [row] = await db.select().from(crimes).where(eq(crimes.id, res.json().id));
+    expect(row?.sort).toBe(43);
+  });
+
+  it("400s a create where maxPayout < minPayout", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Backwards", description: "", cooldownSeconds: 30,
+        minPayout: "500", maxPayout: "100", minBullets: 0, maxBullets: 0,
+        expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a create where maxBullets < minBullets", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Backwards bullets", description: "", cooldownSeconds: 30,
+        minPayout: "50", maxPayout: "100", minBullets: 10, maxBullets: 1,
+        expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("403s a non-admin", async () => {
     const p = await app.inject({
       method: "POST", url: "/api/auth/register",
@@ -113,6 +185,23 @@ describe("crimes admin", () => {
     const res = await app.inject({
       method: "GET", url: "/api/admin/crimes/list",
       headers: { authorization: `Bearer ${p.json().token}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("403s a non-admin creating a crime", async () => {
+    const p = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Pleb2", password: "hunter2hunter2" },
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes",
+      headers: { authorization: `Bearer ${p.json().token}` },
+      payload: {
+        name: "Sneak", description: "", cooldownSeconds: 30,
+        minPayout: "1", maxPayout: "2", minBullets: 0, maxBullets: 0,
+        expReward: "1", jailChancePercent: 0, jailSeconds: 0,
+      },
     });
     expect(res.statusCode).toBe(403);
   });
