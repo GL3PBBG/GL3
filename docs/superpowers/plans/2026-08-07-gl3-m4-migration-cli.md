@@ -51,6 +51,7 @@ SPEC §1.2's catalogue documents *columns and quirks*, not exact V2 `CREATE TABL
 5. **V2 `bounties` has no claimant column** (SPEC §1.2: `B_user`, `B_userToKill`, `B_cost` only). A row present in the dump is, by definition, still open — every migrated row gets `claimed_by = null`.
 6. **V2 `detectives` has no detective-count column** (SPEC §1.2: `D_start`/`D_end`/`D_success` only). Each V2 row is one search by one detective; migrated rows default `detectives = 1`.
 7. **`mail.M_parent` is walked to its root**, not copied 1:1, because GL3's `mail_messages.thread_id` is a flat grouping key (§2.5), while V2's `M_parent` is a parent pointer that can chain arbitrarily deep. Task 27 computes the root once per message with cycle protection (V2 has no FK enforcement, so a malformed parent cycle is possible in a real dump) and memoizes it.
+8. **`bounties` and `detective_searches` are plugin-owned in GL3.** Core migration `0007_relinquish_plugin_tables` (merged after this plan was first written) dropped both from core; the `bounties` and `detectives` plugins now own and migrate them as `p_bounties_bounties` and `p_detectives_searches`. Column sets are unchanged — only names and ownership moved. Three consequences, folded into the tasks below: `createIsolatedPgTarget` (Task 5) runs those two plugins' migrations (via `runPluginMigrations` + the plugin manifests) after the core `apps/server/drizzle` folder, or Task 28/29/30's inserts die on 42P01; the migrator gets its drizzle handles from `src/pg/plugin-tables.ts`, a hand-maintained mirror — the same pattern as `apps/server/test/helpers/plugin-tables.ts`, because the plugin packages export only their manifests; and the README (Task 33) documents that a real cutover target needs plugin migrations run (one server boot) before migrating, since `db:migrate` alone creates only core tables.
 
 ---
 
@@ -70,6 +71,7 @@ Files that change together live together. Each file below has one responsibility
 - `src/mysql/client.ts` — `createMysqlPool(mysqlUrl)`, utf8mb4-with-fallback
 - `src/mysql/fingerprint.ts` — `fingerprintV2Schema(pool)` (§4.2 item 1)
 - `src/pg/types.ts` — `Executor`, `Tx` type aliases shared by every migrator
+- `src/pg/plugin-tables.ts` — drizzle mirrors of the two plugin-owned target tables `p_bounties_bounties` / `p_detectives_searches` ("Known unknowns" item 8)
 - `src/pg/run-phase.ts` — `runPhase()`, the batched-transaction + dry-run-rollback primitive
 - `src/id-map.ts` — `getOrCreateV3Id()`, `lookupV3Id()` — the idempotency mechanism
 - `src/report.ts` — `MigrationReport` type, `createReport`, `bumpTable`, `recordOrphan`, `finishReport`, `writeReportFile`, `formatHumanSummary`
@@ -90,7 +92,7 @@ Files that change together live together. Each file below has one responsibility
 - `src/migrators/inventory.ts` — `userInventory` + `garage` → `player_items` + `garage`
 - `src/migrators/properties.ts` — `properties` → `properties`
 - `src/migrators/social.ts` — `mail` + `notifications` + `gameNews` → `mail_messages` / `notifications` / `game_news`
-- `src/migrators/bounties-detectives.ts` — `bounties` + `detectives` → `bounties` + `detective_searches`
+- `src/migrators/bounties-detectives.ts` — `bounties` + `detectives` → `p_bounties_bounties` + `p_detectives_searches` (plugin-owned — "Known unknowns" item 8)
 - `src/orchestrator.ts` — `runMigration()`, wires all 28 migrators into the 8-phase pipeline
 - `src/cli.ts` — `main(argv)`, the process entrypoint
 - `test/fixtures/v2-schema.sql` — reconstructed V2 `CREATE TABLE` statements (Task 3)
@@ -209,6 +211,8 @@ git commit -m "chore(migrate): document MariaDB admin connection for fixture tes
     "start": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@gl3/plugin-bounties": "*",
+    "@gl3/plugin-detectives": "*",
     "drizzle-orm": "^0.45.2",
     "mysql2": "^3.11.5",
     "postgres": "^3.4.5",
@@ -221,7 +225,7 @@ git commit -m "chore(migrate): document MariaDB admin connection for fixture tes
 }
 ```
 
-`apps/migrate/tsconfig.json` — references `../server` because every migrator imports the GL3 schema and `createDb` straight from `apps/server/src`, not a duplicate copy (SPEC §2.5 defines one schema, used by both apps):
+`apps/migrate/tsconfig.json` — references `../server` because every migrator imports the GL3 schema and `createDb` straight from `apps/server/src`, not a duplicate copy (SPEC §2.5 defines one schema, used by both apps). The two plugin references exist because `createIsolatedPgTarget` (Task 5) imports those plugins' manifests to create the plugin-owned target tables ("Known unknowns" item 8):
 
 ```json
 {
@@ -232,7 +236,11 @@ git commit -m "chore(migrate): document MariaDB admin connection for fixture tes
     "types": ["node"]
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../server" }]
+  "references": [
+    { "path": "../server" },
+    { "path": "../../packages/plugins/bounties" },
+    { "path": "../../packages/plugins/detectives" }
+  ]
 }
 ```
 
@@ -1043,14 +1051,15 @@ git commit -m "test(migrate): seed V2 fixture data covering every orphan/quirk c
 - Test: `apps/migrate/test/helpers/fixtures.test.ts` (extend)
 
 **Interfaces:**
-- Consumes: `DATABASE_URL` (admin base connection, same convention as `apps/server/test/helpers/isolated-db.setup.ts`), `apps/server/drizzle/*.sql` (the committed migrations — GL3 has one schema, migrated once, reused here).
-- Produces: `createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }>` — a freshly created, fully migrated (all 32 tables) Postgres database ready to be the `--pg` target.
+- Consumes: `DATABASE_URL` (admin base connection, same convention as `apps/server/test/helpers/isolated-db.setup.ts`), `apps/server/drizzle/*.sql` (the committed migrations — GL3 has one schema, migrated once, reused here), plus `runPluginMigrations` (`apps/server/src/plugins/migrate.ts`) with the `@gl3/plugin-bounties` / `@gl3/plugin-detectives` manifests — the two plugin-owned target tables are not in `apps/server/drizzle` ("Known unknowns" item 8).
+- Produces: `createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }>` — a freshly created, fully migrated (every core table plus `p_bounties_bounties` / `p_detectives_searches`) Postgres database ready to be the `--pg` target.
 
 - [ ] **Step 1: Extend the failing test**
 
 Append to `apps/migrate/test/helpers/fixtures.test.ts`:
 
 ```ts
+import { sql as sqlTag } from "drizzle-orm";
 import { createDb } from "../../../server/src/db/client.js";
 import { idMap } from "../../../server/src/db/schema/index.js";
 import { createIsolatedPgTarget } from "./fixtures.js";
@@ -1062,6 +1071,11 @@ describe("createIsolatedPgTarget", () => {
       const { db, sql } = createDb(target.url);
       const rows = await db.select().from(idMap);
       expect(rows).toEqual([]); // empty, but querying it proves the migration ran
+      // The plugin-owned target tables exist too — created by runPluginMigrations,
+      // not by apps/server/drizzle ("Known unknowns" item 8). 42P01 here means the
+      // plugin half of the helper is missing.
+      await db.execute(sqlTag`SELECT 1 FROM p_bounties_bounties LIMIT 1`);
+      await db.execute(sqlTag`SELECT 1 FROM p_detectives_searches LIMIT 1`);
       await sql.end();
     } finally {
       await target.teardown();
@@ -1079,12 +1093,18 @@ Expected: FAIL — `createIsolatedPgTarget` is not exported.
 
 Same pattern as `apps/server/test/helpers/isolated-db.setup.ts` — a uniquely-named database, migrated via the migrations folder committed in `apps/server/drizzle`, one per call rather than one per process, because (unlike that file) this is a plain helper function each test calls explicitly, not a vitest `setupFile` — this package has no ambient env-var config to hijack.
 
+After the core folder, the helper runs the `bounties` and `detectives` plugins' migrations through the exact production code path (`runPluginMigrations` + the real manifests) — not a copy of their DDL — because those two plugins own the migrator's target tables ("Known unknowns" item 8). Core migrations first is load-bearing: `runPluginMigrations` writes its tracking rows to `plugin_migrations`, which core `0004_plugin_runtime` creates, and `p_bounties_bounties`'s FKs reference `players`, which core `0000` creates.
+
 Append to `apps/migrate/src/../test/helpers/fixtures.ts`:
 
 ```ts
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import bountiesPlugin from "@gl3/plugin-bounties";
+import detectivesPlugin from "@gl3/plugin-detectives";
+import { createDb } from "../../../server/src/db/client.js";
+import { runPluginMigrations } from "../../../server/src/plugins/migrate.js";
 
 const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url).pathname;
 
@@ -1109,6 +1129,15 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
     await migrator.end();
   }
 
+  // The two plugin-owned target tables ("Known unknowns" item 8), created the
+  // same way apps/server's loader creates them at boot.
+  const pluginDb = createDb(target.toString());
+  try {
+    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin]);
+  } finally {
+    await pluginDb.sql.end();
+  }
+
   return {
     url: target.toString(),
     teardown: async () => {
@@ -1131,7 +1160,7 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run apps/migrate/test/helpers/fixtures.test.ts`
-Expected: PASS, 3 tests. (This test is real and slow — it spins up a full Postgres database and runs every M0–M3 migration. That's the point: it proves `apps/migrate` targets the exact same schema `apps/server` boots against, not a drifted copy.)
+Expected: PASS, 3 tests. (This test is real and slow — it spins up a full Postgres database and runs every core migration plus the two plugins' migrations. That's the point: it proves `apps/migrate` targets the exact same schema `apps/server` boots against, not a drifted copy.)
 
 - [ ] **Step 5: Run the full gate and commit**
 
@@ -4243,23 +4272,68 @@ git commit -m "feat(migrate): social migrator — mail thread-root walk, notific
 
 ### Task 28: Bounties + detectives migrator
 
-Implements "Known unknowns" items 5 and 6: no claimant column in V2 bounties (`claimed_by` is always `null` on migration) and no detective-count column (`detectives` defaults to `1`).
+Implements "Known unknowns" items 5 and 6: no claimant column in V2 bounties (`claimed_by` is always `null` on migration) and no detective-count column (`detectives` defaults to `1`). The target tables are plugin-owned (`p_bounties_bounties` / `p_detectives_searches`, item 8), so this task also creates `src/pg/plugin-tables.ts` — the hand-maintained drizzle mirror of the two tables, same pattern as `apps/server/test/helpers/plugin-tables.ts`.
 
 **Files:**
+- Create: `apps/migrate/src/pg/plugin-tables.ts`
 - Create: `apps/migrate/src/migrators/bounties-detectives.ts`
 - Test: `apps/migrate/test/migrators/bounties-detectives.test.ts`
 
 **Interfaces:**
-- Consumes: `bounties`/`detectiveSearches` schema tables; `migratePlayers` (+ setup) as test seed.
-- Produces: `migrateBountiesAndDetectives(mysql, exec, report): Promise<void>`.
+- Consumes: `bounties`/`detectiveSearches` drizzle handles from `src/pg/plugin-tables.ts`; `migratePlayers` (+ setup) as test seed.
+- Produces: `migrateBountiesAndDetectives(mysql, exec, report): Promise<void>`; the `plugin-tables.ts` mirrors (also imported by Tasks 29–30's tests).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the mirror file**
+
+`apps/migrate/src/pg/plugin-tables.ts`:
+
+```ts
+import { bigint, boolean, integer, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+
+/**
+ * Drizzle handles for the two plugin-owned tables the migrator writes.
+ *
+ * Core relinquished `bounties` and `detective_searches` in
+ * `0007_relinquish_plugin_tables`; the `bounties`/`detectives` plugins own and
+ * migrate them as `p_bounties_bounties` / `p_detectives_searches`. The plugin
+ * packages export only their manifests, so this is a MIRROR — the same pattern
+ * as `apps/server/test/helpers/plugin-tables.ts`: the DDL in each plugin's
+ * `migrations.ts` is the definition, and these must be kept in step by hand.
+ *
+ * Foreign keys are omitted, as in that file: drizzle only needs `references`
+ * to generate DDL, and nothing here generates DDL — `createIsolatedPgTarget`
+ * runs the plugins' real migrations.
+ */
+
+/** Mirrors `packages/plugins/bounties/src/migrations.ts` `0001_bounties`. */
+export const bounties = pgTable("p_bounties_bounties", {
+  id: uuid("id").primaryKey(),
+  placedBy: uuid("placed_by").notNull(),
+  target: uuid("target").notNull(),
+  amount: bigint("amount", { mode: "bigint" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  claimedBy: uuid("claimed_by"),
+});
+
+/** Mirrors `packages/plugins/detectives/src/migrations.ts` `0001_searches`. */
+export const detectiveSearches = pgTable("p_detectives_searches", {
+  id: uuid("id").primaryKey(),
+  playerId: uuid("player_id").notNull(),
+  targetPlayerId: uuid("target_player_id").notNull(),
+  detectives: integer("detectives").notNull().default(1),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  succeeded: boolean("succeeded"),
+});
+```
+
+- [ ] **Step 1b: Write the failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../../server/src/db/client.js";
-import { bounties, detectiveSearches } from "../../../server/src/db/schema/index.js";
+import { bounties, detectiveSearches } from "../../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "../helpers/fixtures.js";
 import { createReport } from "../../src/report.js";
 import { migrateRoles } from "../../src/migrators/roles.js";
@@ -4319,7 +4393,7 @@ Expected: FAIL — cannot resolve `../../src/migrators/bounties-detectives.js`.
 
 ```ts
 import type mysql from "mysql2/promise";
-import { bounties, detectiveSearches } from "../../../server/src/db/schema/index.js";
+import { bounties, detectiveSearches } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
 import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
@@ -4384,8 +4458,8 @@ Expected: PASS, 1 test.
 
 ```bash
 npm run verify
-git add apps/migrate/src/migrators/bounties-detectives.ts apps/migrate/test/migrators/bounties-detectives.test.ts
-git commit -m "feat(migrate): bounties + detectives migrator"
+git add apps/migrate/src/pg/plugin-tables.ts apps/migrate/src/migrators/bounties-detectives.ts apps/migrate/test/migrators/bounties-detectives.test.ts
+git commit -m "feat(migrate): bounties + detectives migrator into plugin-owned tables"
 ```
 
 ---
@@ -4411,10 +4485,11 @@ import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../server/src/db/client.js";
 import {
-  bounties, crimes, detectiveSearches, gangMembers, gangs, garage, idMap, items,
+  crimes, gangMembers, gangs, garage, idMap, items,
   mailMessages, notifications, playerItems, players, properties, ranks, roles,
   rounds, settings,
 } from "../../server/src/db/schema/index.js";
+import { bounties, detectiveSearches } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";
@@ -4599,11 +4674,12 @@ import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../server/src/db/client.js";
 import {
-  bounties, crimes, detectiveSearches, gangInvites, gangLogs, gangMembers, gangPermissions,
+  crimes, gangInvites, gangLogs, gangMembers, gangPermissions,
   gangs, garage, idMap, items, locations, mailMessages, notifications, playerCrimeSkill,
   playerItems, players, playerStats, playerTimers, properties, ranks, roleModuleAccess,
   roles, rounds, settings, weapons,
 } from "../../server/src/db/schema/index.js";
+import { bounties, detectiveSearches } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";
@@ -5023,6 +5099,19 @@ git commit -m "feat(migrate): CLI wiring — main(argv), preflight gate, JSON+hu
 `gl3-migrate` converts a live Gangster Legends V2 MySQL database into a GL3 PostgreSQL
 database. Players keep their accounts (passwords are lazy-rehashed on first login —
 see SPEC §4.3), cash, gangs, and inventories.
+
+## Preparing the target
+
+\`gl3-migrate\` writes into an existing GL3 schema; it does not create one. Two of its
+target tables (\`p_bounties_bounties\`, \`p_detectives_searches\`) are plugin-owned and
+are created by plugin migrations at server boot, not by \`db:migrate\`. So, against a
+fresh database:
+
+\`\`\`bash
+cd apps/server
+DATABASE_URL=postgres://user:pass@host/gl3db npm run db:migrate   # core tables
+DATABASE_URL=... npm start   # boot once so loadPlugins runs the plugin migrations, then stop it
+\`\`\`
 
 ## Usage
 
