@@ -9,7 +9,7 @@ export interface RouteResult {
 export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny> {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
-  auth?: "player" | "public";
+  auth?: "player" | "public" | "admin";
   /** V2 module.json parity. Default true — only actions gate on jail. */
   accessInJail?: boolean;
   /**
@@ -34,7 +34,7 @@ export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny> {
 export interface PluginRoute {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
-  auth: "player" | "public";
+  auth: "player" | "public" | "admin";
   accessInJail: boolean;
   accessInHospital: boolean;
   params: z.ZodTypeAny;

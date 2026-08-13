@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { definePlugin } from "../src/index.js";
+import { definePlugin, route } from "../src/index.js";
 
 const valid = { id: "bounties", version: "1.0.0", basePaths: ["/api/bounties"] };
 
@@ -116,5 +116,54 @@ describe("definePlugin", () => {
 
   it("still reports an invalid manifest when id is present but not a string", () => {
     expect(() => definePlugin({ ...valid, id: 7 })).toThrow(/invalid plugin manifest/);
+  });
+});
+
+describe("adminPages", () => {
+  it("normalizes absent adminPages to []", () => {
+    const m = definePlugin({ id: "hello", version: "1.0.0", basePaths: ["/api/hello"] });
+    expect(m.adminPages).toEqual([]);
+  });
+
+  it("accepts a valid admin page and preserves it", () => {
+    const m = definePlugin({
+      id: "hello", version: "1.0.0", basePaths: ["/api/hello", "/api/admin/hello"],
+      adminPages: [{
+        id: "hello-admin", path: "/admin/hello",
+        view: { kind: "panel", title: "Hello Admin", children: [{ kind: "text", value: "hi" }] },
+      }],
+    });
+    expect(m.adminPages).toHaveLength(1);
+    expect(m.adminPages[0]?.path).toBe("/admin/hello");
+  });
+
+  it("rejects an admin page whose path is outside /admin/", () => {
+    expect(() => definePlugin({
+      id: "hello", version: "1.0.0", basePaths: ["/api/hello"],
+      adminPages: [{
+        id: "hello-admin", path: "/hello",
+        view: { kind: "text", value: "hi" },
+      }],
+    })).toThrow(/admin page path must start with \/admin\//);
+  });
+
+  it("rejects a malformed admin page view at definition time", () => {
+    expect(() => definePlugin({
+      id: "hello", version: "1.0.0", basePaths: ["/api/hello"],
+      adminPages: [{
+        id: "hello-admin", path: "/admin/hello",
+        view: { kind: "nonsense" },
+      }],
+    })).toThrow(/invalid plugin manifest/);
+  });
+});
+
+describe("route auth admin", () => {
+  it("route() accepts auth admin and carries it through", () => {
+    const r = route({
+      method: "GET", path: "/api/admin/hello/things", auth: "admin",
+      handler: async () => ({ status: 200 }),
+    });
+    expect(r.auth).toBe("admin");
   });
 });

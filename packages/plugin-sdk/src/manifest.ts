@@ -28,6 +28,7 @@ export interface PluginManifestInput {
   migrations?: PluginMigration[];
   routes?: PluginRoute[];
   pages?: PageSchema[];
+  adminPages?: PageSchema[];
   events?: PluginEventDecl[];
   jobs?: Record<string, unknown>;
   provides?: FilterPoint<unknown>[];
@@ -43,6 +44,7 @@ export interface PluginManifest {
   migrations: PluginMigration[];
   routes: PluginRoute[];
   pages: PageSchema[];
+  adminPages: PageSchema[];
   events: PluginEventDecl[];
   jobs: Record<string, unknown>;
   provides: FilterPoint<unknown>[];
@@ -97,6 +99,14 @@ const InputSchema = z
     migrations: z.array(MigrationSchema).optional(),
     routes: z.array(z.custom<PluginRoute>()).optional(),
     pages: z.array(PageSchemaSchema).optional(),
+    adminPages: z
+      .array(
+        PageSchemaSchema.refine((p) => p.path === "/admin" || p.path.startsWith("/admin/"), {
+          message: "admin page path must start with /admin/",
+          path: ["path"],
+        }),
+      )
+      .optional(),
     events: z.array(PluginEventDeclSchema).optional(),
     jobs: z.record(z.unknown()).optional(),
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
@@ -167,6 +177,7 @@ export function definePlugin(input: PluginManifestInput): PluginManifest {
     migrations: parsed.migrations ?? [],
     routes: parsed.routes ?? [],
     pages: parsed.pages ?? [],
+    adminPages: parsed.adminPages ?? [],
     events: parsed.events ?? [],
     jobs: parsed.jobs ?? {},
     provides: parsed.provides ?? [],
