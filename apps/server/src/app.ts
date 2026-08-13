@@ -14,6 +14,7 @@ import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
 import { loadSettings } from "./settings/load.js";
+import { registerAdminRoutes } from "./admin/routes.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
@@ -120,6 +121,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   }
 
   registerPluginsEndpoint(app, loaded.payload);
+  registerAdminRoutes(app, deps.db, loaded.manifests);
 
   return app;
 }
