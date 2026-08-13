@@ -233,6 +233,7 @@ export default defineWorkspace([
         "test/detectives-worker.test.ts",
         "test/detectives.test.ts",
         "test/economy-invariant.test.ts",
+        "test/first-admin.test.ts",
         "test/gang-bank.test.ts",
         "test/gang-invites.test.ts",
         "test/gang-lock-order.test.ts",

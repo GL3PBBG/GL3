@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
@@ -6,7 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { LoginRequestSchema, RegisterRequestSchema } from "@gl3/shared";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
-import { players, playerStats } from "../db/schema/index.js";
+import { players, playerStats, roleModuleAccess, roles } from "../db/schema/index.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
 import { createSession, destroySession, readSession } from "./session.js";
@@ -68,6 +68,19 @@ export function registerAuthRoutes(
           passwordHash,
         });
         await tx.insert(playerStats).values({ playerId });
+
+        // First-player-ever becomes Administrator. The advisory lock is
+        // load-bearing: under read committed, two concurrent first registrations
+        // each see only their own insert — both would count 1 and both would claim
+        // admin. The lock serializes count-and-claim; it releases at commit.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(7461001)`);
+        const rows = await tx.select({ n: sql<number>`count(*)` }).from(players);
+        if (Number(rows[0]?.n) === 1) {
+          const adminRoleId = uuidv7();
+          await tx.insert(roles).values({ id: adminRoleId, name: "Administrator" });
+          await tx.insert(roleModuleAccess).values({ roleId: adminRoleId, moduleKey: "*" });
+          await tx.update(players).set({ roleId: adminRoleId }).where(eq(players.id, playerId));
+        }
       });
     } catch (err) {
       // Unique index is the real arbiter; the pre-check above only saves a hash round.
