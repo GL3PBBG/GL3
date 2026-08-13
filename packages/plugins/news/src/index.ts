@@ -89,7 +89,7 @@ export default definePlugin({
           await tx.events.publishCore({
             type: "news.posted",
             actorId: playerId,
-            actorName: author.username ?? "unknown",
+            actorName: author?.username ?? "unknown",
             audience: { kind: "global" },
             newsId: id,
             title: body.title,
