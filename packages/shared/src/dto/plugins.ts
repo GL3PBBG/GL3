@@ -38,6 +38,9 @@ export const VIEW_ACTION_RE = /^(GET|POST|PUT|PATCH|DELETE) \/(?![/\\])[^\s\\]*$
  */
 export const COOLDOWN_ACTION_RE = /^[a-z][a-z0-9_-]*$/;
 
+/** Shared by `table.source` and select `optionsSource`: a GET against an app-internal absolute path. */
+const GET_SOURCE_RE = /^GET \/(?![/\\])[^\s\\]*$/;
+
 /**
  * `panel` and `list` nest without limit, and the schema that parses them is
  * recursive — so the bound has to be checked *before* the recursive parse runs,
@@ -133,12 +136,29 @@ const leafOptions = [
     kind: z.literal("form"),
     action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
     submitLabel: z.string(),
+    // Two strict branches, kept identical to the SDK's copy: select carries
+    // its options wiring, the basic branch does not — so select-only
+    // properties cannot ride on a text field and silently vanish in the
+    // renderer.
     fields: z.array(
-      z.object({
-        name: z.string(),
-        label: z.string(),
-        type: z.enum(["text", "number", "money", "password"]),
-      }).strict(),
+      z.union([
+        z.object({
+          name: z.string(),
+          label: z.string(),
+          type: z.literal("select"),
+          // Same rule and same reason as `table.source`: options render on
+          // mount, so the fetch must never mutate.
+          optionsSource: z.string().regex(GET_SOURCE_RE, "optionsSource must be `GET /absolute/path`"),
+          valueKey: z.string(),
+          labelKey: z.string(),
+          allowEmpty: z.boolean().optional(),
+        }).strict(),
+        z.object({
+          name: z.string(),
+          label: z.string(),
+          type: z.enum(["text", "number", "money", "password"]),
+        }).strict(),
+      ]),
     ),
   }).strict(),
   z
@@ -149,7 +169,7 @@ const leafOptions = [
        * loader's containment pass treats this as a view action, so it must
        * live under the plugin's basePaths like any button/form action.
        */
-      source: z.string().regex(/^GET \/(?![/\\])[^\s\\]*$/, "table source must be `GET /absolute/path`"),
+      source: z.string().regex(GET_SOURCE_RE, "table source must be `GET /absolute/path`"),
       columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
     })
     .strict(),

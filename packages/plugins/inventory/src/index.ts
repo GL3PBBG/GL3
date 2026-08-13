@@ -335,6 +335,19 @@ const adminShopListRoute = route({
   },
 });
 
+// Feeds the shop form's location select. The shop listing cannot serve that
+// role: it lists existing stock rows, which is empty exactly when the admin
+// stocks a location for the first time.
+const adminLocationListRoute = route({
+  method: "GET", path: "/api/admin/inventory/locations", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select({ id: locations.id, name: locations.name }).from(locations),
+    );
+    return { status: 200, body: { rows } };
+  },
+});
+
 const adminShopUpsertRoute = route({
   method: "POST", path: "/api/admin/inventory/shop", auth: "admin",
   body: ShopStockBodySchema,
@@ -411,8 +424,8 @@ const adminPage: PageSchema = {
             { key: "stock", label: "Stock" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/shop", submitLabel: "Set stock", fields: [
-            { name: "locationId", label: "Location id (paste from table)", type: "text" },
-            { name: "itemId", label: "Item id (paste from table)", type: "text" },
+            { name: "locationId", label: "Location", type: "select", optionsSource: "GET /api/admin/inventory/locations", valueKey: "id", labelKey: "name" },
+            { name: "itemId", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
             { name: "price", label: "Price", type: "money" },
             { name: "stock", label: "Stock", type: "number" },
           ] },
@@ -431,6 +444,7 @@ export default definePlugin({
   routes: [
     listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute,
     adminItemListRoute, adminItemCreateRoute, adminShopListRoute, adminShopUpsertRoute,
+    adminLocationListRoute,
   ],
   events: [purchasedEvent],
   // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts

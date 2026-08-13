@@ -87,7 +87,7 @@ const adminRanksPage: PageSchema = {
         { key: "maxHealth", label: "Max health" },
       ] },
       { kind: "form", action: "POST /api/admin/ranks/update", submitLabel: "Update rank", fields: [
-        { name: "id", label: "Rank id (paste from table)", type: "text" },
+        { name: "id", label: "Rank", type: "select", optionsSource: "GET /api/admin/ranks/list", valueKey: "id", labelKey: "name" },
         { name: "name", label: "Name", type: "text" },
         { name: "expRequired", label: "Exp required", type: "money" },
         { name: "cashReward", label: "Cash reward", type: "money" },

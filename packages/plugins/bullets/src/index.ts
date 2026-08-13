@@ -76,7 +76,7 @@ const adminPage: PageSchema = {
         { key: "bulletCost", label: "Cost" },
       ] },
       { kind: "form", action: "POST /api/admin/bullets/stock", submitLabel: "Set stock", fields: [
-        { name: "locationId", label: "Location id (paste from table)", type: "text" },
+        { name: "locationId", label: "Location", type: "select", optionsSource: "GET /api/admin/bullets/stock", valueKey: "id", labelKey: "name" },
         { name: "bulletStock", label: "Bullet stock", type: "number" },
         { name: "bulletCost", label: "Bullet cost", type: "money" },
       ] },

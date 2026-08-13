@@ -159,6 +159,42 @@ describe("validatePlugins view-action containment", () => {
     expect(() => validatePlugins([manifest])).toThrow(/POST \/api\/bank\/withdraw/);
   });
 
+  it("accepts a select field's optionsSource inside the plugin's basePaths", () => {
+    const manifest = withPage({
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{
+        name: "thingId",
+        label: "Thing",
+        type: "select",
+        optionsSource: "GET /api/hello/things",
+        valueKey: "id",
+        labelKey: "name",
+      }],
+    });
+    expect(() => validatePlugins([manifest])).not.toThrow();
+  });
+
+  // `optionsSource` fetches on mount exactly like `table.source` — an
+  // uncontained one would let a page read any endpoint in the app.
+  it("rejects a select field's out-of-scope optionsSource, naming the source", () => {
+    const manifest = withPage({
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{
+        name: "thingId",
+        label: "Thing",
+        type: "select",
+        optionsSource: "GET /api/bank/accounts",
+        valueKey: "id",
+        labelKey: "name",
+      }],
+    });
+    expect(() => validatePlugins([manifest])).toThrow(/GET \/api\/bank\/accounts/);
+  });
+
   // `link.to` is an app-internal client route (`/plugins/:pageId`), not an HTTP
   // endpoint, so it is deliberately outside containment — `INTERNAL_PATH_RE` is
   // the rule that applies to it. Containing it would forbid the one link the

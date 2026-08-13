@@ -97,8 +97,15 @@ function viewActions(view: ViewNode): string[] {
     switch (node.kind) {
       case "button":
       case "cooldownButton":
+        actions.push(node.action);
+        break;
       case "form":
         actions.push(node.action);
+        // A select field's `optionsSource` fetches on mount exactly like
+        // `table.source`, so it is contained the same way.
+        for (const field of node.fields) {
+          if (field.type === "select") actions.push(field.optionsSource);
+        }
         break;
       case "table":
         actions.push(node.source);
