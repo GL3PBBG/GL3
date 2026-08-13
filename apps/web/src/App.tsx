@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { useMe } from "./api/queries.js";
 import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
+import { Admin } from "./pages/Admin.js";
 import { Bank } from "./pages/Bank.js";
 import { Bounties } from "./pages/Bounties.js";
 import { Detectives } from "./pages/Detectives.js";
@@ -75,6 +76,7 @@ export function App(): JSX.Element {
             top-level registration waits on a collision check.
           */}
           <Route path="plugins/:pageId" element={<PluginPage />} />
+          <Route path="admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
