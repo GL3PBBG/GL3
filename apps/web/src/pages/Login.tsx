@@ -14,7 +14,7 @@ export function Login(): JSX.Element {
       className={styles.form}
       onSubmit={(event) => { event.preventDefault(); auth.mutate({ username, password }); }}
     >
-      <h1 className={styles.brand}>Gangster Legends</h1>
+      <h1 className={styles.brand}>GL3</h1>
       <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" />
       <input
         value={password}
