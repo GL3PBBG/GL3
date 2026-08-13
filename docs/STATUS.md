@@ -1,8 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-13, table-ownership correction (bounties/detectives/combat
-tables moved out of core).
-Branch: `refactor/plugin-table-ownership`.
+Last updated: 2026-08-13, **M4 migration CLI complete** (all 33 tasks, both SPEC §6
+acceptance criteria proven).
+Branch: `feat/m4-migration-cli`.
 
 ---
 
@@ -14,10 +14,11 @@ Branch: `refactor/plugin-table-ownership`.
 | **M1 Auth + vertical slice** | ✅ complete | Acceptance criterion proven end to end |
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
-| **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
+| **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 111 files / 968 tests**, `npm run verify` exit 0.
+**Suite: 141 files / 1025 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+57 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
 
 The **admin usability pass** on top of that added one file and 27 tests:
 `admin-ids-hidden` (8, a unit-project walk over every core `adminPages` view
@@ -1068,20 +1069,7 @@ and the foreign-key assertion. `schema.test.ts`'s three census figures moved
 with the tables — 47 → 39 foreign keys (24 cascade, 15 set null) and 30 → 27
 non-primary-key indexes.
 
-## Starting M4
-
-Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
-install below.
-
-Extract a task brief with:
-
-```bash
-.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/\
-subagent-driven-development/scripts/task-brief \
-  docs/superpowers/plans/2026-08-07-gl3-m4-migration-cli.md 1
-```
-
-### What M3 established that later work must not undo
+## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
   are two orders and they do not conflict: gang↔player goes through
@@ -1112,24 +1100,47 @@ subagent-driven-development/scripts/task-brief \
 
 ---
 
-## M4 is blocked on one command from you
+## M4 — the migration CLI (complete)
 
-M4 builds the CLI that converts a live V2 **MySQL** database into GL3 Postgres. To
-test a MySQL reader honestly, the tests need a MySQL-compatible server. Docker is
-unavailable here, so the plan uses MariaDB as the wire-compatible substitute.
+`apps/migrate` converts a live V2 **MySQL** database into GL3 Postgres. All 33 plan
+tasks shipped on `feat/m4-migration-cli`; `apps/migrate/README.md` is the operator
+documentation. Shape:
 
-```bash
-sudo apt-get install -y mariadb-server mariadb-client && sudo service mariadb start
-```
+- **18 migrators** composed by `orchestrator.ts` into the 8-phase pipeline SPEC §4.2
+  orders (roles → rounds → content → players → gangs → inventory/properties → social
+  → settings), one Postgres transaction per phase via `runPhase`.
+- **Idempotency is a table, not a convention.** `id_map(v2_table, v2_id) -> v3_id`
+  resolves every V2 auto-increment id to a stable UUIDv7, so a re-run updates in place.
+  `orchestrator-idempotency.test.ts` runs the whole pipeline three times and asserts
+  identical counts across all 26 target tables — SPEC §6's first criterion.
+- **The V2 login criterion is proven against the real server**, not a stub:
+  `legacy-login.test.ts` is the only migrate test that boots Fastify (`bootTestServer`)
+  against a just-migrated database, logs a V2 player in with their plaintext V2
+  password, and asserts the lazy argon2id upgrade — and that re-running the migrator
+  afterwards does not revert it. SPEC §6's second criterion.
+- **The ledger cannot start empty.** V2 keeps only current balances, but CLAUDE.md
+  rule 3 requires `sum(ledger) == balance`, so the players migrator writes one
+  `migration.opening_balance` row per non-zero balance kind — directly, *not* through
+  `applyBalanceChange`, which would double-count. Deterministic `job_id` makes those
+  inserts idempotent through the same UNIQUE that guards the crime worker.
+- **Orphans are data, not errors.** V2 has no foreign keys; rows referencing deleted
+  users/gangs/items are skipped and counted in the report, never fatal.
+- **The bin is bundled, not just compiled.** `dist/cli.js` is an esbuild bundle
+  because `apps/migrate` imports the server's schema and db client across a project
+  boundary and `tsc` emits those relative specifiers verbatim — the plain `tsc` output
+  died at load with `ERR_MODULE_NOT_FOUND`, invisible to a suite that only ever calls
+  `main()` through vitest's resolver.
 
-`sudo` needs a password, so this has to be run by a human. Task 1 of
-`docs/superpowers/plans/2026-08-07-gl3-m4-migration-cli.md` has the full setup.
+Two environment notes that outlive the milestone: MariaDB 10.11.14 is installed
+natively as the wire-compatible MySQL substitute and hosts only throwaway test
+fixtures (`MYSQL_ADMIN_URL`, see `.env.example`), and `apps/migrate/vitest.config.ts`
+exists because the project was a bare directory entry inheriting vitest's default
+5s `testTimeout` while every other Postgres-touching project got 30s — under full
+load that timed out 30 tests with no assertion failure anywhere.
 
-**To be clear: GL3 remains Postgres-only.** `apps/server`, `apps/web` and
-`packages/shared` have zero MySQL dependencies. `mysql2` appears only in the planned
-`apps/migrate` package, and MariaDB only ever hosts a throwaway test fixture. The
-data flow is one-way — V2 MySQL → GL3 Postgres — and the migrator is a one-shot
-cutover tool.
+**GL3 remains Postgres-only.** `apps/server`, `apps/web` and `packages/shared` have
+zero MySQL dependencies. `mysql2` appears only in `apps/migrate`. The data flow is
+one-way — V2 MySQL → GL3 Postgres — and the migrator is a one-shot cutover tool.
 
 ---
 

@@ -59,8 +59,12 @@ owns and migrates it (`p_bounties_bounties`, `p_detectives_searches`,
 `p_combat_log`), so five of fourteen plugins declare migrations rather than
 two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 `p_oc_*` which have none: keeping them leaves the lock graph exactly as it was.
-Suite: **111 files / 968 tests**, `npm run verify` exit 0.
-M4 (migration CLI) is planned and blocked on a MariaDB install.
+**M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
+§6 acceptance criteria proven (a three-run idempotency test over all 26 target
+tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
+upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
+bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
+Suite: **141 files / 1025 tests**, `npm run verify` exit 0.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
