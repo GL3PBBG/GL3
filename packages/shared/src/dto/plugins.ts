@@ -223,3 +223,14 @@ export const TableRowsResponseSchema = z.object({
   rows: z.array(z.record(z.string())),
 }).strict();
 export type TableRowsResponse = z.infer<typeof TableRowsResponseSchema>;
+
+/** `GET /api/admin/plugins` — admin sections grouped by plugin. */
+export const AdminSectionsResponseSchema = z.object({
+  sections: z.array(
+    z.object({
+      pluginId: z.string().min(1),
+      pages: z.array(PagePayloadSchema),
+    }).strict(),
+  ),
+}).strict();
+export type AdminSectionsResponse = z.infer<typeof AdminSectionsResponseSchema>;

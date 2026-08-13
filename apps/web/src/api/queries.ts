@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
+  AdminSectionsResponseSchema,
   AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
   BuyBulletsResponseSchema, BuyItemResponseSchema, CombatLogResponseSchema,
@@ -17,6 +18,7 @@ import {
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
+  type AdminSectionsResponse,
   type AttackResponse, type BankStatusResponse, type BountyListResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse, type CombatLogResponse,
@@ -713,5 +715,19 @@ export function useExecute(heistId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.oc() });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin
+// ---------------------------------------------------------------------------
+
+export function useAdminSections() {
+  const me = useMe();
+  return useQuery<AdminSectionsResponse>({
+    queryKey: keys.adminSections(),
+    queryFn: async () => AdminSectionsResponseSchema.parse(await api("/api/admin/plugins")),
+    enabled: (me.data?.grants.length ?? 0) > 0,
+    retry: false,
   });
 }

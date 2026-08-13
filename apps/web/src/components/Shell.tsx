@@ -116,6 +116,16 @@ export function Shell(): JSX.Element {
           `path` — see the routing note in App.tsx. `pageId` is only constrained
           to be non-empty, so it is encoded rather than trusted as a path segment.
         */}
+        {me.data && me.data.grants.length > 0 ? (
+          <NavLink
+            to="/admin"
+            className={({ isActive }) =>
+              isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+            }
+          >
+            Admin
+          </NavLink>
+        ) : null}
         {pluginLinks.map((entry) => (
           <NavLink
             key={entry.pageId}
