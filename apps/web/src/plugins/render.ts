@@ -13,6 +13,7 @@ export type RenderInstruction =
   | { kind: "cooldownButton"; label: string; action: string; cooldownAction: string }
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
   | { kind: "form"; action: string; submitLabel: string; fields: { name: string; label: string; type: "text" | "number" | "money" | "password" }[] }
+  | { kind: "table"; source: string; columns: { key: string; label: string }[] }
   | { kind: "panelHeader"; title: string };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -72,6 +73,13 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       type: isRecord(f) && isFieldType(f.type) ? f.type : ("text" as const),
     }));
     return [{ kind: "form", action: String(node.action), submitLabel: String(node.submitLabel), fields }];
+  }
+  if (isNode(node, "table")) {
+    const columns = childArray(node.columns).map((c) => ({
+      key: isRecord(c) ? String(c.key) : "",
+      label: isRecord(c) ? String(c.label) : "",
+    }));
+    return [{ kind: "table", source: String(node.source), columns }];
   }
   if (isNode(node, "panel")) {
     const out: RenderInstruction[] = [{ kind: "panelHeader", title: String(node.title) }];
