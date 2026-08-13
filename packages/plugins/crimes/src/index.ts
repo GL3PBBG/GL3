@@ -2,7 +2,7 @@ import {
   definePlugin, PluginError, route,
   type PageSchema, type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { crimeLog, crimes, playerCrimeSkill, playerStats, players } from "./schema.js";
@@ -230,6 +230,32 @@ const CrimeUpdateSchema = z.object({
   message: "maxPayout must be >= minPayout",
 });
 
+/**
+ * Create carries four columns update does not: `name` and `description` are
+ * NOT NULL with no sensible edit path once set, and `minBullets`/`maxBullets`
+ * gate the crime's cost. `sort` is deliberately absent — the handler derives
+ * it, since asking an admin for a manual ordering integer is how two crimes
+ * end up sharing one.
+ */
+const CrimeCreateSchema = z.object({
+  name: z.string().min(1).max(80),
+  description: z.string().max(500),
+  cooldownSeconds: z.coerce.number().int().nonnegative(),
+  minPayout: AdminMoney,
+  maxPayout: AdminMoney,
+  minBullets: z.coerce.number().int().nonnegative(),
+  maxBullets: z.coerce.number().int().nonnegative(),
+  expReward: AdminMoney,
+  jailChancePercent: z.coerce.number().int().nonnegative().max(100),
+  jailSeconds: z.coerce.number().int().nonnegative(),
+}).strict()
+  .refine((b) => BigInt(b.maxPayout) >= BigInt(b.minPayout), {
+    message: "maxPayout must be >= minPayout",
+  })
+  .refine((b) => b.maxBullets >= b.minBullets, {
+    message: "maxBullets must be >= minBullets",
+  });
+
 const adminCrimesListRoute = route({
   method: "GET", path: "/api/admin/crimes/list", auth: "admin",
   handler: async (ctx) => {
@@ -250,6 +276,34 @@ const adminCrimesListRoute = route({
         })),
       },
     };
+  },
+});
+
+const adminCrimesCreateRoute = route({
+  method: "POST", path: "/api/admin/crimes", auth: "admin",
+  body: CrimeCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      // Read the current max inside the same transaction as the insert: two
+      // concurrent creates that both read the old max would otherwise both
+      // claim the same `sort`, and the player list orders by it.
+      const [top] = await tx.db.select({ sort: crimes.sort })
+        .from(crimes).orderBy(desc(crimes.sort)).limit(1);
+      await tx.db.insert(crimes).values({
+        id, name: body.name, description: body.description,
+        cooldownSeconds: body.cooldownSeconds,
+        minPayout: BigInt(body.minPayout),
+        maxPayout: BigInt(body.maxPayout),
+        minBullets: body.minBullets,
+        maxBullets: body.maxBullets,
+        expReward: BigInt(body.expReward),
+        jailChancePercent: body.jailChancePercent,
+        jailSeconds: body.jailSeconds,
+        sort: (top?.sort ?? 0) + 1,
+      });
+    });
+    return { status: 201, body: { id } };
   },
 });
 
@@ -283,13 +337,25 @@ const adminCrimesPage: PageSchema = {
     kind: "panel", title: "Crimes",
     children: [
       { kind: "table", source: "GET /api/admin/crimes/list", columns: [
-        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "name", label: "Name" },
         { key: "cooldownSeconds", label: "Cooldown (s)" },
         { key: "minPayout", label: "Min payout" },
         { key: "maxPayout", label: "Max payout" },
         { key: "expReward", label: "Exp" },
         { key: "jailChancePercent", label: "Jail %" },
         { key: "jailSeconds", label: "Jail (s)" },
+      ] },
+      { kind: "form", action: "POST /api/admin/crimes", submitLabel: "Add crime", fields: [
+        { name: "name", label: "Name", type: "text" },
+        { name: "description", label: "Description", type: "text" },
+        { name: "cooldownSeconds", label: "Cooldown seconds", type: "number" },
+        { name: "minPayout", label: "Min payout", type: "money" },
+        { name: "maxPayout", label: "Max payout", type: "money" },
+        { name: "minBullets", label: "Min bullets", type: "number" },
+        { name: "maxBullets", label: "Max bullets", type: "number" },
+        { name: "expReward", label: "Exp reward", type: "money" },
+        { name: "jailChancePercent", label: "Jail chance %", type: "number" },
+        { name: "jailSeconds", label: "Jail seconds", type: "number" },
       ] },
       { kind: "form", action: "POST /api/admin/crimes/update", submitLabel: "Update crime", fields: [
         { name: "id", label: "Crime", type: "select", optionsSource: "GET /api/admin/crimes/list", valueKey: "id", labelKey: "name" },
@@ -312,7 +378,7 @@ export default definePlugin({
   id: "crimes",
   version: "1.0.0",
   basePaths: ["/api/crimes", "/api/admin/crimes"],
-  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesUpdateRoute],
+  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a

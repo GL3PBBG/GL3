@@ -1,6 +1,6 @@
 # GL3 project status
 
-Last updated: 2026-08-13, admin + ABAC-lite authz.
+Last updated: 2026-08-13, admin usability pass (id-free tables, create flows).
 Branch: `feat/admin-abac`.
 
 ---
@@ -16,7 +16,22 @@ Branch: `feat/admin-abac`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 110 files / 927 tests**, green across repeated back-to-back runs.
+**Suite: 111 files / 966 tests**, `npm run verify` exit 0.
+
+The **admin usability pass** on top of that added one file and 27 tests:
+`admin-ids-hidden` (8, a unit-project walk over every core `adminPages` view
+asserting no `table` declares an id column), `admin-shell` +10 (role create,
+module grant/revoke, the module list, the self-revoke lockout guard),
+`admin-crimes` +5 and `admin-ranks` +4 (the new create routes). It also
+retires the UUID columns from all seven admin tables, adds "Add rank" and
+"Add crime" forms, and boxes `PageRenderer`'s forms (`.formCard`) after a
+`align-items: center` on a label-above-input grid left every submit button
+floating mid-field — which is how travel's "Add town" form was missed.
+
+Note: 966 − 27 = 939, not the 927 recorded below. The pre-pass figure was
+already stale (the commit that set it says 926, the table said 927); 939 is
+what the tree actually ran at before this pass.
+
 (The pre-`feat/admin-abac` baseline was 98 files / 845 tests, so admin + ABAC
 added **12 new test files / 82 tests net**. The twelve new files:
 `admin-validate` (8), `admin-gate` (5), `first-admin` (3), `admin-shell` (11),

@@ -44,8 +44,14 @@ behaviour record. **Admin + ABAC-lite authz** has since shipped on
 manifest field with a `table` view node, six plugin admin sections (travel
 towns, bullets stock/price, inventory items+shop, crimes+ranks balance editing,
 news post gate via the loader tier) plus core role management; the `roles`
-grant is transitively equivalent to full admin. Suite: **110 files / 927
-tests**, green across repeated back-to-back runs.
+grant is transitively equivalent to full admin. An **admin usability pass**
+has since landed: no admin table shows a UUID any more (ids still travel as
+every `select`'s `valueKey`, enforced by `test/admin-ids-hidden.test.ts`),
+ranks and crimes gained create routes, and core roles gained create plus
+per-module grant/revoke over every loaded plugin id — revoking from the
+caller's own role is refused (`cannot_revoke_own_role`), the counterpart of
+the existing `cannot_demote_self`. Suite: **111 files / 966 tests**,
+`npm run verify` exit 0.
 M4 (migration CLI) is planned and blocked on a MariaDB install.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any

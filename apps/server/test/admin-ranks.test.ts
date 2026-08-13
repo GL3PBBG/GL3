@@ -97,6 +97,49 @@ describe("ranks admin", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("creates a rank and lists it", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks", headers: auth(),
+      payload: {
+        name: "Enforcer", expRequired: "5000", cashReward: "2500",
+        bulletReward: 25, maxHealth: 150,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const { id } = res.json() as { id: string };
+
+    const [row] = await db.select().from(ranks).where(eq(ranks.id, id));
+    expect(row).toMatchObject({
+      name: "Enforcer", expRequired: 5000n, cashReward: 2500n,
+      bulletReward: 25, maxHealth: 150,
+    });
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/ranks/list", headers: auth() });
+    expect(list.json().rows.map((r: { id: string }) => r.id)).toContain(id);
+  });
+
+  it("400s a create with a negative expRequired", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks", headers: auth(),
+      payload: {
+        name: "Broken", expRequired: "-1", cashReward: "0",
+        bulletReward: 0, maxHealth: 100,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a create with an empty name", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks", headers: auth(),
+      payload: {
+        name: "", expRequired: "0", cashReward: "0",
+        bulletReward: 0, maxHealth: 100,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("403s a non-admin", async () => {
     const p = await app.inject({
       method: "POST", url: "/api/auth/register",
@@ -105,6 +148,22 @@ describe("ranks admin", () => {
     const res = await app.inject({
       method: "GET", url: "/api/admin/ranks/list",
       headers: { authorization: `Bearer ${p.json().token}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("403s a non-admin creating a rank", async () => {
+    const p = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Pleb2", password: "hunter2hunter2" },
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks",
+      headers: { authorization: `Bearer ${p.json().token}` },
+      payload: {
+        name: "Sneak", expRequired: "0", cashReward: "0",
+        bulletReward: 0, maxHealth: 100,
+      },
     });
     expect(res.statusCode).toBe(403);
   });

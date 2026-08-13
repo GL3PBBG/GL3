@@ -16,6 +16,30 @@
 
 .form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
+/*
+ * PageRenderer's <form>, and only it — the hand-written pages that wear `.form`
+ * (ProfileCard's stat row, Login) are layout rows, not forms, and boxing them
+ * would be a change nobody asked for.
+ *
+ * `align-items: end` rather than `center`: `.field` is a grid that stacks its
+ * label above the input, so a centred submit button floats between the two
+ * lines instead of sitting on the inputs' baseline. That misalignment is why
+ * the travel section's "Add town" button read as stray chrome under the town
+ * table and got missed entirely. The border makes each form its own control
+ * group, so a page with three of them (add / update / assign) shows three
+ * boxes rather than one run of loose inputs.
+ */
+.formCard {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: end;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
 .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 0.5rem 0; }
 .barFill { height: 100%; background: var(--accent); }
 

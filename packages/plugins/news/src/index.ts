@@ -47,7 +47,6 @@ const adminPage: PageSchema = {
         { name: "body", label: "Body", type: "text" },
       ] },
       { kind: "table", source: "GET /api/admin/news", columns: [
-        { key: "id", label: "Id" },
         { key: "title", label: "Title" },
         { key: "createdAt", label: "Created" },
       ] },

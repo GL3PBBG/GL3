@@ -327,7 +327,7 @@ const adminPage: PageSchema = {
     kind: "panel", title: "Towns",
     children: [
       { kind: "table", source: "GET /api/admin/travel/locations", columns: [
-        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "name", label: "Name" },
         { key: "travelCost", label: "Travel cost" },
         { key: "travelCooldownSeconds", label: "Cooldown (s)" },
       ] },

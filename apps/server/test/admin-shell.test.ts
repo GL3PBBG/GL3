@@ -172,3 +172,170 @@ describe("role management", () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe("role creation and module grants", () => {
+  it("creates a role with no grants", async () => {
+    const founder = await register("Founder");
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "Moderator" },
+    });
+    expect(res.statusCode).toBe(201);
+    const { id } = res.json() as { id: string };
+
+    const table = await app.inject({ method: "GET", url: "/api/admin/roles/table", headers: auth(founder.token) });
+    expect(table.json().rows).toContainEqual({ id, name: "Moderator", moduleKeys: "" });
+  });
+
+  it("400s an empty role name", async () => {
+    const founder = await register("Founder");
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "  " },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("offers every loaded plugin id plus roles and the wildcard as modules", async () => {
+    const founder = await register("Founder");
+    const res = await app.inject({ method: "GET", url: "/api/admin/roles/modules", headers: auth(founder.token) });
+    expect(res.statusCode).toBe(200);
+    const ids = (res.json().rows as { id: string }[]).map((r) => r.id);
+    // Every loaded plugin, not only the six that happen to have an admin page:
+    // a grant is ABAC over the module, and a plugin gaining an admin page must
+    // not be the moment its key first becomes grantable.
+    expect(ids).toContain("alpha");
+    expect(ids).toContain("beta");
+    expect(ids).toContain("bank"); // a core plugin with no adminPages
+    expect(ids).toContain("roles");
+    expect(ids).toContain("*");
+  });
+
+  it("grants a module and the grantee gains exactly that section", async () => {
+    const founder = await register("Founder");
+    const p = await register("Grantee");
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "BetaAdmin" },
+    });
+    const roleId = create.json().id as string;
+
+    const grant = await app.inject({
+      method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+      payload: { roleId, moduleKey: "beta" },
+    });
+    expect(grant.statusCode).toBe(204);
+
+    await app.inject({
+      method: "POST", url: "/api/admin/roles/assign", headers: auth(founder.token),
+      payload: { username: "Grantee", roleId },
+    });
+    const sections = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth(p.token) });
+    expect(sections.statusCode).toBe(200);
+    expect(sections.json().sections.map((s: { pluginId: string }) => s.pluginId)).toEqual(["beta"]);
+  });
+
+  it("is idempotent when the same module is granted twice", async () => {
+    const founder = await register("Founder");
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "Twice" },
+    });
+    const roleId = create.json().id as string;
+    for (const _ of [0, 1]) {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+        payload: { roleId, moduleKey: "alpha" },
+      });
+      expect(res.statusCode).toBe(204);
+    }
+    const rows = await db.select().from(roleModuleAccess).where(eq(roleModuleAccess.roleId, roleId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("revokes a module and the grantee loses the section", async () => {
+    const founder = await register("Founder");
+    const p = await register("Grantee");
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "Temporary" },
+    });
+    const roleId = create.json().id as string;
+    await app.inject({
+      method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+      payload: { roleId, moduleKey: "alpha" },
+    });
+    await app.inject({
+      method: "POST", url: "/api/admin/roles/assign", headers: auth(founder.token),
+      payload: { username: "Grantee", roleId },
+    });
+
+    const revoke = await app.inject({
+      method: "POST", url: "/api/admin/roles/grants/revoke", headers: auth(founder.token),
+      payload: { roleId, moduleKey: "alpha" },
+    });
+    expect(revoke.statusCode).toBe(204);
+    const sections = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth(p.token) });
+    expect(sections.statusCode).toBe(403);
+  });
+
+  // The lockout this guards: the sole `*` grant lives on the founder's own
+  // role, so revoking it strips admin from the only account that can restore
+  // it. Same posture as `cannot_demote_self` on assign.
+  it("refuses to revoke a grant from the caller's own role", async () => {
+    const founder = await register("Founder");
+    const [adminRole] = await db.select().from(roles);
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/roles/grants/revoke", headers: auth(founder.token),
+      payload: { roleId: adminRole?.id, moduleKey: "*" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot_revoke_own_role" });
+    const rows = await db.select().from(roleModuleAccess)
+      .where(eq(roleModuleAccess.roleId, adminRole?.id ?? ""));
+    expect(rows.map((r) => r.moduleKey)).toEqual(["*"]);
+  });
+
+  it("404s a grant against an unknown role", async () => {
+    const founder = await register("Founder");
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+      payload: { roleId: uuidv7(), moduleKey: "alpha" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  // A free-string moduleKey would let an admin grant a key no module ever
+  // checks — a grant that silently does nothing, indistinguishable from one
+  // that works until someone tests it.
+  it("400s a grant of a module key no loaded plugin offers", async () => {
+    const founder = await register("Founder");
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "Typo" },
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+      payload: { roleId: create.json().id, moduleKey: "gamma" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "unknown_module" });
+  });
+
+  it("403s create, grant, revoke and modules for a role without the roles grant", async () => {
+    await register("Founder");
+    const p = await register("AlphaOnly");
+    const roleId = await giveRole(p.playerId, ["alpha"]);
+    const cases = [
+      { url: "/api/admin/roles", payload: { name: "Sneak" } },
+      { url: "/api/admin/roles/grants", payload: { roleId, moduleKey: "beta" } },
+      { url: "/api/admin/roles/grants/revoke", payload: { roleId, moduleKey: "alpha" } },
+    ];
+    for (const c of cases) {
+      const res = await app.inject({ method: "POST", url: c.url, headers: auth(p.token), payload: c.payload });
+      expect(res.statusCode, c.url).toBe(403);
+    }
+    const modules = await app.inject({ method: "GET", url: "/api/admin/roles/modules", headers: auth(p.token) });
+    expect(modules.statusCode).toBe(403);
+  });
+});
