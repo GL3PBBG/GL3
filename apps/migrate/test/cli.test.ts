@@ -36,6 +36,13 @@ describe("main (CLI entrypoint)", () => {
     }
   });
 
+  it("names the missing flag and prints usage when --pg is absent", async () => {
+    const code = await main([]);
+    expect(code).toBe(1);
+    expect(errorSpy.mock.calls[0]?.[0]).toBe("--pg is required");
+    expect(errorSpy.mock.calls[1]?.[0]).toContain("usage: gl3-migrate");
+  });
+
   it("prints the scratch-MySQL instructions and exits 1 for --sql-dump without --mysql", async () => {
     const target = await createIsolatedPgTarget();
     try {

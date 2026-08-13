@@ -5,7 +5,8 @@
   "type": "module",
   "bin": { "gl3-migrate": "./dist/cli.js" },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && npm run bundle",
+    "bundle": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js --allow-overwrite",
     "start": "tsx src/cli.ts"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "esbuild": "^0.21.5",
     "tsx": "^4.19.2"
   }
 }
