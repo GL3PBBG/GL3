@@ -61,14 +61,10 @@ describe("POST /api/news", () => {
   });
 
   // Regression guard for a review finding: the only prior "denied" fixture
-  // was a player with *no role at all*, which short-circuits at
-  // `hasModuleAccess`'s `if (!player?.roleId)` guard and never reaches the
-  // matching predicate. A regression that weakened
-  // `rows.some((r) => r.moduleKey === moduleKey || r.moduleKey === "*")`
-  // down to `rows.length > 0` — or dropped the `=== moduleKey` half
-  // entirely — would still pass every other test in this file. A role that
-  // holds a *different*, real module grant is the case that actually
-  // exercises the comparison, not just the has-any-row-at-all guard.
+  // was a player with *no role at all*, which the loader's admin gate
+  // rejects at the "player has no grants" check. A role that holds a
+  // *different*, real module grant exercises the module-key comparison
+  // (grant must be "news" or "*"), not just a has-any-row-at-all check.
   it("403s a player whose role grants a different module, not news", async () => {
     const mailRoleId = uuidv7();
     await db.insert(roles).values({ id: mailRoleId, name: "Mail Moderator" });
@@ -118,9 +114,9 @@ describe("POST /api/news", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  // A role's wildcard module key ("*") is the V2-preserved admin grant
-  // (roleAccess RA_module='*') — it must satisfy any module, not just an
-  // exact "news" match.
+  // A role's wildcard module key ("*") is the admin grant that satisfies
+  // any module check, not just an exact "news" match. The loader gate
+  // checks `hasPermission(grants, "news")` which accepts "news" or "*".
   it("lets a wildcard-module role post", async () => {
     const adminRoleId = uuidv7();
     await db.insert(roles).values({ id: adminRoleId, name: "Admin" });
@@ -168,5 +164,37 @@ describe("GET /api/news", () => {
     const res = await app.inject({ method: "GET", url: "/api/news" });
     expect(res.statusCode).toBe(200);
     expect(res.json().news).toEqual([]);
+  });
+});
+
+describe("GET /api/admin/news", () => {
+  it("returns recent rows for the staff (news-grant) role", async () => {
+    // Post two items as staff
+    await app.inject({
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${staffToken}` },
+      payload: { title: "First", body: "Body 1" },
+    });
+    await app.inject({
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${staffToken}` },
+      payload: { title: "Second", body: "Body 2" },
+    });
+
+    const res = await app.inject({
+      method: "GET", url: "/api/admin/news",
+      headers: { authorization: `Bearer ${staffToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().rows).toHaveLength(2);
+    expect(res.json().rows[0].title).toBe("Second");
+    expect(res.json().rows[0].id).toBeDefined();
+    expect(res.json().rows[0].createdAt).toBeDefined();
+  });
+
+  it("403s a regular player", async () => {
+    const res = await app.inject({
+      method: "GET", url: "/api/admin/news",
+      headers: { authorization: `Bearer ${regularToken}` },
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
