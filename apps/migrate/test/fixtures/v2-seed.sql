@@ -76,11 +76,11 @@ INSERT INTO userStats (US_id, US_money, US_bank, US_bullets, US_exp, US_health, 
 -- in SPEC §1.2's observed-keys list and must still migrate (§1.2: "Custom
 -- modules add arbitrary keys — migrate ALL rows, known or not").
 INSERT INTO userTimers (UT_user, UT_key, UT_time) VALUES
-  (1, 'jail', 4102444800),        -- future (year 2100) — maps to player_stats.jailed_until
+  (1, 'jail', 2100000000),        -- future (year 2036) — maps to player_stats.jailed_until
   (1, 'hospital', 1000000000),    -- past — dropped
-  (3, 'crime', 4102444800),       -- future — generic player_timers row
-  (3, 'someCustomModuleKey', 4102444800), -- future, unknown key — still migrated + reported
-  (999, 'crime', 4102444800);     -- orphan: user 999 does not exist
+  (3, 'crime', 2100000000),       -- future — generic player_timers row
+  (3, 'someCustomModuleKey', 2100000000), -- future, unknown key — still migrated + reported
+  (999, 'crime', 2100000000);     -- orphan: user 999 does not exist
 
 -- Gangs. G_boss=1 (DonVito) but DonVito's own userStats.US_gang=0 above.
 INSERT INTO gangs (G_id, G_name, G_boss, G_underboss, G_bank, G_money, G_level, G_location) VALUES
@@ -117,7 +117,7 @@ INSERT INTO bounties (B_user, B_userToKill, B_cost, B_time) VALUES
   (1, 3, 1000, 1700000200),
   (1, 999, 1000, 1700000200); -- orphan: target 999 does not exist
 INSERT INTO detectives (D_user, D_target, D_start, D_end, D_success) VALUES
-  (1, 3, 1700000000, 4102444800, NULL);
+  (1, 3, 1700000000, 2100000000, NULL);
 INSERT INTO mail (M_id, M_parent, M_sender, M_recipient, M_subject, M_body, M_read, M_type, M_time) VALUES
   (1, NULL, 1, 3, 'Hi', 'Welcome to the family.', 1, 0, 1700000300),
   (2, 1, 3, 1, 'Re: Hi', 'Thanks, boss.', 0, 0, 1700000400),  -- thread root walks to message 1
