@@ -44,7 +44,7 @@ behaviour record. **Admin + ABAC-lite authz** has since shipped on
 manifest field with a `table` view node, six plugin admin sections (travel
 towns, bullets stock/price, inventory items+shop, crimes+ranks balance editing,
 news post gate via the loader tier) plus core role management; the `roles`
-grant is transitively equivalent to full admin. Suite: **110 files / 926
+grant is transitively equivalent to full admin. Suite: **110 files / 927
 tests**, green across repeated back-to-back runs.
 M4 (migration CLI) is planned and blocked on a MariaDB install.
 

@@ -16,15 +16,19 @@ Branch: `feat/admin-abac`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 110 files / 926 tests**, green across repeated back-to-back runs.
-(The pre-`feat/admin-abac` baseline was 98 files / 845 tests.
-Admin + ABAC added 15 new test files / 119 `it()` tests net —
-`admin-validate` (8), `admin-gate` (5), `first-admin` (3), `admin-shell` (10),
+**Suite: 110 files / 927 tests**, green across repeated back-to-back runs.
+(The pre-`feat/admin-abac` baseline was 98 files / 845 tests, so admin + ABAC
+added **12 new test files / 82 tests net**. The twelve new files:
+`admin-validate` (8), `admin-gate` (5), `first-admin` (3), `admin-shell` (11),
 `admin-travel` (5), `admin-bullets` (4), `admin-crimes` (5), `admin-ranks` (5),
-`admin-inventory` (11), `admin-acceptance` (1), SDK `authz` (5), `manifest` (17),
-`pages` (24), shared `admin-sections-dto` (7), web `plugins-render` (9) —
-plus the news gate refactor absorbed the three original gate tests into the
-loader tier.)
+`admin-inventory` (11), `admin-acceptance` (1), SDK `authz` (5), shared
+`admin-sections-dto` (7) — 70 tests. The remaining 12 are *net additions* to
+five files that already existed, not whole-file totals: SDK `manifest` +5
+(adminPages normalisation and validation), SDK `pages` +3 (the `table` node),
+SDK `view-schema-contract` +1 (one more `it.each` case, `table`), web
+`plugins-render` +1 (table instruction), and `news` +2 — the news gate
+refactor also absorbed the three original gate tests into the loader tier,
+which is why its net is smaller than its additions.)
 
 ---
 

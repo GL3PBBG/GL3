@@ -128,11 +128,13 @@ attempt costs the player nothing.
 
 ### Authorization: ABAC-lite (role-module grants)
 
-GL3 uses a role-based model with attribute flavour: `roles` rows hold a name
-and a `grants` JSON column, where each grant is a module key (e.g. `"travel"`,
-`"bullets"`) and the wildcard `"*"` means all modules. `hasPermission(grants,
-moduleKey)` in `@gl3/plugin-sdk` checks whether the player's active role grants
-include the requesting module or `"*"`.
+GL3 uses a role-based model with attribute flavour. A `roles` row is just
+`(id, name, color)` — it carries no grants of its own. Grants live one table
+over, as rows in `role_module_access(role_id, module_key)`: one row per module
+key a role can administer (e.g. `"travel"`, `"bullets"`), with the wildcard
+`"*"` meaning all modules. `loadGrants` collects the module keys for the
+player's active role, and `hasPermission(grants, moduleKey)` in
+`@gl3/plugin-sdk` checks whether they include the requesting module or `"*"`.
 
 **Predicate-level checks are deliberately deferred.** The ABAC design in SPEC
 describes resource-level predicates (e.g. "admin of travel, but only towns in
@@ -152,11 +154,17 @@ guarantee. The per-plugin claim is enforced by the loader's boot validation.
 **The first-registration advisory lock.** The first player to register is
 automatically promoted to Administrator with a `"*"` grant. This is guarded by
 `pg_advisory_xact_lock(7461001)` inside the registration transaction, which
-serialises the count-and-claim race. Without the lock, two concurrent
-registrations can both see `count == 0` and both claim admin — proven at the
-DB level (3/50 without the lock produced 2 admins). The advisory lock
-number is arbitrary but fixed; a second registration call inside the same
-transaction would deadlock on it (not that one exists today).
+serialises the probe-and-claim race. Read committed is what makes the race
+real: each transaction inserts its own player row first, so each sees exactly
+one player — its own — and neither sees the other's uncommitted insert. Both
+therefore conclude "I am the first" and both claim admin. Proven at the DB
+level (3/50 without the lock produced 2 admins). The probe is written as
+"does any player other than me exist?", and it runs *before* the lock so that
+every registration after the first skips the lock entirely; when it comes back
+empty the same probe is repeated under the lock, and that second answer is the
+one that decides. The advisory lock number is arbitrary but fixed; a second
+registration call inside the same transaction would deadlock on it (not that
+one exists today).
 
 **The `roles` grant is transitively equivalent to full admin.** Anyone who
 can assign roles can grant themselves `"*"`, which is full admin. Grant the

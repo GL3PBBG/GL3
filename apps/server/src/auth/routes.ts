@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, ne, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
@@ -72,15 +72,24 @@ export function registerAuthRoutes(
 
         // First-player-ever becomes Administrator. The advisory lock is
         // load-bearing: under read committed, two concurrent first registrations
-        // each see only their own insert — both would count 1 and both would claim
-        // admin. The lock serializes count-and-claim; it releases at commit.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(7461001)`);
-        const rows = await tx.select({ n: sql<number>`count(*)` }).from(players);
-        if (Number(rows[0]?.n) === 1) {
-          const adminRoleId = uuidv7();
-          await tx.insert(roles).values({ id: adminRoleId, name: "Administrator" });
-          await tx.insert(roleModuleAccess).values({ roleId: adminRoleId, moduleKey: "*" });
-          await tx.update(players).set({ roleId: adminRoleId }).where(eq(players.id, playerId));
+        // each see only their own insert — both would see no other player and both
+        // would claim admin. The lock serializes probe-and-claim; it releases at
+        // commit. The probe *before* the lock is what keeps it off the hot path:
+        // every registration after the first finds another player and never takes
+        // the lock at all. The recheck under the lock is the one that decides —
+        // the unlocked probe can only be stale in the direction of "maybe empty".
+        const others = await tx.select({ id: players.id }).from(players)
+          .where(ne(players.id, playerId)).limit(1);
+        if (others.length === 0) {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(7461001)`);
+          const recheck = await tx.select({ id: players.id }).from(players)
+            .where(ne(players.id, playerId)).limit(1);
+          if (recheck.length === 0) {
+            const adminRoleId = uuidv7();
+            await tx.insert(roles).values({ id: adminRoleId, name: "Administrator" });
+            await tx.insert(roleModuleAccess).values({ roleId: adminRoleId, moduleKey: "*" });
+            await tx.update(players).set({ roleId: adminRoleId }).where(eq(players.id, playerId));
+          }
         }
       });
     } catch (err) {
