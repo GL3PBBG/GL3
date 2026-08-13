@@ -16,7 +16,7 @@ Branch: `feat/admin-abac`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 113 files / 964 tests**, green across repeated back-to-back runs.
+**Suite: 110 files / 926 tests**, green across repeated back-to-back runs.
 (The pre-`feat/admin-abac` baseline was 98 files / 845 tests.
 Admin + ABAC added 15 new test files / 119 `it()` tests net —
 `admin-validate` (8), `admin-gate` (5), `first-admin` (3), `admin-shell` (10),
