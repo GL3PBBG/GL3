@@ -62,6 +62,7 @@ function childrenOf(node: unknown): readonly unknown[] {
   if ("items" in node && Array.isArray(node.items)) return node.items;
   if ("rows" in node && Array.isArray(node.rows)) return node.rows;
   if ("fields" in node && Array.isArray(node.fields)) return node.fields;
+  if ("columns" in node && Array.isArray(node.columns)) return node.columns;
   return [];
 }
 
@@ -140,6 +141,18 @@ const leafOptions = [
       }).strict(),
     ),
   }).strict(),
+  z
+    .object({
+      kind: z.literal("table"),
+      /**
+       * GET-only: a table renders data, it must never mutate on mount. The
+       * loader's containment pass treats this as a view action, so it must
+       * live under the plugin's basePaths like any button/form action.
+       */
+      source: z.string().regex(/^GET \/(?![/\\])[^\s\\]*$/, "table source must be `GET /absolute/path`"),
+      columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
+    })
+    .strict(),
 ] as const;
 
 /**
@@ -204,3 +217,9 @@ export type PluginsPayload = z.infer<typeof PluginsPayloadSchema>;
 export type MenuItem = z.infer<typeof MenuItemSchema>;
 export type PagePayload = z.infer<typeof PagePayloadSchema>;
 export type EventMeta = z.infer<typeof EventMetaSchema>;
+
+/** What a `table.source` endpoint returns: pre-stringified rows, column keys as props. */
+export const TableRowsResponseSchema = z.object({
+  rows: z.array(z.record(z.string())),
+}).strict();
+export type TableRowsResponse = z.infer<typeof TableRowsResponseSchema>;
