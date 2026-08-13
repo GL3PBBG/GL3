@@ -288,4 +288,5 @@ export default defineWorkspace([
     },
     ...srcAliases,
   },
+  "apps/migrate",
 ]);
