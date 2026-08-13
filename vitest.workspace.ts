@@ -263,6 +263,7 @@ export default defineWorkspace([
         "test/plugin-hospital-gate.test.ts",
         "test/admin-gate.test.ts",
         "test/admin-shell.test.ts",
+        "test/admin-travel.test.ts",
         "test/admin-validate.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
