@@ -77,7 +77,7 @@ export function Shell(): JSX.Element {
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
-        <h1 className={styles.brand}>Gangster Legends</h1>
+        <h1 className={styles.brand}>GL3</h1>
         <div className={styles.hud}>
           <Stat label="Player">{me.data?.username ?? "—"}</Stat>
           <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
