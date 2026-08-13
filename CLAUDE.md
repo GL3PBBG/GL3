@@ -37,9 +37,16 @@ leader-fired seeded BullMQ job resolving one shared outcome (equal-split payout
 or mass jail), one-active-heist-per-player via a partial unique index, and a
 heist-row-FOR-UPDATE-first lock order that shares no edge with the existing
 three (gang↔player, location↔player, player↔player); spec and tests are its
-behaviour record.
-M4 (migration CLI) is planned and blocked on a MariaDB install. Suite:
-**98 files / 845 tests**, green across repeated back-to-back runs.
+behaviour record. **Admin + ABAC-lite authz** has since shipped on
+`feat/admin-abac`: role→module grants (`role_module_access`) checked by
+`hasPermission` in the SDK, first registered player becomes Administrator with
+`*` (advisory-lock guarded), loader route tier `auth: "admin"`, `adminPages`
+manifest field with a `table` view node, six plugin admin sections (travel
+towns, bullets stock/price, inventory items+shop, crimes+ranks balance editing,
+news post gate via the loader tier) plus core role management; the `roles`
+grant is transitively equivalent to full admin. Suite: **113 files / 964
+tests**, green across repeated back-to-back runs.
+M4 (migration CLI) is planned and blocked on a MariaDB install.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
@@ -184,6 +191,9 @@ unavailable here.
   **nothing** and silently grades the last `tsc --build` against a stale
   `dist/`.
 - Conventional Commits.
+- **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
+  boot by the loader. Core reserves the exact paths `/api/admin/plugins` and
+  `/api/admin/roles`; plugins claim `/api/admin/<pluginId>`.
 
 ---
 

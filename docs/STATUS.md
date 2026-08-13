@@ -1,7 +1,7 @@
 # GL3 project status
 
-Last updated: 2026-08-13, organized crime — four-role heists with buy-in escrow and a shared-fate seeded job.
-Branch: `feat/organized-crime`.
+Last updated: 2026-08-13, admin + ABAC-lite authz.
+Branch: `feat/admin-abac`.
 
 ---
 
@@ -14,19 +14,17 @@ Branch: `feat/organized-crime`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), and **detectives** (cross-location hunting, time-gated reveal, live-location tracking) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 98 files / 845 tests**, green across repeated back-to-back runs.
-(The pre-`feat/item-economy` baseline was 84 files / 707 tests; the 83 this
-line carried through `feat/pvp-combat` was already stale when it was written.
-The item-economy work added three new test files (19 tests) and expanded
-`economy-invariant.test.ts`, `plugin-migrate.test.ts` (+2),
-`plugin-manifest-endpoint.test.ts`, `errors.test.ts`, and `invalidation.test.ts`.
-Bounties added four new test files / 20 tests net and introduced the SDK filter
-system's first live consumer. Organized crime added five test files / 55 tests
-net — `oc.test.ts`, `oc-worker.test.ts`, `oc-concurrency.test.ts`,
-`oc-lock-order.test.ts`, `oc-ledger.test.ts` — plus two `invalidation.test.ts`
-cases and a shared `dto/oc.ts`.)
+**Suite: 113 files / 964 tests**, green across repeated back-to-back runs.
+(The pre-`feat/admin-abac` baseline was 98 files / 845 tests.
+Admin + ABAC added 15 new test files / 119 `it()` tests net —
+`admin-validate` (8), `admin-gate` (5), `first-admin` (3), `admin-shell` (10),
+`admin-travel` (5), `admin-bullets` (4), `admin-crimes` (5), `admin-ranks` (5),
+`admin-inventory` (11), `admin-acceptance` (1), SDK `authz` (5), `manifest` (17),
+`pages` (24), shared `admin-sections-dto` (7), web `plugins-render` (9) —
+plus the news gate refactor absorbed the three original gate tests into the
+loader tier.)
 
 ---
 

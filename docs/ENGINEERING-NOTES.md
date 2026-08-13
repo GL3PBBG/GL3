@@ -126,6 +126,47 @@ attempt costs the player nothing.
   hex) and length-checks before `timingSafeEqual`, which *throws* on length mismatch
   rather than returning false.
 
+### Authorization: ABAC-lite (role-module grants)
+
+GL3 uses a role-based model with attribute flavour: `roles` rows hold a name
+and a `grants` JSON column, where each grant is a module key (e.g. `"travel"`,
+`"bullets"`) and the wildcard `"*"` means all modules. `hasPermission(grants,
+moduleKey)` in `@gl3/plugin-sdk` checks whether the player's active role grants
+include the requesting module or `"*"`.
+
+**Predicate-level checks are deliberately deferred.** The ABAC design in SPEC
+describes resource-level predicates (e.g. "admin of travel, but only towns in
+location X"). No gameplay path needs that today — every admin section is a
+full CRUD surface for its module — and shipping half a predicate system would
+mean choosing a shape that a real requirement later forces to change. The
+grant check is module-level only; if predicates are added later, the
+`hasPermission` call site is the obvious extension point.
+
+**Why `/api/admin` is not wholesale-reserved.** Core reserves the exact paths
+`/api/admin/plugins` and `/api/admin/roles` — it does *not* reserve the
+whole `/api/admin/` prefix. Each plugin claims `/api/admin/<pluginId>` (e.g.
+`/api/admin/travel`). Wholesale reservation would either block future
+first-party admin surfaces or require an escape hatch that undermines the
+guarantee. The per-plugin claim is enforced by the loader's boot validation.
+
+**The first-registration advisory lock.** The first player to register is
+automatically promoted to Administrator with a `"*"` grant. This is guarded by
+`pg_advisory_xact_lock(7461001)` inside the registration transaction, which
+serialises the count-and-claim race. Without the lock, two concurrent
+registrations can both see `count == 0` and both claim admin — proven at the
+DB level (3/50 without the lock produced 2 admins). The advisory lock
+number is arbitrary but fixed; a second registration call inside the same
+transaction would deadlock on it (not that one exists today).
+
+**The `roles` grant is transitively equivalent to full admin.** Anyone who
+can assign roles can grant themselves `"*"`, which is full admin. Grant the
+`roles` permission only to players who already have `"*"`. Core's role
+management routes enforce `cannot_demote_self` and require the `roles` grant
+to assign or clear roles, but they do not prevent granting `"*"` to a player
+who then grants `roles` to an accomplice. This is by design — the trust
+model is that role assignment is itself an admin-only operation, and admins
+are trusted. Do not give `roles` to anyone who should not have full admin.
+
 ---
 
 ## Test infrastructure
