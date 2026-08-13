@@ -4,6 +4,24 @@
 database. Players keep their accounts (passwords are lazy-rehashed on first login —
 see SPEC §4.3), cash, gangs, and inventories.
 
+## Building
+
+```bash
+npm run build --workspace @gl3/migrate
+```
+
+`tsc --build` typechecks and emits, then esbuild bundles `src/cli.ts` into the single
+`dist/cli.js` the `gl3-migrate` bin points at. The bundle step is not cosmetic: this
+package imports the server's drizzle schema and db client across a TypeScript project
+boundary (`../../server/src/...`), and `tsc` copies those specifiers into its output
+verbatim rather than rewriting them at `apps/server/dist`, so the plain `tsc` output
+dies at load with `ERR_MODULE_NOT_FOUND`. Runtime dependencies (`mysql2`, `postgres`,
+`drizzle-orm`, the plugin packages) stay external and resolve from `node_modules` as
+usual.
+
+Without a build, run it straight from source with `npm start --workspace @gl3/migrate --
+--mysql ... --pg ...` (tsx).
+
 ## Preparing the target
 
 `gl3-migrate` writes into an existing GL3 schema; it does not create one. Two of its
