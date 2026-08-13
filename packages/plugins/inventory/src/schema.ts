@@ -5,10 +5,15 @@ import { bigint, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core
  * `packages/plugins/bullets/src/schema.ts` established. Column names and
  * types match `apps/server/src/db/schema/*.ts` exactly. None is declared in
  * this plugin's manifest `tables` map and none gets a migration here: core
- * already owns and migrates all four.
+ * already owns and migrates all of them.
  *
  * Only the columns this plugin touches are listed.
  */
+export const locations = pgTable("locations", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+});
+
 export const items = pgTable("items", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
