@@ -2,14 +2,15 @@ import { definePlugin, InsufficientFundsError, PluginError, route, type PluginCt
 import { and, desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
+import { DETECTIVES_MIGRATIONS } from "./migrations.js";
 import { detectiveSearches, locations, playerStats, players } from "./schema.js";
 
 /**
  * V2's detectives module, GL3-shaped: the cross-location hunting layer.
  * Spec: docs/superpowers/specs/2026-08-12-detectives-design.md.
- * Uses core's `detective_searches` table (no plugin migrations); no combat
- * coupling; no events, menu or pages (plugin-manifest-endpoint.test.ts pins
- * the no-arg boot payload).
+ * Owns and migrates `p_detectives_searches` (`migrations.ts`) — core held it
+ * until `0007_relinquish_plugin_tables`. No combat coupling; no events, menu
+ * or pages (plugin-manifest-endpoint.test.ts pins the no-arg boot payload).
  */
 
 // ---------------------------------------------------------------------------
@@ -236,6 +237,7 @@ export default definePlugin({
   id: "detectives",
   version: "1.0.0",
   basePaths: ["/api/detectives"],
+  migrations: DETECTIVES_MIGRATIONS,
   routes: [hireRoute, listRoute, removeRoute],
   jobs: { resolve: resolveJob },
 });

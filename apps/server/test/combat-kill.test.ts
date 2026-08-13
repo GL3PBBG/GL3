@@ -5,7 +5,6 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import {
-  combatLog,
   items,
   locations,
   playerItems,
@@ -16,6 +15,7 @@ import {
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { combatLog } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();

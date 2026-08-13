@@ -6,7 +6,6 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import {
-  combatLog,
   items,
   locations,
   playerItems,
@@ -16,6 +15,7 @@ import {
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { combatLog } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**

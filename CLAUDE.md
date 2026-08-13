@@ -50,8 +50,16 @@ every `select`'s `valueKey`, enforced by `test/admin-ids-hidden.test.ts`),
 ranks and crimes gained create routes, and core roles gained create plus
 per-module grant/revoke over every loaded plugin id — revoking from the
 caller's own role is refused (`cannot_revoke_own_role`), the counterpart of
-the existing `cannot_demote_self`. Suite: **111 files / 966 tests**,
-`npm run verify` exit 0.
+the existing `cannot_demote_self`. A **table-ownership correction** has since
+landed: core migration `0007_relinquish_plugin_tables` drops `bounties`,
+`detective_searches` and `combat_log`, which shipped in core `0000`/`0005`
+only because the core schema predated the plugin migration runner — no core
+code ever read or wrote any of them. The single plugin that consumes each now
+owns and migrates it (`p_bounties_bounties`, `p_detectives_searches`,
+`p_combat_log`), so five of fourteen plugins declare migrations rather than
+two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
+`p_oc_*` which have none: keeping them leaves the lock graph exactly as it was.
+Suite: **111 files / 968 tests**, `npm run verify` exit 0.
 M4 (migration CLI) is planned and blocked on a MariaDB install.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
@@ -181,6 +189,16 @@ unavailable here.
   `.default(0n)`; drizzle-kit's serialiser crashes on `BigInt`.
 - Integration tests run against **real** Postgres and Redis. No mocks for DB, queue
   or bus paths, ever.
+- **A test that drives a plugin without `bootTestServer()` must run that
+  plugin's migrations itself.** The template database every test file clones is
+  built from *core* migrations only (`test/helpers/global-setup.ts`); plugin
+  tables appear only when `loadPlugins` → `runPluginMigrations` runs. A file
+  using `callPluginRoute` or `runPluginJob` directly needs an explicit
+  `await runPluginMigrations(db, [thePlugin])`, or every test in it dies on
+  42P01. Five plugins now own tables (`inventory`, `oc`, `bounties`,
+  `detectives`, `combat`), so this catches far more files than it used to —
+  `economy-invariant.test.ts` and `detectives-worker.test.ts` are the worked
+  examples.
 - **A new plugin package has eight registration sites, three of which fail
   silently or remotely.** `packages/plugins/<id>/` itself, then:
   `apps/server/package.json` (+ `npm install`), `apps/server/tsconfig.json`

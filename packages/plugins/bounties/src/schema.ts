@@ -3,8 +3,11 @@ import { bigint, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 /**
  * Read/write mirrors of core-owned tables — the pattern
  * `packages/plugins/combat/src/schema.ts` documents. Core owns and migrates
- * all four; `bounties` ships in core migration `0000`
- * (`apps/server/src/db/schema/social.ts:54`). Only touched columns listed.
+ * `players`, `player_stats` and `ranks`; only touched columns are listed.
+ *
+ * `p_bounties_bounties` is the exception and is NOT a mirror: this plugin owns
+ * and migrates it (`migrations.ts`). It was core-owned until core relinquished
+ * it in `0007_relinquish_plugin_tables`.
  */
 export const players = pgTable("players", {
   id: uuid("id").primaryKey(),
@@ -22,7 +25,7 @@ export const ranks = pgTable("ranks", {
   name: text("name").notNull(),
 });
 
-export const bounties = pgTable("bounties", {
+export const bounties = pgTable("p_bounties_bounties", {
   id: uuid("id").primaryKey(),
   placedBy: uuid("placed_by").notNull(),
   target: uuid("target").notNull(),
