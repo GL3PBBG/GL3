@@ -4,6 +4,7 @@ import { and, eq, isNull, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
+import { BOUNTIES_MIGRATIONS } from "./migrations.js";
 import { bounties, players, playerStats, ranks } from "./schema.js";
 
 /**
@@ -217,6 +218,7 @@ export default definePlugin({
   id: "bounties",
   version: "1.0.0",
   basePaths: ["/api/bounties"],
+  migrations: BOUNTIES_MIGRATIONS,
   routes: [placeRoute, listRoute],
   filters: [claimOnKill],
 });
