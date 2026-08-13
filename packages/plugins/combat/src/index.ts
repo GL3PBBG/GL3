@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
+import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
 import { combatLog, items, players, playerStats, ranks } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
@@ -483,6 +484,7 @@ export default definePlugin({
   id: "combat",
   version: "1.0.0",
   basePaths: ["/api/combat"],
+  migrations: COMBAT_MIGRATIONS,
   routes: [attackRoute, logRoute, targetsRoute],
   provides: [killResolved],
 });

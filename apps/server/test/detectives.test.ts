@@ -4,10 +4,11 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { uuidv7 } from "uuidv7";
 import { loadConfig } from "../src/config.js";
 import {
-  detectiveSearches, locations, playerStats, settings, transactions,
+  locations, playerStats, settings, transactions,
 } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { detectiveSearches } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();

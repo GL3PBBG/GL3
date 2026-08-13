@@ -1,7 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-13, admin usability pass (id-free tables, create flows).
-Branch: `feat/admin-abac`.
+Last updated: 2026-08-13, table-ownership correction (bounties/detectives/combat
+tables moved out of core).
+Branch: `refactor/plugin-table-ownership`.
 
 ---
 
@@ -16,7 +17,7 @@ Branch: `feat/admin-abac`.
 | **M4 Migration CLI** | 📋 planned, blocked | 33 tasks — needs a MariaDB install (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 111 files / 966 tests**, `npm run verify` exit 0.
+**Suite: 111 files / 968 tests**, `npm run verify` exit 0.
 
 The **admin usability pass** on top of that added one file and 27 tests:
 `admin-ids-hidden` (8, a unit-project walk over every core `adminPages` view
@@ -983,6 +984,90 @@ race, execute-vs-leave), `test/oc-lock-order.test.ts` (heist-first barrier),
 `test/oc-ledger.test.ts` (sum(ledger)==balance across outcomes). Two
 `invalidation.test.ts` cases + a shared `dto/oc.ts`.
 
+### Table ownership correction — three tables moved out of core
+
+Core migration `0007_relinquish_plugin_tables` drops `bounties`,
+`detective_searches` and `combat_log`. The first two shipped in
+`0000_core_schema` and the third in `0005_combat_log`, all three for the same
+non-reason: the core schema was written before the plugin migration runner
+existed. No core code ever read or wrote any of them — `grep` across
+`apps/server/src` found each named only in `db/schema/social.ts`, which
+declared it, and nowhere else. Each has exactly one consumer, and that
+consumer now owns and creates it:
+
+| was | now | owner |
+|---|---|---|
+| `bounties` | `p_bounties_bounties` | `packages/plugins/bounties` |
+| `detective_searches` | `p_detectives_searches` | `packages/plugins/detectives` |
+| `combat_log` | `p_combat_log` | `packages/plugins/combat` |
+
+Five of the fourteen plugins now declare migrations, up from two. Nothing about
+the mechanism changed: `runPluginMigrations` (`apps/server/src/plugins/migrate.ts`)
+already iterated every manifest at every boot and `migrations` already defaulted
+to `[]`, so plugin-owned tables have always been created at install. Only the
+declarations moved.
+
+**Decisions worth not relitigating:**
+
+- **DROP, not RENAME.** GL3 has no live installs, and preserving rows would
+  have forced the plugin migrations into `CREATE TABLE IF NOT EXISTS` —
+  weaker than the plain `CREATE` that `p_inventory_shop_stock` and `p_oc_*`
+  use, and weaker than the 42P07 `plugin-migrate.test.ts` relies on to prove a
+  migration ran exactly once. A deployment that *does* hold rows must dump the
+  three tables before applying 0007 and reload them after boot; the column sets
+  are identical, only the names changed. Stated in the migration's header too.
+- **The foreign keys moved with the tables.** `p_inventory_shop_stock` and
+  `p_oc_*` deliberately carry none (CLAUDE.md rule 6 — an FK is a lock edge),
+  but that was a choice available to *new* tables. These are existing tables
+  changing hands: dropping their FKs would both leave orphan rows behind a
+  deleted player, with nothing to clean them up, and alter a lock graph that
+  `combat-lock-order.test.ts` and `bounties-lock-order.test.ts` already pin.
+  Keeping them makes the move a pure change of ownership.
+  `combat-log-schema.test.ts` now asserts all three of `p_combat_log`'s FKs and
+  their `ON DELETE` rules, so that stays a defended decision rather than an
+  accident of the DDL.
+- **`p_combat_log` still has no `location_id`,** for the reason `social.ts`
+  recorded before the move: its FKs are taken while the transaction holds two
+  `player_stats` rows `FOR UPDATE`, so a `locations` FK would take `FOR KEY
+  SHARE` on a location row there — player-then-location, closing an ABBA cycle
+  against the location-first order `travel` and `bullets` follow. The reasoning
+  moved to `packages/plugins/combat/src/migrations.ts` with the DDL.
+
+**The drizzle snapshot chain was already broken and is now repaired.**
+Migrations `0005` and `0006` were hand-written with no `meta/*_snapshot.json`,
+so `drizzle-kit generate` diffed against the `0004` snapshot: its first output
+for this change omitted the `combat_log` drop entirely and invented a
+`DROP INDEX "crime_log_job_id_unique"` that `0006` had already done (and which
+would have failed the migration — `0006` used `IF EXISTS`, the generated line
+did not). `0007_relinquish_plugin_tables.sql` is therefore hand-written, but
+the generated `meta/0007_snapshot.json` is kept: it is the first snapshot in
+three migrations that matches reality, so the next `generate` starts clean.
+
+**The trap this sharpened, for whoever adds the next plugin table.** The test
+template database is built from core migrations only
+(`test/helpers/global-setup.ts:47`), so a test file that drives a plugin
+*without* `bootTestServer()` — `callPluginRoute` or `runPluginJob` directly —
+sees no plugin tables at all and dies on 42P01. Three files needed an explicit
+`runPluginMigrations`: `detectives-worker.test.ts` and `economy-invariant.test.ts`
+(which already did it for `inventory`, and now names `combat` and `detectives`
+too), plus `combat-log-schema.test.ts`, which was previously a pure
+`information_schema` read against a core table. That last one gained a
+"creates the table at all" case first, because every other assertion in the
+file passes vacuously when the table is absent — `toMatchObject` on `{}` and
+`toHaveLength(0)` on a missing column are both green. Demonstrated failing:
+with `migrations: []` on the combat manifest, 4 of its 5 cases fail and the
+"no location_id" case is the one that still passes.
+
+Test-side handles for the three tables live in
+`apps/server/test/helpers/plugin-tables.ts` — the `oc-*.test.ts` per-file
+`pgTable` mirror pattern with the copies collapsed into one file, since the
+plugin packages export only their manifest.
+
+Suite went 966 → 968: `combat-log-schema.test.ts` gained the existence guard
+and the foreign-key assertion. `schema.test.ts`'s three census figures moved
+with the tables — 47 → 39 foreign keys (24 cascade, 15 set null) and 30 → 27
+non-primary-key indexes.
+
 ## Starting M4
 
 Read `CLAUDE.md` and `docs/ENGINEERING-NOTES.md` first, then unblock the MariaDB
@@ -1198,11 +1283,13 @@ web image serves only the SPA's own assets.
   from crimes or kills yet. The seeded starter rows and admin inserts remain
   the only other source. The `p_inventory_shop_stock` table carries no
   foreign keys, so it adds no lock edges (design §4.1).
-- **`inventory` now owns a table and migrations.** It is the first ported or
+- **`inventory` now owns a table and migrations.** It was the first ported or
   gameplay plugin to do so — `p_inventory_shop_stock` (migration
   `inventory:0001_shop_stock`) plus a seed migration (`inventory:0002_shop_stock_seed`)
   that populates one row per (location, seeded item). The table has no
-  foreign keys by design; see above.
+  foreign keys by design; see above. `oc` followed, and the table-ownership
+  correction below has since brought `bounties`, `detectives` and `combat`
+  into the same shape.
 - **`inventory` and `combat` now have web pages** (`/inventory`, `/shop`,
   `/combat`), and core hospital has one too (`/hospital`). Ordinary
   first-party React pages in `apps/web/src/pages/`, routed in `App.tsx`.

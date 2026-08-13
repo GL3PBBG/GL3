@@ -29,7 +29,13 @@ describe("core schema", () => {
       "players", "player_stats", "player_timers", "player_crime_skill", "transactions",
       "crimes", "locations", "cars", "theft_tiers", "weapons", "items", "player_items",
       "garage", "gangs", "gang_members", "gang_permissions", "gang_invites", "gang_logs",
-      "properties", "bounties", "detective_searches", "mail_messages", "notifications",
+      // No "bounties" / "detective_searches" / "combat_log": core relinquished
+      // all three in 0007_relinquish_plugin_tables. They are spec §2.5 tables
+      // still, but the plugins that are their only consumers create them now
+      // (p_bounties_bounties, p_detectives_searches, p_combat_log) and this
+      // file never boots plugins — see combat-log-schema.test.ts for the
+      // plugin-owned equivalent of this assertion.
+      "properties", "mail_messages", "notifications",
       "game_news", "ranks", "money_ranks", "roles", "role_module_access", "rounds",
       "settings", "crime_log", "id_map",
     ]) {
@@ -109,9 +115,16 @@ describe("core schema", () => {
     const byRule = Object.fromEntries(rows.map((r) => [r.confdeltype, Number(r.count)]));
     const totalForeignKeys = Object.values(byRule).reduce((sum, n) => sum + n, 0);
 
-    expect(totalForeignKeys).toBe(47);
-    expect(byRule["c"]).toBe(30); // ON DELETE CASCADE
-    expect(byRule["n"]).toBe(17); // ON DELETE SET NULL
+    // 47 through 0006. 0007_relinquish_plugin_tables dropped three tables and
+    // the eight FKs they carried — bounties (placed_by, target cascade;
+    // claimed_by set null), detective_searches (player_id, target_player_id
+    // cascade) and combat_log (attacker_id, target_id cascade;
+    // weapon_item_id set null). The constraints did not disappear from the
+    // game, only from core: the plugins that own those tables now recreate
+    // them, which combat-log-schema.test.ts pins for its share.
+    expect(totalForeignKeys).toBe(39);
+    expect(byRule["c"]).toBe(24); // ON DELETE CASCADE
+    expect(byRule["n"]).toBe(15); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
       SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'
@@ -135,8 +148,11 @@ describe("core schema", () => {
       )
     `);
     // 31 shipped through 0005; migration 0006 dropped crime_log_job_id_unique
-    // (a core-era idempotency key the crimes plugin's job ids collide with).
-    expect(Number(count)).toBe(30);
+    // (a core-era idempotency key the crimes plugin's job ids collide with);
+    // 0007 dropped three more with the tables that owned them —
+    // bounties_target_idx, combat_log_target_idx and combat_log_attacker_idx.
+    // detective_searches had none beyond its primary key.
+    expect(Number(count)).toBe(27);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
