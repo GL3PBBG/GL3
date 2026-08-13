@@ -1,8 +1,9 @@
 import type { PlayerSnapshot, PluginManifest } from "@gl3/plugin-sdk";
-import { PluginError } from "@gl3/plugin-sdk";
+import { PluginError, hasPermission } from "@gl3/plugin-sdk";
+import type { Db } from "../db/client.js";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { players, playerStats } from "../db/schema/index.js";
+import { players, playerStats, roleModuleAccess } from "../db/schema/index.js";
 import { settleHospital } from "../game/hospital/status.js";
 import { releaseIfExpired } from "../game/jail/status.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
@@ -14,7 +15,7 @@ export function registerPluginRoutes(
 ): void {
   for (const manifest of manifests) {
     for (const pluginRoute of manifest.routes) {
-      const preHandler = pluginRoute.auth === "player" ? [app.requireAuth] : [];
+      const preHandler = pluginRoute.auth === "public" ? [] : [app.requireAuth];
 
       app.route({
         method: pluginRoute.method,
@@ -22,6 +23,16 @@ export function registerPluginRoutes(
         preHandler,
         handler: async (request: FastifyRequest, reply: FastifyReply) => {
           const playerId = request.playerId;
+
+          if (pluginRoute.auth === "admin") {
+            // requireAuth has run; playerId is set. Grants resolve fresh per
+            // request — no cache, so a revoked role loses access immediately.
+            if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+            const grants = await loadGrants(deps.db, playerId);
+            if (!hasPermission(grants, manifest.id)) {
+              return reply.code(403).send({ error: "forbidden" });
+            }
+          }
 
           if (!pluginRoute.accessInJail && playerId !== undefined) {
             // Same call, same order, same response as crimes/bullets/travel —
@@ -120,4 +131,14 @@ export async function loadSnapshot(deps: PluginCtxDeps, playerId: string): Promi
     jailed: row.jailedUntil !== null && row.jailedUntil.getTime() > Date.now(),
     gangId: row.gangId,
   };
+}
+
+/** Module keys granted by the player's role; [] when roleless. */
+export async function loadGrants(db: Db, playerId: string): Promise<string[]> {
+  const rows = await db
+    .select({ moduleKey: roleModuleAccess.moduleKey })
+    .from(players)
+    .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
+    .where(eq(players.id, playerId));
+  return rows.map((r) => r.moduleKey);
 }
