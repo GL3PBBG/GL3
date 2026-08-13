@@ -1,6 +1,6 @@
 import {
   definePlugin, PluginError, route,
-  type PluginCtx, type RankUpResult,
+  type PageSchema, type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
 import { and, asc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
@@ -214,14 +214,106 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Admin routes
+// ---------------------------------------------------------------------------
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+const CrimeUpdateSchema = z.object({
+  id: z.string().uuid(),
+  cooldownSeconds: z.coerce.number().int().nonnegative(),
+  minPayout: AdminMoney,
+  maxPayout: AdminMoney,
+  expReward: AdminMoney,
+  jailChancePercent: z.coerce.number().int().nonnegative(),
+  jailSeconds: z.coerce.number().int().nonnegative(),
+}).strict().refine((b) => BigInt(b.maxPayout) >= BigInt(b.minPayout), {
+  message: "maxPayout must be >= minPayout",
+});
+
+const adminCrimesListRoute = route({
+  method: "GET", path: "/api/admin/crimes/list", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select().from(crimes).orderBy(asc(crimes.sort)),
+    );
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((c) => ({
+          id: c.id, name: c.name,
+          cooldownSeconds: String(c.cooldownSeconds),
+          minPayout: c.minPayout.toString(),
+          maxPayout: c.maxPayout.toString(),
+          expReward: c.expReward.toString(),
+          jailChancePercent: String(c.jailChancePercent),
+          jailSeconds: String(c.jailSeconds),
+        })),
+      },
+    };
+  },
+});
+
+const adminCrimesUpdateRoute = route({
+  method: "POST", path: "/api/admin/crimes/update", auth: "admin",
+  body: CrimeUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db.update(crimes)
+        .set({
+          cooldownSeconds: body.cooldownSeconds,
+          minPayout: BigInt(body.minPayout),
+          maxPayout: BigInt(body.maxPayout),
+          expReward: BigInt(body.expReward),
+          jailChancePercent: body.jailChancePercent,
+          jailSeconds: body.jailSeconds,
+        })
+        .where(eq(crimes.id, body.id))
+        .returning({ id: crimes.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("crime_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminCrimesPage: PageSchema = {
+  id: "crimes-admin",
+  path: "/admin/crimes",
+  view: {
+    kind: "panel", title: "Crimes",
+    children: [
+      { kind: "table", source: "GET /api/admin/crimes/list", columns: [
+        { key: "id", label: "Id" }, { key: "name", label: "Name" },
+        { key: "cooldownSeconds", label: "Cooldown (s)" },
+        { key: "minPayout", label: "Min payout" },
+        { key: "maxPayout", label: "Max payout" },
+        { key: "expReward", label: "Exp" },
+        { key: "jailChancePercent", label: "Jail %" },
+        { key: "jailSeconds", label: "Jail (s)" },
+      ] },
+      { kind: "form", action: "POST /api/admin/crimes/update", submitLabel: "Update crime", fields: [
+        { name: "id", label: "Crime id (paste from table)", type: "text" },
+        { name: "cooldownSeconds", label: "Cooldown seconds", type: "number" },
+        { name: "minPayout", label: "Min payout", type: "money" },
+        { name: "maxPayout", label: "Max payout", type: "money" },
+        { name: "expReward", label: "Exp reward", type: "money" },
+        { name: "jailChancePercent", label: "Jail chance %", type: "number" },
+        { name: "jailSeconds", label: "Jail seconds", type: "number" },
+      ] },
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Manifest
 // ---------------------------------------------------------------------------
 
 export default definePlugin({
   id: "crimes",
   version: "1.0.0",
-  basePaths: ["/api/crimes"],
-  routes: [listRoute, commitRoute],
+  basePaths: ["/api/crimes", "/api/admin/crimes"],
+  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesUpdateRoute],
+  adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly

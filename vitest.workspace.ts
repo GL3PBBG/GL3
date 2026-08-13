@@ -265,6 +265,8 @@ export default defineWorkspace([
         "test/admin-shell.test.ts",
         "test/admin-travel.test.ts",
         "test/admin-bullets.test.ts",
+        "test/admin-crimes.test.ts",
+        "test/admin-ranks.test.ts",
         "test/admin-validate.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
