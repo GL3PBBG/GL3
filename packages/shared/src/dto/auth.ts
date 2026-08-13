@@ -40,5 +40,6 @@ export const MeResponseSchema = z.object({
   bank: z.string(),
   bullets: z.string(),
   exp: z.string(),
+  grants: z.array(z.string()),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;

@@ -42,13 +42,28 @@ describe("first registered player becomes admin", () => {
     expect(role?.name).toBe("Administrator");
   });
 
-  it("gives the second player no role", async () => {
-    await register("Founder");
+  it("gives the second player no role and both players see correct grants on /me", async () => {
+    const first = await register("Founder");
     const second = await register("Latecomer");
     expect(await grantsOf(second.playerId)).toEqual([]);
     const [row] = await db.select({ roleId: players.roleId }).from(players)
       .where(eq(players.id, second.playerId));
     expect(row?.roleId).toBeNull();
+
+    // /api/auth/me exposes grants
+    const adminMe = await app.inject({
+      method: "GET", url: "/api/auth/me",
+      headers: { authorization: `Bearer ${first.token}` },
+    });
+    expect(adminMe.statusCode).toBe(200);
+    expect(adminMe.json().grants).toEqual(["*"]);
+
+    const plainMe = await app.inject({
+      method: "GET", url: "/api/auth/me",
+      headers: { authorization: `Bearer ${second.token}` },
+    });
+    expect(plainMe.statusCode).toBe(200);
+    expect(plainMe.json().grants).toEqual([]);
   });
 
   it("exactly one admin under concurrent first registrations", async () => {

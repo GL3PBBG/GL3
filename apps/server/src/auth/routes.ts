@@ -9,6 +9,7 @@ import type { Db } from "../db/client.js";
 import { players, playerStats, roleModuleAccess, roles } from "../db/schema/index.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
+import { loadGrants } from "../plugins/routes.js";
 import { createSession, destroySession, readSession } from "./session.js";
 
 declare module "fastify" {
@@ -152,10 +153,12 @@ export function registerAuthRoutes(
 
     if (!row) return reply.code(404).send({ error: "player_not_found" });
 
+    const grants = await loadGrants(db, playerId);
     return reply.send({
       playerId, username: row.username,
       cash: row.cash.toString(), bank: row.bank.toString(),
       bullets: row.bullets.toString(), exp: row.exp.toString(),
+      grants,
     });
   });
 }
