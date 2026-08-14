@@ -13,9 +13,10 @@ export function Hospital(): JSX.Element {
   const discharge = useDischarge();
   const { remaining, seed } = useCountdowns();
 
-  // The poll is every 2s; the display ticks every 1s. Each poll re-anchors the
-  // local clock, which is what stops a throttled or suspended tab showing a
-  // sentence that expired minutes ago.
+  // The socket re-anchors this on `player.discharged`; the slow safety poll
+  // re-anchors it if the socket is down. The display ticks locally every 1s
+  // between anchors, which is what stops a throttled or suspended tab showing
+  // a sentence that expired minutes ago (see lib/countdown.ts).
   useEffect(() => {
     seed("hospital", hospital.data?.remainingSeconds ?? 0);
   }, [hospital.data, seed]);
@@ -49,7 +50,7 @@ export function Hospital(): JSX.Element {
       <p className={styles.big}>{formatDuration(remaining["hospital"] ?? status.remainingSeconds)}</p>
       <p className={styles.meta}>
         Discharge now for <Money value={status.dischargeCost} /> — heals you fully.
-        This page checks every couple of seconds and lets you out automatically.
+        You'll be let out automatically.
       </p>
       <ErrorText error={discharge.error} />
       <button
