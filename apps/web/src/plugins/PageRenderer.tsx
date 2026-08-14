@@ -298,12 +298,22 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             onSubmit={(event) => {
               event.preventDefault();
               const body: Record<string, string> = {};
-              for (const field of inst.fields) body[field.name] = formValues[`${index}:${field.name}`] ?? "";
+              for (const field of inst.fields) {
+                // A hidden field has no input and therefore no `formValues`
+                // entry — its constant comes straight off the schema.
+                body[field.name] = field.type === "hidden"
+                  ? field.value
+                  : formValues[`${index}:${field.name}`] ?? "";
+              }
               void runAction(index, inst.action, body);
             }}
           >
             {inst.fields.map((field) => {
               const key = `${index}:${field.name}`;
+              // Nothing to draw and nothing to label: onSubmit reads the
+              // constant off the field itself. Rendering an
+              // `<input type="hidden">` would only add a second, unread copy.
+              if (field.type === "hidden") return null;
               return (
                 <label key={field.name} className={styles.field}>
                   <span className={styles.meta}>{field.label}</span>
@@ -321,7 +331,11 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
                       name={field.name}
                       // `money` is a decimal string on the wire, so it stays a text
                       // input — a number input would round-trip it through Number.
-                      type={field.type === "money" ? "text" : field.type}
+                      type={field.type === "money" ? "text" : field.type === "decimal" ? "number" : field.type}
+                      // `<input type="number">` defaults to step="1", which makes
+                      // the browser reject a fractional value on submit. `decimal`
+                      // is the same widget with that restriction lifted.
+                      {...(field.type === "decimal" ? { step: "any" } : {})}
                       value={formValues[key] ?? ""}
                       onChange={(event) => {
                         const { value } = event.target;

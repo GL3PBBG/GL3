@@ -167,6 +167,10 @@ export default definePlugin({
                 { name: "times", label: "Times (number)", type: "number" },
                 { name: "amount", label: "Amount (money)", type: "money" },
                 { name: "secret", label: "Secret (password)", type: "password" },
+                { name: "rate", label: "Rate (decimal)", type: "decimal" },
+                // Draws nothing — the walkthrough check is that the form
+                // shows five boxes, not six, and still posts `mode=constant`.
+                { name: "mode", type: "hidden", value: "constant" },
               ],
             },
           ],

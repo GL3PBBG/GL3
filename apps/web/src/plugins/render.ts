@@ -7,10 +7,12 @@
 /**
  * A select field carries where its options come from; `allowEmpty` is
  * normalised to a required boolean here so the renderer never re-derives the
- * DTO's optionality.
+ * DTO's optionality. A hidden field carries the constant it submits and no
+ * label — it draws nothing.
  */
 export type FormField =
-  | { name: string; label: string; type: "text" | "number" | "money" | "password" }
+  | { name: string; label: string; type: "text" | "number" | "decimal" | "money" | "password" }
+  | { name: string; type: "hidden"; value: string }
   | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean };
 
 export type RenderInstruction =
@@ -44,14 +46,14 @@ function childArray(v: unknown): readonly unknown[] {
 }
 
 /**
- * The DTO enum has already rejected anything outside these four, so the fallback
+ * The DTO enum has already rejected anything outside these five, so the fallback
  * is unreachable for a validated payload. It falls back to `text` rather than
  * dropping the field: `text` is the widget that accepts the widest input and
  * hides nothing, so a hypothetical unknown type degrades to a visible plain
  * input instead of a field the player cannot see or fill.
  */
-function isFieldType(v: unknown): v is "text" | "number" | "money" | "password" {
-  return v === "text" || v === "number" || v === "money" || v === "password";
+function isFieldType(v: unknown): v is "text" | "number" | "decimal" | "money" | "password" {
+  return v === "text" || v === "number" || v === "decimal" || v === "money" || v === "password";
 }
 
 export function renderNode(node: unknown, _handlers: Record<string, (action: string) => void>): RenderInstruction[] {
@@ -79,6 +81,9 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     const fields = childArray(node.fields).map((f): FormField => {
       const name = isRecord(f) ? String(f.name) : "";
       const label = isRecord(f) ? String(f.label) : "";
+      if (isRecord(f) && f.type === "hidden") {
+        return { name, type: "hidden", value: String(f.value) };
+      }
       if (isRecord(f) && f.type === "select") {
         return {
           name,

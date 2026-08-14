@@ -17,8 +17,30 @@ Branch: `feat/m4-migration-cli`.
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
 
-**Suite: 141 files / 1026 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 142 files / 1052 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
+
+The **item admin pass** on top of that added one file and 26 tests. It closes
+three flaws in the inventory admin, all downstream of `ItemBodySchema` being
+narrower than `WeaponEffectsSchema`: only three of a weapon's eight stats were
+settable, the items table printed the raw `effects` jsonb, and items were
+create-only — a seeded item such as Rusty Pistol could never be edited.
+`admin-inventory` +16 (every weapon stat on create, blank-means-absent, the
+per-stat columns, and the new `POST /api/admin/inventory/items/update`, which
+refuses a type-mismatched body rather than let an admin write `{armor}` onto a
+weapon and brick it), `plugins-render` +2, SDK `view-schema-contract` +4, and
+the new `admin-hidden-discriminator` (2, a unit-project walk asserting all six
+item forms carry `itemType` as a hidden constant).
+
+Two form field types were added to the view vocabulary for it, each in all
+three copies (SDK, DTO, the renderer's hand-written one): **`decimal`**, a
+`number` input with `step="any"`, because a weapon's `critMultiplier` is the
+vocabulary's only float and `<input type="number">` defaults to `step="1"` —
+the browser rejects 1.5 before it is ever submitted; and **`hidden`**, a
+strict branch carrying a `value` and no `label`, which draws nothing and
+submits its constant. `hidden` is what removes the six free-text `itemType`
+boxes an admin previously had to type a discriminator into, where one typo was
+a 400.
 
 The **admin usability pass** on top of that added one file and 27 tests:
 `admin-ids-hidden` (8, a unit-project walk over every core `adminPages` view

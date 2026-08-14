@@ -58,6 +58,8 @@ const everyKind = {
           { name: "times", label: "Times", type: "number" },
           { name: "stake", label: "Stake", type: "money" },
           { name: "secret", label: "Secret", type: "password" },
+          { name: "rate", label: "Rate", type: "decimal" },
+          { name: "kind", type: "hidden", value: "weapon" },
         ],
       },
       {

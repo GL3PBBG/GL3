@@ -174,6 +174,7 @@ export default defineWorkspace([
         "test/config.test.ts",
         "test/password.test.ts",
         "test/admin-ids-hidden.test.ts",
+        "test/admin-hidden-discriminator.test.ts",
         "test/admin-validate.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",

@@ -64,7 +64,7 @@ two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **141 files / 1026 tests**, `npm run verify` exit 0.
+Suite: **142 files / 1052 tests**, `npm run verify` exit 0.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

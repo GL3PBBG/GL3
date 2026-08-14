@@ -136,10 +136,10 @@ const leafOptions = [
     kind: z.literal("form"),
     action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
     submitLabel: z.string(),
-    // Two strict branches, kept identical to the SDK's copy: select carries
-    // its options wiring, the basic branch does not — so select-only
-    // properties cannot ride on a text field and silently vanish in the
-    // renderer.
+    // Three strict branches, kept identical to the SDK's copy: select carries
+    // its options wiring, hidden carries its constant, the basic branch
+    // carries neither — so a branch-only property cannot ride on a text field
+    // and silently vanish in the renderer.
     fields: z.array(
       z.union([
         z.object({
@@ -155,8 +155,15 @@ const leafOptions = [
         }).strict(),
         z.object({
           name: z.string(),
+          // No `label`: the field draws nothing. It submits a constant the
+          // route requires.
+          type: z.literal("hidden"),
+          value: z.string(),
+        }).strict(),
+        z.object({
+          name: z.string(),
           label: z.string(),
-          type: z.enum(["text", "number", "money", "password"]),
+          type: z.enum(["text", "number", "decimal", "money", "password"]),
         }).strict(),
       ]),
     ),

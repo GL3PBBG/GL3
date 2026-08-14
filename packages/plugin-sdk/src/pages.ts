@@ -67,9 +67,10 @@ const leafOptions = [
       kind: z.literal("form"),
       action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
       submitLabel: z.string(),
-      // Two strict branches: select carries its options wiring, the basic
-      // branch does not — so select-only properties cannot ride on a text
-      // field and silently vanish in the renderer.
+      // Three strict branches: select carries its options wiring, hidden
+      // carries its constant, the basic branch carries neither — so a
+      // branch-only property cannot ride on a text field and silently vanish
+      // in the renderer.
       fields: z.array(
         z.union([
           z
@@ -91,8 +92,22 @@ const leafOptions = [
           z
             .object({
               name: z.string(),
+              // No `label`: the field draws nothing, so there is nowhere to
+              // put one. It submits a constant the route requires — a
+              // discriminator the admin would otherwise have to type by hand,
+              // where one typo is a 400.
+              type: z.literal("hidden"),
+              value: z.string(),
+            })
+            .strict(),
+          z
+            .object({
+              name: z.string(),
               label: z.string(),
-              type: z.enum(["text", "number", "money", "password"]),
+              // `decimal` is `number` for fractional values. `number` renders
+              // as `<input type="number">`, whose default `step` of 1 makes
+              // the browser reject 1.5 before it is ever submitted.
+              type: z.enum(["text", "number", "decimal", "money", "password"]),
             })
             .strict(),
         ]),
