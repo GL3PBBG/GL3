@@ -238,9 +238,11 @@ unavailable here.
   ranges and is a deliberate act, never the default. `files` in both manifests is
   load-bearing — `dist/` is gitignored, and without it npm publishes a package
   with no build output.
-  **Outstanding:** `player.discharged` (`packages/shared/src/events.ts`, commit
-  `3b7e72e`) landed *after* the `0.1.0` publish, so the registry copy is missing
-  the 22nd core event variant and needs `0.1.1`.
+  The registry currently serves `@gl3/shared@0.1.1` (the `player.discharged`
+  variant from commit `3b7e72e`, which landed after `0.1.0`) and
+  `@gl3/plugin-sdk@0.1.0` — the SDK's own `src` is unchanged since its publish,
+  and its `"@gl3/shared": "^0.1.0"` dependency already resolves the new patch,
+  so it did not need republishing.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and

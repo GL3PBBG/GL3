@@ -1164,9 +1164,12 @@ and every third-party plugin resolving `^0.1.0` builds against that old copy.
 Changing the public surface of either package therefore means bumping its
 version and republishing (shared first). `^0.1.0` means `>=0.1.0 <0.2.0` at
 `0.x`, so additive changes go out as patches and keep existing peer ranges
-resolving; `0.2.0` invalidates them all. **Currently outstanding:**
-`player.discharged` (commit `3b7e72e`) added the 22nd core event variant after
-`0.1.0` was published, so the registry copy lags the workspace by that variant.
+resolving; `0.2.0` invalidates them all. The first exercise of this was
+`@gl3/shared@0.1.1`: `player.discharged` (commit `3b7e72e`) added the 22nd core
+event variant after `0.1.0` was published, and the registry lagged the workspace
+by that variant until the patch went out. `@gl3/plugin-sdk` stayed at `0.1.0` —
+its own `src` was untouched, and its `"@gl3/shared": "^0.1.0"` dependency
+resolves the new patch on its own.
 
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at
