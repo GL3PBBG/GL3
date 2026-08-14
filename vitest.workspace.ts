@@ -277,6 +277,7 @@ export default defineWorkspace([
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/sentence-sweeper.test.ts",
+        "test/sentence-sweeper-lock-order.test.ts",
         "test/shop-concurrency.test.ts",
         "test/shop.test.ts",
         "test/travel-lock-order.test.ts",
