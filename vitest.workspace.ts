@@ -176,6 +176,7 @@ export default defineWorkspace([
         "test/admin-ids-hidden.test.ts",
         "test/admin-hidden-discriminator.test.ts",
         "test/admin-validate.test.ts",
+        "test/plugin-map.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",
       ],
