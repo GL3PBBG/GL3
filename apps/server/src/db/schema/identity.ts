@@ -78,6 +78,12 @@ export const playerStats = pgTable("player_stats", {
   gangIdx: index("player_stats_gang_idx").on(t.gangId),
   rankIdx: index("player_stats_rank_idx").on(t.rankId),
   locationIdx: index("player_stats_location_idx").on(t.locationId),
+  // The sentence sweeper selects on these every tick. Partial because almost
+  // every row has both columns null — the index only ever holds live sentences.
+  jailedUntilIdx: index("player_stats_jailed_until_idx")
+    .on(t.jailedUntil).where(sql`${t.jailedUntil} is not null`),
+  hospitalUntilIdx: index("player_stats_hospital_until_idx")
+    .on(t.hospitalUntil).where(sql`${t.hospitalUntil} is not null`),
 }));
 
 /** Mirrors V2 userTimers: open-ended key→time. Custom module keys must survive. */
