@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { pruneExpired, seedDeadline, secondsLeft, startDeadline } from "../src/lib/countdown.js";
+import {
+  countdownSeconds, pruneExpired, seedDeadline, secondsLeft, startDeadline,
+} from "../src/lib/countdown.js";
 
 const T0 = 1_800_000_000_000;
 
@@ -64,5 +66,26 @@ describe("pruneExpired", () => {
   it("returns the same object when nothing expired, to keep render identity", () => {
     const live = { jail: T0 + 5_000 };
     expect(pruneExpired(live, T0)).toBe(live);
+  });
+});
+
+describe("countdownSeconds", () => {
+  it("prefers the live tick over the server snapshot", () => {
+    // The snapshot is a round trip old the moment it arrives; the local tick
+    // is what the player is actually watching.
+    expect(countdownSeconds(57, 60, true)).toBe(57);
+  });
+
+  it("shows the snapshot before the first anchor, so nothing flashes 0:00", () => {
+    // One render happens between the query resolving and the seeding effect
+    // running. Reading 0 there would blink the sentence away and back.
+    expect(countdownSeconds(undefined, 60, false)).toBe(60);
+  });
+
+  it("reads 0 once an anchored countdown expires, not the stale snapshot", () => {
+    // This is the regression: pruneExpired drops the id at expiry, and falling
+    // back to the snapshot made the clock hit 0:00 and jump back to the full
+    // sentence until the next fetch — up to 30s with the socket down.
+    expect(countdownSeconds(undefined, 60, true)).toBe(0);
   });
 });

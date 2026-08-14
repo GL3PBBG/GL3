@@ -60,6 +60,23 @@ export function seedDeadline(
   return { ...deadlines, [id]: nowMs + seconds * 1000 };
 }
 
+/**
+ * The seconds to display for a countdown whose id may already be pruned.
+ *
+ * `pruneExpired` drops a deadline the moment it passes, so `remaining[id]`
+ * goes undefined exactly at expiry. A naive `remaining[id] ?? snapshot` then
+ * falls back to the server's *old* snapshot: the clock reaches 0:00 and jumps
+ * straight back to the full sentence until the next fetch anchors it again.
+ * Once a countdown has been anchored, a missing id means finished — not
+ * unknown — which is what `anchored` distinguishes.
+ */
+export function countdownSeconds(
+  live: number | undefined, snapshot: number, anchored: boolean,
+): number {
+  if (live !== undefined) return live;
+  return anchored ? 0 : snapshot;
+}
+
 /** Drop finished timers so the button they gate re-enables. */
 export function pruneExpired(deadlines: Deadlines, nowMs: number): Deadlines {
   const live: Record<string, number> = {};

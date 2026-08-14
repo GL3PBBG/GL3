@@ -1,22 +1,19 @@
-import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useJail } from "../api/queries.js";
-import { useCountdowns } from "../hooks/useCountdowns.js";
+import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { Loading, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
 export function Jail(): JSX.Element {
   const jail = useJail();
-  const { remaining, seed } = useCountdowns();
-
   // The socket re-anchors this on `player.released`; the slow safety poll
   // re-anchors it if the socket is down. The display ticks locally every 1s
   // between anchors, which is what stops a throttled or suspended tab showing
   // a sentence that expired minutes ago (see lib/countdown.ts).
-  useEffect(() => {
-    seed("jail", jail.data?.remainingSeconds ?? 0);
-  }, [jail.data, seed]);
+  const jailSeconds = useSentenceCountdown(
+    "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+  );
 
   if (jail.isLoading) return <Loading what="jail status" />;
 
@@ -36,7 +33,7 @@ export function Jail(): JSX.Element {
 
   return (
     <Panel title="Jail">
-      <p className={styles.big}>{formatDuration(remaining["jail"] ?? jail.data.remainingSeconds)}</p>
+      <p className={styles.big}>{formatDuration(jailSeconds)}</p>
       <p className={styles.meta}>
         Out at{" "}
         {jail.data.until === null ? "any moment" : new Date(jail.data.until).toLocaleTimeString()}.
