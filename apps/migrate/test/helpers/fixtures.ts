@@ -134,8 +134,14 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
     teardown: async () => {
       const dropAdmin = postgres(adminUrl, { max: 1 });
       try {
+        // `client backend` only: an autovacuum worker attached to this database
+        // also shows up here, runs as a superuser, and cannot be signalled by the
+        // unprivileged test role — one such row made the whole statement fail with
+        // "permission denied to terminate process". DROP DATABASE only needs the
+        // client sessions gone; the worker exits on its own.
         await dropAdmin.unsafe(
-          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid()`,
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+             WHERE datname = '${dbName}' AND pid <> pg_backend_pid() AND backend_type = 'client backend'`,
         );
         await dropAdmin.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
       } finally {
