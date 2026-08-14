@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config.js";
 import { players, playerStats, ranks } from "../src/db/schema/index.js";
 import { dischargeIfExpired } from "../src/game/hospital/status.js";
 import { releaseIfExpiredWithOutcome } from "../src/game/jail/status.js";
+import { sweepExpiredSentences } from "../src/game/sweep/sweeper.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
@@ -110,5 +111,86 @@ describe("sentence expiry indexes", () => {
     expect(found).toEqual(["player_stats_hospital_until_idx", "player_stats_jailed_until_idx"]);
     // Partial, not full: the WHERE clause is the whole point.
     for (const row of rows) expect(row.indexdef.toLowerCase()).toContain("where");
+  });
+});
+
+describe("sweepExpiredSentences", () => {
+  beforeEach(async () => {
+    await resetDb(db);
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+  });
+
+  it("releases an elapsed jail sentence and publishes player.released", async () => {
+    const id = await makePlayer();
+    await db.update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() - 1000) })
+      .where(eq(playerStats.playerId, id));
+
+    const event = awaitOwnEvent(subscriber, id);
+    const result = await sweepExpiredSentences(db, redis);
+
+    expect(result.released).toContain(id);
+    expect((await event).type).toBe("player.released");
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, id));
+    expect(row?.jailedUntil).toBeNull();
+  });
+
+  it("discharges an elapsed hospital sentence, restoring rank max health", async () => {
+    const id = await makePlayer();
+    await db.update(playerStats)
+      .set({ health: 0, hospitalUntil: new Date(Date.now() - 1000) })
+      .where(eq(playerStats.playerId, id));
+
+    const event = awaitOwnEvent(subscriber, id);
+    const result = await sweepExpiredSentences(db, redis);
+
+    expect(result.discharged).toContain(id);
+    expect((await event).type).toBe("player.discharged");
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, id));
+    expect(row?.health).toBe(140);
+    expect(row?.hospitalUntil).toBeNull();
+  });
+
+  it("leaves live sentences alone", async () => {
+    const id = await makePlayer();
+    await db.update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() + 60_000), hospitalUntil: new Date(Date.now() + 60_000) })
+      .where(eq(playerStats.playerId, id));
+
+    const result = await sweepExpiredSentences(db, redis);
+
+    expect(result.released).toEqual([]);
+    expect(result.discharged).toEqual([]);
+  });
+
+  it("is idempotent — a second pass claims nothing", async () => {
+    const id = await makePlayer();
+    await db.update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() - 1000), health: 0, hospitalUntil: new Date(Date.now() - 1000) })
+      .where(eq(playerStats.playerId, id));
+
+    const first = await sweepExpiredSentences(db, redis);
+    expect(first.released).toEqual([id]);
+    expect(first.discharged).toEqual([id]);
+
+    const second = await sweepExpiredSentences(db, redis);
+    expect(second.released).toEqual([]);
+    expect(second.discharged).toEqual([]);
+  });
+
+  it("claims exactly once when two sweeps race, which is what makes a second instance safe", async () => {
+    const ids = await Promise.all([makePlayer(), makePlayer(), makePlayer()]);
+    await db.update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() - 1000), health: 0, hospitalUntil: new Date(Date.now() - 1000) })
+      .where(inArray(playerStats.playerId, ids));
+
+    const [a, b] = await Promise.all([
+      sweepExpiredSentences(db, redis),
+      sweepExpiredSentences(db, redis),
+    ]);
+
+    // Every player released/discharged exactly once ACROSS both passes.
+    expect([...a.released, ...b.released].sort()).toEqual([...ids].sort());
+    expect([...a.discharged, ...b.discharged].sort()).toEqual([...ids].sort());
   });
 });
