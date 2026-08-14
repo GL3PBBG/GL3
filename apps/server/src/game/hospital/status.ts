@@ -1,6 +1,10 @@
 import { and, eq, isNotNull } from "drizzle-orm";
+import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
+import type { GameEvent } from "@gl3/shared";
+import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
-import { playerStats, ranks } from "../../db/schema/index.js";
+import { players, playerStats, ranks } from "../../db/schema/index.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 
 export interface HospitalStatus {
@@ -54,28 +58,80 @@ export async function maxHealthFor(tx: Tx, playerId: string): Promise<number> {
  * Takes `tx`, not `db`: every caller is already inside a transaction that
  * holds the relevant player lock.
  *
- * Publishes no event. `GameEventSchema` has `player.released` for jail but no
- * hospital equivalent, and adding a core variant is an SDK surface change
- * (`CoreEventInput` is derived from `GameEvent`) this feature does not need.
+ * Publishes no event: this runs inside the caller's transaction, and
+ * NOTES.md rule 5 says events are facts, published only after commit.
  *
  * The UPDATE repeats `hospital_until IS NOT NULL` so it is the arbiter of
  * "did THIS call perform the release" — the same shape as jail's
  * `releaseIfExpired`.
  */
 export async function settleHospital(tx: Tx, playerId: string): Promise<HospitalStatus> {
+  return (await settleHospitalTx(tx, playerId)).status;
+}
+
+/**
+ * Reports whether THIS call cleared the sentence, which the caller needs to
+ * decide whether to publish `player.discharged`. Publishing cannot happen in
+ * here: this runs inside the caller's transaction and NOTES.md rule 5 says
+ * events are facts, published only after commit.
+ */
+async function settleHospitalTx(
+  tx: Tx, playerId: string,
+): Promise<{ status: HospitalStatus; discharged: boolean }> {
   const [row] = await tx.select({ hospitalUntil: playerStats.hospitalUntil })
     .from(playerStats).where(eq(playerStats.playerId, playerId));
-  if (!row) return FREE;
+  if (!row) return { status: FREE, discharged: false };
 
   const status = statusFrom(row.hospitalUntil);
-  if (status.hospitalised) return status; // still admitted
-  if (row.hospitalUntil === null) return FREE;
+  if (status.hospitalised) return { status, discharged: false }; // still admitted
+  if (row.hospitalUntil === null) return { status: FREE, discharged: false };
 
   const maxHealth = await maxHealthFor(tx, playerId);
-  await tx.update(playerStats)
+  const cleared = await tx.update(playerStats)
     .set({ hospitalUntil: null, health: maxHealth })
-    .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.hospitalUntil)));
-  return FREE;
+    .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.hospitalUntil)))
+    .returning({ playerId: playerStats.playerId });
+  return { status: FREE, discharged: cleared.length > 0 };
+}
+
+/**
+ * The db-level counterpart of jail's `releaseIfExpired`, and the hospital
+ * entry point the sentence sweeper uses.
+ *
+ * Opens its own transaction and takes the player lock through
+ * `lockPlayersForUpdate` — exactly one lock, held alone, which is what makes
+ * the sweeper unable to deadlock against combat's two-player ordering
+ * (NOTES.md rule 6: a deadlock needs a cycle, and a single-lock holder has
+ * no outgoing edge).
+ *
+ * The event is published after commit (rule 5), and only when the UPDATE
+ * matched — so two sweepers, or a sweeper racing a discharge request, publish
+ * `player.discharged` exactly once between them.
+ */
+export async function dischargeIfExpired(
+  db: Db, redis: Redis, playerId: string,
+): Promise<{ status: HospitalStatus; discharged: boolean }> {
+  const [row] = await db.select({ username: players.username })
+    .from(players).where(eq(players.id, playerId));
+  if (!row) return { status: FREE, discharged: false };
+
+  const outcome = await db.transaction(async (tx) => {
+    await lockPlayersForUpdate(tx, [playerId]);
+    return settleHospitalTx(tx, playerId);
+  });
+
+  if (outcome.discharged) {
+    const event: GameEvent = {
+      id: uuidv7(),
+      type: "player.discharged",
+      at: new Date().toISOString(),
+      actorId: playerId,
+      actorName: row.username,
+      audience: { kind: "player", playerId },
+    };
+    await publishEvent(redis, event);
+  }
+  return outcome;
 }
 
 /**
