@@ -217,25 +217,123 @@ const useRoute = route({
 
 const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
 
+/**
+ * The page renderer posts *every* field in a form, sending "" for the ones the
+ * admin left blank (`PageRenderer.tsx`, the form's onSubmit). `z.coerce.number()`
+ * reads "" as 0, so an optional numeric field without this would arrive as a
+ * stated zero rather than absent — and for a weapon's accuracy those are
+ * different weapons: absent means "combat fills it from its own setting",
+ * 0 means "never hits". Blank is normalised to `undefined` here so
+ * `WeaponEffectsSchema`'s defaults apply instead.
+ */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
+/**
+ * Every field of `WeaponEffectsSchema` except the two required damage bounds,
+ * which have no default and must be stated. The admin UI sets all of them: the
+ * five below used to be absent from both this schema and the form, so an
+ * admin-created weapon was frozen at the schema defaults forever.
+ */
+const WeaponStatFields = {
+  accuracy: blankable(z.coerce.number().int().min(0).max(100)),
+  bulletsPerShot: blankable(z.coerce.number().int().positive()),
+  critChance: blankable(z.coerce.number().int().min(0).max(100)),
+  /** The only float in the vocabulary — hence the `decimal` form field type. */
+  critMultiplier: blankable(z.coerce.number().min(1)),
+  armorPierce: blankable(z.coerce.number().int().nonnegative()),
+  minRankExp: blankable(z.coerce.number().int().nonnegative()),
+} as const;
+
+const WeaponStatsShape = {
+  damageMin: z.coerce.number().int().nonnegative(),
+  damageMax: z.coerce.number().int().nonnegative(),
+  ...WeaponStatFields,
+} as const;
+
+const ArmorStatsShape = { armor: z.coerce.number().int().nonnegative() } as const;
+const ConsumableStatsShape = { heal: z.coerce.number().int().positive() } as const;
+
 const ItemBodySchema = z.discriminatedUnion("itemType", [
   z.object({
-    itemType: z.literal("weapon"),
+    itemType: z.literal(ITEM_TYPE_WEAPON),
     name: z.string().min(1).max(80),
-    damageMin: z.coerce.number().int().nonnegative(),
-    damageMax: z.coerce.number().int().nonnegative(),
-    accuracy: z.coerce.number().int().min(0).max(100).optional(),
+    ...WeaponStatsShape,
   }).strict(),
   z.object({
-    itemType: z.literal("armor"),
+    itemType: z.literal(ITEM_TYPE_ARMOR),
     name: z.string().min(1).max(80),
-    armor: z.coerce.number().int().nonnegative(),
+    ...ArmorStatsShape,
   }).strict(),
   z.object({
-    itemType: z.literal("consumable"),
+    itemType: z.literal(ITEM_TYPE_CONSUMABLE),
     name: z.string().min(1).max(80),
-    heal: z.coerce.number().int().positive(),
+    ...ConsumableStatsShape,
   }).strict(),
 ]);
+
+/**
+ * Update carries the same stats as create plus the row id, and makes `name`
+ * optional so an admin rebalancing a weapon does not have to retype its name.
+ * Blank is "leave it" for the same reason it is "absent" above.
+ */
+const ItemUpdateSchema = z.discriminatedUnion("itemType", [
+  z.object({
+    itemType: z.literal(ITEM_TYPE_WEAPON),
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    ...WeaponStatsShape,
+  }).strict(),
+  z.object({
+    itemType: z.literal(ITEM_TYPE_ARMOR),
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    ...ArmorStatsShape,
+  }).strict(),
+  z.object({
+    itemType: z.literal(ITEM_TYPE_CONSUMABLE),
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    ...ConsumableStatsShape,
+  }).strict(),
+]);
+
+type ItemStatsBody =
+  | ({ itemType: typeof ITEM_TYPE_WEAPON } & z.infer<z.ZodObject<typeof WeaponStatsShape>>)
+  | ({ itemType: typeof ITEM_TYPE_ARMOR } & z.infer<z.ZodObject<typeof ArmorStatsShape>>)
+  | ({ itemType: typeof ITEM_TYPE_CONSUMABLE } & z.infer<z.ZodObject<typeof ConsumableStatsShape>>);
+
+/**
+ * Turn a validated body into the `effects` jsonb. The per-type effects schema
+ * runs a second time here on purpose: it is what applies the weapon defaults
+ * and enforces `damageMax >= damageMin`, neither of which the body schema
+ * expresses. `...(x !== undefined && { x })` rather than passing the key
+ * through — an explicit `undefined` would defeat `.default()`.
+ */
+function effectsFor(body: ItemStatsBody): unknown {
+  try {
+    switch (body.itemType) {
+      case ITEM_TYPE_WEAPON:
+        return WeaponEffectsSchema.parse({
+          damageMin: body.damageMin,
+          damageMax: body.damageMax,
+          ...(body.accuracy !== undefined && { accuracy: body.accuracy }),
+          ...(body.bulletsPerShot !== undefined && { bulletsPerShot: body.bulletsPerShot }),
+          ...(body.critChance !== undefined && { critChance: body.critChance }),
+          ...(body.critMultiplier !== undefined && { critMultiplier: body.critMultiplier }),
+          ...(body.armorPierce !== undefined && { armorPierce: body.armorPierce }),
+          ...(body.minRankExp !== undefined && { minRankExp: body.minRankExp }),
+        });
+      case ITEM_TYPE_ARMOR:
+        return ArmorEffectsSchema.parse({ armor: body.armor });
+      case ITEM_TYPE_CONSUMABLE:
+        return ConsumableEffectsSchema.parse({ heal: body.heal });
+    }
+  } catch {
+    throw new PluginError("invalid_effects", 400);
+  }
+}
 
 const ShopStockBodySchema = z.object({
   locationId: z.string().uuid(),
@@ -246,6 +344,62 @@ const ShopStockBodySchema = z.object({
 
 // --- Admin routes ---
 
+/**
+ * One flat string per stat, because a `table` node renders exactly that. The
+ * listing used to carry `JSON.stringify(effects)` in a single column, which
+ * rendered as a wall of braces the admin could read but not act on — the stat
+ * names in it did not even line up with any form field, because five of them
+ * had no form field at all.
+ *
+ * Three conventions, and the difference between them matters:
+ *   ""        the stat does not exist for this item's type
+ *   "—"       the stat exists, is optional, and this item does not state it
+ *             (a V2-migrated weapon has no accuracy)
+ *   "invalid" the type is one this plugin knows but the jsonb does not parse
+ *
+ * An unrecognised `item_type` — `items.item_type` is unconstrained text and V2
+ * shipped types beyond these three — gets blanks everywhere: this plugin has
+ * no schema for it and inventing one would be a lie.
+ */
+function statCells(itemType: string, effects: unknown): Record<string, string> {
+  const blank = {
+    damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
+    critMultiplier: "", armorPierce: "", minRankExp: "", armor: "", heal: "",
+  };
+  const parsed = readEffects(itemType, effects);
+  const known = itemType === ITEM_TYPE_WEAPON
+    || itemType === ITEM_TYPE_ARMOR
+    || itemType === ITEM_TYPE_CONSUMABLE;
+  if (!known) return blank;
+  // `readEffects` answers null for a known type it cannot parse.
+  if (parsed === null) {
+    switch (itemType) {
+      case ITEM_TYPE_WEAPON: return { ...blank, damage: "invalid" };
+      case ITEM_TYPE_ARMOR: return { ...blank, armor: "invalid" };
+      default: return { ...blank, heal: "invalid" };
+    }
+  }
+  switch (itemType) {
+    case ITEM_TYPE_WEAPON: {
+      const w = WeaponEffectsSchema.parse(parsed);
+      return {
+        ...blank,
+        damage: `${w.damageMin}–${w.damageMax}`,
+        accuracy: w.accuracy === undefined ? "—" : String(w.accuracy),
+        bulletsPerShot: String(w.bulletsPerShot),
+        critChance: String(w.critChance),
+        critMultiplier: String(w.critMultiplier),
+        armorPierce: String(w.armorPierce),
+        minRankExp: String(w.minRankExp),
+      };
+    }
+    case ITEM_TYPE_ARMOR:
+      return { ...blank, armor: String(ArmorEffectsSchema.parse(parsed).armor) };
+    default:
+      return { ...blank, heal: String(ConsumableEffectsSchema.parse(parsed).heal) };
+  }
+}
+
 const adminItemListRoute = route({
   method: "GET", path: "/api/admin/inventory/items", auth: "admin",
   handler: async (ctx) => {
@@ -254,10 +408,12 @@ const adminItemListRoute = route({
       status: 200,
       body: {
         rows: rows.map((r) => ({
+          // `id` is never a table column — it is every select's valueKey, which
+          // `test/admin-ids-hidden.test.ts` enforces across every admin page.
           id: r.id,
           name: r.name,
           itemType: r.itemType,
-          effects: JSON.stringify(r.effects),
+          ...statCells(r.itemType, r.effects),
         })),
       },
     };
@@ -268,27 +424,7 @@ const adminItemCreateRoute = route({
   method: "POST", path: "/api/admin/inventory/items", auth: "admin",
   body: ItemBodySchema,
   handler: async (ctx, { body }) => {
-    let effects: unknown;
-    try {
-      switch (body.itemType) {
-        case "weapon":
-          effects = WeaponEffectsSchema.parse({
-            damageMin: body.damageMin,
-            damageMax: body.damageMax,
-            ...(body.accuracy !== undefined && { accuracy: body.accuracy }),
-          });
-          break;
-        case "armor":
-          effects = ArmorEffectsSchema.parse({ armor: body.armor });
-          break;
-        case "consumable":
-          effects = ConsumableEffectsSchema.parse({ heal: body.heal });
-          break;
-      }
-    } catch {
-      throw new PluginError("invalid_effects", 400);
-    }
-
+    const effects = effectsFor(body);
     const id = newId();
     await ctx.transaction(async (tx) => {
       await tx.db.insert(items).values({
@@ -299,6 +435,36 @@ const adminItemCreateRoute = route({
       });
     });
     return { status: 201, body: { id } };
+  },
+});
+
+const adminItemUpdateRoute = route({
+  method: "POST", path: "/api/admin/inventory/items/update", auth: "admin",
+  body: ItemUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const effects = effectsFor(body);
+    const outcome = await ctx.transaction(async (tx) => {
+      // Read the type before writing: the form's item select lists every item
+      // regardless of type, so the armor form can be pointed at a weapon.
+      // Writing `{ armor: n }` onto an item_type of `weapon` would leave a row
+      // whose type and effects disagree, which readEffects then reports as
+      // null and equipping refuses — a bricked item, from a valid-looking
+      // submit. Refuse it instead.
+      const [existing] = await tx.db
+        .select({ itemType: items.itemType })
+        .from(items)
+        .where(eq(items.id, body.id));
+      if (!existing) return "not_found" as const;
+      if (existing.itemType !== body.itemType) return "mismatch" as const;
+      await tx.db
+        .update(items)
+        .set({ effects, ...(body.name !== undefined && { name: body.name }) })
+        .where(eq(items.id, body.id));
+      return "ok" as const;
+    });
+    if (outcome === "not_found") throw new PluginError("item_not_found", 404);
+    if (outcome === "mismatch") throw new PluginError("item_type_mismatch", 400);
+    return { status: 204 };
   },
 });
 
@@ -378,6 +544,26 @@ const adminShopUpsertRoute = route({
   },
 });
 
+/**
+ * Declared once and spread into both the add-weapon and update-weapon forms:
+ * they must offer the same stats, and the reason this page needed fixing in
+ * the first place is that a stat existed in `WeaponEffectsSchema` with no form
+ * field anywhere to set it.
+ *
+ * `critMultiplier` is the one `decimal`. As a `number` the browser applies the
+ * default `step="1"` and refuses to submit 1.5.
+ */
+const WEAPON_STAT_FORM_FIELDS = [
+  { name: "damageMin", label: "Damage min", type: "number" },
+  { name: "damageMax", label: "Damage max", type: "number" },
+  { name: "accuracy", label: "Accuracy % (blank = combat default)", type: "number" },
+  { name: "bulletsPerShot", label: "Bullets per shot (blank = 1)", type: "number" },
+  { name: "critChance", label: "Crit chance % (blank = 0)", type: "number" },
+  { name: "critMultiplier", label: "Crit multiplier (blank = 1)", type: "decimal" },
+  { name: "armorPierce", label: "Armor pierce (blank = 0)", type: "number" },
+  { name: "minRankExp", label: "Min rank exp (blank = 0)", type: "number" },
+] as const satisfies readonly { name: string; label: string; type: "number" | "decimal" }[];
+
 const adminPage: PageSchema = {
   id: "inventory-admin",
   path: "/admin/inventory",
@@ -390,23 +576,53 @@ const adminPage: PageSchema = {
           { kind: "table", source: "GET /api/admin/inventory/items", columns: [
             { key: "name", label: "Name" },
             { key: "itemType", label: "Type" },
-            { key: "effects", label: "Effects" },
+            { key: "damage", label: "Damage" },
+            { key: "accuracy", label: "Accuracy" },
+            { key: "bulletsPerShot", label: "Bullets/shot" },
+            { key: "critChance", label: "Crit %" },
+            { key: "critMultiplier", label: "Crit ×" },
+            { key: "armorPierce", label: "Pierce" },
+            { key: "minRankExp", label: "Min rank exp" },
+            { key: "armor", label: "Armor" },
+            { key: "heal", label: "Heal" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add weapon", fields: [
             { name: "name", label: "Name", type: "text" },
-            { name: "itemType", label: "Type (weapon)", type: "text" },
-            { name: "damageMin", label: "Damage min", type: "number" },
-            { name: "damageMax", label: "Damage max", type: "number" },
-            { name: "accuracy", label: "Accuracy (0-100)", type: "number" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_WEAPON },
+            ...WEAPON_STAT_FORM_FIELDS,
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add armor", fields: [
             { name: "name", label: "Name", type: "text" },
-            { name: "itemType", label: "Type (armor)", type: "text" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_ARMOR },
             { name: "armor", label: "Armor", type: "number" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add consumable", fields: [
             { name: "name", label: "Name", type: "text" },
-            { name: "itemType", label: "Type (consumable)", type: "text" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
+            { name: "heal", label: "Heal", type: "number" },
+          ] },
+        ],
+      },
+      {
+        kind: "panel", title: "Edit an item",
+        children: [
+          { kind: "text", value: "Pick an item in the form matching its type. Leave a stat blank to take its default; leave the name blank to keep the current one." },
+          { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Update weapon", fields: [
+            { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_WEAPON },
+            { name: "name", label: "Rename to (optional)", type: "text" },
+            ...WEAPON_STAT_FORM_FIELDS,
+          ] },
+          { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Update armor", fields: [
+            { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_ARMOR },
+            { name: "name", label: "Rename to (optional)", type: "text" },
+            { name: "armor", label: "Armor", type: "number" },
+          ] },
+          { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Update consumable", fields: [
+            { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
+            { name: "name", label: "Rename to (optional)", type: "text" },
             { name: "heal", label: "Heal", type: "number" },
           ] },
         ],
@@ -440,7 +656,8 @@ export default definePlugin({
   migrations: SHOP_MIGRATIONS,
   routes: [
     listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute,
-    adminItemListRoute, adminItemCreateRoute, adminShopListRoute, adminShopUpsertRoute,
+    adminItemListRoute, adminItemCreateRoute, adminItemUpdateRoute,
+    adminShopListRoute, adminShopUpsertRoute,
     adminLocationListRoute,
   ],
   events: [purchasedEvent],

@@ -77,6 +77,21 @@ const ACCEPTED: readonly (readonly [string, unknown])[] = [
         { name: "times", label: "Times", type: "number" },
         { name: "amount", label: "Amount", type: "money" },
         { name: "secret", label: "Secret", type: "password" },
+        { name: "rate", label: "Rate", type: "decimal" },
+      ],
+    },
+  ],
+  [
+    "form with a hidden field",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Submit form",
+      fields: [
+        { name: "note", label: "Note", type: "text" },
+        // No `label`: a hidden field renders nothing, so there is nowhere to
+        // put one. It exists to submit a constant the route requires.
+        { name: "itemType", type: "hidden", value: "weapon" },
       ],
     },
   ],
@@ -212,6 +227,33 @@ const REJECTED: readonly (readonly [string, unknown])[] = [
           labelKey: "name",
         },
       ],
+    },
+  ],
+  [
+    "a hidden field with no value",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{ name: "itemType", type: "hidden" }],
+    },
+  ],
+  [
+    "a hidden field whose value is not a string",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{ name: "times", type: "hidden", value: 3 }],
+    },
+  ],
+  [
+    "a basic form field smuggling a hidden field's constant",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{ name: "note", label: "Note", type: "text", value: "sneak" }],
     },
   ],
   [

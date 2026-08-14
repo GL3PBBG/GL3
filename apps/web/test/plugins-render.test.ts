@@ -59,6 +59,34 @@ describe("renderNode", () => {
     }]);
   });
 
+  // `decimal` exists because `number` is rendered as `<input type="number">`,
+  // whose default `step` of 1 makes the browser reject a fractional value
+  // before it is ever submitted. A weapon's `critMultiplier` is the live case.
+  it("renders a decimal field", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "critMultiplier", label: "Crit multiplier", type: "decimal" as const }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "critMultiplier", label: "Crit multiplier", type: "decimal" }],
+    }]);
+  });
+
+  // A hidden field submits a constant the route requires and draws nothing —
+  // the inventory admin's `itemType` discriminator is the live case. The
+  // constant has to survive the transform: it is the whole field.
+  it("renders a hidden field carrying its constant", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "itemType", type: "hidden" as const, value: "weapon" }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [{ name: "itemType", type: "hidden", value: "weapon" }],
+    }]);
+  });
+
   it("renders a select field carrying its options wiring", () => {
     const out = renderNode({
       kind: "form", action: "POST /api/x", submitLabel: "Go",
