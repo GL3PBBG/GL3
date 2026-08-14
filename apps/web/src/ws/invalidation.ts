@@ -34,6 +34,10 @@ export function invalidationKeys(
     case "player.jailed":
     case "player.released":
       return [keys.jail(), keys.crimes()];
+    case "player.discharged":
+      // The sentence ended and health came back; /hospital is the whole page
+      // for the discharged player and health lives on /api/auth/me.
+      return [keys.hospital(), keys.me()];
     case "player.travelled":
       // Stock is per-location and the shop query is not keyed by location, so
       // without this a traveller keeps seeing the city they left.
@@ -47,8 +51,12 @@ export function invalidationKeys(
       return [keys.me(), keys.ranks()];
     case "player.attacked":
       // Bullets moved and the target's health did, so the list a player is
-      // looking at is stale; the log gains a row for both parties.
-      return [keys.me(), keys.combatTargets(), keys.combatLog()];
+      // looking at is stale; the log gains a row for both parties. Hospital is
+      // in here because combat settles an elapsed sentence for both
+      // participants itself (combat's own settleHospitalIfElapsed), which
+      // publishes nothing — so this is the only signal the target gets when
+      // an attack beats the sweeper to their discharge.
+      return [keys.me(), keys.combatTargets(), keys.combatLog(), keys.hospital()];
     case "player.killed":
       // The victim is now hospitalised — for them that is the whole page, and
       // for the killer it is why the target vanished from the list.

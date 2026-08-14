@@ -10,17 +10,19 @@ export function Jail(): JSX.Element {
   const jail = useJail();
   const { remaining, seed } = useCountdowns();
 
-  // The poll is every 2s; the display ticks every 1s. Each poll re-anchors the
-  // local clock, which is what stops a throttled or suspended tab showing a
-  // sentence that expired minutes ago (see lib/countdown.ts).
+  // The socket re-anchors this on `player.released`; the slow safety poll
+  // re-anchors it if the socket is down. The display ticks locally every 1s
+  // between anchors, which is what stops a throttled or suspended tab showing
+  // a sentence that expired minutes ago (see lib/countdown.ts).
   useEffect(() => {
     seed("jail", jail.data?.remainingSeconds ?? 0);
   }, [jail.data, seed]);
 
   if (jail.isLoading) return <Loading what="jail status" />;
 
-  // GET /api/jail is what actually runs releaseIfExpired server-side — there is
-  // no cron, so this page sitting open polling is the release.
+  // The server's sentence sweeper is what frees a player now — GET /api/jail
+  // still calls releaseIfExpired as a backstop, so this page works even with
+  // the sweeper disabled (SWEEP_INTERVAL_MS=0).
   if (jail.data?.jailed !== true) {
     return (
       <Panel title="Jail">
@@ -38,7 +40,7 @@ export function Jail(): JSX.Element {
       <p className={styles.meta}>
         Out at{" "}
         {jail.data.until === null ? "any moment" : new Date(jail.data.until).toLocaleTimeString()}.
-        This page checks every couple of seconds and lets you out automatically.
+        You'll be let out automatically.
       </p>
     </Panel>
   );

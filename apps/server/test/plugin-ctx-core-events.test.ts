@@ -75,6 +75,7 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "crime.resolved", audience: { kind: "global" }, crimeId: UUID_A, crimeName: "Rob a store", success: true, payout: "500", bullets: "2", exp: "10", jailedUntil: null },
   { type: "player.jailed", audience: { kind: "global" }, until: AT, reason: "failed a crime" },
   { type: "player.released", audience: { kind: "global" } },
+  { type: "player.discharged", audience: { kind: "global" } },
   { type: "player.travelled", audience: { kind: "global" }, fromLocationId: null, toLocationId: UUID_A, cost: "100" },
   { type: "player.attacked", audience: { kind: "global" }, targetId: UUID_A, targetName: "Sollozzo", damage: 12 },
   { type: "player.killed", audience: { kind: "global" }, victimId: UUID_A, victimName: "Sollozzo" },

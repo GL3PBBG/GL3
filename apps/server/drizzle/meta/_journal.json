@@ -57,6 +57,13 @@
       "when": 1786639424488,
       "tag": "0007_relinquish_plugin_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786744364641,
+      "tag": "0008_sentence_expiry_indexes",
+      "breakpoints": true
     }
   ]
 }
