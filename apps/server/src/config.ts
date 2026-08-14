@@ -5,6 +5,13 @@ const EnvSchema = z.object({
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
   PORT: z.coerce.number().int().positive().default(3000),
   SESSION_TTL: z.coerce.number().int().positive().default(604800),
+  /**
+   * Milliseconds between sentence-sweeper passes. `0` disables the sweeper,
+   * which is safe: `releaseIfExpired`/`settleHospital` still free players
+   * lazily on their next request, exactly as they did before the sweeper
+   * existed. Non-negative rather than positive for that reason.
+   */
+  SWEEP_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   /** Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard. */
   CORS_ORIGINS: z.string().default("http://localhost:5173").refine(
@@ -23,6 +30,7 @@ export interface Config {
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
   pluginIds: string[];
+  sweepIntervalMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -35,5 +43,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     nodeEnv: parsed.NODE_ENV,
     pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+    sweepIntervalMs: parsed.SWEEP_INTERVAL_MS,
   };
 }

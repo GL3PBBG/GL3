@@ -31,12 +31,22 @@ export interface SweepResult {
  * NOTES.md rule 1's at-least-once idempotency comes from here: from the
  * statement, not from a bookkeeping table.
  *
- * Rows are settled ONE AT A TIME, each in its own transaction holding exactly
- * one player lock. A bulk `UPDATE ... WHERE hospital_until <= now()` would
- * take its row locks in scan order, which is not sorted order, and could
- * deadlock against combat's ascending `lockPlayersForUpdate` (rule 6). A
- * holder of a single lock has no outgoing wait edge and so cannot be part of
- * a cycle.
+ * Rows are settled ONE AT A TIME, never as a bulk `UPDATE ... WHERE
+ * hospital_until <= now()`, which would take its row locks in scan order —
+ * not sorted order — and could deadlock against combat's ascending
+ * `lockPlayersForUpdate` (rule 6). The two settlement paths get there
+ * differently, and both are deadlock-free for their own reason:
+ *
+ * - `dischargeIfExpired` (hospital) opens its own transaction and takes
+ *   exactly one player lock through `lockPlayersForUpdate` before settling.
+ *   A holder of a single lock has no outgoing wait edge and so cannot be
+ *   part of a cycle.
+ * - `releaseIfExpiredWithOutcome` (jail) takes no explicit lock at all: it is
+ *   a bare SELECT followed by an `UPDATE ... WHERE jailed_until IS NOT NULL`,
+ *   with no surrounding `db.transaction`. The UPDATE's row lock is acquired
+ *   and released within that single autocommit statement, so no lock survives
+ *   between statements — there is nothing left standing to form a wait edge,
+ *   let alone a cycle.
  *
  * This is a latency optimisation, not the mechanism of record: the lazy path
  * on the gated routes still releases players if no sweeper is running at all.
@@ -69,4 +79,54 @@ export async function sweepExpiredSentences(
     }
   }
   return result;
+}
+
+export interface SweeperHandle {
+  /** Stops the loop. Safe to call more than once. */
+  stop: () => void;
+}
+
+export interface SweeperDeps {
+  db: Db;
+  redis: Redis;
+  /** Milliseconds between the END of one pass and the START of the next. */
+  intervalMs: number;
+  onError?: (error: unknown) => void;
+}
+
+/**
+ * Runs `sweepExpiredSentences` on a loop.
+ *
+ * A self-scheduling `setTimeout` rather than `setInterval`: the delay is
+ * measured from the END of each pass, so a slow pass can never overlap the
+ * next one. Overlap would not corrupt anything — the claim UPDATE makes
+ * double-settling impossible — but it would pile transactions onto a database
+ * that is already the reason the pass was slow.
+ *
+ * A throwing pass is reported and swallowed. The loop must outlive a
+ * transient Redis or Postgres blip; the lazy release path on the gated routes
+ * is what keeps players correct while it is blipping.
+ */
+export function startSentenceSweeper(deps: SweeperDeps): SweeperHandle {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const tick = async (): Promise<void> => {
+    try {
+      await sweepExpiredSentences(deps.db, deps.redis);
+    } catch (error) {
+      deps.onError?.(error);
+    }
+    if (stopped) return;
+    timer = setTimeout(() => { void tick(); }, deps.intervalMs);
+  };
+
+  void tick();
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
 }
