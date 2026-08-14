@@ -1133,10 +1133,20 @@ Dockerfile COPY. Two latent defects were fixed on the way: `@gl3/hello-plugin`
 and `@gl3/plugin-news` were imported by `apps/server/src/` but never declared
 as dependencies, resolving only through workspace hoisting.
 
-Still blocking a real marketplace: `@gl3/plugin-sdk` is `private: true` at
-`0.0.0`, so nothing can be published to or consumed from a registry yet, and
-third-party plugins have no SDK version to declare a peer range against. That
-is the next gap, not this one.
+`@gl3/plugin-sdk` and `@gl3/shared` are published to `npm.gl3.dev` at `0.1.0`,
+so a third-party plugin has an SDK version to declare a peer range against
+(`"peerDependencies": { "@gl3/plugin-sdk": "^0.1.0" }`). Both dropped
+`private: true` and gained `files`, `exports`, `publishConfig` and a `prepack`
+that runs `tsc --build`. **`files` is load-bearing**: `dist/` is gitignored, so
+without it npm falls back to `.gitignore` as `.npmignore` and publishes a
+package with no build output. `@gl3/shared` must publish alongside the SDK and
+first — `pages.ts` imports *values* from it, not only types.
+
+The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
+core packages resolve through the npm workspace here, and pointing the scope at
+the registry risks `npm ci` in the image preferring a registry fetch over the
+workspace link. A *plugin author's* `.npmrc` does need
+`@gl3:registry=https://npm.gl3.dev`, which is what the SDK README documents.
 
 ## What M3 established that later work must not undo
 
