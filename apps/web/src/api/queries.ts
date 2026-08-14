@@ -42,8 +42,24 @@ import {
 import { api, tokenStore } from "./client.js";
 import { keys } from "./keys.js";
 
-/** How often to re-ask the server whether a sentence has expired. */
-const JAIL_POLL_MS = 2_000;
+/**
+ * The server's sentence sweeper ends jail and hospital sentences on a ~2s tick
+ * and pushes `player.released` / `player.discharged` over the socket, so the
+ * page no longer has to ask. This poll is the backstop for the window where
+ * the socket is down (reconnect is 2s, but a server restart can be longer) —
+ * without it a mid-reconnect client would sit on a stale "you're jailed"
+ * screen. 30s rather than the old 2s: 15× less traffic, and the socket is what
+ * makes it feel instant.
+ */
+export const SENTENCE_SAFETY_POLL_MS = 30_000;
+
+export function jailRefetchInterval(data: JailStatus | undefined): number | false {
+  return data?.jailed === true ? SENTENCE_SAFETY_POLL_MS : false;
+}
+
+export function hospitalRefetchInterval(data: HospitalStatus | undefined): number | false {
+  return data?.hospitalised === true ? SENTENCE_SAFETY_POLL_MS : false;
+}
 
 export function useMe() {
   return useQuery<MeResponse>({
@@ -61,16 +77,17 @@ export function useCrimes() {
 }
 
 /**
- * There is no cron that frees players: `GET /api/jail` calls releaseIfExpired,
- * so *asking* is what ends a sentence. Polling while jailed is therefore load
- * bearing, not cosmetic — without it a player who never touches another gated
- * endpoint stays jailed on screen indefinitely.
+ * `GET /api/jail` still calls releaseIfExpired, so asking is still *a* way a
+ * sentence ends — but it is no longer the only one. The server's sentence
+ * sweeper ends sentences on a tick and pushes `player.released`, which
+ * invalidates this query (see ws/invalidation.ts). The slow poll here is the
+ * backstop for a client whose socket is down, not the mechanism.
  */
 export function useJail() {
   return useQuery<JailStatus>({
     queryKey: keys.jail(),
     queryFn: async () => JailStatusSchema.parse(await api("/api/jail")),
-    refetchInterval: (query) => (query.state.data?.jailed === true ? JAIL_POLL_MS : false),
+    refetchInterval: (query) => jailRefetchInterval(query.state.data),
   });
 }
 
@@ -536,9 +553,11 @@ export function useHospital() {
   return useQuery<HospitalStatus>({
     queryKey: keys.hospital(),
     queryFn: async () => HospitalStatusSchema.parse(await api("/api/hospital")),
-    // Same reason as the jail query: nothing frees a player on a timer, so the
-    // page polls to notice the sentence elapsing.
-    refetchInterval: JAIL_POLL_MS,
+    // Same shape as the jail query: the sweeper pushes `player.discharged` and
+    // this slow poll only covers a dropped socket. It is now CONDITIONAL — the
+    // previous version polled unconditionally, so a healthy player sitting on
+    // /hospital hit the server every 2 seconds for nothing.
+    refetchInterval: (query) => hospitalRefetchInterval(query.state.data),
   });
 }
 

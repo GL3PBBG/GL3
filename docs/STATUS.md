@@ -15,9 +15,9 @@ Branch: `feat/m4-migration-cli`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), and **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), and the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling) have since shipped |
 
-**Suite: 142 files / 1052 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 146 files / 1075 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
@@ -68,6 +68,20 @@ SDK `view-schema-contract` +1 (one more `it.each` case, `table`), web
 `plugins-render` +1 (table instruction), and `news` +2 — the news gate
 refactor also absorbed the three original gate tests into the loader tier,
 which is why its net is smaller than its additions.)
+
+The **sentence sweeper** has since shipped: a tick
+(`apps/server/src/game/sweep/sweeper.ts`, `SWEEP_INTERVAL_MS`, default 2000,
+`0` disables) that ends elapsed jail and hospital sentences without waiting
+for the player to ask, publishing `player.released` and the new
+`player.discharged`. The lazy path on the gated routes is unchanged and
+still authoritative when no sweeper runs. Its claim is the existing
+`WHERE ... IS NOT NULL` UPDATE, so a second instance is safe with no
+bookkeeping table; it settles one player per transaction holding one lock,
+which is why it shares no edge with the four existing lock pairs
+(`test/sentence-sweeper-lock-order.test.ts`). The web client's 2-second jail
+and hospital polls dropped to a 30-second socket-down backstop, and the
+hospital poll — previously unconditional — now runs only while the player is
+actually admitted.
 
 ---
 

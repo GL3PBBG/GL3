@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
+import { startSentenceSweeper } from "./game/sweep/sweeper.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { withCorePlugins } from "./plugins/core-plugins.js";
 import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
@@ -63,3 +64,15 @@ const app = await buildApp(config, { db, redis, plugins: loadedPlugins });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
 await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins });
+
+// Deliberately here and NOT in buildApp: every integration test builds its
+// server through buildApp/bootTestServer, and a background process quietly
+// clearing jailed_until under those tests would make half of them race. In
+// production the sweeper is what turns release into a WebSocket push instead
+// of a client poll.
+if (config.sweepIntervalMs > 0) {
+  startSentenceSweeper({
+    db, redis, intervalMs: config.sweepIntervalMs,
+    onError: (error) => { app.log.error({ err: error }, "sentence sweep failed"); },
+  });
+}

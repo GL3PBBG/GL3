@@ -151,8 +151,11 @@ describe("core schema", () => {
     // (a core-era idempotency key the crimes plugin's job ids collide with);
     // 0007 dropped three more with the tables that owned them —
     // bounties_target_idx, combat_log_target_idx and combat_log_attacker_idx.
-    // detective_searches had none beyond its primary key.
-    expect(Number(count)).toBe(27);
+    // detective_searches had none beyond its primary key. 0008 added two
+    // partial indexes for the sentence sweeper's candidate scan —
+    // player_stats_jailed_until_idx and player_stats_hospital_until_idx,
+    // each `WHERE ... IS NOT NULL` so only active sentences are indexed.
+    expect(Number(count)).toBe(29);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

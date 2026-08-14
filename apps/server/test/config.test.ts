@@ -32,4 +32,11 @@ describe("loadConfig", () => {
   it("rejects a wildcard mixed into an otherwise valid allowlist", () => {
     expect(() => loadConfig({ ...valid, CORS_ORIGINS: "http://a.com,*" })).toThrow(/wildcard/);
   });
+
+  it("defaults SWEEP_INTERVAL_MS to 2000 and allows 0 to disable", () => {
+    const base = { DATABASE_URL: "postgres://x", REDIS_URL: "redis://x" };
+    expect(loadConfig({ ...base }).sweepIntervalMs).toBe(2000);
+    expect(loadConfig({ ...base, SWEEP_INTERVAL_MS: "0" }).sweepIntervalMs).toBe(0);
+    expect(loadConfig({ ...base, SWEEP_INTERVAL_MS: "500" }).sweepIntervalMs).toBe(500);
+  });
 });

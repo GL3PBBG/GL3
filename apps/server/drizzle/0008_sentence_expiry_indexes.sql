@@ -1,0 +1,2 @@
+CREATE INDEX "player_stats_jailed_until_idx" ON "player_stats" USING btree ("jailed_until") WHERE "player_stats"."jailed_until" is not null;--> statement-breakpoint
+CREATE INDEX "player_stats_hospital_until_idx" ON "player_stats" USING btree ("hospital_until") WHERE "player_stats"."hospital_until" is not null;

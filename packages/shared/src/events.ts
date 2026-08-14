@@ -28,6 +28,12 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   // actor = the jailed player.
   z.object({ ...base, type: z.literal("player.jailed"), until: TimestampSchema, reason: z.string() }),
   z.object({ ...base, type: z.literal("player.released") }),
+  // actor = the discharged player. The hospital counterpart of
+  // player.released: published by the sentence sweeper (and by
+  // dischargeIfExpired on the lazy path) when an elapsed hospital_until is
+  // cleared. No payload — the client's keys.me() refetch carries the
+  // restored health, and every field here is a field every plugin can emit.
+  z.object({ ...base, type: z.literal("player.discharged") }),
   // fromLocationId is null the first time a player ever travels (no prior
   // location — playerStats.location_id starts null and M2 does not backfill
   // a "home" location at registration, see M2 plan Task 7).
@@ -75,7 +81,7 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   // actor = the OC participant receiving the result.
   z.object({ ...base, type: z.literal("oc.resolved"), heistId: IdSchema, success: z.boolean(), share: MoneySchema, jailSeconds: z.number().int().nonnegative() }),
   /**
-   * The envelope every plugin event travels in. The twenty-one core variants
+   * The envelope every plugin event travels in. The twenty-two core variants
    * above stay closed and unchanged; ported core modules keep emitting their
    * own typed variants (spec: Events). A plugin declares the payload schema,
    * the `describe` template and the invalidation keys in its manifest, and all

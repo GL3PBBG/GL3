@@ -163,4 +163,33 @@ describe("invalidationKeys", () => {
   it("refreshes the oc page and wallet on a heist resolution", () => {
     expect(invalidationKeys(event("oc.resolved"), VIEWER)).toEqual([keys.oc(), keys.me()]);
   });
+
+  it("player.discharged refreshes the hospital page and the wallet", () => {
+    const event_obj: GameEvent = {
+      id: "01920000-0000-7000-8000-000000000001",
+      type: "player.discharged",
+      at: "2026-08-14T00:00:00.000Z",
+      actorId: "01920000-0000-7000-8000-0000000000aa",
+      actorName: "tester",
+      audience: { kind: "player", playerId: "01920000-0000-7000-8000-0000000000aa" },
+    };
+    expect(invalidationKeys(event_obj, "01920000-0000-7000-8000-0000000000aa")).toEqual([
+      keys.hospital(), keys.me(),
+    ]);
+  });
+
+  it("player.attacked also refreshes hospital, because combat can discharge a target silently", () => {
+    const event_obj: GameEvent = {
+      id: "01920000-0000-7000-8000-000000000002",
+      type: "player.attacked",
+      at: "2026-08-14T00:00:00.000Z",
+      actorId: "01920000-0000-7000-8000-0000000000aa",
+      actorName: "tester",
+      audience: { kind: "player", playerId: "01920000-0000-7000-8000-0000000000aa" },
+      targetId: "01920000-0000-7000-8000-0000000000bb",
+      targetName: "victim",
+      damage: 5,
+    };
+    expect(invalidationKeys(event_obj, "01920000-0000-7000-8000-0000000000aa")).toContainEqual(keys.hospital());
+  });
 });
