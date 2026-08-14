@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import {
   useJail, useLocations, useLogout, useMail, useMe, useNotifications, usePlugins, useRanks,
 } from "../api/queries.js";
+import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { unreadCount } from "../lib/mail.js";
 import { progressToNextRank } from "../lib/ranks.js";
@@ -51,6 +52,12 @@ export function Shell(): JSX.Element {
   const mail = useMail();
   const notifications = useNotifications();
   const plugins = usePlugins();
+
+  // The banner is on screen on every page, so it is the countdown a player
+  // watches most — it has to tick between anchors like /jail does.
+  const jailSeconds = useSentenceCountdown(
+    "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+  );
 
   // `order` is the only thing that field is for, so the nav is the one place it
   // has to be honoured. Sorted on a copy — the array belongs to the query cache
@@ -141,7 +148,7 @@ export function Shell(): JSX.Element {
 
       {jail.data?.jailed === true ? (
         <p className={styles.jailBanner} role="status">
-          In jail — {formatDuration(jail.data.remainingSeconds)} remaining.
+          In jail — {formatDuration(jailSeconds)} remaining.
         </p>
       ) : null}
 

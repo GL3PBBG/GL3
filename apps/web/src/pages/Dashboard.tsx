@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useJail, useLocations, useMe, useRanks } from "../api/queries.js";
+import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatAmount } from "../lib/money.js";
 import { formatDuration } from "../lib/errors.js";
 import { progressToNextRank } from "../lib/ranks.js";
@@ -11,6 +12,10 @@ export function Dashboard(): JSX.Element {
   const jail = useJail();
   const ranks = useRanks();
   const locations = useLocations();
+  // Above the early return: hooks cannot be called conditionally.
+  const jailSeconds = useSentenceCountdown(
+    "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+  );
 
   if (!me.data) return <Loading />;
 
@@ -62,7 +67,7 @@ export function Dashboard(): JSX.Element {
       {jail.data?.jailed === true ? (
         <Panel title="Jail">
           <p className={styles.bad} style={{ margin: 0 }}>
-            Locked up for another {formatDuration(jail.data.remainingSeconds)}.{" "}
+            Locked up for another {formatDuration(jailSeconds)}.{" "}
             <Link to="/jail">Watch the clock</Link>
           </p>
         </Panel>
