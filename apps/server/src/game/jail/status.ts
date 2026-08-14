@@ -24,6 +24,11 @@ export async function checkJail(db: Db, playerId: string): Promise<JailStatus> {
 }
 
 /**
+ * As `releaseIfExpired`, but also reports whether THIS call performed the
+ * release. The sentence sweeper needs that answer: it publishes once per
+ * genuine claim and counts claims in its tests. Every request path wants the
+ * status only, and calls the wrapper below.
+ *
  * Postgres is the source of truth for jail (a Redis flush must not free
  * prisoners). This is the ONLY place that clears an expired jailed_until —
  * every gated route calls it first, so release happens lazily on the
@@ -36,35 +41,40 @@ export async function checkJail(db: Db, playerId: string): Promise<JailStatus> {
  * `player.released` fires exactly once no matter how many requests notice
  * the expiry at once.
  */
-export async function releaseIfExpired(db: Db, redis: Redis, playerId: string): Promise<JailStatus> {
+export async function releaseIfExpiredWithOutcome(
+  db: Db, redis: Redis, playerId: string,
+): Promise<{ status: JailStatus; released: boolean }> {
   const [row] = await db.select({ jailedUntil: playerStats.jailedUntil, username: players.username })
     .from(playerStats)
     .innerJoin(players, eq(players.id, playerStats.playerId))
     .where(eq(playerStats.playerId, playerId));
-  if (!row) return FREE;
+  if (!row) return { status: FREE, released: false };
 
   const status = statusFrom(row.jailedUntil);
-  if (status.jailed) return status; // still serving time
+  if (status.jailed) return { status, released: false }; // still serving time
+  if (row.jailedUntil === null) return { status: FREE, released: false };
 
-  if (row.jailedUntil !== null) {
-    const cleared = await db.update(playerStats)
-      .set({ jailedUntil: null })
-      .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.jailedUntil)))
-      .returning({ playerId: playerStats.playerId });
+  const cleared = await db.update(playerStats)
+    .set({ jailedUntil: null })
+    .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.jailedUntil)))
+    .returning({ playerId: playerStats.playerId });
 
-    if (cleared.length > 0) {
-      const event: GameEvent = {
-        id: uuidv7(),
-        type: "player.released",
-        at: new Date().toISOString(),
-        actorId: playerId,
-        actorName: row.username,
-        audience: { kind: "player", playerId },
-      };
-      await publishEvent(redis, event);
-    }
-  }
-  return FREE;
+  if (cleared.length === 0) return { status: FREE, released: false };
+
+  const event: GameEvent = {
+    id: uuidv7(),
+    type: "player.released",
+    at: new Date().toISOString(),
+    actorId: playerId,
+    actorName: row.username,
+    audience: { kind: "player", playerId },
+  };
+  await publishEvent(redis, event);
+  return { status: FREE, released: true };
+}
+
+export async function releaseIfExpired(db: Db, redis: Redis, playerId: string): Promise<JailStatus> {
+  return (await releaseIfExpiredWithOutcome(db, redis, playerId)).status;
 }
 
 /**
