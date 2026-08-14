@@ -13,10 +13,14 @@ ports and the web page renderer are planned follow-up work.
 ## Install
 
 ```bash
+echo '@gl3:registry=https://npm.gl3.dev' >> .npmrc
 npm install @gl3/plugin-sdk zod drizzle-orm
 ```
 
-`@gl3/shared` comes transitively. A plugin may **not** depend on `apps/server`.
+The SDK is published to `npm.gl3.dev`, not npmjs, so the scoped registry line is
+required — scoped, never a bare `registry=`, which would route every other
+dependency through that host too. `@gl3/shared` comes transitively. A plugin may
+**not** depend on `apps/server`.
 
 ## A plugin in one file
 
@@ -106,7 +110,7 @@ plugin id in the message.
 | `version` | `string` | Semver `x.y.z`. |
 | `basePaths` | `string[]` | At least one, each `/api/<name>...`. Every route path must sit under one of these. `/api/auth`, `/api/ws`, `/api/plugins`, `/health` are reserved to core. Overlapping basePaths across plugins is a hard boot failure. |
 | `tables` | `Record<string, string>` | Maps your key to a SQL table name that **must** start with `p_<id-with-underscores>_` (e.g. id `hello` → prefix `p_hello_`). Enforced by the loader at boot. |
-| `migrations` | `{ name, sql }[]` | Plain SQL, no drizzle-kit. Applied once, tracked in `plugin_migrations`. Migration names must be unique within a plugin (checked at definition time). |
+| `migrations` | `{ name, sql }[]` | Plain SQL, no drizzle-kit. Applied once, tracked in `plugin_migrations`. Migration names must be unique within a plugin (checked at definition time). **One-way — there is no `down`**; see Uninstalling. |
 | `routes` | `PluginRoute[]` | Built with `route()` (below). |
 | `pages` | `PageSchema[]` | Declarative UI; see Pages. |
 | `events` | `PluginEventDecl[]` | Declares each event's payload schema, `describe` template, and query invalidations. |
@@ -296,10 +300,12 @@ This is V2's `alterModuleData` pattern, generalised.
 ## Boot
 
 A plugin is loaded by id from `PLUGIN_IDS` (comma-separated, default empty).
-The server resolves each id to its manifest through a static import map in
-`apps/server/src/index.ts` — a dynamic `import(pluginId)` is deliberately not
-used, because a static import is what keeps the dependency-direction check
-enforceable by the compiler.
+The server resolves each id to its manifest through a static import map,
+`apps/server/src/plugins/installed-plugins.ts` — a dynamic `import(pluginId)`
+is deliberately not used, because a static import is what keeps the
+dependency-direction check enforceable by the compiler. That file is
+**generated** from the installed dependencies (see Installing a plugin); the
+imports are still static, only their authorship changed.
 
 Boot sequence:
 
@@ -315,6 +321,134 @@ Boot sequence:
 
 Every failure is a hard boot failure naming the plugin id. Discovery is a static
 deploy-time list — no filesystem scan, no hot reload, no runtime installation.
+
+## Publishing a plugin
+
+A plugin is an ordinary npm package. Three things make it installable as a GL3
+plugin:
+
+```json
+{
+  "name": "@acme/gl3-casino",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "gl3": { "plugin": true },
+  "publishConfig": { "registry": "https://npm.gl3.dev" },
+  "peerDependencies": { "@gl3/plugin-sdk": "^0.1.0" }
+}
+```
+
+1. **`"gl3": { "plugin": true }`** — the marker the server's generator looks
+   for. Without it the package installs and is simply never offered to
+   `PLUGIN_IDS`. It is a marker rather than a naming convention so that no npm
+   scope is mandated: publish under your own.
+2. **An `exports` map pointing at built output**, `dist/index.js` plus
+   `dist/index.d.ts`. Ship compiled JavaScript — the server does not compile
+   its dependencies. Every plugin package in this repo has exactly this shape;
+   `examples/hello-plugin` is the reference.
+3. **The default export is the manifest** returned by `definePlugin`.
+
+`files` is not optional in practice: `dist/` is gitignored, so npm falls back to
+`.gitignore` as `.npmignore` and publishes a package containing no build output
+at all. Declare it and check with `npm pack --dry-run` before the first publish.
+
+The plugin's manifest `id` need not match its package name — the server keys
+`AVAILABLE_PLUGINS` by `manifest.id` and never asserts the two are equal.
+`@acme/gl3-casino` exporting `id: "casino"` is enabled by `PLUGIN_IDS=casino`.
+
+## Installing a plugin
+
+For an operator running their own GL3 deployment, installing a plugin is three
+commands and a commit — never a source edit, so the deployment never forks
+core:
+
+```bash
+npm i @gl3-plugins/casino -w apps/server
+npm run plugins:generate
+git add package.json package-lock.json apps/server/package.json \
+        apps/server/src/plugins/installed-plugins.ts
+```
+
+Then enable it: `PLUGIN_IDS=casino`. Installing makes a plugin *available*;
+`PLUGIN_IDS` decides which of the available ones actually load. An id with no
+installed package is a hard boot failure, not a warning.
+
+`plugins:generate` rewrites `apps/server/src/plugins/installed-plugins.ts` from
+`apps/server`'s **direct** dependencies that carry the `gl3.plugin` marker — a
+transitive dependency can never smuggle itself into the boot. The file is
+committed rather than generated at build time so a fresh clone typechecks with
+no extra step and the install is a reviewable diff;
+`apps/server/test/plugin-map.test.ts` fails in CI if it is stale.
+
+The registry is wired up in the repo's committed `.npmrc`:
+
+```ini
+@gl3-plugins:registry=https://npm.gl3.dev
+```
+
+Scoped, never a bare `registry=` line — a global registry would route *every*
+dependency through that host. To install a plugin published under a different
+scope, add that scope's own line. If the registry ever requires auth for reads,
+add `//npm.gl3.dev/:_authToken=${NPM_TOKEN}` — commit the literal `${NPM_TOKEN}`,
+npm expands it at read time — and switch the two `COPY .npmrc` lines in
+`Dockerfile.server` to `RUN --mount=type=secret`, because a token baked into an
+image layer stays readable from the image forever.
+
+Removing a plugin is *not* symmetrical with installing one: it disables the
+code but leaves every table and row behind. See Uninstalling below.
+
+## Uninstalling
+
+**Uninstalling a plugin removes its code, never its data.** Drop the id from
+`PLUGIN_IDS`, or remove the package from the build entirely, and the next boot
+un-registers:
+
+- its routes (404 afterwards),
+- its pages and its entry in the `/api/plugins` payload,
+- its BullMQ queues and workers — jobs already queued in Redis stay queued, with
+  nothing left to consume them,
+- its event declarations and filter subscriptions. A filter *point* disappearing
+  is silent for its subscribers; a subscriber disappearing is silent for the
+  point.
+
+Everything the plugin wrote stays in the database, permanently:
+
+| Survives | Why |
+|---|---|
+| `p_<id>_*` tables and every row in them | `PluginMigration` is `{ name, sql }`. There is no `down`, and the loader has no drop path — `runPluginMigrations` only ever applies. |
+| `plugin_migrations` rows (`plugin_id`, `name`) | Never deleted. A re-install applies nothing, because every name is still claimed. Editing a migration's SQL after it has run on a database means it will never run there. |
+| `plugin_job_runs` rows | The at-least-once idempotency keys, keyed `(plugin_id, job_id)`. |
+| Writes into core tables | `transactions` ledger rows and the balances they explain, `player_stats` columns, notifications, already-delivered events. Nothing marks these as plugin-authored — on the wire and in the schema they are indistinguishable from core's own writes. |
+
+This is deliberate, not an omission. For a live game, a package dropped from
+`package.json` for one deploy must not take a table of player property with it,
+and money already booked through `tx.economy` is explained by ledger rows that
+`sum(ledger) == balance` still has to account for
+(`test/economy-invariant.test.ts`). So **removal means disable, and only
+disable.**
+
+Deleting the data is a separate, manual operator step, taken deliberately and
+against a backup:
+
+```sql
+-- Example. Read the plugin's own migrations first and drop in FK order.
+DROP TABLE IF EXISTS p_bounties_bounties;
+DELETE FROM plugin_migrations WHERE plugin_id = 'bounties';
+```
+
+Drop the `plugin_migrations` rows in the same breath as the tables. Leave them
+behind and a later re-install of that plugin skips its own schema and dies on
+the first query with `42P01 relation does not exist`.
+
+Ledger rows are the exception: never delete from `transactions`. Reversing a
+plugin's economic effect means booking a compensating movement through
+`applyBalanceChange`, not erasing history.
+
+Core migration `0007_relinquish_plugin_tables` is the in-repo precedent — when
+`bounties`, `detective_searches` and `combat_log` moved from core to the plugins
+that consume them, the drop was written as an explicit, reviewed migration.
+Nothing derived it automatically, and nothing will.
 
 ## Constraints (from NOTES.md)
 
