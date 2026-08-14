@@ -208,6 +208,7 @@ export default defineWorkspace([
         "test/settings-load.test.ts",
         "test/combat-log-schema.test.ts",
         "test/hospital-status.test.ts",
+        "test/sentence-sweeper.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
