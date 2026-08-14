@@ -28,6 +28,12 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   // actor = the jailed player.
   z.object({ ...base, type: z.literal("player.jailed"), until: TimestampSchema, reason: z.string() }),
   z.object({ ...base, type: z.literal("player.released") }),
+  // actor = the discharged player. The hospital counterpart of
+  // player.released: published by the sentence sweeper (and by
+  // dischargeIfExpired on the lazy path) when an elapsed hospital_until is
+  // cleared. No payload — the client's keys.me() refetch carries the
+  // restored health, and every field here is a field every plugin can emit.
+  z.object({ ...base, type: z.literal("player.discharged") }),
   // fromLocationId is null the first time a player ever travels (no prior
   // location — playerStats.location_id starts null and M2 does not backfill
   // a "home" location at registration, see M2 plan Task 7).

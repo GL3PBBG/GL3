@@ -30,6 +30,8 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
       return `Jailed — ${event.reason}`;
     case "player.released":
       return "Released from jail";
+    case "player.discharged":
+      return "Discharged from hospital";
     case "player.travelled":
       return `Travelled (${formatMoney(event.cost)})`;
     case "player.attacked":

@@ -74,4 +74,16 @@ describe("describeEvent", () => {
     const spoofed = pluginEvent({ payload: { target: "Vic", count: "3", actorName: "Mallory" } });
     expect(describeEvent(spoofed, metas)).toBe("Ron greeted Vic 3 times");
   });
+
+  it("describes a hospital discharge", () => {
+    expect(describeEvent(event({
+      id: "01920000-0000-7000-8000-000000000003",
+      type: "player.discharged",
+      at: "2026-08-14T00:00:00.000Z",
+      actorId: "01920000-0000-7000-8000-0000000000aa",
+      actorName: "tester",
+      audience: { kind: "player", playerId: "01920000-0000-7000-8000-0000000000aa" },
+    })))
+      .toBe("Discharged from hospital");
+  });
 });
