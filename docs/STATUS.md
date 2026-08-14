@@ -17,7 +17,7 @@ Branch: `feat/m4-migration-cli`.
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), and the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling) have since shipped |
 
-**Suite: 146 files / 1075 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 147 files / 1082 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
