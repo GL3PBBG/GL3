@@ -1156,6 +1156,18 @@ without it npm falls back to `.gitignore` as `.npmignore` and publishes a
 package with no build output. `@gl3/shared` must publish alongside the SDK and
 first — `pages.ts` imports *values* from it, not only types.
 
+**Publishing is now a standing obligation, not a one-off.** Both packages are
+consumed here through workspace links (`"@gl3/shared": "*"`), so a change to
+either is invisible to `npm run verify` *and* to the registry: the suite passes
+against the workspace source while `npm.gl3.dev` still serves the old tarball,
+and every third-party plugin resolving `^0.1.0` builds against that old copy.
+Changing the public surface of either package therefore means bumping its
+version and republishing (shared first). `^0.1.0` means `>=0.1.0 <0.2.0` at
+`0.x`, so additive changes go out as patches and keep existing peer ranges
+resolving; `0.2.0` invalidates them all. **Currently outstanding:**
+`player.discharged` (commit `3b7e72e`) added the 22nd core event variant after
+`0.1.0` was published, so the registry copy lags the workspace by that variant.
+
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at
 the registry risks `npm ci` in the image preferring a registry fetch over the

@@ -225,6 +225,22 @@ unavailable here.
   exact command the image build runs. Missing the `srcAliases` entry fails
   **nothing** and silently grades the last `tsc --build` against a stale
   `dist/`.
+- **`@gl3/shared` and `@gl3/plugin-sdk` are published npm packages, not just
+  workspace folders** — both live on `npm.gl3.dev` at `0.1.0`. Inside this repo
+  every consumer resolves them through the workspace (`"@gl3/shared": "*"`), so a
+  change to either is green in `npm run verify` while the registry copy stays
+  stale, and a third-party plugin author installing `^0.1.0` gets the old one.
+  **Any change to their public surface needs a version bump plus a republish**,
+  `@gl3/shared` first — `pages.ts` imports *values* from it, not only types.
+  Under `0.x`, `^0.1.0` resolves `>=0.1.0 <0.2.0`, so an additive change ships as
+  a **patch** (`0.1.1`) and existing `"peerDependencies": { "@gl3/plugin-sdk":
+  "^0.1.0" }` keeps working; a minor bump (`0.2.0`) breaks every one of those
+  ranges and is a deliberate act, never the default. `files` in both manifests is
+  load-bearing — `dist/` is gitignored, and without it npm publishes a package
+  with no build output.
+  **Outstanding:** `player.discharged` (`packages/shared/src/events.ts`, commit
+  `3b7e72e`) landed *after* the `0.1.0` publish, so the registry copy is missing
+  the 22nd core event variant and needs `0.1.1`.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and
