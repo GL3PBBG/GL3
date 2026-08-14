@@ -13,10 +13,14 @@ ports and the web page renderer are planned follow-up work.
 ## Install
 
 ```bash
+echo '@gl3:registry=https://npm.gl3.dev' >> .npmrc
 npm install @gl3/plugin-sdk zod drizzle-orm
 ```
 
-`@gl3/shared` comes transitively. A plugin may **not** depend on `apps/server`.
+The SDK is published to `npm.gl3.dev`, not npmjs, so the scoped registry line is
+required — scoped, never a bare `registry=`, which would route every other
+dependency through that host too. `@gl3/shared` comes transitively. A plugin may
+**not** depend on `apps/server`.
 
 ## A plugin in one file
 
@@ -328,9 +332,10 @@ plugin:
   "name": "@acme/gl3-casino",
   "type": "module",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
   "gl3": { "plugin": true },
   "publishConfig": { "registry": "https://npm.gl3.dev" },
-  "peerDependencies": { "@gl3/plugin-sdk": "^1.0.0" }
+  "peerDependencies": { "@gl3/plugin-sdk": "^0.1.0" }
 }
 ```
 
@@ -344,11 +349,13 @@ plugin:
    `examples/hello-plugin` is the reference.
 3. **The default export is the manifest** returned by `definePlugin`.
 
-Caveat, and it is currently a blocking one: `@gl3/plugin-sdk` is `private: true`
-at version `0.0.0`, so it cannot be published or depended on from a registry
-yet. Until it is published there is no version for a third-party plugin to
-declare a peer range against. Plugins written today live inside this repo's
-workspace.
+`files` is not optional in practice: `dist/` is gitignored, so npm falls back to
+`.gitignore` as `.npmignore` and publishes a package containing no build output
+at all. Declare it and check with `npm pack --dry-run` before the first publish.
+
+The plugin's manifest `id` need not match its package name — the server keys
+`AVAILABLE_PLUGINS` by `manifest.id` and never asserts the two are equal.
+`@acme/gl3-casino` exporting `id: "casino"` is enabled by `PLUGIN_IDS=casino`.
 
 ## Installing a plugin
 
