@@ -101,6 +101,49 @@ consult the database. Jailed players are blocked from crimes and travel with a
 `423`, returned *before* any cooldown is claimed or job enqueued, so a blocked
 attempt costs the player nothing.
 
+### The sentence sweeper: a tick, not a job queue
+
+Before this, nothing in GL3 freed a player on a timer — `GET /api/jail` called
+`releaseIfExpired` and `GET /api/hospital` called `settleHospital`, and
+**asking was what ended a sentence.** The client papered over that with a
+2-second poll (the hospital one unconditionally, even for a healthy player
+sitting on the page — a plain bug). Two designs were weighed for a
+server-side fix:
+
+- **One delayed BullMQ job per sentence.** Exact timing, zero idle work.
+  Rejected: `sendToJail`/`sendToHospital` are plugin-facing SDK surface
+  (`tx.jail.sendToJail`, `tx.hospital.sendToHospital`), so enqueue-after-commit
+  would be an SDK change; re-jailing or pardoning leaves an orphan job needing
+  jobId dedup; and rows created outside that path (the M4 V2 import) would get
+  no job at all.
+- **A sweep tick (chosen).** One indexed `SELECT` per pass against a partial
+  index that only contains rows with an active sentence (migration `0008`),
+  then one small transaction per expired row. The atomic claim is the existing
+  `UPDATE ... WHERE ... IS NOT NULL RETURNING` — multi-instance safety and
+  CLAUDE.md rule 1 (at-least-once idempotency) come free from the statement,
+  no bookkeeping table needed. No SDK change, no orphan-job bookkeeping, and it
+  catches rows from any origin including imported ones.
+
+**It settles one player per transaction, deliberately — not one bulk
+UPDATE.** CLAUDE.md rule 6: a bulk `UPDATE ... WHERE hospital_until <= now()`
+takes row locks in *scan order*, not sorted order, which can invert the
+ascending order combat's `lockPlayersForUpdate` imposes on the player↔player
+pair and deadlock (`40P01`). Holding exactly one player lock at a time cannot
+deadlock against anything — a deadlock needs a cycle, and a single-lock
+holder has no outgoing edge. `test/sentence-sweeper-lock-order.test.ts`
+proves this the same way the other three lock-order tests do: the bulk-UPDATE
+shape was shown failing before the per-player loop replaced it. **Do not
+"simplify" this into a bulk UPDATE** — it is faster in isolation and wrong
+the moment it runs next to combat.
+
+The lazy path on `GET /api/jail` and `GET /api/hospital` stays and is
+unchanged. If the sweeper process dies, a deploy restarts it, or someone runs
+the server with `SWEEP_INTERVAL_MS=0`, players must still get out — the tick
+is belt-and-braces, never the only mechanism. For the same reason the client
+keeps a slow *safety* poll (30s) instead of dropping polling entirely: a
+socket mid-reconnect would otherwise leave a client stuck on a stale
+"jailed" screen indefinitely.
+
 ---
 
 ## Security

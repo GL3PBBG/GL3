@@ -17,7 +17,7 @@ M0, M1, M2 and M3 are complete. M5 (plugin SDK) is in progress: the foundation
 module ports have shipped (`ranks`, `notifications`, `news`, `bank`,
 `bullets`, `travel`, `crimes`, `mail`, `gangs`) — M5's module-port track is
 complete. The event-envelope blocker that unblocked the last of them is
-**resolved** — `tx.events.publishCore` lets a plugin publish any of the 21
+**resolved** — `tx.events.publishCore` lets a plugin publish any of the 22
 core `GameEvent` variants verbatim. `profile`, `leaderboard` and `jail`
 remain deliberate non-ports — see `docs/STATUS.md`. **PvP combat** has since
 shipped on `feat/pvp-combat`: the `combat` and `inventory` plugins plus core
@@ -64,7 +64,7 @@ two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **142 files / 1052 tests**, `npm run verify` exit 0.
+Suite: **146 files / 1075 tests**, `npm run verify` exit 0.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

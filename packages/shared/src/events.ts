@@ -81,7 +81,7 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   // actor = the OC participant receiving the result.
   z.object({ ...base, type: z.literal("oc.resolved"), heistId: IdSchema, success: z.boolean(), share: MoneySchema, jailSeconds: z.number().int().nonnegative() }),
   /**
-   * The envelope every plugin event travels in. The twenty-one core variants
+   * The envelope every plugin event travels in. The twenty-two core variants
    * above stay closed and unchanged; ported core modules keep emitting their
    * own typed variants (spec: Events). A plugin declares the payload schema,
    * the `describe` template and the invalidation keys in its manifest, and all
