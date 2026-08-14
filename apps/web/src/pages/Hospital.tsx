@@ -50,7 +50,7 @@ export function Hospital(): JSX.Element {
       <p className={styles.big}>{formatDuration(remaining["hospital"] ?? status.remainingSeconds)}</p>
       <p className={styles.meta}>
         Discharge now for <Money value={status.dischargeCost} /> — heals you fully.
-        You'll be let out automatically.
+        You'll be discharged automatically.
       </p>
       <ErrorText error={discharge.error} />
       <button
