@@ -1,5 +1,5 @@
 import type mysql from "mysql2/promise";
-import { cars, theftTiers } from "../../../server/src/db/schema/index.js";
+import { cars, theftTiers } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id } from "../id-map.js";
 import { bumpTable, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";

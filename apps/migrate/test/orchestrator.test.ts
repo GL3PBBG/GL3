@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../server/src/db/client.js";
 import {
-  crimes, gangMembers, gangs, garage, idMap, items,
+  crimes, gangMembers, gangs, idMap, items,
   mailMessages, notifications, playerItems, players, properties, ranks, roles,
   rounds, settings,
 } from "../../server/src/db/schema/index.js";
-import { bounties, detectiveSearches } from "../src/pg/plugin-tables.js";
+import { bounties, detectiveSearches, garage } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";

@@ -27,14 +27,17 @@ describe("core schema", () => {
     const names = new Set(rows.map((r) => r.tablename));
     for (const expected of [
       "players", "player_stats", "player_timers", "player_crime_skill", "transactions",
-      "crimes", "locations", "cars", "theft_tiers", "weapons", "items", "player_items",
-      "garage", "gangs", "gang_members", "gang_permissions", "gang_invites", "gang_logs",
+      "crimes", "locations", "weapons", "items", "player_items",
+      "gangs", "gang_members", "gang_permissions", "gang_invites", "gang_logs",
       // No "bounties" / "detective_searches" / "combat_log": core relinquished
-      // all three in 0007_relinquish_plugin_tables. They are spec §2.5 tables
-      // still, but the plugins that are their only consumers create them now
-      // (p_bounties_bounties, p_detectives_searches, p_combat_log) and this
-      // file never boots plugins — see combat-log-schema.test.ts for the
-      // plugin-owned equivalent of this assertion.
+      // all three in 0007_relinquish_plugin_tables. No "cars" / "theft_tiers" /
+      // "garage": core relinquished those three in 0009_relinquish_car_tables.
+      // All six are spec §2.5 tables still, but the plugins that are their
+      // only consumers create them now (p_bounties_bounties,
+      // p_detectives_searches, p_combat_log, p_theft_cars, p_theft_tiers,
+      // p_theft_garage) and this file never boots plugins — see
+      // combat-log-schema.test.ts for the plugin-owned equivalent of this
+      // assertion.
       "properties", "mail_messages", "notifications",
       "game_news", "ranks", "money_ranks", "roles", "role_module_access", "rounds",
       "settings", "crime_log", "id_map",
@@ -122,9 +125,13 @@ describe("core schema", () => {
     // weapon_item_id set null). The constraints did not disappear from the
     // game, only from core: the plugins that own those tables now recreate
     // them, which combat-log-schema.test.ts pins for its share.
-    expect(totalForeignKeys).toBe(39);
-    expect(byRule["c"]).toBe(24); // ON DELETE CASCADE
-    expect(byRule["n"]).toBe(15); // ON DELETE SET NULL
+    // 0009_relinquish_car_tables dropped garage and its three FKs —
+    // player_id, car_id cascade; location_id set null. cars and theft_tiers
+    // carried none. p_theft_garage recreates all three under the theft
+    // plugin, which theft-tiers.test.ts pins for its share.
+    expect(totalForeignKeys).toBe(36);
+    expect(byRule["c"]).toBe(22); // ON DELETE CASCADE
+    expect(byRule["n"]).toBe(14); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
       SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'
@@ -155,7 +162,11 @@ describe("core schema", () => {
     // partial indexes for the sentence sweeper's candidate scan —
     // player_stats_jailed_until_idx and player_stats_hospital_until_idx,
     // each `WHERE ... IS NOT NULL` so only active sentences are indexed.
-    expect(Number(count)).toBe(29);
+    // 0009_relinquish_car_tables dropped garage_player_idx with the table
+    // that owned it; cars and theft_tiers had no indexes beyond their
+    // primary key. p_theft_garage_player_idx recreates it under the theft
+    // plugin, which theft-tiers.test.ts pins for its share.
+    expect(Number(count)).toBe(28);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

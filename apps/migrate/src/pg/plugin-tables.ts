@@ -1,4 +1,4 @@
-import { bigint, boolean, integer, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Drizzle handles for the two plugin-owned tables the migrator writes.
@@ -34,4 +34,31 @@ export const detectiveSearches = pgTable("p_detectives_searches", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
   succeeded: boolean("succeeded"),
+});
+
+/** Mirrors `packages/plugins/theft/src/migrations.ts` `0001_cars`. */
+export const cars = pgTable("p_theft_cars", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  value: bigint("value", { mode: "bigint" }).notNull(),
+  theftWeight: integer("theft_weight").notNull().default(1),
+});
+
+/** Mirrors `packages/plugins/theft/src/migrations.ts` `0002_tiers`. */
+export const theftTiers = pgTable("p_theft_tiers", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  successChance: integer("success_chance").notNull(),
+  maxDamage: integer("max_damage").notNull(),
+  minCarValue: bigint("min_car_value", { mode: "bigint" }).notNull(),
+  maxCarValue: bigint("max_car_value", { mode: "bigint" }).notNull(),
+});
+
+/** Mirrors `packages/plugins/theft/src/migrations.ts` `0003_garage`. */
+export const garage = pgTable("p_theft_garage", {
+  id: uuid("id").primaryKey(),
+  playerId: uuid("player_id").notNull(),
+  carId: uuid("car_id").notNull(),
+  damage: integer("damage").notNull().default(0),
+  locationId: uuid("location_id"),
 });

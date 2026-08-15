@@ -64,6 +64,13 @@
       "when": 1786744364641,
       "tag": "0008_sentence_expiry_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786830000000,
+      "tag": "0009_relinquish_car_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { bigint, boolean, check, index, integer, pgTable, text, timestamp, uuid,
 import { balanceKind } from "./enums.js";
 import { players } from "./identity.js";
 import { gangs } from "./social.js";
-import { cars, crimes, items, locations } from "./content.js";
+import { crimes, items, locations } from "./content.js";
 
 /**
  * Append-only. Never updated, never deleted. sum(amount) per owner == that
@@ -36,15 +36,6 @@ export const playerItems = pgTable("player_items", {
   itemId: uuid("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
   qty: integer("qty").notNull().default(0),
 }, (t) => ({ pk: primaryKey({ columns: [t.playerId, t.itemId] }) }));
-
-/** Cars are location-bound in V2 (spec §1.2 garage). */
-export const garage = pgTable("garage", {
-  id: uuid("id").primaryKey(),
-  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
-  carId: uuid("car_id").notNull().references(() => cars.id, { onDelete: "cascade" }),
-  damage: integer("damage").notNull().default(0),
-  locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),
-}, (t) => ({ playerIdx: index("garage_player_idx").on(t.playerId) }));
 
 /** V2 PR_module is a string naming the implementing module → plugin_id (spec §1.2). */
 export const properties = pgTable("properties", {
