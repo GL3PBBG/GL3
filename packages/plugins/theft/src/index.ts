@@ -1,7 +1,12 @@
-import { and, gte, lte, sql } from "drizzle-orm";
+import { randomInt } from "node:crypto";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { uuidv7 } from "uuidv7";
+import { z } from "zod";
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
-import { cars, theftTiers } from "./schema.js";
+import { bracketWeight, resolveTheft, type CatalogueCar, type TheftTier } from "./resolve.js";
+import { cars, garage, playerStats, theftTiers } from "./schema.js";
 import { THEFT_MIGRATIONS } from "./migrations.js";
+import { readTheftSettings } from "./settings.js";
 
 // Re-exported rather than reached via a `@gl3/plugin-theft/settings` subpath
 // import: this workspace's vitest srcAliases only match an import specifier
@@ -62,6 +67,196 @@ const tiersRoute = route({
   },
 });
 
+/**
+ * Steal a car from one tier's value bracket, or run from the police.
+ *
+ * Synchronous, like combat and unlike crimes: there is no shared outcome and
+ * no delay to model, so a BullMQ job would buy nothing but a rule-1
+ * idempotency key to maintain.
+ *
+ * The id arrives in the BODY, not the path: the declarative page posts through
+ * a form, and a form submits a body. Every mutating route in this plugin takes
+ * its id the same way.
+ */
+const stealRoute = route({
+  method: "POST",
+  path: "/api/theft/steal",
+  accessInJail: false,
+  accessInHospital: true,
+  body: z.object({ tierId: z.string().uuid() }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readTheftSettings((key) => ctx.settings.get(key));
+
+    // Both reads happen BEFORE the cooldown is claimed, so neither a bad id
+    // nor an empty catalogue costs the player anything — the ordering
+    // `packages/plugins/crimes/src/index.ts` established. Unlocked, and
+    // deliberately: the authoritative reads happen under the locks below.
+    const precheck = await ctx.transaction(async (tx) => {
+      const [tier] = await tx.db.select().from(theftTiers).where(eq(theftTiers.id, body.tierId));
+      if (tier === undefined) return { tier: undefined, inBracket: 0 };
+      const [counted] = await tx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(cars)
+        .where(and(gte(cars.value, tier.minCarValue), lte(cars.value, tier.maxCarValue)));
+      return { tier, inBracket: counted?.n ?? 0 };
+    });
+    const tier: TheftTier | undefined = precheck.tier;
+    if (tier === undefined) throw new PluginError("tier_not_found", 404);
+    if (precheck.inBracket === 0) throw new PluginError("no_cars_in_tier", 409);
+
+    // Redis SET NX EX inside the SDK, so rule 2 is satisfied structurally —
+    // there is no peek-then-set to get wrong. The action is the bare segment
+    // `theft`: the SDK's key grammar takes one key segment, not a dotted path.
+    const claimed = await ctx.cooldown.acquire("theft", player.id, config.cooldownSeconds);
+    if (!claimed) {
+      const retryAfter = await ctx.cooldown.peek("theft", player.id);
+      throw new PluginError("cooldown_active", 429, { retryAfter }, { "retry-after": String(retryAfter) });
+    }
+
+    try {
+      return await ctx.transaction(async (tx) => {
+        // Where the car will be parked has to be READ before it can be
+        // locked, so this read is unlocked and is re-checked below.
+        const [before] = await tx.db
+          .select({ locationId: playerStats.locationId })
+          .from(playerStats)
+          .where(eq(playerStats.playerId, player.id));
+        const locationId = before?.locationId ?? null;
+        if (locationId === null) throw new PluginError("no_location", 409);
+
+        // RULE 6, and the load-bearing lines of this plugin. Inserting a
+        // p_theft_garage row reaches `locations` implicitly through
+        // location_id's FK (FOR KEY SHARE). Locking the player first and
+        // arriving at the location afterwards is the shipped travel deadlock
+        // exactly — bullets locks location->player, so the inverse order
+        // deadlocks against it under load. Location first, then the player,
+        // through the SDK helpers and never a hand-written FOR UPDATE.
+        await tx.locks.location(locationId);
+        await tx.locks.player([player.id]);
+
+        // Lock-then-recheck (TOCTOU): a player who travelled between the
+        // unlocked read and the lock must not park a car in the city they
+        // left. This is a defence, not an optimisation.
+        const [after] = await tx.db
+          .select({ locationId: playerStats.locationId })
+          .from(playerStats)
+          .where(eq(playerStats.playerId, player.id));
+        if (after?.locationId !== locationId) throw new PluginError("wrong_location", 409);
+
+        const catalogue: CatalogueCar[] = await tx.db
+          .select({ id: cars.id, name: cars.name, value: cars.value, theftWeight: cars.theftWeight })
+          .from(cars);
+        const total = bracketWeight(tier, catalogue);
+
+        const outcome = resolveTheft(
+          {
+            successRoll: randomInt(0, 100),
+            // `randomInt(n, n)` throws, so the zero-weight case never draws —
+            // resolveTheft answers `empty` from the same fact.
+            carRoll: total > 0 ? randomInt(0, total) : 0,
+            // maxDamage 0 -> randomInt(0, 1) -> 0. Pristine, and no throw.
+            damageRoll: randomInt(0, tier.maxDamage + 1),
+            escapeRoll: randomInt(0, 100),
+          },
+          tier,
+          catalogue,
+          config.chase.escapeChance,
+        );
+
+        // The pre-check counted cars in the bracket; this catches the case it
+        // cannot see — a bracket whose every car carries weight 0. Throwing
+        // rolls the transaction back and the catch below returns the cooldown.
+        if (outcome.kind === "empty") throw new PluginError("no_cars_in_tier", 409);
+
+        if (outcome.kind === "stolen") {
+          await tx.db.insert(garage).values({
+            id: uuidv7(),
+            playerId: player.id,
+            carId: outcome.car.id,
+            damage: outcome.damage,
+            locationId,
+          });
+          await tx.events.publish({
+            name: "resolved",
+            actorId: player.id,
+            actorName: player.username,
+            audience: { kind: "global" },
+            payload: {
+              outcome: `stole a ${outcome.car.name}`,
+              carName: outcome.car.name,
+              success: "true",
+            },
+          });
+          return {
+            status: 201,
+            body: { outcome: "stolen", car: outcome.car.name, damage: outcome.damage },
+          };
+        }
+
+        const escaped = outcome.kind === "escaped";
+        // The module's own outcome first, the state change second — the
+        // crimes ordering, preserved by tx.events' single buffer. Buffered
+        // here and flushed after commit, so rule 5 holds.
+        await tx.events.publish({
+          name: "resolved",
+          actorId: player.id,
+          actorName: player.username,
+          audience: { kind: "global" },
+          payload: {
+            outcome: escaped ? "was spotted lifting a car and got away" : "was caught lifting a car",
+            carName: "",
+            success: "false",
+          },
+        });
+
+        if (escaped) return { status: 200, body: { outcome: "escaped" } };
+
+        // Takes the player lock itself, in the same order as
+        // economy.applyBalanceChange, so it needs no lock call of its own.
+        const until = await tx.jail.sendToJail(player.id, config.chase.jailSeconds);
+        await tx.events.publishCore({
+          type: "player.jailed",
+          actorId: player.id,
+          actorName: player.username,
+          audience: { kind: "global" },
+          until: until.toISOString(),
+          reason: "caught stealing a car",
+        });
+        return { status: 200, body: { outcome: "caught", until: until.toISOString() } };
+      });
+    } catch (err) {
+      // The theft did not happen, so the player must not pay for it. Unlike
+      // combat's attack — which keeps the cooldown on a 4xx to deny a free
+      // probe — every refusal reachable here is about the WORLD (an empty
+      // bracket, no location, a mid-flight move), not about the target.
+      await ctx.cooldown.release("theft", player.id);
+      throw err;
+    }
+  },
+});
+
+/**
+ * One `describe` template, not the design doc's two: a manifest event declares
+ * a single template, so the phrasing lives in the payload and the template
+ * only positions it.
+ */
+const resolvedEvent = {
+  name: "resolved",
+  payload: z.object({ outcome: z.string(), carName: z.string(), success: z.string() }),
+  describe: "{actorName} {outcome}",
+  invalidates: ["theft", "garage", "me"],
+};
+
+/** Declared here, published by the garage's sell route. */
+const soldEvent = {
+  name: "sold",
+  payload: z.object({ carName: z.string(), payout: z.string() }),
+  describe: "{actorName} sold a {carName} for {payout}",
+  invalidates: ["garage", "me"],
+};
+
 export default definePlugin({
   id: "theft",
   version: "1.0.0",
@@ -72,5 +267,6 @@ export default definePlugin({
     garage: "p_theft_garage",
   },
   migrations: THEFT_MIGRATIONS,
-  routes: [tiersRoute],
+  routes: [tiersRoute, stealRoute],
+  events: [resolvedEvent, soldEvent],
 });
