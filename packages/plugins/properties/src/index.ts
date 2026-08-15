@@ -1,10 +1,12 @@
 import { eq, sql } from "drizzle-orm";
+import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { readPropertiesSettings } from "./settings.js";
 import { accruedSince } from "./resolve.js";
+import { adminPage } from "./pages.js";
 
 // Re-exported so tests can import the parser and types directly.
 export { readPropertiesSettings, type PropertiesSettings } from "./settings.js";
@@ -334,6 +336,164 @@ const claimRoute = route({
 // Event declarations
 // ---------------------------------------------------------------------------
 
+// Re-exported so test/plugin-manifest-endpoint.test.ts can assert against
+// the same page object rather than a hand-copied duplicate of its view tree,
+// which would silently drift if pages.ts changed.
+export { adminPage } from "./pages.js";
+
+// ---------------------------------------------------------------------------
+// Admin routes
+// ---------------------------------------------------------------------------
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+
+/**
+ * The page renderer posts every field in a form, sending "" for the ones the
+ * admin left blank (`PageRenderer.tsx`'s form `onSubmit`). Blank is
+ * normalised to `undefined` here so an update that only changes one column
+ * leaves every other column untouched — the theft convention, reused.
+ */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505") return true;
+  if (err instanceof Error && err.cause !== null && typeof err.cause === "object" && "code" in err.cause && (err.cause as { code: string }).code === "23505") return true;
+  return false;
+}
+
+const PropertyCreateSchema = z
+  .object({
+    locationId: z.string().uuid(),
+    pluginId: z.string().min(1).max(80),
+    cost: AdminMoney,
+    rate: AdminMoney,
+  })
+  .strict();
+
+const PropertyUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    pluginId: blankable(z.string().min(1).max(80)),
+    cost: AdminMoney,
+    rate: AdminMoney,
+  })
+  .strict();
+
+/**
+ * All properties as a TableRowsResponse. `id` is the update form's select
+ * `valueKey`; `locationId` is the create form's select `valueKey`. Neither
+ * is rendered as a column.
+ */
+const adminListRoute = route({
+  method: "GET",
+  path: "/api/admin/properties",
+  auth: "admin",
+  handler: async (ctx) => {
+    return ctx.transaction(async (tx) => {
+      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
+
+      const props = await tx.db
+        .select({
+          id: propertiesTable.id,
+          locationId: propertiesTable.locationId,
+          pluginId: propertiesTable.pluginId,
+          ownerPlayerId: propertiesTable.ownerPlayerId,
+          cost: propertiesTable.cost,
+          rate: propertiesTable.rate,
+          profit: propertiesTable.profit,
+          ownerName: players.username,
+        })
+        .from(propertiesTable)
+        .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
+
+      const propByLocation = new Map(props.map((p) => [p.locationId, p]));
+
+      const rows = allLocations.map((loc) => {
+        const p = propByLocation.get(loc.id);
+        return {
+          id: p?.id ?? "",
+          locationId: loc.id,
+          locationName: loc.name,
+          plugin: p?.pluginId ?? "",
+          ownerName: p?.ownerPlayerId ? (p?.ownerName ?? "") : "",
+          cost: p?.cost.toString() ?? "0",
+          rate: p?.rate.toString() ?? "0",
+          profit: p?.profit.toString() ?? "0",
+        };
+      });
+
+      return { status: 200, body: { rows } };
+    });
+  },
+});
+
+const adminCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/properties",
+  auth: "admin",
+  body: PropertyCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    try {
+      await ctx.transaction(async (tx) => {
+        await tx.db.insert(propertiesTable).values({
+          id,
+          locationId: body.locationId,
+          pluginId: body.pluginId,
+          cost: BigInt(body.cost),
+          rate: BigInt(body.rate),
+        });
+      });
+    } catch (err: unknown) {
+      // unique(location_id) violation → 409
+      if (isUniqueViolation(err)) {
+        throw new PluginError("location_taken", 409);
+      }
+      throw err;
+    }
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/properties/update",
+  auth: "admin",
+  body: PropertyUpdateSchema,
+  handler: async (ctx, { body }) => {
+    // The property editor selects FOR UPDATE on exactly one
+    // p_properties_properties row and locks nothing else. A transaction
+    // holding exactly one lock cannot be half of a deadlock cycle, which is
+    // why this route introduces no new deadlock edge — do not grow a second
+    // lock in this route.
+    const updated = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db
+        .select()
+        .from(propertiesTable)
+        .where(eq(propertiesTable.id, body.id))
+        .for("update");
+      if (existing === undefined) return false;
+      await tx.db
+        .update(propertiesTable)
+        .set({
+          cost: BigInt(body.cost),
+          rate: BigInt(body.rate),
+          ...(body.pluginId !== undefined && { pluginId: body.pluginId }),
+        })
+        .where(eq(propertiesTable.id, body.id));
+      return true;
+    });
+    if (!updated) throw new PluginError("property_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Event declarations (cont.)
+// ---------------------------------------------------------------------------
+
 const boughtEvent = {
   name: "bought",
   payload: z.object({ propertyName: z.string(), cost: z.string() }),
@@ -367,8 +527,8 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute, claimRoute],
+  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminCreateRoute, adminUpdateRoute],
   events: [boughtEvent, soldEvent, incomeEvent],
   pages: [],
-  adminPages: [],
+  adminPages: [adminPage],
 });
