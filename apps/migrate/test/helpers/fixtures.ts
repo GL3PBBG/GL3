@@ -98,7 +98,7 @@ const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url)
 /**
  * Creates a uniquely-named Postgres database, runs every core migration from
  * apps/server/drizzle, then runs the bounties + detectives + theft plugin
- * migrations (the five plugin-owned target tables — "Known unknowns" item 8).
+ * migrations (the six plugin-owned target tables — "Known unknowns" item 8).
  * Returns a connection URL plus a teardown function.
  */
 export async function createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }> {
@@ -122,7 +122,7 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
     await migrator.end();
   }
 
-  // The five plugin-owned target tables ("Known unknowns" item 8), created
+  // The six plugin-owned target tables ("Known unknowns" item 8), created
   // the same way apps/server's loader creates them at boot.
   const pluginDb = createDb(target.toString());
   try {
