@@ -1,4 +1,5 @@
 import { definePlugin } from "@gl3/plugin-sdk";
+import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -74,7 +75,12 @@ describe("GET /api/plugins", () => {
       const { token } = await register(app);
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
-      expect(res.json().menu.map((m: { label: string }) => m.label)).toEqual(["Beta", "Alpha"]);
+      // `bootTestServer` always merges CORE_PLUGINS (`withCorePlugins`) under
+      // `alpha`/`beta`, so `theft`'s two menu entries ride along here too —
+      // sorted by `order` with everyone else's.
+      expect(res.json().menu.map((m: { label: string }) => m.label)).toEqual([
+        "Beta", "Alpha", "Car theft", "Garage",
+      ]);
     } finally {
       await close();
     }
@@ -99,8 +105,15 @@ describe("GET /api/plugins", () => {
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
-        menu: [],
-        pages: [],
+        menu: [
+          { pageId: "theft.index", path: "/theft", label: "Car theft", order: 40 },
+          { pageId: "theft.garage", path: "/garage", label: "Garage", order: 41 },
+        ],
+        // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
+        // only in the top-level `menu` array, not duplicated onto each page.
+        pages: [theftPage, garagePage].map((p) => ({
+          pluginId: "theft", id: p.id, path: p.path, view: p.view,
+        })),
         events: [{
           pluginId: "inventory",
           name: "purchased",
