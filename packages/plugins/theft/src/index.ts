@@ -7,6 +7,11 @@ import { bracketWeight, resolveTheft, type CatalogueCar, type TheftTier } from "
 import { cars, garage, locations, playerStats, theftTiers } from "./schema.js";
 import { THEFT_MIGRATIONS } from "./migrations.js";
 import { readTheftSettings } from "./settings.js";
+import { adminPage, garagePage, theftPage } from "./pages.js";
+// Re-exported so `test/plugin-manifest-endpoint.test.ts` can assert against
+// the same page objects rather than a hand-copied duplicate of their view
+// trees, which would silently drift if `pages.ts` changed.
+export { adminPage, garagePage, theftPage } from "./pages.js";
 
 // Re-exported rather than reached via a `@gl3/plugin-theft/settings` subpath
 // import: this workspace's vitest srcAliases only match an import specifier
@@ -438,6 +443,206 @@ const repairRoute = route({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Admin routes
+// ---------------------------------------------------------------------------
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+
+/**
+ * The page renderer posts every field in a form, sending "" for the ones the
+ * admin left blank (`PageRenderer.tsx`'s form `onSubmit`). Blank is
+ * normalised to `undefined` here so an update that only renames a row leaves
+ * every other column untouched — `packages/plugins/inventory/src/index.ts`'s
+ * admin routes' convention, reused rather than reinvented.
+ */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
+const CarCreateSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    value: AdminMoney,
+    theftWeight: z.coerce.number().int().nonnegative(),
+  })
+  .strict();
+
+const CarUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    value: AdminMoney,
+    theftWeight: z.coerce.number().int().nonnegative(),
+  })
+  .strict();
+
+const TierCreateSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    successChance: z.coerce.number().int().min(0).max(100),
+    maxDamage: z.coerce.number().int().nonnegative(),
+    minCarValue: AdminMoney,
+    maxCarValue: AdminMoney,
+  })
+  .strict()
+  .refine((b) => BigInt(b.maxCarValue) >= BigInt(b.minCarValue), {
+    message: "maxCarValue must be >= minCarValue",
+  });
+
+const TierUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    successChance: z.coerce.number().int().min(0).max(100),
+    maxDamage: z.coerce.number().int().nonnegative(),
+    minCarValue: AdminMoney,
+    maxCarValue: AdminMoney,
+  })
+  .strict()
+  .refine((b) => BigInt(b.maxCarValue) >= BigInt(b.minCarValue), {
+    message: "maxCarValue must be >= minCarValue",
+  });
+
+/**
+ * The catalogue as a `TableRowsResponse`. `id` is the update form's select
+ * `valueKey` and is never rendered as a column.
+ */
+const adminCarListRoute = route({
+  method: "GET",
+  path: "/api/admin/theft/cars",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(cars));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          value: r.value.toString(),
+          theftWeight: String(r.theftWeight),
+        })),
+      },
+    };
+  },
+});
+
+const adminCarCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/theft/cars",
+  auth: "admin",
+  body: CarCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(cars).values({
+        id,
+        name: body.name,
+        value: BigInt(body.value),
+        theftWeight: body.theftWeight,
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminCarUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/theft/cars/update",
+  auth: "admin",
+  body: CarUpdateSchema,
+  handler: async (ctx, { body }) => {
+    // The catalogue editor takes FOR UPDATE on exactly one p_theft_cars row
+    // and locks nothing else. A transaction holding exactly one lock cannot
+    // be half of a deadlock cycle, which is why the new p_theft_cars node
+    // introduces none — do not grow a second lock in this route.
+    const updated = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db.select().from(cars).where(eq(cars.id, body.id)).for("update");
+      if (existing === undefined) return false;
+      await tx.db
+        .update(cars)
+        .set({
+          value: BigInt(body.value),
+          theftWeight: body.theftWeight,
+          ...(body.name !== undefined && { name: body.name }),
+        })
+        .where(eq(cars.id, body.id));
+      return true;
+    });
+    if (!updated) throw new PluginError("car_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminTierListRoute = route({
+  method: "GET",
+  path: "/api/admin/theft/tiers",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(theftTiers));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          successChance: String(r.successChance),
+          maxDamage: String(r.maxDamage),
+          minCarValue: r.minCarValue.toString(),
+          maxCarValue: r.maxCarValue.toString(),
+        })),
+      },
+    };
+  },
+});
+
+const adminTierCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/theft/tiers",
+  auth: "admin",
+  body: TierCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(theftTiers).values({
+        id,
+        name: body.name,
+        successChance: body.successChance,
+        maxDamage: body.maxDamage,
+        minCarValue: BigInt(body.minCarValue),
+        maxCarValue: BigInt(body.maxCarValue),
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminTierUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/theft/tiers/update",
+  auth: "admin",
+  body: TierUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(theftTiers)
+        .set({
+          successChance: body.successChance,
+          maxDamage: body.maxDamage,
+          minCarValue: BigInt(body.minCarValue),
+          maxCarValue: BigInt(body.maxCarValue),
+          ...(body.name !== undefined && { name: body.name }),
+        })
+        .where(eq(theftTiers.id, body.id))
+        .returning({ id: theftTiers.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("tier_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 /**
  * One `describe` template, not the design doc's two: a manifest event declares
  * a single template, so the phrasing lives in the payload and the template
@@ -468,6 +673,20 @@ export default definePlugin({
     garage: "p_theft_garage",
   },
   migrations: THEFT_MIGRATIONS,
-  routes: [tiersRoute, stealRoute, listGarageRoute, sellRoute, repairRoute],
+  routes: [
+    tiersRoute,
+    stealRoute,
+    listGarageRoute,
+    sellRoute,
+    repairRoute,
+    adminCarListRoute,
+    adminCarCreateRoute,
+    adminCarUpdateRoute,
+    adminTierListRoute,
+    adminTierCreateRoute,
+    adminTierUpdateRoute,
+  ],
   events: [resolvedEvent, soldEvent],
+  pages: [theftPage, garagePage],
+  adminPages: [adminPage],
 });
