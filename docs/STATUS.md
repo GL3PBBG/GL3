@@ -1,8 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-15, **money ranks + backfire + weapon condition complete**
-(first of four clusters activating migrated-but-unread V2 tables).
-Branch: `feat/money-ranks-backfire`.
+Last updated: 2026-08-15, **car theft + garage + police chase complete**
+(second of four clusters activating migrated-but-unread V2 tables).
+Branch: `feat/car-theft`.
 
 ---
 
@@ -15,11 +15,14 @@ Branch: `feat/money-ranks-backfire`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), and **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster) have since shipped |
 
-**Suite: 152 files / 1155 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 160 files / 1216 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
-ranks, backfire and weapon condition added the last 5 files / 70 tests.)
+ranks, backfire and weapon condition added 5 files / 70 tests; car theft added
+8 files / 60 tests — see its section below. 1155 + 60 = 1215, not 1216: the
+one-test gap is the same recorded-vs-measured drift this file has corrected
+before, and 1216 is the measured figure — the run's own per-file sum.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -130,6 +133,13 @@ cash figure behind the bracket does not.
 
 Every balance movement anywhere is an append-only ledger row inside the same
 transaction as the balance update.
+
+They can steal cars. A theft attempt draws a weighted pick from the chosen
+tier's value bracket; success parks the car (with rolled damage) in the city
+they are standing in, failure runs a police chase — get away clean, or serve
+`chase.jail_seconds`. The garage lists, sells (value scaled by damage,
+truncating toward the house) and repairs (cost per damage point) — all only
+from the city the car sits in, which is where it stays.
 
 **Every path touching a (gang, player) pair takes both rows through
 `lockGangAndPlayerForUpdate`**, which orders them by UUID string comparison. That is
@@ -1190,6 +1200,107 @@ with TS2366), **and** the `CORPUS` drift guard in
 integration suite. Two separate task reviews missed one each. A task that
 widens the union must run the whole of `npm run verify`, not its own project.
 
+### Car theft, garage and the police chase
+
+Spec: `docs/superpowers/specs/2026-08-15-car-theft-garage-police-chase-design.md`.
+The second of four clusters activating migrated-but-unread V2 tables
+(`cars`, `theft_tiers`, `garage` — V2's four modules `cars`/`garage`/`theft`/
+`policeChase` shipped as one GL3 plugin). Branch `feat/car-theft`. Like the
+PvP combat cluster, this is not a port: the schema is the only V2-derived
+constraint, so **the spec and the tests are the only specification of its
+behaviour**.
+
+**What shipped:**
+
+- **`packages/plugins/theft`** — `GET /api/theft/tiers` (bracket metadata and
+  car counts; does not spend the cooldown), `POST /api/theft/steal` (weighted
+  draw over the tier's value bracket, weight = `theft_weight`), and the
+  location-gated garage: `GET /api/garage`, `POST /api/garage/sell` (payout =
+  value scaled by damage, bigint division truncating toward the house, through
+  `applyBalanceChange`), `POST /api/garage/repair` (a pristine car is a 204
+  no-op, the spec-1 gunsmith ruling). A failed theft runs the chase:
+  escape (`escapeRoll < chase.escape_chance`) or jail via
+  `tx.jail.sendToJail`, with `theft.resolved` published before the core
+  `player.jailed` — the crimes ordering. Synchronous like combat: no job, so
+  no rule-1 idempotency key to maintain. Steal/sell/repair take ids in the
+  **body**, not the path — the declarative pages post through forms.
+- **Two declarative pages** — `/theft` (tier table + one-select steal form)
+  and `/garage` (car table + sell and repair forms) via the manifest `pages`
+  field and `PageSchema`, rendered by the loader's page renderer rather than
+  hand-written React in `apps/web`. A view is static, so all data arrives
+  through `table.source`/`optionsSource` GET routes; per-row buttons are not
+  expressible in the ten-kind vocabulary, hence the select-then-submit shape
+  the admin pages already use.
+- **Core migration `0009_relinquish_car_tables`** drops `cars`, `theft_tiers`
+  and `garage` — the `0007` precedent applied to the next three tables that
+  qualified (shipped in core `0000` only because the core schema predated the
+  plugin migration runner; no core code ever read them). The `theft` plugin
+  now owns and creates `p_theft_cars`, `p_theft_tiers` and `p_theft_garage`
+  with their foreign keys moved across verbatim, so **six of fifteen plugins
+  declare migrations**. `apps/migrate` retargets through
+  `pg/plugin-tables.ts`; its idempotency test keeps all 26 table entries,
+  three now plugin-owned. `schema.test.ts`'s census moved with them:
+  39 → 36 foreign keys, 29 → 28 non-PK indexes.
+- **Lock order — locations-first, through the SDK helpers.** Inserting a
+  `p_theft_garage` row reaches `locations` implicitly through the
+  `location_id` FK; locking the player first would be the shipped travel
+  deadlock exactly. Every theft path reads the location **unlocked**, locks it
+  via `tx.locks.location`, then locks the player and **re-reads** — the
+  lock-then-recheck TOCTOU defence (`409 wrong_location` for a mid-flight
+  move, which also gates a pristine repair: wrong city beats no-op).
+  `p_theft_cars` is a new lock-graph node that introduces no cycle: only
+  theft's insert takes `FOR KEY SHARE` on one row last, and the admin
+  catalogue editor holds exactly one `FOR UPDATE` — a transaction with one
+  lock cannot be half of a cycle, so that route may not grow a second lock.
+  Regression test `test/theft-lock-order.test.ts`, against the **real**
+  bullets and travel routes as counterparties (the rule-6 corollary: same-helper
+  participants prove only the safe case), demonstrated red against the
+  inverted order first.
+- **No new `GameEvent` variant** — a deliberate departure from bounties and
+  organized crime. Theft publishes plugin events (`theft.resolved`,
+  `theft.sold`) and reaches for `publishCore` only for the existing
+  `player.jailed`. CLAUDE.md records what widening the union costs (three
+  places break, one only under the integration suite); nothing about a stolen
+  car needs to be indistinguishable from a core emission on the wire.
+- **Admin**: `/api/admin/theft` with the car catalogue and the tier table —
+  create and update for both, blank-means-unchanged names (the inventory
+  admin convention), `minCarValue <= maxCarValue` enforced by a `.refine`,
+  and no UUID rendered anywhere (ids travel only as `select` `valueKey`s).
+
+**Cooldown is released on refusal, unlike combat.** Every refusal after the
+claim is about the world (empty bracket, no location, mid-flight move), not
+the target — a player must not pay for a world state they cannot see. A tier
+lookup or empty-bracket 409 **before** the claim costs nothing either (the
+crimes-plugin ordering).
+
+**Settings** (`theft.*` namespaced by the SDK): `cooldown_seconds` (300,
+floored at 1 — a zero TTL is the `travel_cooldown_seconds = 0` live crash, not
+copied), `chase.escape_chance` (40, clamped 0-100), `chase.jail_seconds`
+(600, flat not per-tier — tiers carry no ordering column),
+`repair.cost_per_point` (500, bigint). `readTheftSettings` guards blank
+strings explicitly because `Number("") === 0` would silently mean "zero"
+instead of "use the default".
+
+Eight new test files / 60 tests: `theft-resolve` (16, the pure resolver),
+`theft-settings` (6), `theft-routes` (8), `theft-chase` (2), `garage` (13),
+`theft-tiers` (2), `theft-lock-order` (3), `admin-theft` (10).
+
+**A `testTimeout` lesson, learned on this branch's verification.** The first
+full `npm run verify` of the cluster failed on nothing but
+`theft-chase.test.ts`: both tests timed out at vitest's default 5000ms
+(5391ms/5361ms), standalone they pass in ~1.96s. The file is the only one in
+the cluster that boots `bootTestServer()` **inside each test body** — settings
+are a boot-time snapshot, so each case's `theft.chase.*` rows must land before
+its own boot — which puts `resetDb` (the multi-second TRUNCATE CASCADE) plus a
+full boot against the 5s **test** timeout where every sibling file pays the
+same cost in a `beforeEach` against the project's 30s **hook** timeout. Under
+six-worker full-suite load the body crossed 5s. `apps/migrate/vitest.config.ts`
+hit this exact failure before and fixed it with `testTimeout: 30000`;
+`vitest.workspace.ts` now sets the same on the two Postgres projects
+(`@gl3/server`, `@gl3/server:db-only`). Test-infra only — no production code
+changed. `ledger.test.ts`'s 4.0-4.2s-of-5s watch item is closed by the same
+change.
+
 ### Installing a plugin without forking core
 
 The optional-plugin import map used to be a hand-written literal in
@@ -1286,7 +1397,8 @@ workspace link. A *plugin author's* `.npmrc` does need
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
   are two orders and they do not conflict: gang↔player goes through
   `lockGangAndPlayerForUpdate` (UUID comparison); location↔player is **always
-  locations first** — a single location via `lockLocationForUpdate` (bullets), or
+  locations first** — a single location via `lockLocationForUpdate` (bullets;
+  theft's steal/sell/repair through `tx.locks.location`), or
   several via `lockLocationsForUpdate` which sorts them ascending (travel locks
   both its source and destination rows through it). Adding a path that locks a
   location and a player in a new order, or a gang and a player outside the helper,

@@ -57,7 +57,8 @@ only because the core schema predated the plugin migration runner — no core
 code ever read or wrote any of them. The single plugin that consumes each now
 owns and migrates it (`p_bounties_bounties`, `p_detectives_searches`,
 `p_combat_log`), so five of fourteen plugins declare migrations rather than
-two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
+two — and with the theft cluster's `0009_relinquish_car_tables` below, six of
+fifteen. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 `p_oc_*` which have none: keeping them leaves the lock graph exactly as it was.
 **Money ranks, backfire and weapon condition** have since shipped on
 `feat/money-ranks-backfire`, the first of four clusters bringing
@@ -68,13 +69,24 @@ behind a new attacker-only `player.backfired` event; and
 `p_combat_weapon_condition` (combat migration `0004`, no foreign keys) degrades
 weapons over both time and use, scaling each weapon's declared
 `backfireChance` as a multiplier so an explicit zero stays zero. Repair is a
-gunsmith route in `combat`, not a shop route in `inventory`.
+gunsmith route in `combat`, not a shop route in `inventory`. **Car theft** has
+since shipped on `feat/car-theft`, the second of the four clusters: the
+`theft` plugin (steal by tier with a weighted draw from the tier's value
+bracket, police chase on failure — escape or jail — and a location-gated
+garage with sell/repair), core migration `0009_relinquish_car_tables` moving
+`cars`, `theft_tiers` and `garage` out of core (`p_theft_cars`,
+`p_theft_tiers`, `p_theft_garage`) — so **six** of fifteen plugins declare
+migrations rather than five — theft's routes are locations-first through
+`tx.locks.location` before `tx.locks.player`
+(`test/theft-lock-order.test.ts`), and its two player-facing pages plus its
+admin section are declared in the manifest rather than hand-written in
+`apps/web`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **152 files / 1155 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **160 files / 1216 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -176,14 +188,15 @@ unavailable here.
    UPDATE and reached `locations` implicitly through the `location_id` FK,
    inverting bullets' location→player order). Every gang↔player path now goes
    through `lockGangAndPlayerForUpdate`; every location↔player path is
-   locations-first — a single row via `lockLocationForUpdate` (bullets) or
+   locations-first — a single row via `lockLocationForUpdate` (bullets, and
+   theft's steal/sell/repair through `tx.locks.location`) or
    several via `lockLocationsForUpdate`, which sorts them ascending (travel
    locks both its source and destination through it). Player↔player is the
    third pair, added by combat: `lockPlayersForUpdate` dedupes and sorts
    ascending in one statement, which is what makes A-shoots-B safe against
    B-shoots-A. Regression tests: `test/gang-lock-order.test.ts`,
-   `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`
-   (`economy/ledger.ts`).
+   `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`,
+   `test/theft-lock-order.test.ts` (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing
@@ -212,12 +225,13 @@ unavailable here.
   tables appear only when `loadPlugins` → `runPluginMigrations` runs. A file
   using `callPluginRoute` or `runPluginJob` directly needs an explicit
   `await runPluginMigrations(db, [thePlugin])`, or every test in it dies on
-  42P01. Five plugins now own tables (`inventory`, `oc`, `bounties`,
-  `detectives`, `combat`), so this catches far more files than it used to —
-  `economy-invariant.test.ts` and `detectives-worker.test.ts` are the worked
-  examples.
+  42P01. Six plugins now own tables (`inventory`, `oc`, `bounties`,
+  `detectives`, `combat`, `theft`), so this catches far more files than it
+  used to — `economy-invariant.test.ts` and `detectives-worker.test.ts` are
+  the worked examples.
 - **A new *workspace-local* plugin package has eight registration sites, three
-  of which fail silently or remotely.** All eight are consequences of living in
+  of which fail silently or remotely** (plus a ninth that is per-*test-file*,
+  below). All eight are consequences of living in
   the workspace; a plugin **installed from the registry** needs exactly two —
   a dependency in `apps/server/package.json` and `npm run plugins:generate`,
   which rewrites the generated `apps/server/src/plugins/installed-plugins.ts`.
@@ -238,6 +252,16 @@ unavailable here.
   exact command the image build runs. Missing the `srcAliases` entry fails
   **nothing** and silently grades the last `tsc --build` against a stale
   `dist/`.
+- **The ninth registration site is per test file, not per plugin:
+  `vitest.workspace.ts` enumerates test files explicitly in each project's
+  `include`.** A new `apps/server/test/*.test.ts` that is not listed there is
+  invisible to every run — `npx vitest run <path>` exits 1 with "No test files
+  found" and no other hint, and `npm run verify` stays green without it, so a
+  file can sit committed and never execute. This bit three separate tasks on
+  the `feat/car-theft` branch. New files go in the project matching what they
+  touch (`@gl3/server:unit` for pure functions, `@gl3/server:db-only` /
+  `redis-only`, the default `@gl3/server` project for `bootTestServer` /
+  `testDb` files).
 - **`@gl3/shared` and `@gl3/plugin-sdk` are published npm packages, not just
   workspace folders** — both live on `npm.gl3.dev` at `0.1.0`. Inside this repo
   every consumer resolves them through the workspace (`"@gl3/shared": "*"`), so a
