@@ -14,6 +14,41 @@ afterAll(async () => {
 });
 
 /**
+ * Small `information_schema` readers in the same style the tests below
+ * already use inline (raw `sql` via `db.execute`) — collapsed into helpers
+ * because the weapon-condition tests need the same three queries the
+ * existing tests below inline once each.
+ */
+async function columnsOf(table: string): Promise<string[]> {
+  const rows = await db.execute(sql`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = ${table}
+  `);
+  return rows.map((r) => String(r.column_name));
+}
+
+async function primaryKeyOf(table: string): Promise<string[]> {
+  const rows = await db.execute(sql`
+    SELECT kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_name = tc.constraint_name
+    WHERE tc.table_name = ${table} AND tc.constraint_type = 'PRIMARY KEY'
+    ORDER BY kcu.ordinal_position
+  `);
+  return rows.map((r) => String(r.column_name));
+}
+
+async function foreignKeysOf(table: string): Promise<string[]> {
+  const rows = await db.execute(sql`
+    SELECT tc.constraint_name
+    FROM information_schema.table_constraints tc
+    WHERE tc.table_name = ${table} AND tc.constraint_type = 'FOREIGN KEY'
+  `);
+  return rows.map((r) => String(r.constraint_name));
+}
+
+/**
  * `p_combat_log` is owned by the combat plugin, not core — core relinquished
  * it (as `combat_log`) in `0007_relinquish_plugin_tables`. The test template
  * database is built from core migrations only (helpers/global-setup.ts:47),
@@ -104,5 +139,33 @@ describe("p_combat_log schema", () => {
       target_id: { to: "players", onDelete: "CASCADE" },
       weapon_item_id: { to: "items", onDelete: "SET NULL" },
     });
+  });
+});
+
+describe("p_combat_weapon_condition", () => {
+  it("has the expected columns", async () => {
+    const cols = await columnsOf("p_combat_weapon_condition");
+    expect(cols).toEqual(
+      expect.arrayContaining(["player_id", "item_id", "condition", "updated_at"]),
+    );
+  });
+
+  it("is keyed on (player_id, item_id)", async () => {
+    const pk = await primaryKeyOf("p_combat_weapon_condition");
+    expect(pk).toEqual(["player_id", "item_id"]);
+  });
+
+  /**
+   * The point of the table's design. Rows here are written while the
+   * transaction holds two `player_stats` rows FOR UPDATE, so ANY foreign key
+   * would take FOR KEY SHARE on its referent at that moment. An `items` FK
+   * in particular would open a player-then-item lock edge that exists
+   * nowhere else in the graph (CLAUDE.md rule 6). Declaring none keeps the
+   * graph at exactly gang<->player, location<->player, player<->player and
+   * organized crime's heist-first order.
+   */
+  it("declares no foreign keys, deliberately", async () => {
+    const fks = await foreignKeysOf("p_combat_weapon_condition");
+    expect(fks).toEqual([]);
   });
 });
