@@ -9,7 +9,10 @@ const base: WeaponProfile = {
 describe("resolveShot", () => {
   it("misses when the hit roll is at or above accuracy", () => {
     const out = resolveShot(base, 0, { hitRoll: 60, damageRoll: 20, critRoll: 0 });
-    expect(out).toEqual({ hit: false, crit: false, damage: 0, armorAbsorbed: 0, bulletsSpent: 1 });
+    expect(out).toEqual({
+      hit: false, crit: false, damage: 0, armorAbsorbed: 0, bulletsSpent: 1,
+      backfire: false, selfDamage: 0,
+    });
   });
 
   it("hits when the roll is below accuracy", () => {
@@ -102,5 +105,73 @@ describe("rollFor", () => {
     // randomInt(n, n) would throw, so the +1 in rollFor is load-bearing.
     const weapon = { ...base, damageMin: 7, damageMax: 7 };
     expect(rollFor(weapon).damageRoll).toBe(7);
+  });
+});
+
+describe("backfire", () => {
+  const weapon: WeaponProfile = {
+    accuracy: 100,
+    damageMin: 10,
+    damageMax: 10,
+    bulletsPerShot: 2,
+    critChance: 100,
+    critMultiplier: 2,
+    armorPierce: 0,
+    minRankExp: 0,
+    backfireChance: 50,
+  };
+
+  it("beats a hit roll that would otherwise connect", () => {
+    const out = resolveShot(weapon, 5, { hitRoll: 0, damageRoll: 10, critRoll: 0, backfireRoll: 0 });
+    expect(out.backfire).toBe(true);
+    expect(out.hit).toBe(false);
+    expect(out.crit).toBe(false);
+    expect(out.damage).toBe(0);
+    expect(out.armorAbsorbed).toBe(0);
+  });
+
+  it("deals the raw damage roll to the attacker, unreduced by the target's armor", () => {
+    const out = resolveShot(weapon, 99, { hitRoll: 0, damageRoll: 10, critRoll: 0, backfireRoll: 0 });
+    expect(out.selfDamage).toBe(10);
+  });
+
+  it("spends bullets anyway", () => {
+    const out = resolveShot(weapon, 0, { hitRoll: 0, damageRoll: 10, critRoll: 0, backfireRoll: 0 });
+    expect(out.bulletsSpent).toBe(2);
+  });
+
+  it("does not fire when the roll is at or above the chance", () => {
+    const out = resolveShot(weapon, 0, { hitRoll: 0, damageRoll: 10, critRoll: 0, backfireRoll: 50 });
+    expect(out.backfire).toBe(false);
+    expect(out.hit).toBe(true);
+  });
+
+  it("is unreachable for a weapon declaring zero, even on roll 0", () => {
+    const out = resolveShot({ ...weapon, backfireChance: 0 }, 0,
+      { hitRoll: 0, damageRoll: 10, critRoll: 0, backfireRoll: 0 });
+    expect(out.backfire).toBe(false);
+  });
+
+  it("reports selfDamage 0 on every non-backfire outcome", () => {
+    const hit = resolveShot({ ...weapon, backfireChance: 0 }, 0,
+      { hitRoll: 0, damageRoll: 10, critRoll: 99, backfireRoll: 0 });
+    const miss = resolveShot({ ...weapon, accuracy: 0, backfireChance: 0 }, 0,
+      { hitRoll: 50, damageRoll: 10, critRoll: 99, backfireRoll: 0 });
+    expect(hit.selfDamage).toBe(0);
+    expect(miss.selfDamage).toBe(0);
+  });
+});
+
+describe("rollFor", () => {
+  it("draws a backfire roll in [0, 100)", () => {
+    for (let i = 0; i < 200; i += 1) {
+      const rolls = rollFor({
+        accuracy: 50, damageMin: 1, damageMax: 5, bulletsPerShot: 1,
+        critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+        backfireChance: 5,
+      });
+      expect(rolls.backfireRoll).toBeGreaterThanOrEqual(0);
+      expect(rolls.backfireRoll).toBeLessThan(100);
+    }
   });
 });
