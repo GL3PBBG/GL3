@@ -2,10 +2,11 @@ import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@g
 import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
+import { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
-import { combatLog, items, players, playerStats, ranks } from "./schema.js";
+import { combatLog, items, players, playerStats, ranks, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -52,11 +53,17 @@ async function settleHospitalIfElapsed(tx: PluginTx, targetId: string): Promise<
     .where(and(eq(playerStats.playerId, targetId), isNotNull(playerStats.hospitalUntil)));
 }
 
-/** The equipped weapon's stats, or the unarmed profile when nothing is equipped. */
+/**
+ * The equipped weapon's stats, or the unarmed profile when nothing is
+ * equipped. `condition` is the caller's already-aged (`effectiveCondition`)
+ * reading for `weaponItemId`, PRISTINE when unarmed — this function stays
+ * pure with respect to time, same as `resolve.ts`.
+ */
 async function loadWeapon(
   tx: PluginTx,
   weaponItemId: string | null,
   config: CombatSettings,
+  condition: number,
 ): Promise<WeaponProfile> {
   const unarmed: WeaponProfile = {
     accuracy: config.unarmed.accuracy,
@@ -67,6 +74,8 @@ async function loadWeapon(
     critMultiplier: 1,
     armorPierce: 0,
     minRankExp: 0,
+    // Fists have no condition row and never backfire.
+    backfireChance: 0,
   };
   if (weaponItemId === null) return unarmed;
 
@@ -84,7 +93,15 @@ async function loadWeapon(
   // The one field a migrated V2 item never carries — `itemEffects` has no
   // accuracy column. `??`, not `||`: a weapon that states `accuracy: 0` means
   // it, and `||` would silently upgrade it to the default.
-  return { ...parsed.data, accuracy: parsed.data.accuracy ?? config.defaultWeaponAccuracy };
+  return {
+    ...parsed.data,
+    accuracy: parsed.data.accuracy ?? config.defaultWeaponAccuracy,
+    backfireChance: backfireChanceFor(
+      parsed.data.backfireChance ?? config.backfire.baseChance,
+      condition,
+      config.backfire.wearFactor,
+    ),
+  };
 }
 
 /**
@@ -180,7 +197,26 @@ const attackRoute = route({
         throw new PluginError("protected", 409);
       }
 
-      const weapon = await loadWeapon(tx, attacker.weaponItemId, config);
+      // Read once, used three times: to scale backfire chance, to compute the
+      // value written back after the shot, and to answer the response. `now`
+      // is captured once so the decay a shot observes and the decay it writes
+      // cannot straddle a period boundary.
+      const shotAt = new Date();
+      const [conditionRow] = attacker.weaponItemId === null ? [] : await tx.db
+        .select()
+        .from(weaponCondition)
+        .where(and(
+          eq(weaponCondition.playerId, player.id),
+          eq(weaponCondition.itemId, attacker.weaponItemId),
+        ));
+      const currentCondition = conditionRow === undefined
+        ? PRISTINE
+        : effectiveCondition(
+            conditionRow.condition, conditionRow.updatedAt, shotAt,
+            config.condition.decayPeriodSeconds, config.condition.decayPerPeriod,
+          );
+
+      const weapon = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
         throw new PluginError("insufficient_bullets", 409);
       }
@@ -192,6 +228,84 @@ const attackRoute = route({
 
       const targetArmor = await loadArmor(tx, target.armorItemId);
       const outcome = resolveShot(weapon, targetArmor, rollFor(weapon));
+
+      // Every shot wears the weapon, hit or miss or backfire: as with bullets,
+      // the cost is firing, not connecting.
+      //
+      // `updated_at = shotAt` resets the time-decay clock, deliberately. Time
+      // decay models rust from disuse and use decay models firing; a player
+      // who shoots constantly accrues only the latter, one who never shoots
+      // only the former. Both reach zero and neither double-counts.
+      if (attacker.weaponItemId !== null) {
+        const nextCondition = Math.max(0, currentCondition - config.condition.wearPerShot);
+        await tx.db
+          .insert(weaponCondition)
+          .values({
+            playerId: player.id,
+            itemId: attacker.weaponItemId,
+            condition: nextCondition,
+            updatedAt: shotAt,
+          })
+          .onConflictDoUpdate({
+            target: [weaponCondition.playerId, weaponCondition.itemId],
+            set: { condition: nextCondition, updatedAt: shotAt },
+          });
+      }
+
+      if (outcome.backfire) {
+        const attackerHealth = Math.max(0, attacker.health - outcome.selfDamage);
+        await tx.db
+          .update(playerStats)
+          .set({
+            health: attackerHealth,
+            backfire: sql`${playerStats.backfire} + 1`,
+          })
+          .where(eq(playerStats.playerId, player.id));
+
+        const hospitalised = attackerHealth === 0;
+        // No existing path hospitalises the ATTACKER — every other call sends
+        // the victim. Sets health = 0 alongside the deadline, so the UPDATE
+        // above is redundant on this path; left alone, as the kill path does.
+        if (hospitalised) {
+          await tx.hospital.sendToHospital(player.id, config.hospitalSeconds);
+        }
+
+        // The log answers "who shot at me", and someone did.
+        await tx.db.insert(combatLog).values({
+          id: uuidv7(),
+          attackerId: player.id,
+          targetId: params.targetId,
+          hit: false,
+          damage: 0,
+          fatal: false,
+          weaponItemId: attacker.weaponItemId,
+          payout: 0n,
+        });
+
+        // Attacker only. The target has no way of knowing your gun jammed,
+        // and telling them is information the attacker did not choose to give.
+        await tx.events.publishCore({
+          type: "player.backfired",
+          actorId: player.id,
+          actorName: player.username,
+          audience: { kind: "player", playerId: player.id },
+          selfDamage: outcome.selfDamage,
+          hospitalised,
+        });
+
+        // Returns early, so the target's health is never written, no kill is
+        // evaluated, no payout moves, and `killResolved` never runs —
+        // a backfire cannot claim a bounty.
+        return {
+          status: 200,
+          body: {
+            hit: false, crit: false, damage: 0, armorAbsorbed: 0,
+            targetHealth: target.health, targetKilled: false,
+            payout: "0", bulletsSpent: outcome.bulletsSpent,
+            backfire: true, selfDamage: outcome.selfDamage, attackerHealth,
+          },
+        };
+      }
 
       const targetHealth = Math.max(0, target.health - outcome.damage);
       // Skipped on a zero-damage hit: armor held, so the row is unchanged and
@@ -305,6 +419,9 @@ const attackRoute = route({
           targetKilled: killed,
           payout: payout.toString(),
           bulletsSpent: outcome.bulletsSpent,
+          backfire: false,
+          selfDamage: 0,
+          attackerHealth: attacker.health,
         },
       };
     });
