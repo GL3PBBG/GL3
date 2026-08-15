@@ -17,7 +17,7 @@ export const adminPage: PageSchema = {
       ] },
       { kind: "form", action: "POST /api/admin/properties", submitLabel: "Add property", fields: [
         { name: "locationId", label: "Location", type: "select",
-          optionsSource: "GET /api/admin/properties", valueKey: "locationId", labelKey: "locationName", allowEmpty: false },
+          optionsSource: "GET /api/admin/properties/locations", valueKey: "locationId", labelKey: "locationName", allowEmpty: false },
         { name: "pluginId", label: "Plugin ID", type: "text" },
         { name: "cost", label: "Cost", type: "money" },
         { name: "rate", label: "Rate", type: "money" },
