@@ -34,19 +34,23 @@ const auth = () => ({ authorization: `Bearer ${adminToken}` });
 
 const ADMIN_ROUTES: { method: "GET" | "POST"; url: string }[] = [
   { method: "GET", url: "/api/admin/properties" },
+  { method: "GET", url: "/api/admin/properties/locations" },
   { method: "POST", url: "/api/admin/properties" },
   { method: "POST", url: "/api/admin/properties/update" },
 ];
 
 describe("properties admin", () => {
   it("403s a non-admin on every admin route", async () => {
-    const pleb = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      remoteAddress: "10.99.1.1",
-      payload: { username: "Pleb", password: "hunter2hunter2" },
-    });
-    const headers = { authorization: `Bearer ${pleb.json().token}` };
-    for (const { method, url } of ADMIN_ROUTES) {
+    // One pleb per route, distinct IP (N2): a shared IP risks a rate-limit
+    // 429 instead of the 403 under test.
+    for (let i = 0; i < ADMIN_ROUTES.length; i++) {
+      const pleb = await app.inject({
+        method: "POST", url: "/api/auth/register",
+        remoteAddress: `10.99.1.${i + 1}`,
+        payload: { username: `Pleb${i}`, password: "hunter2hunter2" },
+      });
+      const headers = { authorization: `Bearer ${pleb.json().token}` };
+      const { method, url } = ADMIN_ROUTES[i];
       const res = await app.inject({ method, url, headers, payload: method === "POST" ? {} : undefined });
       expect(res.statusCode, `${method} ${url}`).toBe(403);
     }
@@ -88,6 +92,26 @@ describe("properties admin", () => {
     // Only one row for this location.
     const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
     expect(rows).toHaveLength(1);
+  });
+
+  it("lists only unclaimed locations in the locations endpoint", async () => {
+    // Seed a second location so we can claim one and leave the other.
+    const locationId2 = uuidv7();
+    await db.insert(coreLocations).values({ id: locationId2, name: "Othertown" });
+
+    // Claim locationId.
+    await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bank", cost: "1000", rate: "100" },
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/admin/properties/locations", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json().rows as Record<string, string>[];
+    const ids = rows.map((r) => r.locationId);
+    // locationId is claimed, so only locationId2 should appear.
+    expect(ids).not.toContain(locationId);
+    expect(ids).toContain(locationId2);
   });
 
   it("updates a property with a blank pluginId and keeps the old value", async () => {

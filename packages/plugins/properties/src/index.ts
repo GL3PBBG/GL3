@@ -382,9 +382,34 @@ const PropertyUpdateSchema = z
   .strict();
 
 /**
- * All properties as a TableRowsResponse. `id` is the update form's select
- * `valueKey`; `locationId` is the create form's select `valueKey`. Neither
- * is rendered as a column.
+ * Unclaimed locations as a TableRowsResponse — the create form's select
+ * `optionsSource`. The 409 `location_taken` guard on the create route
+ * covers the race window between the admin selecting and submitting.
+ */
+const adminLocationsRoute = route({
+  method: "GET",
+  path: "/api/admin/properties/locations",
+  auth: "admin",
+  handler: async (ctx) => {
+    return ctx.transaction(async (tx) => {
+      const claimed = await tx.db
+        .select({ locationId: propertiesTable.locationId })
+        .from(propertiesTable);
+      const claimedIds = new Set(claimed.map((c) => c.locationId));
+
+      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
+      const rows = allLocations
+        .filter((loc) => !claimedIds.has(loc.id))
+        .map((loc) => ({ locationId: loc.id, locationName: loc.name }));
+
+      return { status: 200, body: { rows } };
+    });
+  },
+});
+
+/**
+ * All locations as a TableRowsResponse. `id` is the update form's select
+ * `valueKey`. Not rendered as a column.
  */
 const adminListRoute = route({
   method: "GET",
@@ -527,7 +552,7 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminCreateRoute, adminUpdateRoute],
+  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminLocationsRoute, adminCreateRoute, adminUpdateRoute],
   events: [boughtEvent, soldEvent, incomeEvent],
   pages: [],
   adminPages: [adminPage],
