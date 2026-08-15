@@ -24,6 +24,7 @@ const LINKS: ReadonlyArray<readonly [string, string]> = [
   ["/combat", "Combat"],
   ["/bounties", "Bounties"],
   ["/detectives", "Detectives"],
+  ["/properties", "Properties"],
   ["/oc", "Heists"],
   ["/ranks", "Ranks"],
   ["/leaderboards", "Leaderboards"],
