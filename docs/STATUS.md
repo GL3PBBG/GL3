@@ -17,7 +17,7 @@ Branch: `feat/m4-migration-cli`.
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), and the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling) have since shipped |
 
-**Suite: 147 files / 1082 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 147 files / 1085 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
@@ -1170,6 +1170,15 @@ event variant after `0.1.0` was published, and the registry lagged the workspace
 by that variant until the patch went out. `@gl3/plugin-sdk` stayed at `0.1.0` —
 its own `src` was untouched, and its `"@gl3/shared": "^0.1.0"` dependency
 resolves the new patch on its own.
+
+**The registry lost its storage on 2026-08-15** and was rebuilt: `npm.gl3.dev`
+had been running without a persistent volume, and attaching one reset it to
+empty, taking the auth tokens with it. Both packages were republished onto the
+fresh registry, so it now serves exactly `@gl3/shared@0.1.1` and
+`@gl3/plugin-sdk@0.1.0` — `@gl3/shared@0.1.0` no longer exists, and an exact pin
+on it 404s. Caret ranges are unaffected. The practical lesson is that the
+registry is not the archive: the workspace source and these version numbers are,
+and a lost tarball is recovered by republishing from the tag that produced it.
 
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at

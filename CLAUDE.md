@@ -64,7 +64,10 @@ two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **147 files / 1082 tests**, `npm run verify` exit 0.
+Suite: **147 files / 1085 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
+`REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
+env var, which reads like 36 real failures.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
@@ -240,9 +243,12 @@ unavailable here.
   with no build output.
   The registry currently serves `@gl3/shared@0.1.1` (the `player.discharged`
   variant from commit `3b7e72e`, which landed after `0.1.0`) and
-  `@gl3/plugin-sdk@0.1.0` — the SDK's own `src` is unchanged since its publish,
-  and its `"@gl3/shared": "^0.1.0"` dependency already resolves the new patch,
-  so it did not need republishing.
+  `@gl3/plugin-sdk@0.1.0`. `@gl3/shared@0.1.0` is **gone** — `npm.gl3.dev` had no
+  persistent volume until 2026-08-15 and lost its storage when one was attached,
+  so both packages were republished onto the empty registry and only the versions
+  above exist. A plugin pinning `@gl3/shared@0.1.0` exactly now 404s; `^0.1.0`
+  resolves `0.1.1` and is unaffected, which is why the SDK needed no version bump
+  of its own.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and
