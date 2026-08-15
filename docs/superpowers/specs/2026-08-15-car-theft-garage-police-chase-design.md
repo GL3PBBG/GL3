@@ -109,14 +109,23 @@ purchase route and the real travel route.
 
 ## 4. Stealing
 
-### `GET /api/theft`
+### `GET /api/theft/tiers`
 
-Lists every tier: name, `successChance`, `maxDamage`, the value bracket, the
-count of catalogue cars inside it, and `cooldownRemaining`. Read-only, no
+Lists every tier: `id`, name, `successChance`, `maxDamage`, the value bracket,
+the count of catalogue cars inside it, and `cooldownRemaining`. Read-only, no
 locks, **and it does not spend the cooldown** — the combat targets-route
 principle: a player must never burn an action to discover a rule.
 
-### `POST /api/theft/:tierId/steal`
+Shaped as a `TableRowsResponse` (`{ rows: [{...strings}] }`) because it is both
+the `table.source` and the `optionsSource` of the steal form's select. Ids
+travel as the select's `valueKey` and are never rendered as a column, the rule
+`test/admin-ids-hidden.test.ts` already enforces on the admin side.
+
+### `POST /api/theft/steal`
+
+Body `{ tierId }`, not a path param: the declarative page posts through a
+`form`, and a form submits a body. Every mutating route in this plugin takes
+its id the same way, for the same reason.
 
 `accessInJail: false`. Synchronous, like combat and unlike crimes: there is no
 shared outcome and no delay to model, so a BullMQ job would buy nothing but a
@@ -171,11 +180,14 @@ the first is punishment without information.
 
 ### `GET /api/garage`
 
-The caller's cars: garage row id, car name, damage, the location's name, the
-sale value, the repair cost, and whether the caller is standing in that city.
-No locks, no cooldown.
+The caller's cars as a `TableRowsResponse`: car name, damage, the location's
+name, the sale value, the repair cost, and whether the caller is standing in
+that city. The garage row id is present as the select `valueKey` only. No
+locks, no cooldown. Backs the garage table and both forms' `optionsSource`.
 
-### `POST /api/garage/:garageId/sell`
+### `POST /api/garage/sell`
+
+Body `{ garageId }`.
 
 Requires the caller to be in the car's location — `409 wrong_location`
 otherwise. Payout is the value scaled by damage:
@@ -188,9 +200,10 @@ payout = car.value * BigInt(100 - damage) / 100n
 the fraction. The row is deleted and the payout moves through
 `tx.economy.applyBalanceChange` (rule 3) with reason `theft.sell`.
 
-### `POST /api/garage/:garageId/repair`
+### `POST /api/garage/repair`
 
-The garage's counterpart to spec 1's gunsmith, deliberately the same shape.
+Body `{ garageId }`. The garage's counterpart to spec 1's gunsmith,
+deliberately the same shape.
 Location-gated identically. Restores damage to 0 in one call; cost is
 `settings.repair.costPerPoint * BigInt(damage)`. Insufficient cash is
 `409 insufficient_funds`.
@@ -238,11 +251,23 @@ Both are buffered and flushed after commit (rule 5).
 ## 8. Web
 
 Two declarative pages via the manifest `pages` field and `PageSchema` — the
-loader's page renderer, not hand-written React under `apps/web`. `/theft` lists
-the tiers with a steal button per row; `/garage` lists the caller's cars with
-sell and repair. Keeping both in the manifest is what makes `theft`
-installable from the registry without touching core, which is the point of the
-plugin SDK.
+loader's page renderer, not hand-written React under `apps/web`. `theft` is the
+first core plugin to declare `pages`, which is the point: keeping the UI in the
+manifest is what would make it installable from the registry without touching
+core.
+
+A `view` is static, so all data arrives through `table.source` and
+`select.optionsSource` GET routes. `/theft` is a table of tiers plus a
+one-select form that steals; `/garage` is a table of the caller's cars plus a
+sell form and a repair form, each selecting a car. Per-row action buttons are
+not expressible in the ten-kind vocabulary — hence the select-then-submit
+shape, which is the same one the admin pages already use.
+
+`test/plugin-manifest-endpoint.test.ts` asserts the exact `GET /api/plugins`
+payload of a no-arg boot, and today that is `{ menu: [], pages: [], events:
+[inventory.purchased] }`. Both new pages and both new events appear there and
+the assertion is updated with them. That test is the intended tripwire for
+exactly this change, not collateral damage.
 
 ## 9. Admin
 
