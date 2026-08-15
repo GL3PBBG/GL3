@@ -187,7 +187,7 @@ const stealRoute = route({
             name: "resolved",
             actorId: player.id,
             actorName: player.username,
-            audience: { kind: "global" },
+            audience: { kind: "player", playerId: player.id },
             payload: {
               outcome: `stole a ${outcome.car.name}`,
               carName: outcome.car.name,
@@ -208,7 +208,7 @@ const stealRoute = route({
           name: "resolved",
           actorId: player.id,
           actorName: player.username,
-          audience: { kind: "global" },
+          audience: { kind: "player", playerId: player.id },
           payload: {
             outcome: escaped ? "was spotted lifting a car and got away" : "was caught lifting a car",
             carName: "",
@@ -225,7 +225,7 @@ const stealRoute = route({
           type: "player.jailed",
           actorId: player.id,
           actorName: player.username,
-          audience: { kind: "global" },
+          audience: { kind: "player", playerId: player.id },
           until: until.toISOString(),
           reason: "caught stealing a car",
         });
