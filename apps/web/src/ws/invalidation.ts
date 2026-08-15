@@ -57,6 +57,12 @@ export function invalidationKeys(
       // publishes nothing — so this is the only signal the target gets when
       // an attack beats the sweeper to their discharge.
       return [keys.me(), keys.combatTargets(), keys.combatLog(), keys.hospital()];
+    case "player.backfired":
+      // Same surfaces as a landed shot, minus anything about the target: the
+      // attacker spent bullets, took the damage themselves, and the log gained
+      // a row. `hospital` because a backfire can put the ATTACKER there — the
+      // one path in combat that hospitalises the shooter.
+      return [keys.me(), keys.combatTargets(), keys.combatLog(), keys.hospital()];
     case "player.killed":
       // The victim is now hospitalised — for them that is the whole page, and
       // for the killer it is why the target vanished from the list.
