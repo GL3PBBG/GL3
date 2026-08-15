@@ -202,6 +202,7 @@ export default defineWorkspace([
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
         "test/properties-settings.test.ts",
+        "test/properties-resolve.test.ts",
       ],
     },
     ...srcAliases,
