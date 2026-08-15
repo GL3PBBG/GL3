@@ -6,6 +6,7 @@ import mysql from "mysql2/promise";
 import postgres from "postgres";
 import bountiesPlugin from "@gl3/plugin-bounties";
 import detectivesPlugin from "@gl3/plugin-detectives";
+import propertiesPlugin from "@gl3/plugin-properties";
 import theftPlugin from "@gl3/plugin-theft";
 import { createDb } from "../../../server/src/db/client.js";
 import { runPluginMigrations } from "../../../server/src/plugins/migrate.js";
@@ -125,7 +126,7 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
   // the same way apps/server's loader creates them at boot.
   const pluginDb = createDb(target.toString());
   try {
-    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin, theftPlugin]);
+    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin]);
   } finally {
     await pluginDb.sql.end();
   }

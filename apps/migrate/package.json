@@ -12,6 +12,7 @@
   "dependencies": {
     "@gl3/plugin-bounties": "*",
     "@gl3/plugin-detectives": "*",
+    "@gl3/plugin-properties": "*",
     "@gl3/plugin-theft": "*",
     "drizzle-orm": "^0.45.2",
     "mysql2": "^3.11.5",
