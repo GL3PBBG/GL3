@@ -11,6 +11,7 @@ export function Ranks(): JSX.Element {
   if (ranks.isLoading || !me.data) return <Loading what="ranks" />;
 
   const rows = ranks.data?.ranks ?? [];
+  const moneyRanks = ranks.data?.moneyRanks ?? [];
   const progress = progressToNextRank(me.data.exp, rows);
 
   return (
@@ -41,6 +42,16 @@ export function Ranks(): JSX.Element {
                 {rank.bulletReward} bullets · {rank.maxHealth} hp
               </div>
             </div>
+          </li>
+        ))}
+      </ul>
+
+      <h3 className={styles.meta}>Wealth</h3>
+      <ul className={styles.rows}>
+        {moneyRanks.map((moneyRank) => (
+          <li key={moneyRank.id} className={styles.row}>
+            <strong>{moneyRank.label}</strong>
+            <span className={styles.meta}><Money value={moneyRank.threshold} /></span>
           </li>
         ))}
       </ul>

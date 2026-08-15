@@ -16,8 +16,10 @@ import {
   OcCreateResponseSchema, OcStateResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
+  RepairResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
+  WeaponConditionDtoSchema,
   type AdminSectionsResponse,
   type AttackResponse, type BankStatusResponse, type BountyListResponse,
   type BuyBulletsResponse,
@@ -36,8 +38,10 @@ import {
   type OcCashResponse, type OcCreateResponse, type OcStateResponse,
   type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
   type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
+  type RepairResponse,
   type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
+  type WeaponConditionDto,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
 import { keys } from "./keys.js";
@@ -545,6 +549,29 @@ export function useAttack() {
       void queryClient.invalidateQueries({ queryKey: keys.combatTargets() });
       void queryClient.invalidateQueries({ queryKey: keys.combatLog() });
       void queryClient.invalidateQueries({ queryKey: keys.hospital() });
+      // Every shot wears the weapon, hit, miss, or backfire alike.
+      void queryClient.invalidateQueries({ queryKey: keys.weaponCondition() });
+    },
+  });
+}
+
+export function useWeaponCondition() {
+  return useQuery<WeaponConditionDto>({
+    queryKey: keys.weaponCondition(),
+    queryFn: async () => WeaponConditionDtoSchema.parse(await api("/api/combat/weapon")),
+  });
+}
+
+export function useRepairWeapon() {
+  const queryClient = useQueryClient();
+  return useMutation<RepairResponse, Error, string>({
+    mutationFn: async (itemId) =>
+      RepairResponseSchema.parse(
+        await api("/api/combat/repair", { method: "POST", body: JSON.stringify({ itemId }) }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.weaponCondition() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
   });
 }
