@@ -9,6 +9,11 @@ export interface WeaponProfile {
   critMultiplier: number;
   armorPierce: number;
   minRankExp: number;
+  /**
+   * Already scaled by condition — `backfireChanceFor` is applied by the
+   * caller, so this stays pure and knows nothing about wear.
+   */
+  backfireChance: number;
 }
 
 export interface ShotOutcome {
@@ -17,13 +22,18 @@ export interface ShotOutcome {
   damage: number;
   armorAbsorbed: number;
   bulletsSpent: number;
+  /** The weapon went off in the attacker's hand. Not a miss. */
+  backfire: boolean;
+  /** Damage dealt to the ATTACKER. 0 on every non-backfire outcome. */
+  selfDamage: number;
 }
 
-/** The three draws a shot needs, taken by the caller so this stays pure. */
+/** The four draws a shot needs, taken by the caller so this stays pure. */
 export interface Rolls {
   hitRoll: number;
   damageRoll: number;
   critRoll: number;
+  backfireRoll: number;
 }
 
 /**
@@ -39,6 +49,7 @@ export function rollFor(weapon: WeaponProfile): Rolls {
     hitRoll: randomInt(0, 100),
     damageRoll: randomInt(weapon.damageMin, weapon.damageMax + 1),
     critRoll: randomInt(0, 100),
+    backfireRoll: randomInt(0, 100),
   };
 }
 
@@ -61,8 +72,28 @@ export function resolveShot(
 ): ShotOutcome {
   const bulletsSpent = weapon.bulletsPerShot;
 
+  // BEFORE the hit roll, deliberately. A backfire is not a miss — the gun
+  // went off in your hand, and the hit roll never happens. Ordering it after
+  // would make a backfire impossible on any shot that connects, which is
+  // exactly backwards.
+  //
+  // Self-damage is the raw damage roll reduced by NO armor: not the target's
+  // (irrelevant — nothing reached them) and not the attacker's (armor does
+  // not protect you from your own weapon).
+  if (rolls.backfireRoll < weapon.backfireChance) {
+    return {
+      backfire: true,
+      hit: false,
+      crit: false,
+      damage: 0,
+      armorAbsorbed: 0,
+      selfDamage: rolls.damageRoll,
+      bulletsSpent,
+    };
+  }
+
   if (rolls.hitRoll >= weapon.accuracy) {
-    return { hit: false, crit: false, damage: 0, armorAbsorbed: 0, bulletsSpent };
+    return { hit: false, crit: false, damage: 0, armorAbsorbed: 0, bulletsSpent, backfire: false, selfDamage: 0 };
   }
 
   const crit = rolls.critRoll < weapon.critChance;
@@ -76,5 +107,5 @@ export function resolveShot(
   const damage = Math.max(0, raw - effectiveArmor);
   const armorAbsorbed = raw - damage;
 
-  return { hit: true, crit, damage, armorAbsorbed, bulletsSpent };
+  return { hit: true, crit, damage, armorAbsorbed, bulletsSpent, backfire: false, selfDamage: 0 };
 }

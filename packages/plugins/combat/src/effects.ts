@@ -36,6 +36,13 @@ export const WeaponEffectsSchema = z.object({
    * when an admin edits or deletes a rank row.
    */
   minRankExp: z.number().int().nonnegative().default(0),
+  /**
+   * Optional for the same reason `accuracy` is: a migrated V2 item has no
+   * such column and must still parse. Combat fills an absent value from
+   * `combat.backfire.base_chance`. An explicit 0 means "never backfires" and
+   * must survive the round trip — do not collapse it to the default.
+   */
+  backfireChance: z.number().int().min(0).max(100).optional(),
 }).refine((e) => e.damageMax >= e.damageMin, {
   message: "damageMax must be >= damageMin",
 });
