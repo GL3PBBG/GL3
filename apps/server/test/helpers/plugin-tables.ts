@@ -59,3 +59,11 @@ export const combatLog = pgTable("p_combat_log", {
   payout: bigint("payout", { mode: "bigint" }).notNull().default(sql`0`),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Mirrors `packages/plugins/combat/src/migrations.ts` `0004_weapon_condition`. */
+export const weaponCondition = pgTable("p_combat_weapon_condition", {
+  playerId: uuid("player_id").notNull(),
+  itemId: uuid("item_id").notNull(),
+  condition: integer("condition").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

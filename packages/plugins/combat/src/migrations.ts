@@ -44,4 +44,30 @@ export const COMBAT_MIGRATIONS: { name: string; sql: string }[] = [
     name: "0003_attacker_idx",
     sql: `CREATE INDEX p_combat_log_attacker_idx ON p_combat_log (attacker_id, created_at)`,
   },
+  {
+    /**
+     * No foreign keys, and that is the design. See the file header on
+     * `p_combat_log`: these rows are written while two `player_stats` rows
+     * are held FOR UPDATE, so an FK would take FOR KEY SHARE on its referent
+     * right there. A `players` FK would be player-then-player, which
+     * `tx.locks.player` already orders safely, but an `items` FK would open
+     * a player-then-item edge that exists nowhere else. Declaring neither
+     * leaves NOTES.md rule 6's lock graph exactly as it was — the same
+     * choice `p_inventory_shop_stock` made.
+     *
+     * A row whose player or item has since been deleted is harmless: it is
+     * only ever read by full primary key, from a path that has already
+     * loaded both, and is never joined back.
+     *
+     * No index beyond the primary key: every read is by full key.
+     */
+    name: "0004_weapon_condition",
+    sql: `CREATE TABLE p_combat_weapon_condition (
+      player_id  uuid        NOT NULL,
+      item_id    uuid        NOT NULL,
+      condition  integer     NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (player_id, item_id)
+    )`,
+  },
 ];
