@@ -12,6 +12,14 @@ import { THEFT_MIGRATIONS } from "./migrations.js";
 // only `tsc --build` produces. No other plugin in this repo uses a subpath
 // export for this reason.
 export { readTheftSettings, type TheftSettings } from "./settings.js";
+export {
+  bracketWeight,
+  resolveTheft,
+  type CatalogueCar,
+  type TheftOutcome,
+  type TheftRolls,
+  type TheftTier,
+} from "./resolve.js";
 
 /**
  * Shaped as a TableRowsResponse (`{ rows: [{...strings}] }`) because it is

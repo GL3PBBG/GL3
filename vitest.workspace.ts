@@ -69,9 +69,6 @@ const srcAliases = {
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
-      "@gl3/plugin-theft/resolve": fileURLToPath(
-        new URL("./packages/plugins/theft/src/resolve.ts", import.meta.url),
-      ),
     },
   },
 };
