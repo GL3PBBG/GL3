@@ -32,13 +32,14 @@ describe("core schema", () => {
       // No "bounties" / "detective_searches" / "combat_log": core relinquished
       // all three in 0007_relinquish_plugin_tables. No "cars" / "theft_tiers" /
       // "garage": core relinquished those three in 0009_relinquish_car_tables.
-      // All six are spec §2.5 tables still, but the plugins that are their
+      // No "properties": core relinquished it in 0010_relinquish_properties.
+      // All seven are spec §2.5 tables still, but the plugins that are their
       // only consumers create them now (p_bounties_bounties,
       // p_detectives_searches, p_combat_log, p_theft_cars, p_theft_tiers,
-      // p_theft_garage) and this file never boots plugins — see
-      // combat-log-schema.test.ts for the plugin-owned equivalent of this
-      // assertion.
-      "properties", "mail_messages", "notifications",
+      // p_theft_garage, p_properties_properties) and this file never boots
+      // plugins — see combat-log-schema.test.ts for the plugin-owned
+      // equivalent of this assertion.
+      "mail_messages", "notifications",
       "game_news", "ranks", "money_ranks", "roles", "role_module_access", "rounds",
       "settings", "crime_log", "id_map",
     ]) {
@@ -129,9 +130,12 @@ describe("core schema", () => {
     // player_id, car_id cascade; location_id set null. cars and theft_tiers
     // carried none. p_theft_garage recreates all three under the theft
     // plugin, which theft-tiers.test.ts pins for its share.
-    expect(totalForeignKeys).toBe(36);
-    expect(byRule["c"]).toBe(22); // ON DELETE CASCADE
-    expect(byRule["n"]).toBe(14); // ON DELETE SET NULL
+    // 0010_relinquish_properties dropped properties and its two FKs —
+    // location_id cascade; owner_player_id set null.
+    // p_properties_properties recreates both under the properties plugin.
+    expect(totalForeignKeys).toBe(34);
+    expect(byRule["c"]).toBe(21); // ON DELETE CASCADE
+    expect(byRule["n"]).toBe(13); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
       SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'
@@ -166,7 +170,10 @@ describe("core schema", () => {
     // that owned it; cars and theft_tiers had no indexes beyond their
     // primary key. p_theft_garage_player_idx recreates it under the theft
     // plugin, which theft-tiers.test.ts pins for its share.
-    expect(Number(count)).toBe(28);
+    // 0010_relinquish_properties dropped properties_location_idx with the
+    // table that owned it. p_properties_properties recreates it under the
+    // properties plugin.
+    expect(Number(count)).toBe(27);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
