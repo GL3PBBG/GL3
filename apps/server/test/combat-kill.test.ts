@@ -61,7 +61,13 @@ async function makeAttackable(): Promise<string> {
 /** Seeds an item and equips it as `weapon_item_id`. Returns the item id. */
 async function equipWeapon(playerId: string, effects: Record<string, unknown>): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `w-${id.slice(-8)}`, itemType: "weapon", effects });
+  // Spread first so a caller can override. See combat.test.ts's equipWeapon
+  // for why: the default `combat.backfire.base_chance` of 2 otherwise gives
+  // every shot a 2% chance of returning early with no kill and no ledger row.
+  await db.insert(items).values({
+    id, name: `w-${id.slice(-8)}`, itemType: "weapon",
+    effects: { backfireChance: 0, ...effects },
+  });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));
   return id;

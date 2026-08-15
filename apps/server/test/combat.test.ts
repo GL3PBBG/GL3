@@ -84,7 +84,18 @@ async function equipWeapon(
   itemType = "weapon",
 ): Promise<string> {
   const id = uuidv7();
-  await db.insert(items).values({ id, name: `w-${id.slice(-8)}`, itemType, effects });
+  // `backfireChance: 0` is spread FIRST so a caller can still override it.
+  // Without it every weapon here inherits `combat.backfire.base_chance`,
+  // whose default is 2 — a 2% chance per shot that the route returns early
+  // with no hit, no kill, no payout and no ledger row. That is correct
+  // gameplay and catastrophic as a test default: it makes every assertion
+  // on a connecting shot in this file fail roughly one run in forty, and
+  // this file fires ~25 of them. It belongs beside `accuracy: 100` — the
+  // same kind of knob, pinned for the same reason.
+  await db.insert(items).values({
+    id, name: `w-${id.slice(-8)}`, itemType,
+    effects: { backfireChance: 0, ...effects },
+  });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));
   return id;

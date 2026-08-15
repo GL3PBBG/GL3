@@ -103,7 +103,10 @@ beforeAll(async () => {
     // rather than on whatever subset the dice allow. A sweep whose money path
     // fires one time in three is a weaker test for no gain in realism —
     // combat-resolve.test.ts is where the roll itself is exercised.
-    effects: { accuracy: 100, damageMin: 100, damageMax: 100 },
+    // `backfireChance: 0` extends the same argument to the backfire roll: the
+    // default `combat.backfire.base_chance` of 2 would fire the money path
+    // 98 times in 100 instead of always, for no gain in realism.
+    effects: { accuracy: 100, damageMin: 100, damageMax: 100, backfireChance: 0 },
   });
   await db.insert(playerItems).values(playerIds.map((id) => ({ playerId: id, itemId: weaponId, qty: 1 })));
   await db
