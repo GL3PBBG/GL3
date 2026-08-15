@@ -1,5 +1,9 @@
-import type { AttackResponse, TargetReason } from "@gl3/shared";
-import { useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe } from "../api/queries.js";
+import type { AttackResponse, TargetReason, WeaponConditionDto } from "@gl3/shared";
+import {
+  useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe,
+  useRepairWeapon, useWeaponCondition,
+} from "../api/queries.js";
+import { formatMoney } from "../lib/money.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -18,6 +22,9 @@ const REASONS: Record<TargetReason, string> = {
 };
 
 function AttackResult({ data }: { data: AttackResponse }): JSX.Element {
+  if (data.backfire) {
+    return <span className={styles.bad}>Your weapon backfired for {data.selfDamage} damage!</span>;
+  }
   if (!data.hit) return <span>Missed.</span>;
   return (
     <span>
@@ -33,6 +40,39 @@ function AttackResult({ data }: { data: AttackResponse }): JSX.Element {
   );
 }
 
+/** Weapon name, condition bar, backfire odds, and a repair action. */
+function WeaponPanel({ weapon }: { weapon: WeaponConditionDto }): JSX.Element {
+  const repair = useRepairWeapon();
+  const itemId = weapon.itemId;
+
+  return (
+    <div>
+      <h3 className={styles.meta}>Weapon</h3>
+      <p className={styles.meta}>{weapon.name ?? "Unarmed"}</p>
+      {itemId !== null ? (
+        <>
+          <div className={styles.bar}>
+            <div className={styles.barFill} style={{ width: `${weapon.condition}%` }} />
+          </div>
+          <p className={styles.meta}>
+            Condition {weapon.condition}% · Backfire chance {weapon.backfireChance}%
+          </p>
+          <ErrorText error={repair.error} />
+          {weapon.condition < 100 ? (
+            <button
+              type="button"
+              disabled={repair.isPending}
+              onClick={() => { repair.mutate(itemId); }}
+            >
+              {repair.isPending ? "Repairing…" : `Repair (${formatMoney(weapon.repairCost)})`}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function Combat(): JSX.Element {
   const targets = useCombatTargets();
   const log = useCombatLog();
@@ -40,6 +80,7 @@ export function Combat(): JSX.Element {
   const jail = useJail();
   const hospital = useHospital();
   const attack = useAttack();
+  const weapon = useWeaponCondition();
 
   if (targets.isLoading) return <Loading what="targets" />;
   if (targets.error) return <ErrorText error={targets.error} />;
@@ -59,6 +100,8 @@ export function Combat(): JSX.Element {
 
       {jailed ? <p className={styles.bad}>You can't shoot anyone from jail.</p> : null}
       {!jailed && hospitalised ? <p className={styles.bad}>You can't shoot anyone from a hospital bed.</p> : null}
+
+      {weapon.data ? <WeaponPanel weapon={weapon.data} /> : null}
 
       {attack.data ? (
         <p className={styles.meta}><AttackResult data={attack.data} /></p>

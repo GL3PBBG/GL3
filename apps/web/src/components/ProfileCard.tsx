@@ -16,11 +16,14 @@ export function ProfileCard({ profile }: { profile: ProfileDto }): JSX.Element {
         <Avatar url={profile.avatarUrl} alt={`${profile.username}'s avatar`} />
         <div className={styles.rowStack}>
           <span className={styles.meta}>
-            {profile.rankName ?? "Unranked"} · <Amount value={profile.exp} /> exp
+            {profile.rankName ?? "Unranked"}
+            {profile.moneyRankLabel !== null ? ` · ${profile.moneyRankLabel}` : ""}
+            {" · "}<Amount value={profile.exp} /> exp
           </span>
           <span className={styles.meta}>
             {profile.gangName ?? "No gang"} · joined <When iso={profile.createdAt} />
           </span>
+          <span className={styles.meta}>Backfires · {profile.backfire}</span>
         </div>
       </div>
       {profile.bio === null || profile.bio === "" ? (
