@@ -33,24 +33,6 @@ export const locations = pgTable("locations", {
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull().default(sql`0`),
 });
 
-export const cars = pgTable("cars", {
-  id: uuid("id").primaryKey(),
-  name: text("name").notNull(),
-  value: bigint("value", { mode: "bigint" }).notNull(),
-  /** V2 CA_theftChance is a weight, not a percentage (spec §1.2). */
-  theftWeight: integer("theft_weight").notNull().default(1),
-});
-
-export const theftTiers = pgTable("theft_tiers", {
-  id: uuid("id").primaryKey(),
-  name: text("name").notNull(),
-  successChance: integer("success_chance").notNull(),
-  maxDamage: integer("max_damage").notNull(),
-  /** V2 T_worstCar/T_bestCar are cash bounds, not car ids (spec §1.2). */
-  minCarValue: bigint("min_car_value", { mode: "bigint" }).notNull(),
-  maxCarValue: bigint("max_car_value", { mode: "bigint" }).notNull(),
-});
-
 export const weapons = pgTable("weapons", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),

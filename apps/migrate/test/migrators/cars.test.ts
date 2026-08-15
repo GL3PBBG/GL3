@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../../server/src/db/client.js";
-import { cars, theftTiers } from "../../../server/src/db/schema/index.js";
+import { cars, theftTiers } from "../../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "../helpers/fixtures.js";
 import { createReport } from "../../src/report.js";
 import { migrateCars } from "../../src/migrators/cars.js";

@@ -3,11 +3,11 @@ import mysql from "mysql2/promise";
 import { createDb } from "../../server/src/db/client.js";
 import {
   crimes, gangInvites, gangLogs, gangMembers, gangPermissions,
-  gangs, garage, idMap, items, locations, mailMessages, notifications, playerCrimeSkill,
+  gangs, idMap, items, locations, mailMessages, notifications, playerCrimeSkill,
   playerItems, players, playerStats, playerTimers, properties, ranks, roleModuleAccess,
   roles, rounds, settings, weapons,
 } from "../../server/src/db/schema/index.js";
-import { bounties, detectiveSearches } from "../src/pg/plugin-tables.js";
+import { bounties, detectiveSearches, garage } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";
