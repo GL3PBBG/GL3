@@ -34,3 +34,9 @@ export const playerStats = pgTable("player_stats", {
   locationId: uuid("location_id"),
   cash: bigint("cash", { mode: "bigint" }).notNull(),
 });
+
+/** Core-owned, mirrored for the list route's owner-name join. */
+export const players = pgTable("players", {
+  id: uuid("id").primaryKey(),
+  username: text("username").notNull(),
+});

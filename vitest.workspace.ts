@@ -312,6 +312,8 @@ export default defineWorkspace([
         "test/shop-concurrency.test.ts",
         "test/shop.test.ts",
         "test/garage.test.ts",
+        "test/properties-events.test.ts",
+        "test/properties-routes.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",
