@@ -1264,17 +1264,16 @@ on it 404s. Caret ranges are unaffected. The practical lesson is that the
 registry is not the archive: the workspace source and these version numbers are,
 and a lost tarball is recovered by republishing from the tag that produced it.
 
-**`@gl3/shared` is at `0.1.2` in the workspace and `0.1.1` on the registry.**
-The money-ranks/backfire cluster widened the public surface additively — the
-`player.backfired` event variant, `WeaponConditionDtoSchema` and
-`RepairResponseSchema` in `dto/combat.ts`, `moneyRankLabel`/`backfire` on
-`ProfileDto`, and `moneyRanks` on `RankListResponse` — so the manifest was
-bumped to `0.1.2` as a patch, keeping every `^0.1.0` peer range resolving.
-`npm pack --dry-run` is clean (126 files, `dist/` present). **The publish
-itself has not been run** and needs a human to authorise it, the same gate
-every outward-facing step here gets. `@gl3/plugin-sdk` needs no bump: its own
-`src` is untouched and its `"@gl3/shared": "^0.1.0"` dependency picks the new
-patch up by itself.
+**`@gl3/shared@0.1.2` is published.** The money-ranks/backfire cluster widened
+the public surface additively — the `player.backfired` event variant,
+`WeaponConditionDtoSchema` and `RepairResponseSchema` in `dto/combat.ts`,
+`moneyRankLabel`/`backfire` on `ProfileDto`, and `moneyRanks` on
+`RankListResponse` — so it went out as a patch, keeping every `^0.1.0` peer
+range resolving. `npm view @gl3/shared versions` now returns
+`[ '0.1.1', '0.1.2' ]`; `0.1.0` is still gone for the storage-loss reason
+above. `@gl3/plugin-sdk` stays at `0.1.0`: its own `src` is untouched and its
+`"@gl3/shared": "^0.1.0"` dependency picks the new patch up by itself — the
+same shape as the `0.1.1` release.
 
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at

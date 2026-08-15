@@ -258,11 +258,12 @@ unavailable here.
   so both packages were republished onto the empty registry and only the versions
   above exist. A plugin pinning `@gl3/shared@0.1.0` exactly now 404s; `^0.1.0`
   resolves `0.1.1` and is unaffected, which is why the SDK needed no version bump
-  of its own. **The workspace is now at `@gl3/shared@0.1.2`** — the money-ranks
+  of its own. **`@gl3/shared@0.1.2` has since been published** — the money-ranks
   cluster widened the surface additively (`player.backfired`,
   `WeaponConditionDtoSchema`, `RepairResponseSchema`, `moneyRankLabel`/`backfire`
-  on `ProfileDto`, `moneyRanks` on `RankListResponse`) — **but that version has
-  not been published.** The registry still serves `0.1.1`.
+  on `ProfileDto`, `moneyRanks` on `RankListResponse`), so it went out as a
+  patch. The registry now serves `@gl3/shared` `0.1.1` and `0.1.2`, and
+  `@gl3/plugin-sdk@0.1.0`.
 - **Adding a variant to `GameEvent` breaks three places, and the third only
   fails under the integration suite.** The two obvious ones are the exhaustive
   switches in `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which
