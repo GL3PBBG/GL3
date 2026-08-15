@@ -303,6 +303,15 @@ describe("POST /api/garage/repair", () => {
     expect(row?.damage).toBe(10);
   });
 
+  it("refuses a pristine car in the wrong city with wrong_location, not 204", async () => {
+    const carId = await seedCar("Sedan", 10_000n);
+    const garageId = await seedGarage(playerId, carId, 0, otherLocationId);
+
+    const res = await repair(garageId);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "wrong_location" });
+  });
+
   it("404s another player's car rather than 403ing", async () => {
     const { token: otherToken } = await register(`Stranger${regCounter + 1}`);
     const carId = await seedCar("Sedan", 10_000n);
