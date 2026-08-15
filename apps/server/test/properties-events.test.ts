@@ -136,6 +136,8 @@ describe("properties events", () => {
       type: "plugin.event",
       pluginId: "properties",
       name: "bought",
+      actorId: playerId,
+      audience: { kind: "player", playerId },
       payload: { propertyName: expect.any(String), cost: "50000" },
     });
   });
@@ -160,6 +162,8 @@ describe("properties events", () => {
       type: "plugin.event",
       pluginId: "properties",
       name: "sold",
+      actorId: playerId,
+      audience: { kind: "player", playerId },
       payload: { propertyName: expect.any(String), payout: "11500" },
     });
   });
@@ -183,6 +187,8 @@ describe("properties events", () => {
       type: "plugin.event",
       pluginId: "properties",
       name: "income",
+      actorId: playerId,
+      audience: { kind: "player", playerId },
       payload: { propertyName: expect.any(String), amount: "1500" },
     });
   });
