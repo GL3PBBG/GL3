@@ -14,6 +14,7 @@ import { type CombatSettings, readCombatSettings } from "./settings.js";
 // `@gl3/server:unit` project because it touches neither Postgres nor Redis).
 export { resolveShot, rollFor } from "./resolve.js";
 export type { Rolls, ShotOutcome, WeaponProfile } from "./resolve.js";
+export { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
 export { readCombatSettings } from "./settings.js";
 export type { CombatSettings } from "./settings.js";
 

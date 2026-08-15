@@ -170,6 +170,7 @@ export default defineWorkspace([
       root: "./apps/server",
       include: [
         "test/combat-resolve.test.ts",
+        "test/combat-condition.test.ts",
         "test/combat-settings.test.ts",
         "test/config.test.ts",
         "test/password.test.ts",
