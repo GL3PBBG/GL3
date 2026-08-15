@@ -229,6 +229,7 @@ export default defineWorkspace([
         "test/bounties.test.ts",
         "test/bounties-lock-order.test.ts",
         "test/bullets.test.ts",
+        "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",
         "test/combat-kill.test.ts",
