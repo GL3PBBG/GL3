@@ -89,7 +89,9 @@ describe("GET /api/plugins", () => {
   // set: `bootTestServer()`'s no-arg path still merges `CORE_PLUGINS` via
   // `withCorePlugins`, so any core plugin's own menu/pages/events surface
   // here. `inventory` declares the `purchased` event (`shop.ts`), the first
-  // core plugin to declare any — hence the non-empty `events` array below.
+  // core plugin to declare any, and `theft` declares two — hence the
+  // non-empty `events` array below. Order follows `CORE_PLUGINS`, where
+  // `theft` is appended after `inventory`.
   it("returns an empty 200 payload when no plugins are loaded", async () => {
     const { app, close } = await bootTestServer();
     try {
@@ -104,6 +106,16 @@ describe("GET /api/plugins", () => {
           name: "purchased",
           describe: "Bought {qty}x {name}",
           invalidates: ["inventory", "me"],
+        }, {
+          pluginId: "theft",
+          name: "resolved",
+          describe: "{actorName} {outcome}",
+          invalidates: ["theft", "garage", "me"],
+        }, {
+          pluginId: "theft",
+          name: "sold",
+          describe: "{actorName} sold a {carName} for {payout}",
+          invalidates: ["garage", "me"],
         }],
       });
     } finally {
