@@ -4,6 +4,7 @@ import { readPropertiesSettings } from "./settings.js";
 
 // Re-exported so tests can import the parser and types directly.
 export { readPropertiesSettings, type PropertiesSettings } from "./settings.js";
+export { accruedSince } from "./resolve.js";
 
 /**
  * Stub manifest — routes, events, pages and adminPages arrive in later tasks.
