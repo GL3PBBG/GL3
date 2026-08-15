@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { resolveShot, rollFor, type WeaponProfile } from "@gl3/plugin-combat";
 
+// `backfireChance: 0` keeps the backfire branch unreachable for every test
+// that predates it. It is not optional on `WeaponProfile`, and nothing
+// typechecks this directory — no tsconfig includes `apps/server/test` — so
+// omitting it would be a silent lie in the annotation rather than an error.
 const base: WeaponProfile = {
   accuracy: 60, damageMin: 10, damageMax: 20, bulletsPerShot: 1,
   critChance: 0, critMultiplier: 2, armorPierce: 0, minRankExp: 0,
+  backfireChance: 0,
 };
 
 describe("resolveShot", () => {
