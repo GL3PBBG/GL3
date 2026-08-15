@@ -59,12 +59,22 @@ owns and migrates it (`p_bounties_bounties`, `p_detectives_searches`,
 `p_combat_log`), so five of fourteen plugins declare migrations rather than
 two. Their foreign keys moved with them, unlike `p_inventory_shop_stock` and
 `p_oc_*` which have none: keeping them leaves the lock graph exactly as it was.
+**Money ranks, backfire and weapon condition** have since shipped on
+`feat/money-ranks-backfire`, the first of four clusters bringing
+migrated-but-unread V2 tables into play: `money_ranks` becomes a public
+profile bracket over cash+bank (the label is public, the figure never is) and
+a second table on `/ranks`; `player_stats.backfire` becomes a lifetime counter
+behind a new attacker-only `player.backfired` event; and
+`p_combat_weapon_condition` (combat migration `0004`, no foreign keys) degrades
+weapons over both time and use, scaling each weapon's declared
+`backfireChance` as a multiplier so an explicit zero stays zero. Repair is a
+gunsmith route in `combat`, not a shop route in `inventory`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **147 files / 1085 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **152 files / 1155 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -248,7 +258,21 @@ unavailable here.
   so both packages were republished onto the empty registry and only the versions
   above exist. A plugin pinning `@gl3/shared@0.1.0` exactly now 404s; `^0.1.0`
   resolves `0.1.1` and is unaffected, which is why the SDK needed no version bump
-  of its own.
+  of its own. **The workspace is now at `@gl3/shared@0.1.2`** — the money-ranks
+  cluster widened the surface additively (`player.backfired`,
+  `WeaponConditionDtoSchema`, `RepairResponseSchema`, `moneyRankLabel`/`backfire`
+  on `ProfileDto`, `moneyRanks` on `RankListResponse`) — **but that version has
+  not been published.** The registry still serves `0.1.1`.
+- **Adding a variant to `GameEvent` breaks three places, and the third only
+  fails under the integration suite.** The two obvious ones are the exhaustive
+  switches in `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which
+  fail loudly with TS2366. The third is the `CORPUS` drift guard in
+  `apps/server/test/plugin-ctx-core-events.test.ts`: `CoreEventInput` is
+  derived from `GameEventSchema`, so a new variant reaches the SDK for free
+  and would reach the wire untested. `npm run typecheck` and the `@gl3/web`
+  project both pass with it missing. A change that widens the union must run
+  the whole of `npm run verify`; `player.backfired` shipped past two separate
+  task reviews on this exact gap.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and
@@ -272,5 +296,14 @@ Work is executed by subagents, one task at a time, against a written plan in
   `TRUNCATE`). Instrumentation beats intuition.
 - **Demand proof a test can fail.** A green acceptance test that was never shown
   turning red proves nothing.
+- **"Pre-existing failure" means pre-existing on `main`.** An agent reported two
+  typecheck errors as pre-existing, having checked them out at a commit *inside*
+  its own branch — where an earlier task had already introduced them. Any such
+  claim gets re-checked against the merge base, not against whatever commit the
+  agent happened to compare with.
+- **"Changing this default affects nothing" needs the caller list, not the
+  argument.** Enumerate every call site before accepting it. A default value's
+  blast radius is exactly its callers, and that is cheap to enumerate and easy
+  to hand-wave.
 - **Flaky means broken.** Load-dependent failures here have always had real causes:
   shared BullMQ queue names, unfiltered event listeners, duplicated truncates.

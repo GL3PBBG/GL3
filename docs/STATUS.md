@@ -1,8 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-13, **M4 migration CLI complete** (all 33 tasks, both SPEC §6
-acceptance criteria proven).
-Branch: `feat/m4-migration-cli`.
+Last updated: 2026-08-15, **money ranks + backfire + weapon condition complete**
+(first of four clusters activating migrated-but-unread V2 tables).
+Branch: `feat/money-ranks-backfire`.
 
 ---
 
@@ -15,10 +15,11 @@ Branch: `feat/m4-migration-cli`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), and the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), and **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables) have since shipped |
 
-**Suite: 147 files / 1085 tests**, `npm run verify` exit 0. (M4 added the 30 files /
-58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968.)
+**Suite: 152 files / 1155 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
+ranks, backfire and weapon condition added the last 5 files / 70 tests.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -119,7 +120,13 @@ live over the WebSocket. A killing shot takes the victim's **on-hand** cash
 (their bank is untouched) and puts them in hospital for a fixed sentence.
 From hospital they can wait it out, use a heal item to restore health, or pay
 cash to be discharged early — heal items restore health but do **not** end the
-sentence.
+sentence. A shot can also **backfire**: the bullets are spent, the shooter
+takes the damage themselves and may be hospitalised by it, the target is never
+touched and never told. Chance comes from the weapon's own `backfireChance`
+scaled by how worn it is — weapons degrade with every shot and with elapsed
+time, and are repaired at the gunsmith route in `combat`. A player's lifetime
+backfire count and their wealth bracket both show on the public profile; the
+cash figure behind the bracket does not.
 
 Every balance movement anywhere is an append-only ledger row inside the same
 transaction as the balance update.
@@ -1106,6 +1113,83 @@ and the foreign-key assertion. `schema.test.ts`'s three census figures moved
 with the tables — 47 → 39 foreign keys (24 cascade, 15 set null) and 30 → 27
 non-primary-key indexes.
 
+### Money ranks, backfire and weapon condition
+
+Spec: `docs/superpowers/specs/2026-08-15-money-ranks-backfire-weapon-condition-design.md`.
+The first of four clusters bringing migrated-but-unread V2 tables into play.
+Three features that share one surface (the shot resolution in `combat`) and one
+rule (a bracket is public, the figure behind it is not).
+
+**Money ranks.** `money_ranks` (label, threshold) was migrated and never read.
+The bracket is now computed as the highest row whose `threshold <=
+cash + bank` and served two ways: `moneyRankLabel` on the **public** profile
+DTO, and the whole ladder on `GET /api/ranks` beside the exp ranks, rendered
+as a second table on `/ranks`. Below the lowest threshold, and on an empty
+table, the label is `null` rather than an error.
+
+The load-bearing property is the one `money-ranks.test.ts` pins last: the
+profile route SELECTs `cash` and `bank` to compute the label and must never
+return either. "The bracket is public, the figure is private" is the rule; the
+test asserts the response has no `cash` or `bank` property and that the digits
+of the figure appear nowhere in the serialised body. Widening that payload
+later is how the rule gets broken by accident.
+
+**Backfire.** `player_stats.backfire` is a lifetime counter, incremented once
+per backfired shot. A backfire consumes the bullets, deals `selfDamage` to the
+shooter, can hospitalise them, and never touches the target. The new
+`player.backfired` core event carries `selfDamage` and `hospitalised` and is
+addressed to the **attacker alone** — a global audience would tell the target
+that a shot they never felt was fired at them. The web copy is second person
+and never names a target for the same reason.
+
+**Weapon condition.** `p_combat_weapon_condition` (combat migration
+`0004_weapon_condition`; `(player_id, item_id)` primary key, `condition`,
+`updated_at`) degrades over **both** time and use: `wearPerShot` per shot,
+plus `decayPerPeriod` per elapsed `decayPeriodSeconds` computed lazily from
+`updated_at` on every read. Lazily, not by a sweeper — a BullMQ worker
+mutating condition would need an idempotency key tied to `job.id` (rule 1) for
+no gain. A missing row means `PRISTINE` (100), so the table only ever holds
+worn weapons.
+
+Condition scales the weapon's declared `backfireChance` as a **multiplier**,
+never an addend, so a weapon declaring `backfireChance: 0` stays at zero
+however ruined it is — the same "an explicit zero survives" property
+`accuracy: 0` already has. With the defaults (base 2, wear factor 3): 2% at
+pristine, 8% at ruined. Repair is a gunsmith route in `combat`
+(`POST /api/combat/repair`, priced at `repair.cost_per_point` per point
+restored), deliberately not a shop route in `inventory` — the shop sells,
+it does not service.
+
+`combat/src/condition.ts` is two pure functions with `now` as a parameter and
+no I/O, the same shape as `resolve.ts`, which is what lets the boundaries
+(future `updated_at`, zero period, clamping at both ends) be tested
+exhaustively.
+
+**Decisions worth not relitigating:**
+
+- **`p_combat_weapon_condition` declares no foreign keys**, matching
+  `p_inventory_shop_stock` and `p_oc_*`. Its rows are written while two
+  `player_stats` rows are held FOR UPDATE, so a `players` FK would take FOR
+  KEY SHARE there (safe — `tx.locks.player` already orders that pair) but an
+  `items` FK would open a player-then-item edge that exists nowhere else in
+  the graph (rule 6). Declaring neither leaves the lock graph untouched. Rows
+  orphaned by a deleted player or item are harmless: every read is by full
+  primary key from a path that already loaded both, and they are never joined
+  back.
+- **A no-op repair returns 204**, not a body. `apps/web`'s `api()` maps 204 to
+  `undefined`, so a client that parses the response would throw on it — the
+  web client never does, because the repair button is hidden at condition 100
+  and `repair.data` is never rendered. If that ever needs touching, drop the
+  parse rather than fabricate a body.
+
+**Cost of adding a `GameEvent` variant, learned here.** `player.backfired`
+broke *three* places, not the two that are obvious: the two exhaustive
+switches in `apps/web` (`lib/eventCopy.ts`, `ws/invalidation.ts`, which fail
+with TS2366), **and** the `CORPUS` drift guard in
+`apps/server/test/plugin-ctx-core-events.test.ts`, which only fails under the
+integration suite. Two separate task reviews missed one each. A task that
+widens the union must run the whole of `npm run verify`, not its own project.
+
 ### Installing a plugin without forking core
 
 The optional-plugin import map used to be a hand-written literal in
@@ -1179,6 +1263,18 @@ fresh registry, so it now serves exactly `@gl3/shared@0.1.1` and
 on it 404s. Caret ranges are unaffected. The practical lesson is that the
 registry is not the archive: the workspace source and these version numbers are,
 and a lost tarball is recovered by republishing from the tag that produced it.
+
+**`@gl3/shared` is at `0.1.2` in the workspace and `0.1.1` on the registry.**
+The money-ranks/backfire cluster widened the public surface additively — the
+`player.backfired` event variant, `WeaponConditionDtoSchema` and
+`RepairResponseSchema` in `dto/combat.ts`, `moneyRankLabel`/`backfire` on
+`ProfileDto`, and `moneyRanks` on `RankListResponse` — so the manifest was
+bumped to `0.1.2` as a patch, keeping every `^0.1.0` peer range resolving.
+`npm pack --dry-run` is clean (126 files, `dist/` present). **The publish
+itself has not been run** and needs a human to authorise it, the same gate
+every outward-facing step here gets. `@gl3/plugin-sdk` needs no bump: its own
+`src` is untouched and its `"@gl3/shared": "^0.1.0"` dependency picks the new
+patch up by itself.
 
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at
@@ -1396,12 +1492,17 @@ web image serves only the SPA's own assets.
 - **`effects.ts` is duplicated** between `packages/plugins/combat` and
   `packages/plugins/inventory` (weapon/armor/consumable effect schemas and the
   item-type constants). A plugin may not import another plugin, so the two
-  copies are kept in step **by hand and nothing enforces it** — a drift shows
-  up as combat reading an item inventory wrote differently. The natural fix is
-  the equipment/inventory split the design defers to the item-economy cluster.
-- **`player_stats.backfire` is still unused.** The V2-derived column exists
-  (integer, default 0) and nothing in combat reads or writes it. The backfire
-  mechanic is not implemented.
+  copies are kept in step **by hand**, but drift is no longer silent:
+  `apps/server/test/effects-parity.test.ts` parses one fixture, one minimal
+  item and one invalid item through both copies of `WeaponEffectsSchema` and
+  fails if the answers differ. It imports each package's `src/effects.js` by
+  relative path — neither manifest exports an `./effects` subpath, and adding
+  one purely to make a test resolve was refused. The real fix is still the
+  equipment/inventory split the design defers to the item-economy cluster.
+- **`player_stats.backfire` is now the backfire mechanic's lifetime counter.**
+  The V2-derived column (integer, default 0) is incremented once per backfired
+  shot and rendered on the public profile. See "Money ranks, backfire and
+  weapon condition" below for the whole cluster.
 - **No kills leaderboard.** `combat_log` has everything needed to build one;
   nothing does. Deferred with the rest of the leaderboard work.
 - **The item economy is half-open.** A per-location shop inside the
