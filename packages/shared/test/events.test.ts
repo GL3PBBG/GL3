@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GameEventSchema, MoneySchema, ServerFrameSchema } from "../src/index.js";
+import { AttackResponseSchema, WeaponConditionDtoSchema } from "../src/dto/combat.js";
+import { ProfileDtoSchema } from "../src/dto/profile.js";
+import { RankListResponseSchema } from "../src/dto/rank.js";
 
 const crimeResolved = {
   id: "018f8e2a-0000-7000-8000-000000000001",
@@ -100,11 +103,12 @@ describe("GameEventSchema", () => {
   // M5 adds exactly one name — the envelope every plugin event travels in. The
   // twenty-two core names stay closed: a ported core module gets its own variant,
   // not a plugin.event, so this census failing is how an accidental widening of
-  // the core union is caught.
-  it("covers the twenty-two core event names plus M5's plugin envelope", () => {
+  // the core union is caught. The backfire/weapon-condition spec adds one more
+  // core variant, player.backfired (attacker-only weapon jam), on top of that.
+  it("covers the twenty-two core event names plus M5's plugin envelope, plus player.backfired", () => {
     expect(new Set(GameEventSchema.options.map((o) => o.shape.type.value))).toEqual(new Set([
       "crime.resolved", "player.jailed", "player.released", "player.travelled",
-      "player.attacked", "player.killed", "player.discharged", "bounty.placed", "bounty.claimed",
+      "player.attacked", "player.killed", "player.backfired", "player.discharged", "bounty.placed", "bounty.claimed",
       "gang.created", "gang.memberJoined", "gang.memberLeft", "mail.received",
       "notification.created", "news.posted", "chat.message", "player.joined",
       "player.rankedUp", "bank.transacted", "bullets.purchased",
@@ -157,5 +161,67 @@ describe("GameEventSchema", () => {
   it("wraps events in a server frame", () => {
     const frame = ServerFrameSchema.parse({ kind: "event", event: crimeResolved });
     expect(frame.kind).toBe("event");
+  });
+});
+
+describe("backfire and condition contracts", () => {
+  it("parses a player.backfired event", () => {
+    const parsed = GameEventSchema.parse({
+      id: "018f0000-0000-7000-8000-000000000001",
+      at: new Date().toISOString(),
+      actorId: "018f0000-0000-7000-8000-000000000002",
+      actorName: "shooter",
+      audience: { kind: "player", playerId: "018f0000-0000-7000-8000-000000000002" },
+      type: "player.backfired",
+      selfDamage: 7,
+      hospitalised: false,
+    });
+    expect(parsed.type).toBe("player.backfired");
+  });
+
+  it("rejects a negative selfDamage", () => {
+    expect(() => GameEventSchema.parse({
+      id: "018f0000-0000-7000-8000-000000000001",
+      at: new Date().toISOString(),
+      actorId: "018f0000-0000-7000-8000-000000000002",
+      actorName: "shooter",
+      audience: { kind: "player", playerId: "018f0000-0000-7000-8000-000000000002" },
+      type: "player.backfired",
+      selfDamage: -1,
+      hospitalised: false,
+    })).toThrow();
+  });
+
+  it("requires the three new attack response fields", () => {
+    expect(() => AttackResponseSchema.parse({
+      hit: false, crit: false, damage: 0, armorAbsorbed: 0,
+      targetHealth: 100, targetKilled: false, payout: "0", bulletsSpent: 1,
+    })).toThrow();
+  });
+
+  it("parses a weapon condition dto with no weapon equipped", () => {
+    const dto = WeaponConditionDtoSchema.parse({
+      itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
+    });
+    expect(dto.itemId).toBeNull();
+  });
+
+  it("carries a nullable money rank label on a profile", () => {
+    const dto = ProfileDtoSchema.parse({
+      playerId: "018f0000-0000-7000-8000-000000000002",
+      username: "someone", bio: null, avatarUrl: null,
+      gangId: null, gangName: null, exp: "0", rankName: null,
+      moneyRankLabel: null, backfire: 0,
+      createdAt: new Date().toISOString(),
+    });
+    expect(dto.moneyRankLabel).toBeNull();
+  });
+
+  it("carries a money rank ladder on the rank list", () => {
+    const res = RankListResponseSchema.parse({
+      ranks: [],
+      moneyRanks: [{ id: "018f0000-0000-7000-8000-000000000003", label: "Broke", threshold: "0" }],
+    });
+    expect(res.moneyRanks[0]?.label).toBe("Broke");
   });
 });

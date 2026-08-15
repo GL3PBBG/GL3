@@ -78,6 +78,14 @@ export const ProfileDtoSchema = z.object({
   gangName: z.string().nullable(),
   exp: MoneySchema,
   rankName: z.string().nullable(),
+  /**
+   * The wealth BRACKET, never the figure. `cash`/`bank` are read to compute
+   * it and are never returned. Null when the player is below the lowest
+   * threshold, or when `money_ranks` is empty.
+   */
+  moneyRankLabel: z.string().nullable(),
+  /** Lifetime count of the player's own weapon backfiring. */
+  backfire: z.number().int().nonnegative(),
   createdAt: TimestampSchema,
 });
 export type ProfileDto = z.infer<typeof ProfileDtoSchema>;

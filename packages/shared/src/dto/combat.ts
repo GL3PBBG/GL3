@@ -36,6 +36,12 @@ export const AttackResponseSchema = z.object({
   targetKilled: z.boolean(),
   payout: MoneySchema,
   bulletsSpent: z.number().int(),
+  /** True when the weapon went off in the attacker's hand: no miss, no hit. */
+  backfire: z.boolean(),
+  /** Damage the attacker took from their own weapon. 0 unless `backfire`. */
+  selfDamage: z.number().int().nonnegative(),
+  /** The attacker's health after the shot, so the client need not refetch. */
+  attackerHealth: z.number().int().nonnegative(),
 });
 export type AttackResponse = z.infer<typeof AttackResponseSchema>;
 
@@ -55,3 +61,22 @@ export const CombatLogResponseSchema = z.object({
   entries: z.array(CombatLogEntrySchema),
 });
 export type CombatLogResponse = z.infer<typeof CombatLogResponseSchema>;
+
+/**
+ * The equipped weapon's wear, for the combat page. Every field is nullable or
+ * zero when nothing is equipped: fists have no condition and never backfire.
+ */
+export const WeaponConditionDtoSchema = z.object({
+  itemId: z.string().uuid().nullable(),
+  name: z.string().nullable(),
+  condition: z.number().int().min(0).max(100),
+  backfireChance: z.number().int().min(0).max(100),
+  repairCost: MoneySchema,
+});
+export type WeaponConditionDto = z.infer<typeof WeaponConditionDtoSchema>;
+
+export const RepairResponseSchema = z.object({
+  condition: z.number().int().min(0).max(100),
+  cost: MoneySchema,
+});
+export type RepairResponse = z.infer<typeof RepairResponseSchema>;

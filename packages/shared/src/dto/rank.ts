@@ -12,5 +12,15 @@ export const RankDtoSchema = z.object({
 });
 export type RankDto = z.infer<typeof RankDtoSchema>;
 
-export const RankListResponseSchema = z.object({ ranks: z.array(RankDtoSchema) });
+export const MoneyRankDtoSchema = z.object({
+  id: IdSchema,
+  label: z.string(),
+  threshold: MoneySchema,
+});
+export type MoneyRankDto = z.infer<typeof MoneyRankDtoSchema>;
+
+export const RankListResponseSchema = z.object({
+  ranks: z.array(RankDtoSchema),
+  moneyRanks: z.array(MoneyRankDtoSchema),
+});
 export type RankListResponse = z.infer<typeof RankListResponseSchema>;
