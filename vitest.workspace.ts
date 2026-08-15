@@ -99,6 +99,18 @@ const rateLimitIsolation = "./test/helpers/rate-limit-isolation.setup.ts";
 // unit and redis-only projects have no such hook to wait on.
 const dbHookTimeout = 30000;
 
+// The same argument, on `testTimeout`: several files do real-database work
+// inside test bodies — not hooks — and count it against vitest's 5s default.
+// `theft-chase.test.ts` boots a whole `bootTestServer()` per test (settings
+// are a boot-time snapshot, so each case's rows must land before its own
+// boot); measured ~2s standalone, it exceeded 5s under a full `npm run
+// verify` at `maxWorkers: 6` (5391ms) and timed out, taking the suite's
+// exit code with it. This is the exact failure `apps/migrate/vitest.config.ts`
+// hit and fixed the same way; `ledger.test.ts`'s 200-op test at 4.0–4.2s of
+// a 5s budget is the same exposure waiting for a loaded run. Only the two
+// Postgres projects get it — the unit and redis-only projects do no DB work.
+const dbTestTimeout = 30000;
+
 /**
  * The single `@gl3/server` project used to run every server test file
  * through both setupFiles unconditionally: a private Postgres database
@@ -220,6 +232,7 @@ export default defineWorkspace([
       globalSetup,
       setupFiles: [isolatedDb],
       hookTimeout: dbHookTimeout,
+      testTimeout: dbTestTimeout,
     },
     ...srcAliases,
   },
@@ -306,6 +319,7 @@ export default defineWorkspace([
       globalSetup,
       setupFiles: [isolatedDb, rateLimitIsolation],
       hookTimeout: dbHookTimeout,
+      testTimeout: dbTestTimeout,
     },
     ...srcAliases,
   },
