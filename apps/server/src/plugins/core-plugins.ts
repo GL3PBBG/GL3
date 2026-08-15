@@ -13,6 +13,7 @@ import mailPlugin from "@gl3/plugin-mail";
 import gangsPlugin from "@gl3/plugin-gangs";
 import inventoryPlugin from "@gl3/plugin-inventory";
 import combatPlugin from "@gl3/plugin-combat";
+import theftPlugin from "@gl3/plugin-theft";
 
 /**
  * Ported core modules — plugin-served, never optional. A static `import`
@@ -31,6 +32,7 @@ import combatPlugin from "@gl3/plugin-combat";
 export const CORE_PLUGINS: readonly PluginManifest[] = [
   rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin, travelPlugin, crimesPlugin,
   mailPlugin, gangsPlugin, inventoryPlugin, combatPlugin, bountiesPlugin, detectivesPlugin, ocPlugin,
+  theftPlugin,
 ];
 
 /**

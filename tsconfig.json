@@ -17,6 +17,7 @@
     { "path": "./packages/plugins/bounties" },
     { "path": "./packages/plugins/oc" },
     { "path": "./packages/plugins/detectives" },
+    { "path": "./packages/plugins/theft" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./apps/migrate" },

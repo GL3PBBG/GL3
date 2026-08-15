@@ -66,6 +66,12 @@ const srcAliases = {
       "@gl3/plugin-detectives": fileURLToPath(
         new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-theft": fileURLToPath(
+        new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-theft/resolve": fileURLToPath(
+        new URL("./packages/plugins/theft/src/resolve.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -181,6 +187,8 @@ export default defineWorkspace([
         "test/plugin-map.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",
+        "test/theft-settings.test.ts",
+        "test/theft-resolve.test.ts",
       ],
     },
     ...srcAliases,
@@ -287,6 +295,7 @@ export default defineWorkspace([
         "test/sentence-sweeper-loop.test.ts",
         "test/shop-concurrency.test.ts",
         "test/shop.test.ts",
+        "test/theft-tiers.test.ts",
         "test/travel-lock-order.test.ts",
         "test/travel.test.ts",
         "test/ws.test.ts",
