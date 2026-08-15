@@ -6,6 +6,7 @@ import { Admin } from "./pages/Admin.js";
 import { Bank } from "./pages/Bank.js";
 import { Bounties } from "./pages/Bounties.js";
 import { Detectives } from "./pages/Detectives.js";
+import { Properties } from "./pages/Properties.js";
 import { Bullets } from "./pages/Bullets.js";
 import { Combat } from "./pages/Combat.js";
 import { Crimes } from "./pages/Crimes.js";
@@ -57,6 +58,7 @@ export function App(): JSX.Element {
           <Route path="combat" element={<Combat />} />
           <Route path="bounties" element={<Bounties />} />
           <Route path="detectives" element={<Detectives />} />
+          <Route path="properties" element={<Properties />} />
           <Route path="oc" element={<OrganizedCrime />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
