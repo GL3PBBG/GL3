@@ -53,8 +53,17 @@ describe("GET /api/players/:playerId/profile", () => {
     // first, with a readable diff, if a column is ever added without
     // updating ProfileDtoSchema to match.
     expect(Object.keys(body).sort()).toEqual(
-      ["playerId", "username", "bio", "avatarUrl", "gangId", "gangName", "exp", "rankName", "createdAt"].sort(),
+      [
+        "playerId", "username", "bio", "avatarUrl", "gangId", "gangName", "exp", "rankName",
+        "moneyRankLabel", "backfire", "createdAt",
+      ].sort(),
     );
+  });
+
+  it("includes the money-rank bracket (null, no ranks seeded) and lifetime backfire count", async () => {
+    const res = await app.inject({ method: "GET", url: `/api/players/${playerId}/profile` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ moneyRankLabel: null, backfire: 0 });
   });
 });
 

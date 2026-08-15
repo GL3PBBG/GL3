@@ -168,3 +168,46 @@ describe("ranks admin", () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe("money ranks admin", () => {
+  it("creates, lists and updates a money rank", async () => {
+    const created = await app.inject({
+      method: "POST", url: "/api/admin/ranks/money", headers: auth(),
+      payload: { label: "Loaded", threshold: "5000" },
+    });
+    expect(created.statusCode).toBe(201);
+    const { id } = created.json() as { id: string };
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/ranks/money/list", headers: auth() });
+    const rows = list.json().rows as { id: string; label: string; threshold: string }[];
+    expect(rows.find((r) => r.id === id)?.threshold).toBe("5000");
+
+    const updated = await app.inject({
+      method: "POST", url: "/api/admin/ranks/money/update", headers: auth(),
+      payload: { id, label: "Very loaded", threshold: "6000" },
+    });
+    expect(updated.statusCode).toBe(204);
+  });
+
+  it("404s on updating a money rank that does not exist", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks/money/update", headers: auth(),
+      payload: { id: uuidv7(), label: "Ghost", threshold: "1" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: "money_rank_not_found" });
+  });
+
+  it("refuses a non-admin", async () => {
+    const p = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "Pleb3", password: "hunter2hunter2" },
+    });
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/ranks/money",
+      headers: { authorization: `Bearer ${p.json().token}` },
+      payload: { label: "X", threshold: "1" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
