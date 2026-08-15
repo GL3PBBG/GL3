@@ -23,3 +23,9 @@ export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   rankId: uuid("rank_id"),
 });
+
+export const moneyRanks = pgTable("money_ranks", {
+  id: uuid("id").primaryKey(),
+  label: text("label").notNull(),
+  threshold: bigint("threshold", { mode: "bigint" }).notNull(),
+});

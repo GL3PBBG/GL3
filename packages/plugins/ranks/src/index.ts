@@ -1,7 +1,7 @@
 import { definePlugin, newId, PluginError, route, type PageSchema } from "@gl3/plugin-sdk";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { playerStats, ranks } from "./schema.js";
+import { moneyRanks, playerStats, ranks } from "./schema.js";
 
 /**
  * `GET /api/ranks` — the rank ladder, with the caller's current rank
@@ -29,6 +29,13 @@ const RankFieldsSchema = z.object({
 });
 const RankUpdateSchema = RankFieldsSchema.extend({ id: z.string().uuid() }).strict();
 const RankCreateSchema = RankFieldsSchema.strict();
+
+const MoneyRankFieldsSchema = z.object({
+  label: z.string().min(1).max(80),
+  threshold: AdminMoney,
+});
+const MoneyRankCreateSchema = MoneyRankFieldsSchema.strict();
+const MoneyRankUpdateSchema = MoneyRankFieldsSchema.extend({ id: z.string().uuid() }).strict();
 
 // --- Admin routes ---
 
@@ -93,6 +100,53 @@ const adminRanksUpdateRoute = route({
   },
 });
 
+const adminMoneyRanksListRoute = route({
+  method: "GET", path: "/api/admin/ranks/money/list", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select().from(moneyRanks).orderBy(asc(moneyRanks.threshold)),
+    );
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((r) => ({
+          id: r.id, label: r.label, threshold: r.threshold.toString(),
+        })),
+      },
+    };
+  },
+});
+
+const adminMoneyRanksCreateRoute = route({
+  method: "POST", path: "/api/admin/ranks/money", auth: "admin",
+  body: MoneyRankCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = newId();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(moneyRanks).values({
+        id, label: body.label, threshold: BigInt(body.threshold),
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminMoneyRanksUpdateRoute = route({
+  method: "POST", path: "/api/admin/ranks/money/update", auth: "admin",
+  body: MoneyRankUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db.update(moneyRanks)
+        .set({ label: body.label, threshold: BigInt(body.threshold) })
+        .where(eq(moneyRanks.id, body.id))
+        .returning({ id: moneyRanks.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("money_rank_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminRanksPage: PageSchema = {
   id: "ranks-admin",
   path: "/admin/ranks",
@@ -121,6 +175,22 @@ const adminRanksPage: PageSchema = {
         { name: "bulletReward", label: "Bullet reward", type: "number" },
         { name: "maxHealth", label: "Max health", type: "number" },
       ] },
+      { kind: "table", source: "GET /api/admin/ranks/money/list", columns: [
+        { key: "label", label: "Money rank" },
+        { key: "threshold", label: "Threshold" },
+      ] },
+      { kind: "form", action: "POST /api/admin/ranks/money", submitLabel: "Add money rank", fields: [
+        { name: "label", label: "Label", type: "text" },
+        { name: "threshold", label: "Threshold", type: "money" },
+      ] },
+      { kind: "form", action: "POST /api/admin/ranks/money/update", submitLabel: "Update money rank", fields: [
+        // `id` travels as the select's valueKey and is never a table column:
+        // no admin table shows a UUID (`test/admin-ids-hidden.test.ts`).
+        { name: "id", label: "Money rank", type: "select",
+          optionsSource: "GET /api/admin/ranks/money/list", valueKey: "id", labelKey: "label" },
+        { name: "label", label: "Label", type: "text" },
+        { name: "threshold", label: "Threshold", type: "money" },
+      ] },
     ],
   },
 };
@@ -143,6 +213,7 @@ export default definePlugin({
             .from(playerStats)
             .where(eq(playerStats.playerId, playerId));
           const rows = await tx.db.select().from(ranks).orderBy(asc(ranks.expRequired));
+          const money = await tx.db.select().from(moneyRanks).orderBy(asc(moneyRanks.threshold));
 
           return {
             status: 200,
@@ -156,6 +227,9 @@ export default definePlugin({
                 maxHealth: r.maxHealth,
                 current: r.id === player?.rankId,
               })),
+              moneyRanks: money.map((m) => ({
+                id: m.id, label: m.label, threshold: m.threshold.toString(),
+              })),
             },
           };
         });
@@ -164,6 +238,9 @@ export default definePlugin({
     adminRanksListRoute,
     adminRanksCreateRoute,
     adminRanksUpdateRoute,
+    adminMoneyRanksListRoute,
+    adminMoneyRanksCreateRoute,
+    adminMoneyRanksUpdateRoute,
   ],
   adminPages: [adminRanksPage],
 });

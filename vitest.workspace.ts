@@ -257,6 +257,7 @@ export default defineWorkspace([
         "test/jail.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
+        "test/money-ranks.test.ts",
         "test/news.test.ts",
         "test/oc-worker.test.ts",
         "test/oc-concurrency.test.ts",
