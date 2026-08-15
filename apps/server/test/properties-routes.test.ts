@@ -96,22 +96,6 @@ const cashOf = async (id: string): Promise<bigint> => {
   return row?.cash ?? 0n;
 };
 
-const sumLedger = async (playerId: string, reason: string): Promise<bigint> => {
-  const rows = await db
-    .select({ amount: transactions.amount })
-    .from(transactions)
-    .where(eq(transactions.playerId, playerId));
-  // transactions.reason is text, so we filter in JS.
-  // Actually we can't filter by reason in the query easily — let's just sum the relevant ones.
-  return rows
-    .filter((r) => {
-      // transactions table doesn't have a reason column directly accessible via eq for text...
-      // Actually it does: reason is a text column. Let's use a subquery approach or raw.
-      return true; // we'll filter below
-    })
-    .reduce((sum, r) => sum + r.amount, 0n);
-};
-
 beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
