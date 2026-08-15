@@ -69,6 +69,9 @@ const srcAliases = {
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-properties": fileURLToPath(
+        new URL("./packages/plugins/properties/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -198,6 +201,7 @@ export default defineWorkspace([
         "test/rng.test.ts",
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
+        "test/properties-settings.test.ts",
       ],
     },
     ...srcAliases,

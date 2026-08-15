@@ -18,6 +18,7 @@
     { "path": "./packages/plugins/oc" },
     { "path": "./packages/plugins/detectives" },
     { "path": "./packages/plugins/theft" },
+    { "path": "./packages/plugins/properties" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./apps/migrate" },
