@@ -9,6 +9,18 @@ export interface CombatSettings {
     damageMax: number;
     bulletsPerShot: number;
   };
+  condition: {
+    wearPerShot: number;
+    decayPeriodSeconds: number;
+    decayPerPeriod: number;
+  };
+  backfire: {
+    baseChance: number;
+    wearFactor: number;
+  };
+  repair: {
+    costPerPoint: bigint;
+  };
 }
 
 /**
@@ -81,6 +93,20 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
       // 500ing every shot in the game.
       damageMax: Math.max(damageMin, num(get, "unarmed.damage_max", 5)),
       bulletsPerShot: Math.max(1, num(get, "unarmed.bullets_per_shot", 1)),
+    },
+    condition: {
+      wearPerShot: num(get, "condition.wear_per_shot", 1),
+      // Floored at 1: `effectiveCondition` divides by this, and a zero would
+      // make every read Infinity periods of decay.
+      decayPeriodSeconds: Math.max(1, num(get, "condition.decay_period_seconds", 86_400)),
+      decayPerPeriod: num(get, "condition.decay_per_period", 1),
+    },
+    backfire: {
+      baseChance: Math.min(100, num(get, "backfire.base_chance", 2)),
+      wearFactor: num(get, "backfire.wear_factor", 3),
+    },
+    repair: {
+      costPerPoint: big(get, "repair.cost_per_point", 1000n),
     },
   };
 }

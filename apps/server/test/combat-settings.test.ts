@@ -26,6 +26,9 @@ describe("readCombatSettings", () => {
       newbieExpThreshold: 100n,
       defaultWeaponAccuracy: 50,
       unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1 },
+      condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
+      backfire: { baseChance: 2, wearFactor: 3 },
+      repair: { costPerPoint: 1000n },
     });
   });
 
@@ -47,6 +50,9 @@ describe("readCombatSettings", () => {
       newbieExpThreshold: 250n,
       defaultWeaponAccuracy: 70,
       unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3 },
+      condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
+      backfire: { baseChance: 2, wearFactor: 3 },
+      repair: { costPerPoint: 1000n },
     });
   });
 
@@ -143,5 +149,39 @@ describe("readCombatSettings", () => {
     const huge = "9007199254740993"; // Number.MAX_SAFE_INTEGER + 2
     expect(readCombatSettings(getter({ "newbie_exp_threshold": huge })).newbieExpThreshold)
       .toBe(9007199254740993n);
+  });
+});
+
+describe("condition, backfire and repair settings", () => {
+  const from = (map: Record<string, string>) =>
+    readCombatSettings((key) => map[key] ?? null);
+
+  it("defaults every new key", () => {
+    const s = from({});
+    expect(s.condition.wearPerShot).toBe(1);
+    expect(s.condition.decayPeriodSeconds).toBe(86_400);
+    expect(s.condition.decayPerPeriod).toBe(1);
+    expect(s.backfire.baseChance).toBe(2);
+    expect(s.backfire.wearFactor).toBe(3);
+    expect(s.repair.costPerPoint).toBe(1000n);
+  });
+
+  it("reads bare keys, not combat-prefixed ones", () => {
+    expect(from({ "backfire.base_chance": "40" }).backfire.baseChance).toBe(40);
+    expect(from({ "combat.backfire.base_chance": "40" }).backfire.baseChance).toBe(2);
+  });
+
+  it("falls back rather than reading a blank value as zero", () => {
+    const s = from({ "backfire.base_chance": "  ", "repair.cost_per_point": "" });
+    expect(s.backfire.baseChance).toBe(2);
+    expect(s.repair.costPerPoint).toBe(1000n);
+  });
+
+  it("floors the decay period at 1 so the division can never be by zero", () => {
+    expect(from({ "condition.decay_period_seconds": "0" }).condition.decayPeriodSeconds).toBe(1);
+  });
+
+  it("caps the base chance at 100", () => {
+    expect(from({ "backfire.base_chance": "500" }).backfire.baseChance).toBe(100);
   });
 });
