@@ -6,7 +6,7 @@ import { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js"
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
-import { combatLog, items, players, playerStats, ranks, weaponCondition } from "./schema.js";
+import { combatLog, items, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -51,6 +51,29 @@ async function settleHospitalIfElapsed(tx: PluginTx, targetId: string): Promise<
     .update(playerStats)
     .set({ hospitalUntil: null, health: row.maxHealth ?? 100 })
     .where(and(eq(playerStats.playerId, targetId), isNotNull(playerStats.hospitalUntil)));
+}
+
+/**
+ * The current, time-aged condition of one weapon, and the row it came from.
+ * A missing row is PRISTINE — every migrated player's weapons start there and
+ * no backfill migration is needed.
+ */
+async function readCondition(
+  tx: PluginTx,
+  playerId: string,
+  itemId: string,
+  config: CombatSettings,
+  now: Date,
+): Promise<number> {
+  const [row] = await tx.db
+    .select()
+    .from(weaponCondition)
+    .where(and(eq(weaponCondition.playerId, playerId), eq(weaponCondition.itemId, itemId)));
+  if (row === undefined) return PRISTINE;
+  return effectiveCondition(
+    row.condition, row.updatedAt, now,
+    config.condition.decayPeriodSeconds, config.condition.decayPerPeriod,
+  );
 }
 
 /**
@@ -202,19 +225,9 @@ const attackRoute = route({
       // is captured once so the decay a shot observes and the decay it writes
       // cannot straddle a period boundary.
       const shotAt = new Date();
-      const [conditionRow] = attacker.weaponItemId === null ? [] : await tx.db
-        .select()
-        .from(weaponCondition)
-        .where(and(
-          eq(weaponCondition.playerId, player.id),
-          eq(weaponCondition.itemId, attacker.weaponItemId),
-        ));
-      const currentCondition = conditionRow === undefined
+      const currentCondition = attacker.weaponItemId === null
         ? PRISTINE
-        : effectiveCondition(
-            conditionRow.condition, conditionRow.updatedAt, shotAt,
-            config.condition.decayPeriodSeconds, config.condition.decayPerPeriod,
-          );
+        : await readCondition(tx, player.id, attacker.weaponItemId, config, shotAt);
 
       const weapon = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
@@ -598,11 +611,141 @@ const targetsRoute = route({
   },
 });
 
+/**
+ * What the combat page shows above the target list. Read-only, so it takes no
+ * lock and opens no write. Fists report pristine, zero chance and zero cost:
+ * there is nothing to wear and nothing to repair.
+ */
+const weaponRoute = route({
+  method: "GET",
+  path: "/api/combat/weapon",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readCombatSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      const [stats] = await tx.db
+        .select({ weaponItemId: playerStats.weaponItemId })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      const itemId = stats?.weaponItemId ?? null;
+      if (itemId === null) {
+        return {
+          status: 200,
+          body: {
+            itemId: null, name: null, condition: PRISTINE,
+            backfireChance: 0, repairCost: "0",
+          },
+        };
+      }
+
+      const [item] = await tx.db
+        .select({ name: items.name, itemType: items.itemType, effects: items.effects })
+        .from(items)
+        .where(eq(items.id, itemId));
+      const condition = await readCondition(tx, player.id, itemId, config, new Date());
+      const parsed = item === undefined || item.itemType !== ITEM_TYPE_WEAPON
+        ? undefined
+        : WeaponEffectsSchema.safeParse(item.effects);
+      const base = parsed?.success === true
+        ? parsed.data.backfireChance ?? config.backfire.baseChance
+        : 0;
+
+      return {
+        status: 200,
+        body: {
+          itemId,
+          name: item?.name ?? null,
+          condition,
+          backfireChance: backfireChanceFor(base, condition, config.backfire.wearFactor),
+          repairCost: (config.repair.costPerPoint * BigInt(PRISTINE - condition)).toString(),
+        },
+      };
+    });
+  },
+});
+
+/**
+ * The gunsmith. Cost is `repair.cost_per_point` x points restored — a flat
+ * rate rather than a fraction of item value, because `items` HAS no value
+ * column: price lives in `p_inventory_shop_stock`, and reading it here would
+ * be the first cross-plugin table read in the repo.
+ *
+ * No cooldown: cost is the limiter, and a cooldown would mean a Redis key,
+ * which would mean rule 2's SET NX EX discipline for no gameplay gain.
+ *
+ * Reachable in hospital. You are not shooting anyone; you are fixing a gun.
+ */
+const repairRoute = route({
+  method: "POST",
+  path: "/api/combat/repair",
+  accessInJail: false,
+  accessInHospital: true,
+  body: z.object({ itemId: z.string().uuid() }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readCombatSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      // Player-only lock. Nothing here touches a gang, a location or a second
+      // player, so this adds no edge to rule 6's graph.
+      await tx.locks.player([player.id]);
+
+      // Ownership, not equipment: a weapon in the bag can be repaired.
+      const [owned] = await tx.db
+        .select({ qty: playerItems.qty, itemType: items.itemType })
+        .from(playerItems)
+        .innerJoin(items, eq(items.id, playerItems.itemId))
+        .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, body.itemId)));
+      if (owned === undefined || owned.qty <= 0 || owned.itemType !== ITEM_TYPE_WEAPON) {
+        throw new PluginError("weapon_not_found", 404);
+      }
+
+      const now = new Date();
+      const current = await readCondition(tx, player.id, body.itemId, config, now);
+      const restored = PRISTINE - current;
+      // Not an error: repairing a pristine weapon is a no-op, and charging
+      // zero would still write a ledger row.
+      if (restored === 0) return { status: 204 };
+
+      const cost = config.repair.costPerPoint * BigInt(restored);
+      const [stats] = await tx.db
+        .select({ cash: playerStats.cash })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      // Checked under the lock taken as this transaction's first statement,
+      // so the balance cannot move between the check and the debit.
+      if (stats === undefined || stats.cash < cost) {
+        throw new PluginError("insufficient_funds", 409);
+      }
+
+      await tx.economy.applyBalanceChange({
+        playerId: player.id,
+        amount: -cost,
+        kind: "cash",
+        reason: "combat.repair",
+      });
+
+      await tx.db
+        .insert(weaponCondition)
+        .values({ playerId: player.id, itemId: body.itemId, condition: PRISTINE, updatedAt: now })
+        .onConflictDoUpdate({
+          target: [weaponCondition.playerId, weaponCondition.itemId],
+          set: { condition: PRISTINE, updatedAt: now },
+        });
+
+      return { status: 200, body: { condition: PRISTINE, cost: cost.toString() } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "combat",
   version: "1.0.0",
   basePaths: ["/api/combat"],
   migrations: COMBAT_MIGRATIONS,
-  routes: [attackRoute, logRoute, targetsRoute],
+  routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute],
   provides: [killResolved],
 });
