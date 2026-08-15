@@ -42,6 +42,17 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("player.attacked"), targetId: IdSchema, targetName: z.string(), damage: z.number().int().nonnegative() }),
   // actor = the killer, or the victim when the kill has no human killer.
   z.object({ ...base, type: z.literal("player.killed"), victimId: IdSchema, victimName: z.string() }),
+  /**
+   * Published to the ATTACKER only. The target has no way of knowing your gun
+   * jammed, and telling them is information the attacker did not choose to
+   * give. `hospitalised` is true when the self-damage put the attacker at 0.
+   */
+  z.object({
+    ...base,
+    type: z.literal("player.backfired"),
+    selfDamage: z.number().int().nonnegative(),
+    hospitalised: z.boolean(),
+  }),
   // actor = the player who placed the bounty.
   z.object({ ...base, type: z.literal("bounty.placed"), bountyId: IdSchema, targetId: IdSchema, targetName: z.string(), amount: MoneySchema }),
   // actor = the player who claimed it.
