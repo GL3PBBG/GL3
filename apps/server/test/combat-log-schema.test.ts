@@ -142,7 +142,35 @@ describe("p_combat_log schema", () => {
   });
 });
 
+/**
+ * Same beforeAll as the block above, and for the same reason. It is not
+ * redundant: `beforeAll` is describe-scoped, so this block would otherwise
+ * depend on the previous describe having run first — true today, and true
+ * only by file order. `runPluginMigrations` tracks applied migrations in
+ * `plugin_migrations`, so the second call is a no-op rather than a re-run.
+ */
 describe("p_combat_weapon_condition", () => {
+  beforeAll(async () => {
+    await runPluginMigrations(db, [combatPlugin]);
+  });
+
+  /**
+   * Guards the FK assertion below, which is the vacuous-pass shape:
+   * `information_schema` returns zero rows for a table that does not exist,
+   * so `expect(fks).toEqual([])` passes just as happily against an absent
+   * table as against one that deliberately declares no foreign keys.
+   * The two assertions between here and there would fail on an absent table
+   * (`[]` matches neither `arrayContaining` nor the expected PK), but that is
+   * incidental — this test is what makes the guarantee explicit.
+   */
+  it("creates the table at all (guards the vacuous-pass FK check below)", async () => {
+    const rows = await db.execute(sql`
+      SELECT 1 FROM pg_tables
+      WHERE schemaname = 'public' AND tablename = 'p_combat_weapon_condition'
+    `);
+    expect(rows).toHaveLength(1);
+  });
+
   it("has the expected columns", async () => {
     const cols = await columnsOf("p_combat_weapon_condition");
     expect(cols).toEqual(
