@@ -79,6 +79,9 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "player.travelled", audience: { kind: "global" }, fromLocationId: null, toLocationId: UUID_A, cost: "100" },
   { type: "player.attacked", audience: { kind: "global" }, targetId: UUID_A, targetName: "Sollozzo", damage: 12 },
   { type: "player.killed", audience: { kind: "global" }, victimId: UUID_A, victimName: "Sollozzo" },
+  // Attacker-only in combat, and the corpus keeps that audience: a global
+  // backfire would tell the target the shot never left the barrel.
+  { type: "player.backfired", audience: { kind: "player", playerId: UUID_A }, selfDamage: 12, hospitalised: false },
   { type: "bounty.placed", audience: { kind: "global" }, bountyId: UUID_A, targetId: UUID_B, targetName: "Sollozzo", amount: "1000" },
   { type: "bounty.claimed", audience: { kind: "global" }, bountyId: UUID_A, targetId: UUID_B, targetName: "Sollozzo", amount: "1000" },
   { type: "gang.created", audience: { kind: "global" }, gangId: UUID_A, gangName: "Corleone" },
