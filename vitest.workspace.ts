@@ -292,6 +292,7 @@ export default defineWorkspace([
         "test/sentence-sweeper-loop.test.ts",
         "test/shop-concurrency.test.ts",
         "test/shop.test.ts",
+        "test/garage.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-routes.test.ts",
         "test/theft-tiers.test.ts",

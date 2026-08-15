@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
 import { bracketWeight, resolveTheft, type CatalogueCar, type TheftTier } from "./resolve.js";
-import { cars, garage, playerStats, theftTiers } from "./schema.js";
+import { cars, garage, locations, playerStats, theftTiers } from "./schema.js";
 import { THEFT_MIGRATIONS } from "./migrations.js";
 import { readTheftSettings } from "./settings.js";
 
@@ -238,6 +238,207 @@ const stealRoute = route({
 });
 
 /**
+ * bigint division truncates, which is the correct direction: the house keeps
+ * the fraction. Shared by the list route and the sell route so the number a
+ * player is shown is the number they are paid, by construction.
+ */
+function saleValueOf(value: bigint, damage: number): bigint {
+  const intact = BigInt(Math.min(100, Math.max(0, damage)));
+  return (value * (100n - intact)) / 100n;
+}
+
+/**
+ * The caller's cars as a TableRowsResponse: car name, damage, the location's
+ * name, the sale value, the repair cost, and whether the caller is standing
+ * in that city. No locks, no cooldown — read-only.
+ */
+const listGarageRoute = route({
+  method: "GET",
+  path: "/api/garage",
+  accessInJail: true,
+  accessInHospital: true,
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readTheftSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      const [me] = await tx.db
+        .select({ locationId: playerStats.locationId })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+
+      const owned = await tx.db
+        .select({
+          id: garage.id,
+          damage: garage.damage,
+          locationId: garage.locationId,
+          carName: cars.name,
+          carValue: cars.value,
+          locationName: locations.name,
+        })
+        .from(garage)
+        .innerJoin(cars, eq(cars.id, garage.carId))
+        .leftJoin(locations, eq(locations.id, garage.locationId))
+        .where(eq(garage.playerId, player.id));
+
+      return {
+        status: 200,
+        body: {
+          rows: owned.map((row) => ({
+            // `id` is the select's valueKey and is never rendered as a
+            // column — the rule test/admin-ids-hidden.test.ts enforces on the
+            // admin side, kept here for the same reason.
+            id: row.id,
+            carName: row.carName,
+            damage: String(row.damage),
+            locationName: row.locationName ?? "Unknown",
+            saleValue: saleValueOf(row.carValue, row.damage).toString(),
+            repairCost: (config.repair.costPerPoint * BigInt(row.damage)).toString(),
+            here: row.locationId === me?.locationId ? "yes" : "no",
+          })),
+        },
+      };
+    });
+  },
+});
+
+/**
+ * Sell a car for its value scaled by damage. Requires standing in the car's
+ * own location — `garage.location_id` is where the car sits and stays.
+ */
+const sellRoute = route({
+  method: "POST",
+  path: "/api/garage/sell",
+  accessInJail: false,
+  accessInHospital: true,
+  body: z.object({ garageId: z.string().uuid() }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      // Unlocked read, only to learn WHICH location to lock.
+      const [before] = await tx.db
+        .select({ locationId: garage.locationId })
+        .from(garage)
+        .where(and(eq(garage.id, body.garageId), eq(garage.playerId, player.id)));
+      if (before?.locationId == null) throw new PluginError("car_not_found", 404);
+
+      // Rule 6: the location first, then the player. Deleting the garage row
+      // still touches locations through the FK.
+      await tx.locks.location(before.locationId);
+      await tx.locks.player([player.id]);
+
+      // Lock-then-recheck.
+      const [row] = await tx.db
+        .select({
+          id: garage.id,
+          damage: garage.damage,
+          locationId: garage.locationId,
+          carName: cars.name,
+          carValue: cars.value,
+        })
+        .from(garage)
+        .innerJoin(cars, eq(cars.id, garage.carId))
+        .where(and(eq(garage.id, body.garageId), eq(garage.playerId, player.id)));
+      if (row === undefined) throw new PluginError("car_not_found", 404);
+
+      const [me] = await tx.db
+        .select({ locationId: playerStats.locationId })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (me?.locationId !== row.locationId) throw new PluginError("wrong_location", 409);
+
+      const payout = saleValueOf(row.carValue, row.damage);
+      await tx.db.delete(garage).where(eq(garage.id, row.id));
+      await tx.economy.applyBalanceChange({
+        playerId: player.id,
+        amount: payout,
+        kind: "cash",
+        reason: "theft.sell",
+      });
+      await tx.events.publish({
+        name: "sold",
+        actorId: player.id,
+        actorName: player.username,
+        audience: { kind: "player", playerId: player.id },
+        payload: { carName: row.carName, payout: payout.toString() },
+      });
+
+      return { status: 200, body: { payout: payout.toString() } };
+    });
+  },
+});
+
+/**
+ * Restore damage to 0. A pristine car is a 204 no-op, not an error — the
+ * spec-1 gunsmith ruling, kept for the same reason: a no-op is not a
+ * mistake, and charging for it or 4xx-ing it both punish a double click.
+ * The 204 check runs AFTER the wrong-location check: a pristine car in
+ * another city is still the wrong city.
+ */
+const repairRoute = route({
+  method: "POST",
+  path: "/api/garage/repair",
+  accessInJail: false,
+  accessInHospital: true,
+  body: z.object({ garageId: z.string().uuid() }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readTheftSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      // Unlocked read, only to learn WHICH location to lock.
+      const [before] = await tx.db
+        .select({ locationId: garage.locationId })
+        .from(garage)
+        .where(and(eq(garage.id, body.garageId), eq(garage.playerId, player.id)));
+      if (before?.locationId == null) throw new PluginError("car_not_found", 404);
+
+      // Rule 6: the location first, then the player.
+      await tx.locks.location(before.locationId);
+      await tx.locks.player([player.id]);
+
+      // Lock-then-recheck.
+      const [row] = await tx.db
+        .select({ id: garage.id, damage: garage.damage, locationId: garage.locationId })
+        .from(garage)
+        .where(and(eq(garage.id, body.garageId), eq(garage.playerId, player.id)));
+      if (row === undefined) throw new PluginError("car_not_found", 404);
+
+      const [me] = await tx.db
+        .select({ locationId: playerStats.locationId })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (me?.locationId !== row.locationId) throw new PluginError("wrong_location", 409);
+
+      if (row.damage === 0) return { status: 204 };
+
+      const cost = config.repair.costPerPoint * BigInt(row.damage);
+      const [stats] = await tx.db
+        .select({ cash: playerStats.cash })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      // Checked under the lock, so the balance cannot move between the check
+      // and the debit.
+      if (stats === undefined || stats.cash < cost) {
+        throw new PluginError("insufficient_funds", 409);
+      }
+      await tx.economy.applyBalanceChange({
+        playerId: player.id,
+        amount: -cost,
+        kind: "cash",
+        reason: "theft.repair",
+      });
+      await tx.db.update(garage).set({ damage: 0 }).where(eq(garage.id, row.id));
+      return { status: 200, body: { cost: cost.toString() } };
+    });
+  },
+});
+
+/**
  * One `describe` template, not the design doc's two: a manifest event declares
  * a single template, so the phrasing lives in the payload and the template
  * only positions it.
@@ -267,6 +468,6 @@ export default definePlugin({
     garage: "p_theft_garage",
   },
   migrations: THEFT_MIGRATIONS,
-  routes: [tiersRoute, stealRoute],
+  routes: [tiersRoute, stealRoute, listGarageRoute, sellRoute, repairRoute],
   events: [resolvedEvent, soldEvent],
 });
