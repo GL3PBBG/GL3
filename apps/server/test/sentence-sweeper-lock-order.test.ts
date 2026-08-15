@@ -76,7 +76,10 @@ async function equipPeashooter(playerId: string): Promise<void> {
     id,
     name: `w-${id.slice(-8)}`,
     itemType: "weapon",
-    effects: { accuracy: 100, damageMin: 1, damageMax: 1 },
+    // `backfireChance: 0` for the same reason as `accuracy: 100` — a backfire
+    // returns before the target is touched, so the shot would not take the
+    // locks whose order this test exists to pin.
+    effects: { accuracy: 100, damageMin: 1, damageMax: 1, backfireChance: 0 },
   });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));

@@ -84,7 +84,10 @@ async function equipExecutioner(playerId: string): Promise<void> {
     id,
     name: `w-${id.slice(-8)}`,
     itemType: "weapon",
-    effects: { accuracy: 100, damageMin: 50, damageMax: 50 },
+    // `backfireChance: 0` for the same reason as `accuracy: 100` — the
+    // default `combat.backfire.base_chance` of 2 would otherwise let one shot
+    // in fifty return early, which under concurrency reads as a lost race.
+    effects: { accuracy: 100, damageMin: 50, damageMax: 50, backfireChance: 0 },
   });
   await db.insert(playerItems).values({ playerId, itemId: id, qty: 1 });
   await db.update(playerStats).set({ weaponItemId: id }).where(eq(playerStats.playerId, playerId));

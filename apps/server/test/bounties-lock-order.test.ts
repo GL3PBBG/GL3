@@ -104,11 +104,14 @@ async function equipWeapon(
   effects: Record<string, unknown>,
 ): Promise<string> {
   const id = uuidv7();
+  // Spread first so a caller can override. See combat.test.ts's equipWeapon
+  // for why: the default `combat.backfire.base_chance` of 2 otherwise gives
+  // every shot a 2% chance of returning early with no kill and no filter run.
   await db.insert(items).values({
     id,
     name: `w-${id.slice(-8)}`,
     itemType: "weapon",
-    effects,
+    effects: { backfireChance: 0, ...effects },
   });
   await db
     .insert(playerItems)
