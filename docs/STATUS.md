@@ -1227,7 +1227,8 @@ behaviour**.
 - **Two declarative pages** — `/theft` (tier table + one-select steal form)
   and `/garage` (car table + sell and repair forms) via the manifest `pages`
   field and `PageSchema`, rendered by the loader's page renderer rather than
-  hand-written React in `apps/web`. A view is static, so all data arrives
+  hand-written React in `apps/web`. Theft is the **first core plugin to
+  declare `pages`** — every earlier plugin ships `adminPages` only. A view is static, so all data arrives
   through `table.source`/`optionsSource` GET routes; per-row buttons are not
   expressible in the ten-kind vocabulary, hence the select-then-submit shape
   the admin pages already use.
