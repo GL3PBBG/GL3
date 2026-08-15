@@ -36,6 +36,12 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
       return `Travelled (${formatMoney(event.cost)})`;
     case "player.attacked":
       return `Attacked ${event.targetName} for ${event.damage}`;
+    case "player.backfired":
+      // Attacker-only event, so the copy is second person. The target is
+      // never named: the shot never reached them.
+      return event.hospitalised
+        ? `Your weapon backfired for ${event.selfDamage} — hospitalised`
+        : `Your weapon backfired for ${event.selfDamage}`;
     case "player.killed":
       return `${event.victimName} was killed`;
     case "bounty.placed":

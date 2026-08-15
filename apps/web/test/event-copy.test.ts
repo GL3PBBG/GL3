@@ -86,4 +86,18 @@ describe("describeEvent", () => {
     })))
       .toBe("Discharged from hospital");
   });
+
+  // Second person, and the target is never named: the event reaches the
+  // attacker alone, and the shot never reached anyone else.
+  it("describes a backfire in the second person", () => {
+    expect(describeEvent(event({
+      type: "player.backfired", selfDamage: 12, hospitalised: false,
+    }))).toBe("Your weapon backfired for 12");
+  });
+
+  it("says so when the backfire hospitalised the shooter", () => {
+    expect(describeEvent(event({
+      type: "player.backfired", selfDamage: 40, hospitalised: true,
+    }))).toBe("Your weapon backfired for 40 — hospitalised");
+  });
 });
