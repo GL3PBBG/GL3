@@ -1,8 +1,9 @@
 # GL3 project status
 
-Last updated: 2026-08-16, **properties complete**
-(third of four clusters activating migrated-but-unread V2 tables).
-Branch: `feat/properties`.
+Last updated: 2026-08-16, **rounds complete** — a seasonal scoring window,
+core rather than a plugin, shipped after the four migrated-but-unread-table
+clusters (properties was the last of those).
+Branch: `feat/rounds`.
 
 ---
 
@@ -15,17 +16,19 @@ Branch: `feat/properties`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped. **Rounds** (seasonal scoring window, lazy rollover under an advisory lock, points payout, core rather than a plugin) has since shipped on top of that — see the section below |
 
-**Suite: 167 files / 1272 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 177 files / 1370 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
 ranks, backfire and weapon condition added 5 files / 70 tests; car theft added
 8 files / 60 tests; properties added 7 files / 55 tests (52 at first ship,
 plus 3 from the final-review fix pass: N1's admin-create-default-rate test
-and N13's two income-cap tests) — see the sections below. 1216 + 55 = 1271,
-but the run measures 1272 — the same recorded-vs-measured drift this file
-has corrected before; 1272 is the measured figure, the run's own per-file
-sum.)
+and N13's two income-cap tests); rounds added 10 files / 92 tests plus 9 more
+inside existing files — see the sections below. This file has recorded a
+measured-vs-summed drift before (1272 vs. a 1271 sum at the properties
+milestone); 177/1370 here is the number `npm run verify`'s own summary line
+reported on a clean run at commit `9b47d61`, not a sum reconstructed from
+per-cluster deltas.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -1380,6 +1383,105 @@ Seven new test files / 55 tests: `properties-settings` (7),
 income-cap tests), `properties-events` (4), `properties-lock-order` (3),
 `admin-properties` (9, including N1's admin-create-default-rate test), and
 the web `properties-page` (4, pure `rowAction`).
+
+### Rounds — seasonal scoring window
+
+Spec: `docs/superpowers/specs/2026-08-16-rounds-seasonal-design.md`. Branch
+`feat/rounds`. Not a port and not one of the four migrated-but-unread-table
+clusters: rounds is **core**, not a plugin — there is no relinquish
+migration, and the plugin migration count stays **seven of sixteen**.
+
+**What shipped:**
+
+- **Lazy rollover under an advisory lock, no cron.** There is no job and no
+  scheduler; `ensureCurrentRound(db, redis, settings)` runs at the top of
+  every rounds-touching request (`GET /api/rounds`, the leaderboard routes,
+  the admin section) and does nothing on the common path — a live,
+  already-snapshotted round returns immediately with no transaction and no
+  lock wait (proven by a foreign-session-holds-the-lock probe with a hard
+  timeout). When the current round has ended, it opens a transaction, takes
+  `pg_advisory_xact_lock(7461002)` first, freezes the round's final
+  standings into `round_entries`, pays out, publishes, and activates (or
+  opens) the successor — all under the one lock, so N concurrent callers
+  produce one settle and N−1 no-ops rather than N racing finalizes. A
+  migrated V2 install's entire round history is settled in place by
+  migration `0011`'s own `UPDATE`, not cascade-finalized on first boot.
+- **Points, not cash.** The payout (`payoutPoints`, a settings-driven award
+  table keyed by final placing, default `[1000n, 500n, 250n]`) pays into the
+  `points` balance through `applyBalanceChange` — the one balance kind with
+  no leaderboard ZSET and no existing faucet, so a round's prize cannot move
+  any board the *next* round measures (paying cash or bank would inject a
+  head start into the exact economy about to be re-scored; `exp` is not
+  payable at all without corrupting the pure-activity board). Every payout
+  row carries `balance_kind = 'points'`, `ref_id = <round id>`, and a null
+  `job_id` — there is no BullMQ job here, so no `job.id` idempotency key
+  applies; the advisory lock is what makes settle-exactly-once.
+- **`round_entries` is the hall of fame — there is no separate winners
+  table.** One row per player per round: `exp_at_start` / `cash_at_start` /
+  `bank_at_start` snapshot the player's totals at registration (mid-round
+  joiners start at their own values, not the round's, so standing reads 0
+  immediately on join), and `final_exp` / `final_cash` / `final_bank` freeze
+  at settle. A player who never made a request in the round still gets an
+  entry (the whole-population snapshot on activation), and with zero
+  `rounds` rows registration writes nothing and leaves `players.round_id`
+  null.
+- **Four new core files** under `apps/server/src/game/rounds/`:
+  `service.ts` (`ensureCurrentRound`, the lock/freeze/pay/publish/activate
+  sequence), `settings.ts` (`payoutPoints`, the award-table parser with a
+  hardcoded fallback on an unparseable setting), `standings.ts`
+  (`roundStandings(exec, roundId, kind, n, finalized, minDelta?)`, the
+  live-vs-frozen board query), and `routes.ts` (player-facing `GET
+  /api/rounds`). All-time leaderboards are unmodified: `keys.leaderboard`,
+  `recordScore`, `rebuildLeaderboards` and `topN` stay exactly as they were,
+  pinned by an edit to `leaderboard.test.ts` rather than to the ZSET code.
+- **Two new `GameEvent` variants** — `round.started` and `round.finished`
+  (with a `winners[]` array of `{ playerId, username, placing, points }`) —
+  travel as core events, not `plugin.event`, matching rounds' core status.
+  This is the fourth place a new variant must reach, alongside
+  `eventCopy.ts`, `invalidation.ts` and the `CORPUS` drift guard in
+  `plugin-ctx-core-events.test.ts`: `packages/shared/test/events.test.ts`
+  carries its own hardcoded census of every core name, missed by this plan
+  and caught only when the whole-tree `npm run verify` ran (see CLAUDE.md).
+  `@gl3/shared` picked up an additive patch bump, `0.1.3` → `0.1.4`, for
+  these two variants plus the new `dto/rounds.ts` exports;
+  `@gl3/plugin-sdk` needed no bump, since its `CoreEventInput` derives from
+  `GameEvent` rather than restating it.
+- **Admin section** — `/api/admin/rounds` (list/create/update, table +
+  forms, no id column: the edit form's select `valueKey` carries the round
+  id, the row shows its name) with write-time overlap rejection
+  (`400 round_overlap`) guarded by the same advisory lock family the
+  rollover itself uses, so two concurrent creates of the same window leave
+  exactly one row. `GET /api/admin/rounds/table` is the pre-stringified
+  twin `PageRenderer`'s `table` view consumes.
+- **Player page** — `apps/web/src/pages/Rounds.tsx`, plus a scope toggle
+  (`?scope=all` vs the round-local default) added to the existing
+  Leaderboards page so a round-scoped board and the all-time ZSET board
+  share one view.
+- **Core migration `0011_round_entries`** — the eight statements of spec
+  §1.5.3: two `ALTER TABLE rounds ADD COLUMN` (`finalized_at`,
+  `snapshotted_at`), the `round_entries` table with its composite
+  `(round_id, player_id)` primary key, two cascade FKs (`round_id ->
+  rounds.id`, `player_id -> players.id`), two indexes
+  (`round_entries_player_idx`, and the partial `rounds_open_idx` on
+  `rounds(starts_at) WHERE finalized_at IS NULL`), and the settle-the-past
+  `UPDATE` — deliberate DML, not a stray backfill, and the one thing that
+  stops a V2-migrated install cascade-finalizing its whole round history on
+  first boot. `apps/server/test/schema.test.ts`'s FK/index drift guards
+  moved with it: total FKs 34→36, `ON DELETE CASCADE` 21→23 (`SET NULL`
+  unchanged at 13), non-PK index count 27→29.
+
+Ten new test files / 92 tests: `rounds-settings` (10), `rounds-standings`
+(12), `rounds-finalize` (10), `rounds-snapshot` (6), `rounds-ledger` (1, a
+whole-file reconciliation across a rollover), `rounds-rollover` (1, the
+8-concurrent-callers exactly-once proof), `rounds-lock-order` (2, the
+rounds↔player pair — the fourth lock pair in the codebase after
+gang↔player, location↔player and player↔player — proven against real bank
+and combat routes behind a `pg_stat_activity` barrier, not a same-helper
+race), `rounds-routes` (13), `admin-rounds` (28, including the
+two-concurrent-creates overlap proof), and the web `rounds-page` (9). Net
+tree total: **177 files / 1370 tests**, up from 167/1269 — the other nine
+tests are edits inside existing files (`leaderboard`, `event-copy`,
+`invalidation`, `admin-ids-hidden`'s floor raised to 10 sections).
 
 ### Installing a plugin without forking core
 

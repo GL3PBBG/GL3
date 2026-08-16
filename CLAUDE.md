@@ -97,12 +97,30 @@ hand-written in `apps/web` (spec-mandated) while its admin section is a
 manifest-declared `adminPages` table + forms; three events (`bought`,
 `sold`, `income`) publish to the acting player with
 `invalidates: ["properties", "me"]`.
+**Rounds** has since shipped on `feat/rounds`, a seasonal scoring window and,
+unlike the four preceding clusters, **core rather than a plugin** — there is
+no relinquish migration and the plugin migration count stays seven of
+sixteen. `ensureCurrentRound` settles lazily at read time under
+`pg_advisory_xact_lock(7461002)`, no cron: a live already-snapshotted round
+returns immediately with no transaction, and an ended round is frozen into
+`round_entries` (the hall of fame — there is no separate winners table),
+paid out in `points` (the one balance with no leaderboard ZSET and no
+faucet, so a round's prize cannot move any board the next round measures),
+published, and rolled to its successor, all under the one lock so N
+concurrent settlers produce one settle and N−1 no-ops. Two new core
+`GameEvent` variants, `round.started` and `round.finished`, ship in core
+migration `0011_round_entries` alongside `round_entries` and its two
+cascade FKs — the fourth place a new variant must reach turned out to be
+`packages/shared/test/events.test.ts`'s own hardcoded census, missed by the
+plan and caught only under the whole-tree suite (see the four-places note
+below). `@gl3/shared` took an additive patch bump to `0.1.4` for the new
+events plus `dto/rounds.ts`; `@gl3/plugin-sdk` needed none.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **167 files / 1269 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **177 files / 1370 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -319,7 +337,14 @@ unavailable here.
   cluster widened the surface additively (`PropertyRowSchema`,
   `PropertyListResponseSchema` for the hand-written web page), again a patch.
   The registry now serves `@gl3/shared` `0.1.1`, `0.1.2` and `0.1.3`, and
-  `@gl3/plugin-sdk@0.1.0`.
+  `@gl3/plugin-sdk@0.1.0`. **`packages/shared/package.json` is bumped to
+  `0.1.4`** for the rounds cluster's two `GameEvent` variants and
+  `dto/rounds.ts`, but — unlike the three patches above — it has **not**
+  been published: publishing is an outward-facing, hard-to-reverse action
+  reserved for a human decision, so `npm.gl3.dev` still serves `0.1.3` as
+  the newest `@gl3/shared` until that publish happens. An out-of-repo plugin
+  cannot call `publishCore` with `round.started` or `round.finished` until
+  it does.
 - **Adding a variant to `GameEvent` breaks four places, and none of the last
   two is a type error.** The two obvious ones are the exhaustive switches in
   `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
