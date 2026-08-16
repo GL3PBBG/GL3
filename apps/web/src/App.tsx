@@ -27,6 +27,7 @@ import { OrganizedCrime } from "./pages/OrganizedCrime.js";
 import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
+import { Rounds } from "./pages/Rounds.js";
 import { Travel } from "./pages/Travel.js";
 import { PluginPage } from "./plugins/PluginPage.js";
 import { useGameEvents } from "./ws/useGameEvents.js";
@@ -62,6 +63,7 @@ export function App(): JSX.Element {
           <Route path="oc" element={<OrganizedCrime />} />
           <Route path="ranks" element={<Ranks />} />
           <Route path="leaderboards" element={<Leaderboards />} />
+          <Route path="rounds" element={<Rounds />} />
           <Route path="gang" element={<Gang />} />
           <Route path="mail" element={<Mail />} />
           <Route path="mail/:threadId" element={<MailThread />} />

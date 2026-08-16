@@ -55,7 +55,16 @@ function watchOwnEvents(actorId: string, expected: number): { seen: GameEvent[];
     if (seen.length >= expected) resolveDone();
   };
   subscriber.on("message", onMessage);
-  const settled = Promise.race([done, new Promise<void>((r) => setTimeout(r, 1500))])
+  // 5000ms, matching `awaitOwnEvent`'s own default (test/helpers/events.ts) —
+  // NOT a delivery budget. This timer starts here, before the
+  // `ctx.transaction(...)` below whose post-commit flush is what actually
+  // produces the events, so it races the work it is waiting on rather than
+  // just the pub/sub hop. A shorter number (1500ms, the prior value) could
+  // fire before the transaction even committed under load, detach the
+  // listener, and leave `seen` at `[]` — an all-or-nothing false failure
+  // indistinguishable from a real regression. It must exceed the slowest the
+  // transaction can plausibly take, not just the wire.
+  const settled = Promise.race([done, new Promise<void>((r) => setTimeout(r, 5000))])
     .then(() => { subscriber.off("message", onMessage); });
   return { seen, settled };
 }
@@ -97,6 +106,8 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "bullets.purchased", audience: { kind: "player", playerId: UUID_A }, locationId: UUID_A, quantity: 5, cost: "500", cash: "500", bullets: "5" },
   { type: "oc.updated", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, status: "open" },
   { type: "oc.resolved", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, success: true, share: "2500", jailSeconds: 0 },
+  { type: "round.started", audience: { kind: "global" }, roundId: UUID_A, roundName: "Season 1", endsAt: "2026-09-01T00:00:00.000Z" },
+  { type: "round.finished", audience: { kind: "global" }, roundId: UUID_A, roundName: "Season 1", winners: [{ playerId: UUID_B, username: "alice", placing: 1, points: "1000" }] },
 ];
 
 describe("tx.events.publishCore", () => {
@@ -162,6 +173,11 @@ describe("tx.events.publishCore", () => {
     expect(watch.seen.map((e) => e.type)).toEqual(["news.posted", "plugin.event", "chat.message"]);
   });
 
+  // The absence of an event is only provable by waiting out watchOwnEvents'
+  // full timeout — nothing ever arrives to resolve `done` early — so raising
+  // that timeout from 1500ms to 5000ms makes this one test ~3.5s slower.
+  // Accepted: a fast wrong answer (an event that legitimately took >1500ms
+  // reported as dropped) is worse than a slow right one.
   it("drops a buffered core event when the transaction rolls back", async () => {
     const player = await createPlayer();
     const ctx = createPluginCtx(deps(), opts);

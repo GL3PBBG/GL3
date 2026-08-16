@@ -13,7 +13,12 @@ export const keys = {
   crimes: () => ["crimes"] as const,
   locations: () => ["locations"] as const,
   ranks: () => ["ranks"] as const,
-  leaderboard: (kind: LeaderboardKind) => ["leaderboard", kind] as const,
+  leaderboard: (kind: LeaderboardKind, scope: "round" | "all") => ["leaderboard", kind, scope] as const,
+  rounds: () => ["rounds"] as const,
+  roundStandings: (roundId: string, kind: LeaderboardKind) =>
+    ["rounds", roundId, "standings", kind] as const,
+  /** The prefix over every kind and scope — for invalidation, not for a query. */
+  leaderboards: () => ["leaderboard"] as const,
 
   // Pass 2 (social). `profile` is keyed by player id because the same query
   // serves both /profile and /players/:playerId — the Gang page also reads

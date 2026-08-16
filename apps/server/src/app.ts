@@ -9,6 +9,7 @@ import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
+import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
@@ -60,8 +61,9 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   registerJailRoutes(app, deps.db, deps.redis, requireAuth);
   registerHospitalRoutes(app, deps.db, loadedSettings, requireAuth);
-  registerLeaderboardRoutes(app, deps.db, deps.redis, requireAuth, leaderboardPrefix);
+  registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerProfileRoutes(app, deps.db, requireAuth);
+  registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while
