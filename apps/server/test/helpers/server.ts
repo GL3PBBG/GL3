@@ -6,14 +6,14 @@ import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
 import { withCorePlugins } from "../../src/plugins/core-plugins.js";
-import { loadPlugins } from "../../src/plugins/loader.js";
+import { loadPlugins, type LoadedPlugins } from "../../src/plugins/loader.js";
 import { loadSettings } from "../../src/settings/load.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
 
 export async function bootTestServer(
   options?: { plugins?: readonly PluginManifest[] },
-): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
+): Promise<{ app: FastifyInstance; close: () => Promise<void>; plugins: LoadedPlugins }> {
   const config = loadConfig({ ...process.env, NODE_ENV: "test" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
@@ -75,6 +75,11 @@ export async function bootTestServer(
 
   return {
     app,
+    // Exposed so a file that ALSO drives a plugin job manually (runPluginJob,
+    // for a pinned seed or pinned settings) can pause the matching queue and
+    // stop the live worker started above from racing it. Purely additive —
+    // every other caller destructures `{ app, close }` and is unaffected.
+    plugins: loadedPlugins,
     close: async () => {
       for (const w of loadedPlugins.workers) await w.close();
       for (const q of loadedPlugins.queues.values()) await q.close();
