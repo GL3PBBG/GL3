@@ -36,6 +36,18 @@ export const detectiveSearches = pgTable("p_detectives_searches", {
   succeeded: boolean("succeeded"),
 });
 
+/** Mirrors `packages/plugins/properties/src/migrations.ts` `0001_properties`. */
+export const propertiesPlugin = pgTable("p_properties_properties", {
+  id: uuid("id").primaryKey(),
+  locationId: uuid("location_id").notNull(),
+  pluginId: text("plugin_id").notNull(),
+  ownerPlayerId: uuid("owner_player_id"),
+  cost: bigint("cost", { mode: "bigint" }).notNull(),
+  profit: bigint("profit", { mode: "bigint" }).notNull(),
+  lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
+  rate: bigint("rate", { mode: "bigint" }).notNull(),
+});
+
 /** Mirrors `packages/plugins/theft/src/migrations.ts` `0001_cars`. */
 export const cars = pgTable("p_theft_cars", {
   id: uuid("id").primaryKey(),

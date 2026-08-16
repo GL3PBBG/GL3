@@ -4,10 +4,10 @@ import { createDb } from "../../server/src/db/client.js";
 import {
   crimes, gangInvites, gangLogs, gangMembers, gangPermissions,
   gangs, idMap, items, locations, mailMessages, notifications, playerCrimeSkill,
-  playerItems, players, playerStats, playerTimers, properties, ranks, roleModuleAccess,
+  playerItems, players, playerStats, playerTimers, ranks, roleModuleAccess,
   roles, rounds, settings, weapons,
 } from "../../server/src/db/schema/index.js";
-import { bounties, detectiveSearches, garage } from "../src/pg/plugin-tables.js";
+import { bounties, detectiveSearches, garage, propertiesPlugin } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";
@@ -17,7 +17,7 @@ const ALL_TABLES = [
   roles, roleModuleAccess, rounds, ranks, crimes, locations, items, weapons,
   players, playerStats, playerTimers, playerCrimeSkill,
   gangs, gangMembers, gangPermissions, gangInvites, gangLogs,
-  playerItems, garage, properties,
+  playerItems, garage, propertiesPlugin,
   mailMessages, notifications, bounties, detectiveSearches,
   settings, idMap,
 ] as const;

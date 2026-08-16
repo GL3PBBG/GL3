@@ -80,13 +80,29 @@ migrations rather than five — theft's routes are locations-first through
 `tx.locks.location` before `tx.locks.player`
 (`test/theft-lock-order.test.ts`), and its two player-facing pages plus its
 admin section are declared in the manifest rather than hand-written in
-`apps/web`.
+`apps/web`. **Properties** has since shipped on `feat/properties`, the third
+of the four clusters: the `properties` plugin (buy/sell/claim on one
+property per location, income accruing by whole hours from `last_claimed_at`
+at `rate` capped by the `income.cap` setting, computed lazily at read and
+never stored), core migration `0010_relinquish_properties` moving
+`properties` out of core (`p_properties_properties`, with a unique index on
+`location_id`) — so **seven** of sixteen plugins declare migrations rather
+than six — the migrator stamps owned rows' `last_claimed_at` to migration
+time so migrated owners accrue from the move, not 2015; `plugin_id` is a
+dormant flavour label (stored, listed, admin-editable, selects nothing);
+sell pays `cost + accrued` and `profit` is lifetime paid-out, not a claimable
+pool; its routes are locations-first (`tx.locks.location` before
+`tx.locks.player`, `test/properties-lock-order.test.ts`); its player page is
+hand-written in `apps/web` (spec-mandated) while its admin section is a
+manifest-declared `adminPages` table + forms; three events (`bought`,
+`sold`, `income`) publish to the acting player with
+`invalidates: ["properties", "me"]`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **160 files / 1216 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **167 files / 1269 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -189,14 +205,16 @@ unavailable here.
    inverting bullets' location→player order). Every gang↔player path now goes
    through `lockGangAndPlayerForUpdate`; every location↔player path is
    locations-first — a single row via `lockLocationForUpdate` (bullets, and
-   theft's steal/sell/repair through `tx.locks.location`) or
+   theft's steal/sell/repair through `tx.locks.location`, and properties'
+   buy/sell/claim through `tx.locks.location`) or
    several via `lockLocationsForUpdate`, which sorts them ascending (travel
    locks both its source and destination through it). Player↔player is the
    third pair, added by combat: `lockPlayersForUpdate` dedupes and sorts
    ascending in one statement, which is what makes A-shoots-B safe against
    B-shoots-A. Regression tests: `test/gang-lock-order.test.ts`,
    `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`,
-   `test/theft-lock-order.test.ts` (`economy/ledger.ts`).
+   `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`
+   (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing
@@ -225,8 +243,8 @@ unavailable here.
   tables appear only when `loadPlugins` → `runPluginMigrations` runs. A file
   using `callPluginRoute` or `runPluginJob` directly needs an explicit
   `await runPluginMigrations(db, [thePlugin])`, or every test in it dies on
-  42P01. Six plugins now own tables (`inventory`, `oc`, `bounties`,
-  `detectives`, `combat`, `theft`), so this catches far more files than it
+  42P01. Seven plugins now own tables (`inventory`, `oc`, `bounties`,
+  `detectives`, `combat`, `theft`, `properties`), so this catches far more files than it
   used to — `economy-invariant.test.ts` and `detectives-worker.test.ts` are
   the worked examples.
 - **A new *workspace-local* plugin package has eight registration sites, three
@@ -286,7 +304,10 @@ unavailable here.
   cluster widened the surface additively (`player.backfired`,
   `WeaponConditionDtoSchema`, `RepairResponseSchema`, `moneyRankLabel`/`backfire`
   on `ProfileDto`, `moneyRanks` on `RankListResponse`), so it went out as a
-  patch. The registry now serves `@gl3/shared` `0.1.1` and `0.1.2`, and
+  patch. **`@gl3/shared@0.1.3` has since been published** — the properties
+  cluster widened the surface additively (`PropertyRowSchema`,
+  `PropertyListResponseSchema` for the hand-written web page), again a patch.
+  The registry now serves `@gl3/shared` `0.1.1`, `0.1.2` and `0.1.3`, and
   `@gl3/plugin-sdk@0.1.0`.
 - **Adding a variant to `GameEvent` breaks three places, and the third only
   fails under the integration suite.** The two obvious ones are the exhaustive

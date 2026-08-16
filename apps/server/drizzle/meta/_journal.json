@@ -71,6 +71,13 @@
       "when": 1786830000000,
       "tag": "0009_relinquish_car_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786916400000,
+      "tag": "0010_relinquish_properties",
+      "breakpoints": true
     }
   ]
 }

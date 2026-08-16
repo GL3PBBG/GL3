@@ -15,6 +15,7 @@ import {
   NewsListResponseSchema, NotificationListResponseSchema, OcCashResponseSchema,
   OcCreateResponseSchema, OcStateResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
+  PropertyListResponseSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
   RepairResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
@@ -760,6 +761,53 @@ export function useExecute(heistId: string) {
       z.object({ jobId: z.string() }).parse(await api(`/api/oc/${heistId}/execute`, { method: "POST" })),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.oc() });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Properties
+// ---------------------------------------------------------------------------
+
+export function useProperties() {
+  return useQuery({
+    queryKey: keys.properties(),
+    queryFn: async () => PropertyListResponseSchema.parse(await api("/api/properties")),
+  });
+}
+
+export function useBuyProperty() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (propertyId: string) =>
+      api(`/api/properties/${propertyId}/buy`, { method: "POST" }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.properties() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useSellProperty() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (propertyId: string) =>
+      api(`/api/properties/${propertyId}/sell`, { method: "POST" }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.properties() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useClaimProperty() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (propertyId: string) =>
+      api(`/api/properties/${propertyId}/claim`, { method: "POST" }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.properties() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
   });
 }

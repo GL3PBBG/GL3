@@ -69,6 +69,9 @@ const srcAliases = {
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-properties": fileURLToPath(
+        new URL("./packages/plugins/properties/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -198,6 +201,8 @@ export default defineWorkspace([
         "test/rng.test.ts",
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
+        "test/properties-settings.test.ts",
+        "test/properties-resolve.test.ts",
       ],
     },
     ...srcAliases,
@@ -296,6 +301,7 @@ export default defineWorkspace([
         "test/admin-ranks.test.ts",
         "test/admin-inventory.test.ts",
         "test/admin-theft.test.ts",
+        "test/admin-properties.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",
@@ -307,6 +313,9 @@ export default defineWorkspace([
         "test/shop-concurrency.test.ts",
         "test/shop.test.ts",
         "test/garage.test.ts",
+        "test/properties-events.test.ts",
+        "test/properties-lock-order.test.ts",
+        "test/properties-routes.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",

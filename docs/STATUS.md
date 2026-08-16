@@ -1,8 +1,8 @@
 # GL3 project status
 
-Last updated: 2026-08-15, **car theft + garage + police chase complete**
-(second of four clusters activating migrated-but-unread V2 tables).
-Branch: `feat/car-theft`.
+Last updated: 2026-08-16, **properties complete**
+(third of four clusters activating migrated-but-unread V2 tables).
+Branch: `feat/properties`.
 
 ---
 
@@ -15,14 +15,17 @@ Branch: `feat/car-theft`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster) have since shipped |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped |
 
-**Suite: 160 files / 1216 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 167 files / 1272 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
 ranks, backfire and weapon condition added 5 files / 70 tests; car theft added
-8 files / 60 tests — see its section below. 1155 + 60 = 1215, not 1216: the
-one-test gap is the same recorded-vs-measured drift this file has corrected
-before, and 1216 is the measured figure — the run's own per-file sum.)
+8 files / 60 tests; properties added 7 files / 55 tests (52 at first ship,
+plus 3 from the final-review fix pass: N1's admin-create-default-rate test
+and N13's two income-cap tests) — see the sections below. 1216 + 55 = 1271,
+but the run measures 1272 — the same recorded-vs-measured drift this file
+has corrected before; 1272 is the measured figure, the run's own per-file
+sum.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -133,6 +136,13 @@ cash figure behind the bracket does not.
 
 Every balance movement anywhere is an append-only ledger row inside the same
 transaction as the balance update.
+
+They can buy property. Each location has one property; buying it sets the
+owner and starts the income clock, claiming banks whole hours × rate (capped),
+and selling returns the purchase price plus banked income. Income accrues
+lazily — nothing is stored until claimed, and a zero-claim is free. The page
+shows every property in the world: buy when unowned, claim (with live
+accrued) when yours, nothing when another's.
 
 They can steal cars. A theft attempt draws a weighted pick from the chosen
 tier's value bracket; success parks the car (with rolled damage) in the city
@@ -1301,6 +1311,75 @@ hit this exact failure before and fixed it with `testTimeout: 30000`;
 (`@gl3/server`, `@gl3/server:db-only`). Test-infra only — no production code
 changed. `ledger.test.ts`'s 4.0-4.2s-of-5s watch item is closed by the same
 change.
+
+### Properties — location income, lazy accrual, one property per location
+
+Spec: `docs/superpowers/specs/2026-08-15-properties-design.md`. The third of
+four clusters activating migrated-but-unread V2 tables (`properties`).
+Branch `feat/properties`. Not a port: the schema is the only V2-derived
+constraint, so **the spec and the tests are the only specification of its
+behaviour**.
+
+**What shipped:**
+
+- **`packages/plugins/properties`** — one property row per location (unique
+  index on `location_id`, not a UNIQUE constraint — same guarantee, no
+  drizzle-kit naming dependence). Player routes take the id in the **path**
+  (`POST /api/properties/:id/buy|sell|claim`, `GET /api/properties`); admin
+  routes keep ids in the body (form posts). Income accrues lazily:
+  `accruedSince(lastClaimedAt, rate, cap, now)` computes whole hours ×
+  `rate`, clamped at the `income.cap` setting, at read time — the claimable
+  pool is never stored. `last_claimed_at` moves only on a claim that pays
+  (a zero-claim answers `{claimed:"0"}`, touches nothing, publishes
+  nothing — double-click safe). Sell pays `cost + accrued` (owner recovers
+  the price plus banked income; a buyer pays `cost` only — there is no
+  market). `profit` is lifetime income paid out, incremented at claim and
+  at sell — a ledger of record, not a claimable pool. `plugin_id` is a
+  dormant flavour label: stored, listed, admin-editable, selects nothing.
+- **Events** — `bought`, `sold`, `income`, each published to the acting
+  player (`audience: { kind: "player", playerId }`) with `invalidates:
+  ["properties", "me"]` so the web page and the cash badge both refresh.
+  No new `GameEvent` variant, no `publishCore` — plugin events only.
+- **Core migration `0010_relinquish_properties`** drops the core `properties`
+  table (the `0007`/`0009` precedent — shipped in core `0000` only because
+  the core schema predated the plugin migration runner; no core code ever
+  read it). The plugin owns `p_properties_properties` with FKs to
+  `locations` (CASCADE) and `players` (SET NULL), so **seven of sixteen
+  plugins declare migrations**. `apps/migrate` retargets through
+  `pg/plugin-tables.ts` and stamps owned rows' `last_claimed_at` to
+  migration time — migrated owners accrue from the move, not from 2015.
+- **Lock order** — locations-first: every money route reads the row
+  unlocked, takes `tx.locks.location(locationId)` then `tx.locks.player`,
+  re-reads FOR UPDATE, and only then moves money. Regression test
+  `test/properties-lock-order.test.ts` (barrier + 20×8 load against the
+  real bullets and travel routes), demonstrated red against the inverted
+  order first — the Postgres deadlock log names both statements.
+- **Admin** — `/api/admin/properties` (list/create/update; update takes
+  FOR UPDATE on exactly one row, the theft single-lock argument) plus
+  `GET /api/admin/properties/locations` returning only unclaimed locations
+  as the create form's select source. One declarative `adminPages` entry
+  (`table` + create/update forms, no id column).
+- **Player page — hand-written React**, unlike theft's declarative pages:
+  the spec mandates it because per-row actions (buy only when unowned,
+  claim with live accrued when yours, nothing when another's) are not
+  expressible in the ten-kind page vocabulary. `apps/web/src/pages/
+  Properties.tsx` with a pure `rowAction` function; the shared DTO lives
+  in `@gl3/shared` (`PropertyRowSchema`, `PropertyListResponseSchema`,
+  published as `0.1.3` — additive patch); `keys.properties()` =
+  `["properties"]`, matching the manifest `invalidates` prefix.
+
+**Settings** (`properties.*` namespaced by the SDK): `income.cap`
+(1_000_000), `income.default_rate` (500 — wired into admin create's
+fallback when `rate` is omitted; still parsed but unread by
+`apps/migrate`'s `migrateProperties`, which hardcodes `500` instead),
+`admin.can_edit_rate` (true — parsed but unread; spec §4 creates it for a
+future runmode).
+
+Seven new test files / 55 tests: `properties-settings` (7),
+`properties-resolve` (10), `properties-routes` (18, including N13's two
+income-cap tests), `properties-events` (4), `properties-lock-order` (3),
+`admin-properties` (9, including N1's admin-create-default-rate test), and
+the web `properties-page` (4, pure `rowAction`).
 
 ### Installing a plugin without forking core
 

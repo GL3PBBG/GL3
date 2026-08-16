@@ -3,7 +3,7 @@ import { bigint, boolean, check, index, integer, pgTable, text, timestamp, uuid,
 import { balanceKind } from "./enums.js";
 import { players } from "./identity.js";
 import { gangs } from "./social.js";
-import { crimes, items, locations } from "./content.js";
+import { crimes, items } from "./content.js";
 
 /**
  * Append-only. Never updated, never deleted. sum(amount) per owner == that
@@ -37,15 +37,6 @@ export const playerItems = pgTable("player_items", {
   qty: integer("qty").notNull().default(0),
 }, (t) => ({ pk: primaryKey({ columns: [t.playerId, t.itemId] }) }));
 
-/** V2 PR_module is a string naming the implementing module → plugin_id (spec §1.2). */
-export const properties = pgTable("properties", {
-  id: uuid("id").primaryKey(),
-  locationId: uuid("location_id").notNull().references(() => locations.id, { onDelete: "cascade" }),
-  pluginId: text("plugin_id").notNull(),
-  ownerPlayerId: uuid("owner_player_id").references(() => players.id, { onDelete: "set null" }),
-  cost: bigint("cost", { mode: "bigint" }).notNull().default(sql`0`),
-  profit: bigint("profit", { mode: "bigint" }).notNull().default(sql`0`),
-}, (t) => ({ locationIdx: index("properties_location_idx").on(t.locationId) }));
 
 export const crimeLog = pgTable("crime_log", {
   id: uuid("id").primaryKey(),
