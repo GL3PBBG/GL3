@@ -102,14 +102,25 @@ describe("registration snapshot", () => {
     expect(res.statusCode).toBe(201);
 
     const [player] = await db.select().from(players).where(eq(players.username, "midjoiner"));
-    await db.update(playerStats).set({ exp: 500n, cash: 700n }).where(eq(playerStats.playerId, player!.id));
 
     const [entry] = await db.select().from(roundEntries)
       .where(and(eq(roundEntries.roundId, roundId), eq(roundEntries.playerId, player!.id)));
     expect(entry).toBeDefined();
     expect(entry!.expAtStart).toBe(0n);
+    expect(entry!.cashAtStart).toBe(0n);
     expect(entry!.joinedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+    expect(entry!.joinedAt.getTime()).toBeLessThanOrEqual(Date.now());
     expect(player!.roundId).toBe(roundId);
+
+    // Standing is 0 the instant they join — this is the whole point of a
+    // per-player snapshot, and it's the one assertion a bug that read raw
+    // `exp` instead of the delta could still pass, since a fresh player's
+    // absolute exp is also 0. Checked BEFORE any stats mutation below.
+    const freshBoard = await roundStandings(db, roundId, "exp", 10, false);
+    const freshMine = freshBoard.find((e) => e.playerId === player!.id);
+    expect(freshMine!.score).toBe("0");
+
+    await db.update(playerStats).set({ exp: 500n, cash: 700n }).where(eq(playerStats.playerId, player!.id));
 
     const board = await roundStandings(db, roundId, "exp", 10, false);
     const mine = board.find((e) => e.playerId === player!.id);
