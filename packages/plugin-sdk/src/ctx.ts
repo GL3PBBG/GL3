@@ -2,6 +2,7 @@ import type { GameEvent } from "@gl3/shared";
 import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { FilterPoint } from "./filters.js";
+import type { PropertyTypeDecl } from "./manifest.js";
 
 /**
  * The transaction handle a plugin sees. `query` is omitted, so
@@ -223,6 +224,15 @@ export interface PluginCtx {
   readonly job: JobContext | null;
   readonly filters: { apply<T>(point: FilterPoint<T>, value: T): Promise<T> };
   readonly settings: { get(key: string): string | null };
+  /**
+   * Every property type declared by any installed plugin, from the loader's
+   * registry. Read-only manifest data — the same information `GET /api/plugins`
+   * already serves — so every plugin sees it, not only `properties`.
+   */
+  readonly propertyTypes: {
+    get(id: string): PropertyTypeDecl | null;
+    list(): readonly PropertyTypeDecl[];
+  };
   readonly log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;
