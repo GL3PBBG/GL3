@@ -1394,12 +1394,19 @@ migration, and the plugin migration count stays **seven of sixteen**.
 **What shipped:**
 
 - **Lazy rollover under an advisory lock, no cron.** There is no job and no
-  scheduler; `ensureCurrentRound(db, redis, settings)` runs at the top of
-  every rounds-touching request (`GET /api/rounds`, the leaderboard routes,
-  the admin section) and does nothing on the common path — a live,
-  already-snapshotted round returns immediately with no transaction and no
-  lock wait (proven by a foreign-session-holds-the-lock probe with a hard
-  timeout). When the current round has ended, it opens a transaction, takes
+  scheduler; `ensureCurrentRound(db, redis, settings)` runs at four call
+  sites — `GET /api/rounds`, the leaderboard routes, and once at server
+  boot (`index.ts`, between `loadSettings` and `loadPlugins`, deliberately
+  outside `buildApp` so a boot-time rollover can't race round assertions
+  under the integration tests; it absorbs the expensive case of a server
+  that was down across several scheduled windows). The admin section is
+  **not** a caller: `GET /api/admin/rounds` and its `/table` twin read the
+  `rounds` table directly, without the lock, because a listing a few
+  milliseconds stale is not a correctness problem. Every call does nothing
+  on the common path — a live, already-snapshotted round returns
+  immediately with no transaction and no lock wait (proven by a
+  foreign-session-holds-the-lock probe with a hard timeout). When the
+  current round has ended, it opens a transaction, takes
   `pg_advisory_xact_lock(7461002)` first, freezes the round's final
   standings into `round_entries`, pays out, publishes, and activates (or
   opens) the successor — all under the one lock, so N concurrent callers
