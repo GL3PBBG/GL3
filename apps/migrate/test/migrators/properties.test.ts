@@ -11,7 +11,7 @@ import { migrateLocations } from "../../src/migrators/locations.js";
 import { migrateItems } from "../../src/migrators/items.js";
 import { migratePlayers } from "../../src/migrators/players.js";
 import { migrateProperties } from "../../src/migrators/properties.js";
-import { lookupV3Id } from "../../src/id-map.js";
+import { getOrCreateV3Id, lookupV3Id } from "../../src/id-map.js";
 
 describe("migrateProperties", () => {
   it("copies PR_module into plugin_id and drops the orphan-location row", async () => {
@@ -26,6 +26,13 @@ describe("migrateProperties", () => {
       await migrateLocations(pool, db, createReport(false));
       await migrateItems(pool, db, createReport(false));
       await migratePlayers(pool, db, createReport(false));
+
+      // A user mapping for the -1 sentinel, which no real V2 database has.
+      // Its only purpose is to make the migrator's `PR_user > 0` guard
+      // OBSERVABLE: without the guard, `lookupV3Id(exec, "users", -1)` would
+      // resolve to this uuid and land in owner_player_id. With it, the row
+      // stays unowned. Delete this seeding and the test proves nothing.
+      const sentinelId = (await getOrCreateV3Id(db, "users", -1)).v3Id;
 
       const report = createReport(false);
       await migrateProperties(pool, db, report);
@@ -43,11 +50,10 @@ describe("migrateProperties", () => {
       const closed = rows.find((r) => r.ownerPlayerId === null);
       expect(closed).toBeDefined();
       expect(closed!.ownerPlayerId).toBeNull();
+      expect(closed!.ownerPlayerId).not.toBe(sentinelId);
       expect(closed!.lastClaimedAt).toBeNull(); // unowned rows get no accrual clock
 
       expect(report.orphans).toContainEqual({ table: "properties", v2Id: 99, reason: "location 99 does not exist" });
-      // PR_user = -1 must NOT be reported as an orphan user.
-      expect(report.orphans.some((o) => o.v2Id === -1)).toBe(false);
 
       await pool.end();
       await sql.end();
