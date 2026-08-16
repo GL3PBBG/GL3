@@ -310,6 +310,7 @@ export default defineWorkspace([
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/rounds-finalize.test.ts",
+        "test/rounds-ledger.test.ts",
         "test/rounds-snapshot.test.ts",
         "test/sentence-sweeper.test.ts",
         "test/sentence-sweeper-lock-order.test.ts",
