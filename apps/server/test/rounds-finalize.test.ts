@@ -1,19 +1,44 @@
 import { and, eq } from "drizzle-orm";
+import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { notifications, players, playerStats, roundEntries, rounds, transactions }
   from "../src/db/schema/index.js";
 import { ensureCurrentRound } from "../src/game/rounds/service.js";
-import { createRedis } from "../src/redis.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 
 const { db } = testDb();
-const redis = createRedis(loadConfig(process.env).redisUrl);
+const config = loadConfig(process.env);
+const redis = createRedis(config.redisUrl);
+const subscriber = createSubscriber(config.redisUrl);
 const SETTINGS = { "rounds.payout_points": "[1000,500,250]" };
 
-afterAll(async () => { await redis.quit(); });
+/** Matches the lock `service.ts` takes inside `settle()` — see CLAUDE.md rule 6's neighbours. */
+const ROUNDS_LOCK = 7461002;
+
+afterAll(async () => { await redis.quit(); subscriber.disconnect(); });
 beforeEach(async () => { await resetDb(db); });
+
+/**
+ * Races `promise` against a rejecting timer so a regression that makes the
+ * fast path open a transaction (and so wait on `ROUNDS_LOCK`) fails the test
+ * instead of hanging the whole suite.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
 
 async function seedPlayer(username: string, exp: bigint): Promise<string> {
   const id = uuidv7();
@@ -113,6 +138,34 @@ describe("ensureCurrentRound finalize", () => {
     expect(await db.select().from(transactions)).toEqual([]);
   });
 
+  it("takes the fast path for a live, already-snapshotted round — no transaction, no advisory lock wait", async () => {
+    const live = await seedRound("Fast Path", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
+    await seedPlayer("fast_path_untouched", 10n);
+
+    // A foreign session holds ROUNDS_LOCK for the whole call. If the fast
+    // path regressed into always calling settle(), ensureCurrentRound would
+    // block on `pg_advisory_xact_lock` behind this session and the call
+    // below would time out instead of returning promptly.
+    const blocker = postgres(config.databaseUrl, { max: 1 });
+    const t0 = await blocker.reserve();
+    try {
+      await t0`BEGIN`;
+      await t0`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`;
+
+      const active = await withTimeout(
+        ensureCurrentRound(db, redis, SETTINGS),
+        2000,
+        "ensureCurrentRound did not return within 2000ms while a foreign session held " +
+          "the advisory lock — the fast path must not open a transaction",
+      );
+      expect(active?.id).toBe(live);
+    } finally {
+      await t0`ROLLBACK`;
+      t0.release();
+      await blocker.end();
+    }
+  });
+
   it("returns null and writes nothing when there are no rounds", async () => {
     await seedPlayer("no_rounds", 0n);
     expect(await ensureCurrentRound(db, redis, SETTINGS)).toBeNull();
@@ -146,7 +199,7 @@ describe("ensureCurrentRound finalize", () => {
     expect(paid!.amount).toBe(1000n);
   });
 
-  it("notifies each winner without publishing a per-winner event", async () => {
+  it("notifies each winner with the round name and payout amount", async () => {
     const ended = await seedRound("Notified", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
     const winner = await seedPlayer("notified_winner", 100n);
     await db.insert(roundEntries).values({ roundId: ended, playerId: winner, expAtStart: 0n });
@@ -156,5 +209,39 @@ describe("ensureCurrentRound finalize", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]!.body).toContain("Notified");
     expect(notes[0]!.body).toContain("1000");
+  });
+
+  it("publishes round.finished for the settled round and round.started for its successor", async () => {
+    const ended = await seedRound("Publishes Finished", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
+    const next = await seedRound("Publishes Started", ago(60_000), ahead(3_600_000));
+    const winner = await seedPlayer("publish_winner", 100n);
+    await db.insert(roundEntries).values({ roundId: ended, playerId: winner, expAtStart: 0n });
+
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    // §4.4 sets `actorId` to the round's own id precisely so a test has a
+    // per-round discriminator on a globally-audienced event — `game:events`
+    // is shared with every other concurrently-running test file (CLAUDE.md
+    // rule 4), so a bare `once("message")` could grab a stranger's payload.
+    const finished = awaitOwnEvent(subscriber, ended);
+    const started = awaitOwnEvent(subscriber, next);
+
+    await ensureCurrentRound(db, redis, SETTINGS);
+
+    const finishedEvent = await finished;
+    expect(finishedEvent.type).toBe("round.finished");
+    if (finishedEvent.type !== "round.finished") throw new Error("unreachable");
+    expect(finishedEvent.roundId).toBe(ended);
+    expect(finishedEvent.roundName).toBe("Publishes Finished");
+    // The award PAID, as a decimal string — not the exp delta that earned it.
+    expect(finishedEvent.winners).toEqual([
+      { playerId: winner, username: "publish_winner", placing: 1, points: "1000" },
+    ]);
+
+    const startedEvent = await started;
+    expect(startedEvent.type).toBe("round.started");
+    if (startedEvent.type !== "round.started") throw new Error("unreachable");
+    expect(startedEvent.roundId).toBe(next);
+    expect(startedEvent.roundName).toBe("Publishes Started");
+    expect(startedEvent.endsAt).not.toBeNull();
   });
 });
