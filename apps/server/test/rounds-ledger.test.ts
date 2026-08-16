@@ -18,8 +18,13 @@ import { bootTestServer } from "./helpers/server.js";
 const { db } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
-const AWARDS = [1000n, 500n, 250n];
-const SETTINGS_VALUE = "[1000,500,250]";
+// Deliberately different from `DEFAULT_PAYOUT_POINTS` ([1000n, 500n, 250n] in
+// game/rounds/settings.ts) in every position, so the settings-load guard below
+// can actually distinguish "the seeded row was read" from "seeding silently
+// fell back to the default" — the two were indistinguishable when this table
+// matched the default verbatim.
+const AWARDS = [900n, 600n, 300n];
+const SETTINGS_VALUE = "[900,600,300]";
 // player_stats.cash defaults to `sql\`0\`` (src/db/schema/identity.ts) and
 // /api/auth/register inserts playerStats with no cash override — read off
 // the schema default, not guessed. Asserted directly against a freshly
@@ -135,7 +140,7 @@ describe("the ledger reconciles across a rollover", () => {
     // Distinct, unambiguous exp deltas — direct player_stats writes, not the
     // ledger: exp is not a BalanceKind (only cash/bank/points are), so this
     // does not touch sum(ledger) == balance at all.
-    const expByPlayer = [900n, 500n, 200n]; // -> awards [1000, 500, 250] in that order
+    const expByPlayer = [900n, 500n, 200n]; // -> awards AWARDS[0], AWARDS[1], AWARDS[2] in that order
     for (const [i, p] of players.entries()) {
       await db.update(playerStats).set({ exp: expByPlayer[i]! }).where(eq(playerStats.playerId, p.id));
       await db.insert(roundEntries).values({ roundId: endedRoundId, playerId: p.id, expAtStart: 0n });
@@ -169,7 +174,7 @@ describe("the ledger reconciles across a rollover", () => {
     expect(payouts.every((r) => r.refId === endedRoundId)).toBe(true);
     expect(payouts.every((r) => r.jobId === null)).toBe(true);
 
-    // Placing order, not just the multiset: paying [250,500,1000] sums the same.
+    // Placing order, not just the multiset: paying [300,600,900] sums the same.
     const paidInPlacingOrder = winnersInExpectedOrder.map((id) =>
       payouts.find((r) => r.playerId === id)!.amount);
     expect(paidInPlacingOrder).toEqual(AWARDS);
