@@ -136,6 +136,17 @@ export REDIS_URL=redis://localhost:6379
 npm run verify          # typecheck + full suite — run this LOCALLY before committing
 ```
 
+**While iterating, scope the run; at the merge gate, don't.** The full suite
+takes many minutes, so `npm run verify:related` (or `npm run test:related --
+<files>`) runs only the tests whose module graph reaches what this branch
+changed. That is a real gear for the edit loop — but it is a module-graph tool
+and it cannot see a guard that asserts against the *database* instead of
+against an import. `apps/server/test/schema.test.ts` reads `pg_catalog` and
+imports nothing from the migration that changes its counts, so no scoped run
+of any kind will select it. The rounds cluster is the worked example: twelve
+green task-scoped runs, then two drift guards failed on the first full run.
+**The last run before a merge is the bare `npm run verify`.**
+
 **Read `verify`'s exit code, not its summary.** Piping the run through
 `grep`/`tail` discards npm's exit status, and the summary alone is not the
 whole verdict: an unhandled rejection anywhere in the run makes vitest exit
