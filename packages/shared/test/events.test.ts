@@ -101,11 +101,14 @@ describe("GameEventSchema", () => {
   });
 
   // M5 adds exactly one name — the envelope every plugin event travels in. The
-  // twenty-two core names stay closed: a ported core module gets its own variant,
+  // core names stay closed: a ported core module gets its own variant,
   // not a plugin.event, so this census failing is how an accidental widening of
-  // the core union is caught. The backfire/weapon-condition spec adds one more
-  // core variant, player.backfired (attacker-only weapon jam), on top of that.
-  it("covers the twenty-two core event names plus M5's plugin envelope, plus player.backfired", () => {
+  // the core union is caught. The backfire/weapon-condition spec added one more
+  // core variant, player.backfired (attacker-only weapon jam). The rounds spec
+  // adds two more, round.started and round.finished — rounds are core (no
+  // relinquish migration), so they join this list rather than travelling as
+  // plugin.event.
+  it("covers the core event names plus M5's plugin envelope, plus player.backfired and rounds", () => {
     expect(new Set(GameEventSchema.options.map((o) => o.shape.type.value))).toEqual(new Set([
       "crime.resolved", "player.jailed", "player.released", "player.travelled",
       "player.attacked", "player.killed", "player.backfired", "player.discharged", "bounty.placed", "bounty.claimed",
@@ -113,6 +116,7 @@ describe("GameEventSchema", () => {
       "notification.created", "news.posted", "chat.message", "player.joined",
       "player.rankedUp", "bank.transacted", "bullets.purchased",
       "oc.updated", "oc.resolved",
+      "round.started", "round.finished",
       "plugin.event",
     ]));
   });
