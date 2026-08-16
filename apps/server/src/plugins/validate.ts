@@ -5,8 +5,17 @@ export const RESERVED_BASE_PATHS = [
   "/api/auth", "/api/ws", "/api/plugins", "/health",
   // Core admin shell endpoints. Deliberately NOT "/api/admin": plugins claim
   // /api/admin/<their-id> for their own admin routes.
-  "/api/admin/plugins", "/api/admin/roles",
+  "/api/admin/plugins", "/api/admin/roles", "/api/admin/rounds",
+  // "/api/rounds" is deliberately NOT reserved: it is a gameplay path, and a
+  // plugin replacing one is the strangler seam working as designed. A plugin
+  // that claims it anyway does not shadow core — an exact duplicate is
+  // FST_ERR_DUPLICATED_ROUTE at boot.
 ] as const;
+
+/** Core module keys `moduleKeysOf` (admin/routes.ts) grants over. A plugin id
+ *  equal to one of these makes an unrelated plugin's grant satisfy a core
+ *  permission check, because grants are stored as bare, un-namespaced strings. */
+const RESERVED_MODULE_KEYS = ["roles", "rounds", "*"] as const;
 
 function fail(message: string): never {
   throw new Error(`plugin validation failed — ${message}`);
@@ -173,6 +182,10 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
   for (const manifest of manifests) {
     if (seenIds.has(manifest.id)) fail(`two plugins claim the id "${manifest.id}"`);
     seenIds.add(manifest.id);
+
+    if ((RESERVED_MODULE_KEYS as readonly string[]).includes(manifest.id)) {
+      fail(`plugin id "${manifest.id}" collides with a core admin module key`);
+    }
 
     const prefix = `p_${manifest.id.replaceAll("-", "_")}_`;
     for (const [key, value] of Object.entries(manifest.tables)) {

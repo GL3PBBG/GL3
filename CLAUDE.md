@@ -97,12 +97,30 @@ hand-written in `apps/web` (spec-mandated) while its admin section is a
 manifest-declared `adminPages` table + forms; three events (`bought`,
 `sold`, `income`) publish to the acting player with
 `invalidates: ["properties", "me"]`.
+**Rounds** has since shipped on `feat/rounds`, a seasonal scoring window and,
+unlike the four preceding clusters, **core rather than a plugin** — there is
+no relinquish migration and the plugin migration count stays seven of
+sixteen. `ensureCurrentRound` settles lazily at read time under
+`pg_advisory_xact_lock(7461002)`, no cron: a live already-snapshotted round
+returns immediately with no transaction, and an ended round is frozen into
+`round_entries` (the hall of fame — there is no separate winners table),
+paid out in `points` (the one balance with no leaderboard ZSET and no
+faucet, so a round's prize cannot move any board the next round measures),
+published, and rolled to its successor, all under the one lock so N
+concurrent settlers produce one settle and N−1 no-ops. Two new core
+`GameEvent` variants, `round.started` and `round.finished`, ship in core
+migration `0011_round_entries` alongside `round_entries` and its two
+cascade FKs — the fourth place a new variant must reach turned out to be
+`packages/shared/test/events.test.ts`'s own hardcoded census, missed by the
+plan and caught only under the whole-tree suite (see the four-places note
+below). `@gl3/shared` took an additive patch bump to `0.1.4` for the new
+events plus `dto/rounds.ts`; `@gl3/plugin-sdk` needed none.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **167 files / 1269 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **177 files / 1370 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -135,6 +153,17 @@ export DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3
 export REDIS_URL=redis://localhost:6379
 npm run verify          # typecheck + full suite — run this LOCALLY before committing
 ```
+
+**While iterating, scope the run; at the merge gate, don't.** The full suite
+takes many minutes, so `npm run verify:related` (or `npm run test:related --
+<files>`) runs only the tests whose module graph reaches what this branch
+changed. That is a real gear for the edit loop — but it is a module-graph tool
+and it cannot see a guard that asserts against the *database* instead of
+against an import. `apps/server/test/schema.test.ts` reads `pg_catalog` and
+imports nothing from the migration that changes its counts, so no scoped run
+of any kind will select it. The rounds cluster is the worked example: twelve
+green task-scoped runs, then two drift guards failed on the first full run.
+**The last run before a merge is the bare `npm run verify`.**
 
 **Read `verify`'s exit code, not its summary.** Piping the run through
 `grep`/`tail` discards npm's exit status, and the summary alone is not the
@@ -308,17 +337,40 @@ unavailable here.
   cluster widened the surface additively (`PropertyRowSchema`,
   `PropertyListResponseSchema` for the hand-written web page), again a patch.
   The registry now serves `@gl3/shared` `0.1.1`, `0.1.2` and `0.1.3`, and
-  `@gl3/plugin-sdk@0.1.0`.
-- **Adding a variant to `GameEvent` breaks three places, and the third only
-  fails under the integration suite.** The two obvious ones are the exhaustive
-  switches in `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which
-  fail loudly with TS2366. The third is the `CORPUS` drift guard in
+  `@gl3/plugin-sdk@0.1.0`. **`packages/shared/package.json` is bumped to
+  `0.1.4`** for the rounds cluster's two `GameEvent` variants and
+  `dto/rounds.ts`, but — unlike the three patches above — it has **not**
+  been published: publishing is an outward-facing, hard-to-reverse action
+  reserved for a human decision, so `npm.gl3.dev` still serves `0.1.3` as
+  the newest `@gl3/shared` until that publish happens. An out-of-repo plugin
+  cannot call `publishCore` with `round.started` or `round.finished` until
+  it does.
+- **Adding a variant to `GameEvent` breaks four places, and none of the last
+  two is a type error.** The two obvious ones are the exhaustive switches in
+  `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
+  with TS2366. The third is the `CORPUS` drift guard in
   `apps/server/test/plugin-ctx-core-events.test.ts`: `CoreEventInput` is
   derived from `GameEventSchema`, so a new variant reaches the SDK for free
-  and would reach the wire untested. `npm run typecheck` and the `@gl3/web`
-  project both pass with it missing. A change that widens the union must run
-  the whole of `npm run verify`; `player.backfired` shipped past two separate
-  task reviews on this exact gap.
+  and would reach the wire untested. **It needs Postgres and Redis, so it
+  fails only under the integration suite** — `npm run typecheck`, the
+  `@gl3/web` project and CI's `verify:ci` all pass with it missing.
+  `player.backfired` shipped past two separate task reviews on this exact gap.
+  The fourth is the hardcoded census `Set` in
+  `packages/shared/test/events.test.ts`, which asserts the complete list of
+  core event names against `GameEventSchema.options`. That one runs in the
+  `@gl3/shared` project, so CI does catch it — but `npm run typecheck` does
+  not, and it is a *separate* list from the `CORPUS` entries, so updating one
+  never updates the other. A change that widens the union must run the whole
+  of `npm run verify`; the rounds cluster hit the fourth place after twelve
+  green task-scoped runs.
+- **A core migration that adds a foreign key or an index breaks
+  `apps/server/test/schema.test.ts`.** It counts every FK by `ON DELETE` rule
+  and every non-primary-key index in `public`, with a comment block tracing
+  each number to the migration that moved it. The counts are a drift guard, so
+  the fix is always to restate them and extend the comment — never to loosen
+  the assertion. It lives in `@gl3/server:db-only`, so like the `CORPUS` guard
+  it fails only under the integration suite; `0011_round_entries` moved 34→36
+  FKs (two cascades) and 27→29 indexes and was caught nowhere else.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and

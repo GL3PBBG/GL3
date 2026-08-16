@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rolesPage } from "../src/admin/roles-page.js";
+import { roundsPage } from "../src/admin/rounds-page.js";
 import { CORE_PLUGINS } from "../src/plugins/core-plugins.js";
 
 /**
@@ -38,12 +39,15 @@ describe("admin tables never display an id column", () => {
       manifest.adminPages.map((page) => ({ label: `${manifest.id}:${page.id}`, view: page.view })),
     ),
     { label: `core:${rolesPage.id}`, view: rolesPage.view },
+    { label: `core:${roundsPage.id}`, view: roundsPage.view },
   ];
 
   it("covers every core admin page that has one", () => {
     // Guards the walker itself: a refactor that stopped finding adminPages
-    // would make every assertion below vacuously pass.
-    expect(sections.length).toBeGreaterThanOrEqual(7);
+    // would make every assertion below vacuously pass. The floor equals
+    // reality on this branch: eight plugins declare adminPages, plus roles
+    // and rounds hand-written here, is 10.
+    expect(sections.length).toBeGreaterThanOrEqual(10);
   });
 
   for (const section of sections) {

@@ -22,5 +22,6 @@ export * from "./dto/profile.js";
 export * from "./dto/plugins.js";
 export * from "./dto/properties.js";
 export * from "./dto/rank.js";
+export * from "./dto/rounds.js";
 export * from "./dto/shop.js";
 export * from "./dto/travel.js";

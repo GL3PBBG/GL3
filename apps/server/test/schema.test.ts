@@ -133,8 +133,11 @@ describe("core schema", () => {
     // 0010_relinquish_properties dropped properties and its two FKs —
     // location_id cascade; owner_player_id set null.
     // p_properties_properties recreates both under the properties plugin.
-    expect(totalForeignKeys).toBe(34);
-    expect(byRule["c"]).toBe(21); // ON DELETE CASCADE
+    // 0011_round_entries adds round_entries and its two FKs, both cascade:
+    // round_id -> rounds(id) and player_id -> players(id) — a round_entries
+    // row has no meaning once either side is gone.
+    expect(totalForeignKeys).toBe(36);
+    expect(byRule["c"]).toBe(23); // ON DELETE CASCADE
     expect(byRule["n"]).toBe(13); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
@@ -173,7 +176,12 @@ describe("core schema", () => {
     // 0010_relinquish_properties dropped properties_location_idx with the
     // table that owned it. p_properties_properties recreates it under the
     // properties plugin.
-    expect(Number(count)).toBe(27);
+    // 0011_round_entries adds two: round_entries_player_idx on
+    // round_entries(player_id), and the partial rounds_open_idx on
+    // rounds(starts_at) WHERE finalized_at IS NULL. round_entries' own
+    // composite (round_id, player_id) primary key is excluded by this
+    // query's NOT EXISTS clause, so it does not add a third.
+    expect(Number(count)).toBe(29);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
