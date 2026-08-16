@@ -143,9 +143,13 @@ describe("rollover fires exactly once under concurrency", () => {
     // Both events are published (inside ensureCurrentRound, before the HTTP
     // response is sent) well before Promise.all above resolves, but delivery
     // over the pub/sub connection is still an async network hop — wait for it
-    // explicitly rather than assuming it already landed.
-    await finishedArrived;
-    await startedArrived;
+    // explicitly rather than assuming it already landed. Promise.all, not two
+    // sequential awaits: each of these rejects on its own 5s timeout
+    // (awaitOwnEvent's default), and a sequential await leaves the second
+    // promise's rejection unhandled if the first one is what fails — an
+    // unhandled rejection makes vitest exit non-zero while still printing
+    // every test passed (NOTES.md).
+    await Promise.all([finishedArrived, startedArrived]);
     subscriber.off("message", onMessage);
 
     // 1. all 8 calls resolve cleanly — none throws, no 23505.

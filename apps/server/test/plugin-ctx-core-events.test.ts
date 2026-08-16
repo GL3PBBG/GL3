@@ -55,7 +55,16 @@ function watchOwnEvents(actorId: string, expected: number): { seen: GameEvent[];
     if (seen.length >= expected) resolveDone();
   };
   subscriber.on("message", onMessage);
-  const settled = Promise.race([done, new Promise<void>((r) => setTimeout(r, 1500))])
+  // 5000ms, matching `awaitOwnEvent`'s own default (test/helpers/events.ts) —
+  // NOT a delivery budget. This timer starts here, before the
+  // `ctx.transaction(...)` below whose post-commit flush is what actually
+  // produces the events, so it races the work it is waiting on rather than
+  // just the pub/sub hop. A shorter number (1500ms, the prior value) could
+  // fire before the transaction even committed under load, detach the
+  // listener, and leave `seen` at `[]` — an all-or-nothing false failure
+  // indistinguishable from a real regression. It must exceed the slowest the
+  // transaction can plausibly take, not just the wire.
+  const settled = Promise.race([done, new Promise<void>((r) => setTimeout(r, 5000))])
     .then(() => { subscriber.off("message", onMessage); });
   return { seen, settled };
 }
@@ -164,6 +173,11 @@ describe("tx.events.publishCore", () => {
     expect(watch.seen.map((e) => e.type)).toEqual(["news.posted", "plugin.event", "chat.message"]);
   });
 
+  // The absence of an event is only provable by waiting out watchOwnEvents'
+  // full timeout — nothing ever arrives to resolve `done` early — so raising
+  // that timeout from 1500ms to 5000ms makes this one test ~3.5s slower.
+  // Accepted: a fast wrong answer (an event that legitimately took >1500ms
+  // reported as dropped) is worse than a slow right one.
   it("drops a buffered core event when the transaction rolls back", async () => {
     const player = await createPlayer();
     const ctx = createPluginCtx(deps(), opts);

@@ -146,22 +146,28 @@ describe("ensureCurrentRound finalize", () => {
     // path regressed into always calling settle(), ensureCurrentRound would
     // block on `pg_advisory_xact_lock` behind this session and the call
     // below would time out instead of returning promptly.
+    // `blocker.reserve()` is inside its own try, whose finally always ends
+    // the pool — a rejecting reserve() before that finally existed leaked the
+    // pool (blocker.end() never ran).
     const blocker = postgres(config.databaseUrl, { max: 1 });
-    const t0 = await blocker.reserve();
     try {
-      await t0`BEGIN`;
-      await t0`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`;
+      const t0 = await blocker.reserve();
+      try {
+        await t0`BEGIN`;
+        await t0`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`;
 
-      const active = await withTimeout(
-        ensureCurrentRound(db, redis, SETTINGS),
-        2000,
-        "ensureCurrentRound did not return within 2000ms while a foreign session held " +
-          "the advisory lock — the fast path must not open a transaction",
-      );
-      expect(active?.id).toBe(live);
+        const active = await withTimeout(
+          ensureCurrentRound(db, redis, SETTINGS),
+          2000,
+          "ensureCurrentRound did not return within 2000ms while a foreign session held " +
+            "the advisory lock — the fast path must not open a transaction",
+        );
+        expect(active?.id).toBe(live);
+      } finally {
+        await t0`ROLLBACK`;
+        t0.release();
+      }
     } finally {
-      await t0`ROLLBACK`;
-      t0.release();
       await blocker.end();
     }
   });
@@ -227,7 +233,12 @@ describe("ensureCurrentRound finalize", () => {
 
     await ensureCurrentRound(db, redis, SETTINGS);
 
-    const finishedEvent = await finished;
+    // Promise.all, not two sequential awaits: each of these rejects on its
+    // own 5s timeout (awaitOwnEvent's default), and awaiting them one after
+    // the other leaves the second promise's rejection unhandled if the first
+    // one is what fails — an unhandled rejection makes vitest exit non-zero
+    // while still printing every test passed (NOTES.md).
+    const [finishedEvent, startedEvent] = await Promise.all([finished, started]);
     expect(finishedEvent.type).toBe("round.finished");
     if (finishedEvent.type !== "round.finished") throw new Error("unreachable");
     expect(finishedEvent.roundId).toBe(ended);
@@ -237,7 +248,6 @@ describe("ensureCurrentRound finalize", () => {
       { playerId: winner, username: "publish_winner", placing: 1, points: "1000" },
     ]);
 
-    const startedEvent = await started;
     expect(startedEvent.type).toBe("round.started");
     if (startedEvent.type !== "round.started") throw new Error("unreachable");
     expect(startedEvent.roundId).toBe(next);
