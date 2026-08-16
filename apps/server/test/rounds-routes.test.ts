@@ -106,10 +106,21 @@ describe("GET /api/rounds", () => {
 });
 
 describe("GET /api/rounds/:id/standings", () => {
-  it("parses for kind=cash/bank/exp and defaults to exp when kind is omitted", async () => {
+  it("401s with no token", async () => {
+    const roundId = await seedRound("Auth Round", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
+    const res = await app.inject({ method: "GET", url: `/api/rounds/${roundId}/standings` });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("parses for kind=cash/bank/exp and defaults to exp when kind is omitted, returning the seeded entry's live score", async () => {
     const { token, playerId } = await register(`standings_${Date.now()}`);
     const roundId = await seedRound("Standings Round", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
     await db.insert(roundEntries).values({ roundId, playerId, expAtStart: 0n, cashAtStart: 0n, bankAtStart: 0n });
+    // Non-zero, all-distinct deltas: a route wired to the wrong round id, or
+    // hardcoding `finalized`, would return an empty or wrong-valued board
+    // rather than merely failing a "some array exists" check.
+    await db.update(playerStats).set({ exp: 500n, cash: 300n, bank: 200n }).where(eq(playerStats.playerId, playerId));
+    const expected: Record<"cash" | "bank" | "exp", string> = { cash: "300", bank: "200", exp: "500" };
 
     for (const kind of ["cash", "bank", "exp"] as const) {
       const res = await app.inject({
@@ -122,6 +133,8 @@ describe("GET /api/rounds/:id/standings", () => {
       expect(parsed.roundId).toBe(roundId);
       expect(parsed.roundName).toBe("Standings Round");
       expect(parsed.finalized).toBe(false);
+      expect(parsed.entries).toHaveLength(1);
+      expect(parsed.entries[0]).toMatchObject({ playerId, score: expected[kind] });
     }
 
     const noKind = await app.inject({
@@ -129,7 +142,37 @@ describe("GET /api/rounds/:id/standings", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(noKind.statusCode).toBe(200);
-    expect(RoundStandingsResponseSchema.parse(noKind.json()).kind).toBe("exp");
+    const noKindParsed = RoundStandingsResponseSchema.parse(noKind.json());
+    expect(noKindParsed.kind).toBe("exp");
+    expect(noKindParsed.entries[0]).toMatchObject({ playerId, score: "500" });
+  });
+
+  it("reads FROZEN final_* figures for a finalized round, unmoved by later live changes", async () => {
+    const { token, playerId } = await register(`finalized_${Date.now()}`);
+    const roundId = await seedRound("Finalized Round", ago(7_200_000), ago(3_600_000), {
+      snapshottedAt: ago(7_200_000), finalizedAt: ago(3_600_000),
+    });
+    await db.insert(roundEntries).values({
+      roundId, playerId,
+      expAtStart: 0n, cashAtStart: 0n, bankAtStart: 0n,
+      finalExp: 900n, finalCash: 400n, finalBank: 150n,
+    });
+    // Live player_stats now disagree with the frozen final_* figures — a route
+    // that read the live table instead of the frozen one (i.e. hardcoded
+    // `finalized: false` into roundStandings) would return these instead.
+    await db.update(playerStats)
+      .set({ exp: 999_999n, cash: 999_999n, bank: 999_999n })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "GET", url: `/api/rounds/${roundId}/standings?kind=exp`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const parsed = RoundStandingsResponseSchema.parse(res.json());
+    expect(parsed.finalized).toBe(true);
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0]).toMatchObject({ playerId, score: "900" });
   });
 
   it("400s invalid_kind for an unknown kind", async () => {
