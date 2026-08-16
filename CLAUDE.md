@@ -336,15 +336,13 @@ unavailable here.
   patch. **`@gl3/shared@0.1.3` has since been published** — the properties
   cluster widened the surface additively (`PropertyRowSchema`,
   `PropertyListResponseSchema` for the hand-written web page), again a patch.
-  The registry now serves `@gl3/shared` `0.1.1`, `0.1.2` and `0.1.3`, and
-  `@gl3/plugin-sdk@0.1.0`. **`packages/shared/package.json` is bumped to
-  `0.1.4`** for the rounds cluster's two `GameEvent` variants and
-  `dto/rounds.ts`, but — unlike the three patches above — it has **not**
-  been published: publishing is an outward-facing, hard-to-reverse action
-  reserved for a human decision, so `npm.gl3.dev` still serves `0.1.3` as
-  the newest `@gl3/shared` until that publish happens. An out-of-repo plugin
-  cannot call `publishCore` with `round.started` or `round.finished` until
-  it does.
+  **`@gl3/shared@0.1.4` has since been published** — the rounds cluster
+  widened the surface additively (the `round.started` and `round.finished`
+  `GameEvent` variants, plus `dto/rounds.ts`), again a patch, and
+  `@gl3/plugin-sdk` needed no bump because its `CoreEventInput` is derived
+  from `GameEvent` rather than restated. The registry now serves
+  `@gl3/shared` `0.1.1`, `0.1.2`, `0.1.3` and `0.1.4`, and
+  `@gl3/plugin-sdk@0.1.0`.
 - **Adding a variant to `GameEvent` breaks four places, and none of the last
   two is a type error.** The two obvious ones are the exhaustive switches in
   `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
