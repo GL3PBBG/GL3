@@ -1,4 +1,4 @@
-import { eq, ne, sql } from "drizzle-orm";
+import { asc, eq, ne, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
@@ -6,7 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { LoginRequestSchema, RegisterRequestSchema } from "@gl3/shared";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
-import { players, playerStats, roleModuleAccess, roles } from "../db/schema/index.js";
+import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
@@ -69,6 +69,35 @@ export function registerAuthRoutes(
           passwordHash,
         });
         await tx.insert(playerStats).values({ playerId });
+
+        // A player who registers halfway through a round competes on progress
+        // from the moment they join, not from zero. There is no round id in
+        // scope here — the register route knows nothing about rounds — so the
+        // block starts with its own read, using the same active predicate
+        // ensureCurrentRound's probe uses. Registration deliberately does NOT
+        // call ensureCurrentRound: that opens a transaction (we are in one) and
+        // takes a global advisory lock, and this is a hot path. A round that
+        // has ended but not yet rolled over matches nothing here; the next
+        // round's whole-population activation picks the player up.
+        const [round] = await tx.select({ id: rounds.id }).from(rounds)
+          .where(sql`${rounds.finalizedAt} is null
+                     and ${rounds.startsAt} is not null and ${rounds.startsAt} <= now()
+                     and (${rounds.endsAt} is null or ${rounds.endsAt} > now())`)
+          .orderBy(asc(rounds.startsAt), asc(rounds.id))
+          .limit(1);
+
+        if (round) {
+          // INSERT ... SELECT off player_stats rather than three literal zeroes:
+          // hard-coded 0n would be correct today and would silently start lying
+          // the day new players get a starting balance.
+          await tx.execute(sql`
+            insert into round_entries (round_id, player_id, joined_at, exp_at_start, cash_at_start, bank_at_start)
+            select ${round.id}, ps.player_id, now(), ps.exp, ps.cash, ps.bank
+            from player_stats ps where ps.player_id = ${playerId}
+            on conflict (round_id, player_id) do nothing`);
+
+          await tx.update(players).set({ roundId: round.id }).where(eq(players.id, playerId));
+        }
 
         // First-player-ever becomes Administrator. The advisory lock is
         // load-bearing: under read committed, two concurrent first registrations

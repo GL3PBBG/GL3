@@ -1,17 +1,22 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { players, playerStats, roundEntries, rounds } from "../src/db/schema/index.js";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { players, playerStats, roleModuleAccess, roundEntries, rounds } from "../src/db/schema/index.js";
 import { ensureCurrentRound } from "../src/game/rounds/service.js";
+import { roundStandings } from "../src/game/rounds/standings.js";
 import { createRedis } from "../src/redis.js";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { bootTestServer } from "./helpers/server.js";
 
 const { db } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
 const SETTINGS = { "rounds.payout_points": "[1000,500,250]" };
 
-afterAll(async () => { await redis.quit(); });
+let app: Awaited<ReturnType<typeof bootTestServer>>["app"];
+let closeServer: () => Promise<void>;
+beforeAll(async () => { const booted = await bootTestServer(); app = booted.app; closeServer = booted.close; });
+afterAll(async () => { await closeServer(); await redis.quit(); });
 beforeEach(async () => { await resetDb(db); });
 
 async function seedPlayer(username: string, exp: bigint): Promise<string> {
@@ -83,5 +88,71 @@ describe("round activation snapshot", () => {
     const [again] = await db.select().from(rounds).where(eq(rounds.id, only));
     expect(again!.snapshottedAt?.toISOString()).toBe(stamp?.toISOString());
     expect(await db.select().from(roundEntries)).toHaveLength(3);
+  });
+});
+
+describe("registration snapshot", () => {
+  it("gives a mid-round registrant an entry at their own values, standing 0", async () => {
+    const roundId = await seedRound("Mid", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "midjoiner", password: "correct horse battery" },
+    });
+    expect(res.statusCode).toBe(201);
+
+    const [player] = await db.select().from(players).where(eq(players.username, "midjoiner"));
+    await db.update(playerStats).set({ exp: 500n, cash: 700n }).where(eq(playerStats.playerId, player!.id));
+
+    const [entry] = await db.select().from(roundEntries)
+      .where(and(eq(roundEntries.roundId, roundId), eq(roundEntries.playerId, player!.id)));
+    expect(entry).toBeDefined();
+    expect(entry!.expAtStart).toBe(0n);
+    expect(entry!.joinedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+    expect(player!.roundId).toBe(roundId);
+
+    const board = await roundStandings(db, roundId, "exp", 10, false);
+    const mine = board.find((e) => e.playerId === player!.id);
+    expect(mine!.score).toBe("500");   // delta from THEIR start, not their absolute total
+  });
+
+  it("writes no entry and leaves round_id null when no round is active", async () => {
+    expect(await db.select().from(rounds)).toEqual([]);
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "noroundplayer", password: "correct horse battery" },
+    });
+    expect(res.statusCode).toBe(201);
+
+    const [player] = await db.select().from(players).where(eq(players.username, "noroundplayer"));
+    expect(player!.roundId).toBeNull();
+    expect(await db.select().from(roundEntries)).toEqual([]);
+  });
+
+  it("writes no entry when the current round has ended but nobody has rolled it over", async () => {
+    await seedRound("Over", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "afterhours", password: "correct horse battery" },
+    });
+    expect(res.statusCode).toBe(201);
+    const [player] = await db.select().from(players).where(eq(players.username, "afterhours"));
+    expect(player!.roundId).toBeNull();
+    expect(await db.select().from(roundEntries)).toEqual([]);
+  });
+
+  it("still makes the first registration an Administrator while a round is active", async () => {
+    await seedRound("Admin Round", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "firstadmin", password: "correct horse battery" },
+    });
+    expect(res.statusCode).toBe(201);
+
+    const [player] = await db.select().from(players).where(eq(players.username, "firstadmin"));
+    expect(player!.roleId).not.toBeNull();
+    const grants = await db.select().from(roleModuleAccess).where(eq(roleModuleAccess.roleId, player!.roleId!));
+    expect(grants.map((g) => g.moduleKey)).toContain("*");
+    expect(await db.select().from(roundEntries)).toHaveLength(1);
   });
 });
