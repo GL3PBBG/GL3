@@ -1,16 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
-import { readPropertiesSettings } from "./settings.js";
-import { accruedSince } from "./resolve.js";
 import { adminPage } from "./pages.js";
-
-// Re-exported so tests can import the parser and types directly.
-export { readPropertiesSettings, type PropertiesSettings } from "./settings.js";
-export { accruedSince } from "./resolve.js";
 
 // ---------------------------------------------------------------------------
 // Params schema — id in the path, validated by the loader via `params`.
@@ -30,7 +24,6 @@ const listRoute = route({
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
 
     return ctx.transaction(async (tx) => {
       const rows = await tx.db
@@ -40,8 +33,7 @@ const listRoute = route({
           pluginId: propertiesTable.pluginId,
           ownerPlayerId: propertiesTable.ownerPlayerId,
           cost: propertiesTable.cost,
-          rate: propertiesTable.rate,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
+          profit: propertiesTable.profit,
           locationName: locations.name,
           ownerName: players.username,
         })
@@ -49,23 +41,26 @@ const listRoute = route({
         .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
 
-      const now = new Date();
       return {
         status: 200,
         body: {
           rows: rows.map((row) => {
+            const decl = ctx.propertyTypes.get(row.pluginId);
             const isOwner = row.ownerPlayerId === player.id;
-            const accrued = isOwner
-              ? accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now)
-              : 0n;
             return {
               id: row.id,
+              locationId: row.locationId,
               locationName: row.locationName ?? "",
               pluginId: row.pluginId,
-              rate: row.rate.toString(),
+              typeName: decl?.name ?? row.pluginId,
+              // "" when the type is not installed: there is no declared price,
+              // so the row is not buyable and the page renders no Buy button.
+              price: decl === null ? "" : decl.price.toString(),
+              leverLabel: decl?.leverLabel ?? "",
               ownerName: row.ownerPlayerId ? (row.ownerName ?? "") : "—",
-              cost: row.cost.toString(),
-              accrued: accrued.toString(),
+              // The lever and the P&L are the owner's business only.
+              lever: isOwner ? row.cost.toString() : "",
+              profit: isOwner ? row.profit.toString() : "",
             };
           }),
         },
@@ -128,7 +123,6 @@ const buyRoute = route({
         throw new PluginError("insufficient_funds", 409);
       }
 
-      const now = new Date();
       await tx.economy.applyBalanceChange({
         playerId: player.id,
         amount: -row.cost,
@@ -137,7 +131,7 @@ const buyRoute = route({
       });
       await tx.db
         .update(propertiesTable)
-        .set({ ownerPlayerId: player.id, lastClaimedAt: now })
+        .set({ ownerPlayerId: player.id })
         .where(eq(propertiesTable.id, row.id));
 
       // Fetch the location name for the event payload under the same tx.
@@ -155,179 +149,6 @@ const buyRoute = route({
       });
 
       return { status: 200, body: { propertyId: row.id } };
-    });
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Sell route
-// ---------------------------------------------------------------------------
-
-const sellRoute = route({
-  method: "POST",
-  path: "/api/properties/:id/sell",
-  accessInJail: false,
-  accessInHospital: true,
-  params: PropertyParamsSchema,
-  handler: async (ctx, { params }) => {
-    const player = ctx.player;
-    if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
-
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
-
-      await tx.locks.location(before.locationId);
-      await tx.locks.player([player.id]);
-
-      // Lock-then-recheck.
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
-          rate: propertiesTable.rate,
-          profit: propertiesTable.profit,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== player.id) throw new PluginError("not_owned", 404);
-
-      const now = new Date();
-      const accrued = accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now);
-      const payout = row.cost + accrued;
-
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: payout,
-        kind: "cash",
-        reason: "properties.sell",
-      });
-      await tx.db
-        .update(propertiesTable)
-        .set({
-          ownerPlayerId: null,
-          lastClaimedAt: null,
-          profit: sql`${propertiesTable.profit} + ${accrued}`,
-        })
-        .where(eq(propertiesTable.id, row.id));
-
-      // Fetch the location name for the event payload.
-      const [loc] = await tx.db
-        .select({ name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, row.locationId));
-
-      await tx.events.publish({
-        name: "sold",
-        actorId: player.id,
-        actorName: player.username,
-        audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", payout: payout.toString() },
-      });
-
-      return { status: 200, body: { payout: payout.toString() } };
-    });
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Claim route
-// ---------------------------------------------------------------------------
-
-const claimRoute = route({
-  method: "POST",
-  path: "/api/properties/:id/claim",
-  accessInJail: false,
-  accessInHospital: true,
-  params: PropertyParamsSchema,
-  handler: async (ctx, { params }) => {
-    const player = ctx.player;
-    if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
-
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
-
-      await tx.locks.location(before.locationId);
-      await tx.locks.player([player.id]);
-
-      // Lock-then-recheck.
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
-          rate: propertiesTable.rate,
-          profit: propertiesTable.profit,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== player.id) throw new PluginError("not_owned", 404);
-
-      const now = new Date();
-      const accrued = accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now);
-
-      // Zero-claim: return immediately, do NOT touch last_claimed_at.
-      if (accrued === 0n) {
-        return { status: 200, body: { claimed: "0" } };
-      }
-
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: accrued,
-        kind: "cash",
-        reason: "properties.income",
-      });
-      await tx.db
-        .update(propertiesTable)
-        .set({
-          lastClaimedAt: now,
-          profit: sql`${propertiesTable.profit} + ${accrued}`,
-        })
-        .where(eq(propertiesTable.id, row.id));
-
-      // Fetch the location name for the event payload.
-      const [loc] = await tx.db
-        .select({ name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, row.locationId));
-
-      await tx.events.publish({
-        name: "income",
-        actorId: player.id,
-        actorName: player.username,
-        audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", amount: accrued.toString() },
-      });
-
-      return { status: 200, body: { claimed: accrued.toString() } };
     });
   },
 });
@@ -386,10 +207,6 @@ const PropertyCreateSchema = z
     locationId: z.string().uuid(),
     pluginId: z.string().min(1).max(80),
     cost: AdminMoney,
-    // Optional: blank (the page renderer's convention for a left-empty
-    // field, see `blankable` above) or omitted falls back to the plugin's
-    // `income.default_rate` setting in the handler below (spec §4).
-    rate: blankable(AdminMoney),
   })
   .strict();
 
@@ -398,7 +215,6 @@ const PropertyUpdateSchema = z
     id: z.string().uuid(),
     pluginId: blankable(z.string().min(1).max(80)),
     cost: AdminMoney,
-    rate: AdminMoney,
   })
   .strict();
 
@@ -466,7 +282,6 @@ const adminListRoute = route({
           pluginId: propertiesTable.pluginId,
           ownerPlayerId: propertiesTable.ownerPlayerId,
           cost: propertiesTable.cost,
-          rate: propertiesTable.rate,
           profit: propertiesTable.profit,
           locationName: locations.name,
           ownerName: players.username,
@@ -482,7 +297,6 @@ const adminListRoute = route({
         plugin: p.pluginId,
         ownerName: p.ownerPlayerId ? (p.ownerName ?? "") : "",
         cost: p.cost.toString(),
-        rate: p.rate.toString(),
         profit: p.profit.toString(),
       }));
 
@@ -505,8 +319,6 @@ const adminCreateRoute = route({
       throw new PluginError("unknown_property_type", 404);
     }
     const id = uuidv7();
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
-    const rate = body.rate !== undefined ? BigInt(body.rate) : config.income.defaultRate;
     try {
       await ctx.transaction(async (tx) => {
         await tx.db.insert(propertiesTable).values({
@@ -514,7 +326,6 @@ const adminCreateRoute = route({
           locationId: body.locationId,
           pluginId: body.pluginId,
           cost: BigInt(body.cost),
-          rate,
         });
       });
     } catch (err: unknown) {
@@ -555,7 +366,6 @@ const adminUpdateRoute = route({
         .update(propertiesTable)
         .set({
           cost: BigInt(body.cost),
-          rate: BigInt(body.rate),
           ...(body.pluginId !== undefined && { pluginId: body.pluginId }),
         })
         .where(eq(propertiesTable.id, body.id));
@@ -577,20 +387,6 @@ const boughtEvent = {
   invalidates: ["properties", "me"],
 };
 
-const soldEvent = {
-  name: "sold",
-  payload: z.object({ propertyName: z.string(), payout: z.string() }),
-  describe: "{actorName} sold {propertyName} for {payout}",
-  invalidates: ["properties", "me"],
-};
-
-const incomeEvent = {
-  name: "income",
-  payload: z.object({ propertyName: z.string(), amount: z.string() }),
-  describe: "{actorName} claimed {amount} from {propertyName}",
-  invalidates: ["properties", "me"],
-};
-
 // ---------------------------------------------------------------------------
 // Manifest
 // ---------------------------------------------------------------------------
@@ -603,8 +399,8 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute],
-  events: [boughtEvent, soldEvent, incomeEvent],
+  routes: [listRoute, buyRoute, adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute],
+  events: [boughtEvent],
   pages: [],
   adminPages: [adminPage],
 });

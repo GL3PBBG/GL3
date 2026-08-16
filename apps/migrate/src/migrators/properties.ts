@@ -28,19 +28,15 @@ export async function migrateProperties(pool: mysql.Pool, exec: Executor, report
     const ownerPlayerId = row.PR_user > 0 ? await lookupV3Id(exec, "users", row.PR_user) : null;
     const { v3Id } = await getOrCreateV3Id(exec, "properties", row.PR_id);
     // SPEC §1.2: PR_module is the implementing module's name -> plugin_id.
-    // SPEC §2: migrated owners must not inherit phantom back-accrual from
-    // 2015 — stamp lastClaimedAt so the plugin's lazy-income collector
-    // treats the row as already claimed.
+    // No lastClaimedAt or rate: income is paid by the consumer plugin, not
+    // accrued from a clock, so there is no accrual epoch to stamp and nothing
+    // for a migrated owner to inherit.
+    //
+    // PR_cost migrates verbatim into `cost`, which is the owner's lever on
+    // both sides (V2's PR_cost is the bullet price / max bet).
     const values = {
       id: v3Id, locationId, pluginId: row.PR_module, ownerPlayerId,
       cost: BigInt(row.PR_cost), profit: BigInt(row.PR_profit),
-      lastClaimedAt: ownerPlayerId ? new Date() : null,
-      // Hardcoded, NOT read from properties.income.default_rate — the
-      // migrator has no connection to the plugin's settings reader. The
-      // constant happens to match the setting's own default (500), so
-      // no migrated row is wrong today, but an operator who changes the
-      // setting will not see it reflected here (docs/STATUS.md).
-      rate: 500n,
     };
     await exec.insert(propertiesPlugin).values(values).onConflictDoUpdate({ target: propertiesPlugin.id, set: values });
     bumpTable(report, "properties", "written");
