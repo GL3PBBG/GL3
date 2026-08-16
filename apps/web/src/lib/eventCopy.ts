@@ -78,6 +78,14 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
       return event.success
         ? `Heist succeeded — your share: ${formatMoney(event.share)}.`
         : "Heist failed — you were jailed.";
+    case "round.started":
+      return `Round ${event.roundName} has started`;
+    case "round.finished": {
+      const winner = event.winners.find((w) => w.placing === 1);
+      return winner === undefined
+        ? `Round ${event.roundName} has finished`
+        : `Round ${event.roundName} has finished — ${winner.username} took first`;
+    }
     case "plugin.event": {
       // The copy is the plugin's own `describe` template from GET /api/plugins;
       // only the manifest knows how to word a plugin's event. Matched on

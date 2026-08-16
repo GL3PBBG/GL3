@@ -91,8 +91,33 @@ export const GameEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("oc.updated"), heistId: IdSchema, status: z.enum(["open", "executing", "done", "failed", "cancelled"]) }),
   // actor = the OC participant receiving the result.
   z.object({ ...base, type: z.literal("oc.resolved"), heistId: IdSchema, success: z.boolean(), share: MoneySchema, jailSeconds: z.number().int().nonnegative() }),
+  // actor = the round itself: `actorId` is the round's id and `actorName` its
+  // name. Rollover has no acting player — it is triggered by whichever request
+  // happened to notice — and naming that player would tell everyone that Bob
+  // ended the season. `base.actorId` is a non-nullable IdSchema, so a null is
+  // not available; a round id is a real uuid, is stable, and gives tests a
+  // per-round discriminator on a globally-audienced event.
+  z.object({
+    ...base,
+    type: z.literal("round.started"),
+    roundId: IdSchema,
+    roundName: z.string(),
+    endsAt: TimestampSchema.nullable(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("round.finished"),
+    roundId: IdSchema,
+    roundName: z.string(),
+    winners: z.array(z.object({
+      playerId: IdSchema,
+      username: z.string(),
+      placing: z.number().int().positive(),
+      points: MoneySchema,
+    })),
+  }),
   /**
-   * The envelope every plugin event travels in. The twenty-two core variants
+   * The envelope every plugin event travels in. The twenty-five core variants
    * above stay closed and unchanged; ported core modules keep emitting their
    * own typed variants (spec: Events). A plugin declares the payload schema,
    * the `describe` template and the invalidation keys in its manifest, and all

@@ -178,6 +178,18 @@ describe("invalidationKeys", () => {
     ]);
   });
 
+  it("refreshes rounds, leaderboards and the wallet when a round starts", () => {
+    expect(invalidationKeys(event("round.started"), VIEWER)).toEqual([
+      keys.rounds(), keys.leaderboards(), keys.me(),
+    ]);
+  });
+
+  it("refreshes rounds, leaderboards, notifications and the wallet when a round finishes", () => {
+    expect(invalidationKeys(event("round.finished"), VIEWER)).toEqual([
+      keys.rounds(), keys.leaderboards(), keys.notifications(), keys.me(),
+    ]);
+  });
+
   it("player.attacked also refreshes hospital, because combat can discharge a target silently", () => {
     const event_obj: GameEvent = {
       id: "01920000-0000-7000-8000-000000000002",

@@ -97,6 +97,8 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "bullets.purchased", audience: { kind: "player", playerId: UUID_A }, locationId: UUID_A, quantity: 5, cost: "500", cash: "500", bullets: "5" },
   { type: "oc.updated", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, status: "open" },
   { type: "oc.resolved", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, success: true, share: "2500", jailSeconds: 0 },
+  { type: "round.started", audience: { kind: "global" }, roundId: UUID_A, roundName: "Season 1", endsAt: "2026-09-01T00:00:00.000Z" },
+  { type: "round.finished", audience: { kind: "global" }, roundId: UUID_A, roundName: "Season 1", winners: [{ playerId: UUID_B, username: "alice", placing: 1, points: "1000" }] },
 ];
 
 describe("tx.events.publishCore", () => {
