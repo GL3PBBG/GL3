@@ -311,6 +311,7 @@ export default defineWorkspace([
         "test/ranks.test.ts",
         "test/rounds-finalize.test.ts",
         "test/rounds-ledger.test.ts",
+        "test/rounds-lock-order.test.ts",
         "test/rounds-rollover.test.ts",
         "test/rounds-routes.test.ts",
         "test/rounds-snapshot.test.ts",
