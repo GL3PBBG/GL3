@@ -32,10 +32,22 @@ describe("migrateProperties", () => {
 
       const vitoId = (await lookupV3Id(db, "users", 1))!;
       const rows = await db.select().from(propertiesPlugin);
-      expect(rows).toHaveLength(1); // location 99 orphan dropped
-      expect(rows[0]).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n, rate: 500n });
-      expect(rows[0].lastClaimedAt).not.toBeNull(); // owned row gets a timestamp
+
+      // Location 1 'casino' (owned), location 2 'bullets' (PR_user = -1 ->
+      // unowned). The location-99 row is dropped as an orphan.
+      const casino1 = rows.find((r) => r.pluginId === "casino" && r.ownerPlayerId !== null);
+      expect(rows).toHaveLength(2);
+      expect(casino1).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n, rate: 500n });
+      expect(casino1!.lastClaimedAt).not.toBeNull();
+
+      const closed = rows.find((r) => r.ownerPlayerId === null);
+      expect(closed).toBeDefined();
+      expect(closed!.ownerPlayerId).toBeNull();
+      expect(closed!.lastClaimedAt).toBeNull(); // unowned rows get no accrual clock
+
       expect(report.orphans).toContainEqual({ table: "properties", v2Id: 99, reason: "location 99 does not exist" });
+      // PR_user = -1 must NOT be reported as an orphan user.
+      expect(report.orphans.some((o) => o.v2Id === -1)).toBe(false);
 
       await pool.end();
       await sql.end();
