@@ -1484,8 +1484,13 @@ whole-file reconciliation across a rollover), `rounds-rollover` (1, the
 rounds↔player pair — the fourth lock pair in the codebase after
 gang↔player, location↔player and player↔player — proven against real bank
 and combat routes behind a `pg_stat_activity` barrier, not a same-helper
-race), `rounds-routes` (13), `admin-rounds` (28, including the
-two-concurrent-creates overlap proof), and the web `rounds-page` (9). Net
+race), `rounds-routes` (13), `admin-rounds` (28 — one static `it(` call
+site inside a `for (const g of geometries)` loop expands to 5 runtime
+tests over the five colliding geometries, so a source-line count of `it(`
+finds 24 and undercounts by exactly that loop's width; the geometries
+array and the loop are both in the "overlap rejected at write time" block,
+including the two-concurrent-creates overlap proof), and the web
+`rounds-page` (9). Net
 tree total: **177 files / 1370 tests**, up from 167/1269 — the other nine
 tests are edits inside existing files (`leaderboard`, `event-copy`,
 `invalidation`, `admin-ids-hidden`'s floor raised to 10 sections).
