@@ -100,6 +100,14 @@ describe("GET /api/leaderboard/:kind", () => {
     expect(body.kind).toBe("cash");
     expect(body.entries.some((e: { playerId: string; score: string }) => e.playerId === playerId && e.score === "700")).toBe(true);
 
+    // scope=all must be byte-identical to sending no scope at all: recordScore,
+    // rebuildLeaderboards and topN are unmodified by rounds, and this is what
+    // pins that every caller sending no querystring — the web client included —
+    // keeps getting exactly this ZSET-backed payload.
+    const explicitAll = await app.inject({ method: "GET", url: "/api/leaderboard/cash?scope=all", headers: { authorization: `Bearer ${token}` } });
+    expect(explicitAll.statusCode).toBe(200);
+    expect(explicitAll.json()).toEqual(body);
+
     const bad = await app.inject({ method: "GET", url: "/api/leaderboard/not-a-kind", headers: { authorization: `Bearer ${token}` } });
     expect(bad.statusCode).toBe(400);
 

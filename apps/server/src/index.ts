@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
+import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { withCorePlugins } from "./plugins/core-plugins.js";
@@ -52,6 +53,15 @@ const optionalManifests = config.pluginIds.map((id) => {
 const manifests: PluginManifest[] = withCorePlugins(optionalManifests);
 
 const loadedSettings = await loadSettings(db);
+
+// Deliberately here and NOT in buildApp: every integration test builds its
+// server through buildApp/bootTestServer, and a boot-time rollover firing under
+// those tests would make round assertions race — the same reason the sentence
+// sweeper is kept out of buildApp. The boot call is what absorbs the expensive
+// case: a server that was down across several scheduled rounds settles them all
+// here rather than making the first player of the day pay for it.
+await ensureCurrentRound(db, redis, loadedSettings);
+
 const loadedPlugins = await loadPlugins(
   { db, redis, settings: loadedSettings, leaderboardPrefix: DEFAULT_LEADERBOARD_PREFIX },
   manifests,
