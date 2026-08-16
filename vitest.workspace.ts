@@ -199,6 +199,7 @@ export default defineWorkspace([
         "test/plugin-map.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",
+        "test/rounds-settings.test.ts",
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
         "test/properties-settings.test.ts",
