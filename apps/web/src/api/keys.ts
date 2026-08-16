@@ -13,7 +13,7 @@ export const keys = {
   crimes: () => ["crimes"] as const,
   locations: () => ["locations"] as const,
   ranks: () => ["ranks"] as const,
-  leaderboard: (kind: LeaderboardKind) => ["leaderboard", kind] as const,
+  leaderboard: (kind: LeaderboardKind, scope: "round" | "all") => ["leaderboard", kind, scope] as const,
   rounds: () => ["rounds"] as const,
   roundStandings: (roundId: string, kind: LeaderboardKind) =>
     ["rounds", roundId, "standings", kind] as const,
