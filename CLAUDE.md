@@ -98,7 +98,6 @@ manifest-declared `adminPages` table + forms; three events (`bought`,
 `sold`, `income`) publish to the acting player with
 `invalidates: ["properties", "me"]`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
-**M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-

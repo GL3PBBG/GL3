@@ -17,13 +17,15 @@ Branch: `feat/properties`.
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped |
 
-**Suite: 167 files / 1269 tests**, `npm run verify` exit 0. (M4 added the 30 files /
+**Suite: 167 files / 1272 tests**, `npm run verify` exit 0. (M4 added the 30 files /
 58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
 ranks, backfire and weapon condition added 5 files / 70 tests; car theft added
-8 files / 60 tests; properties added 7 files / 56 tests — see the sections
-below. 1216 + 56 = 1272, but the run measures 1269 — the same
-recorded-vs-measured drift this file has corrected before; 1269 is the
-measured figure, the run's own per-file sum.)
+8 files / 60 tests; properties added 7 files / 55 tests (52 at first ship,
+plus 3 from the final-review fix pass: N1's admin-create-default-rate test
+and N13's two income-cap tests) — see the sections below. 1216 + 55 = 1271,
+but the run measures 1272 — the same recorded-vs-measured drift this file
+has corrected before; 1272 is the measured figure, the run's own per-file
+sum.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -1367,13 +1369,17 @@ behaviour**.
   `["properties"]`, matching the manifest `invalidates` prefix.
 
 **Settings** (`properties.*` namespaced by the SDK): `income.cap`
-(1_000_000), `income.default_rate` (500), `admin.can_edit_rate` (true —
-parsed but unread; spec §4 creates it for a future runmode).
+(1_000_000), `income.default_rate` (500 — wired into admin create's
+fallback when `rate` is omitted; still parsed but unread by
+`apps/migrate`'s `migrateProperties`, which hardcodes `500` instead),
+`admin.can_edit_rate` (true — parsed but unread; spec §4 creates it for a
+future runmode).
 
-Seven new test files / 56 tests: `properties-settings` (7),
-`properties-resolve` (10), `properties-routes` (16), `properties-events`
-(4), `properties-lock-order` (3), `admin-properties` (8), and the web
-`properties-page` (4, pure `rowAction`).
+Seven new test files / 55 tests: `properties-settings` (7),
+`properties-resolve` (10), `properties-routes` (18, including N13's two
+income-cap tests), `properties-events` (4), `properties-lock-order` (3),
+`admin-properties` (9, including N1's admin-create-default-rate test), and
+the web `properties-page` (4, pure `rowAction`).
 
 ### Installing a plugin without forking core
 

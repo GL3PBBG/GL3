@@ -28,8 +28,8 @@ In scope:
 - **lazy on-claim income**: profit accrues by wall-clock formula and is
   banked when the owner visits
 - one player page (`/properties`) and one admin page (`/admin/properties`)
-- profit share on buy/sell: the previous owner's unclaimed profit travels
-  with the property, not the sale
+- profit share on sale: unclaimed income is paid out to the seller at
+  sale time; the next buyer's accrual clock starts fresh at purchase
 
 Out of scope, and deliberately so:
 
@@ -73,7 +73,9 @@ the row to the unowned state), and `rate` is the per-hour income in cents,
 admin-editable per property. `apps/migrate`'s `migrateProperties` retargets
 to the plugin table and stamps `last_claimed_at = migration start` for
 previously-owned rows (so migrated owners do not inherit a phantom
-back-accrual from 2015); `rate` defaults from settings, not per-row.
+back-accrual from 2015); `rate` is hardcoded to `500` in the migrator (it
+does not read `properties.income.default_rate` — see §4); admin create
+reads the setting when `rate` is omitted.
 
 No core code reads or writes `properties` today (verified by grep at plan
 time; the migration census in `schema.test.ts` must be recomputed the same
@@ -83,11 +85,13 @@ Lock graph: the new `p_properties_properties` row reaches `locations` and
 `players` by FK. **Every route that takes a player lock must take the
 location lock first** — locations-first is the established order for the
 location↔player pair (CLAUDE.md rule 6). Buying/selling/claiming lock
-`locations[L]` then `player_stats[P]` then read/update the property row,
-which cannot be half of a deadlock cycle the admin editor doesn't join:
-the admin routes touch **only** the property row (single table, no FK
-reaching outward that the UPDATE itself doesn't already own), so like
-theft's admin car editor they hold exactly one lock.
+`locations[L]` then `player_stats[P]` then read/update the property row.
+Neither admin route can be half of a deadlock cycle with those, but for
+different reasons: the create INSERT takes `FOR KEY SHARE` on
+`locations[L]` via its `location_id` FK and acquires nothing afterwards;
+the update takes `FOR UPDATE` on one property row and nothing else — like
+theft's admin car editor, it touches only the table the UPDATE itself
+already owns.
 
 ## 3. Income model — lazy, on-claim
 
@@ -117,8 +121,9 @@ re-reads the row FOR UPDATE, verifies ownership (404 `not_owned` —
 404-not-403, so existence is not probeable), computes `accrued`, adds it
 to `profit`... no — computes `accrued`, zeroes it into the ledger:
 `applyBalanceChange(player, +accrued, "properties.income")` and sets
-`last_claimed_at = now`. `profit` the column is **not** incremented by
-claims; it is the running total *paid out* (see §5). If `accrued == 0`
+`last_claimed_at = now`. `profit` is the running total *paid out* — it is
+incremented by both a claim's `accrued` and a sale's `accrued` (see §5).
+If `accrued == 0`
 the route still resets nothing and returns `200 { claimed: "0" }` — a
 no-op claim is free, does not move `last_claimed_at`, and is the cheap
 answer to a player hammering the button.
@@ -144,13 +149,16 @@ route publishes after commit (rule 5).
 
 ## 4. Settings
 
-One settings row per key, plugin-prefixed (the theft precedent):
+One settings row per key. Keys are bare (SDK-namespaced as
+`properties.<key>`, matching the theft precedent —
+`properties-settings.test.ts` proves the un-prefixed form is the one the
+parser reads):
 
 | key | default | meaning |
 |---|---|---|
-| `properties.income.cap` | `1000000` | max unclaimed pool, bigint cents |
-| `properties.income.defaultRate` | `500` | per-hour rate applied to rows with no explicit `rate` (migration default and admin create) |
-| `properties.admin.canEditRate` | `true` | informational only — the admin page always edits `rate`; key exists so a future runmode can pin it |
+| `income.cap` | `1000000` | max unclaimed pool, bigint cents |
+| `income.default_rate` | `500` | per-hour rate applied when admin create omits `rate` (the migrator still hardcodes `500` — see §2) |
+| `admin.can_edit_rate` | `true` | informational only — the admin page always edits `rate`; key exists so a future runmode can pin it |
 
 Settings are read at boot (the boot-time snapshot pattern); tests that need
 different values boot their own server (`theft-chase.test.ts` precedent).
@@ -180,7 +188,7 @@ design doc's dotted names are shorthand.
 **Player page (`/properties`, menu order 42):** a table of the world's
 properties — name (location name), flavour label (`plugin_id`), rate,
 owner name or "—", `cost` when unowned, and a per-row action: Buy when
-unowned, Claim when yours, nothing when another's. Hand-written React in
+unowned, Claim + Sell when yours, nothing when another's. Hand-written React in
 `apps/web` (this cluster has no declarative-page precedent among
 player pages for an action-per-foreign-row table — `garagePage` actions
 are own-row only; writing it by hand keeps the row-action logic in one
@@ -211,10 +219,12 @@ update property row
 publish after commit
 ```
 
-The admin routes hold exactly one lock (the property row) and touch no
-other table — the same "a transaction holding exactly one lock cannot be
-half of a deadlock cycle" argument as theft's admin car editor, with the
-same mandated comment.
+The admin update route holds exactly one lock (the property row) and
+touches no other table — the same "a transaction holding exactly one lock
+cannot be half of a deadlock cycle" argument as theft's admin car editor,
+with the same mandated comment. The admin create route's INSERT takes
+`FOR KEY SHARE` on `locations[L]` via the `location_id` FK and acquires
+nothing afterwards, so it likewise cannot be half of a cycle — see §2.
 
 Regression test: `properties-lock-order.test.ts`, the
 `theft-lock-order.test.ts` shape — a blocker connection holding
