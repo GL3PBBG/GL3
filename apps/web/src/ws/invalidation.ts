@@ -98,6 +98,10 @@ export function invalidationKeys(
       // A heist crew is individual players, not a gang — refresh the /oc
       // page (slot grid / invites) and the wallet (payout / refund moves cash).
       return [keys.oc(), keys.me()];
+    case "round.started":
+      return [keys.rounds(), keys.leaderboards(), keys.me()];
+    case "round.finished":
+      return [keys.rounds(), keys.leaderboards(), keys.notifications(), keys.me()];
     case "chat.message":
     case "player.joined":
       return [];

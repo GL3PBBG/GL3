@@ -100,4 +100,26 @@ describe("describeEvent", () => {
       type: "player.backfired", selfDamage: 40, hospitalised: true,
     }))).toBe("Your weapon backfired for 40 — hospitalised");
   });
+
+  it("announces a round starting", () => {
+    expect(describeEvent(event({
+      type: "round.started", roundId: "00000000-0000-7000-8000-000000000010",
+      roundName: "Summer 2026", endsAt: null,
+    }))).toBe("Round Summer 2026 has started");
+  });
+
+  it("names the first-place winner when a round finishes", () => {
+    expect(describeEvent(event({
+      type: "round.finished", roundId: "00000000-0000-7000-8000-000000000010",
+      roundName: "Summer 2026",
+      winners: [{ playerId: "00000000-0000-7000-8000-000000000011", username: "alice", placing: 1, points: "1000" }],
+    }))).toBe("Round Summer 2026 has finished — alice took first");
+  });
+
+  it("falls back to a plain finish message when there are no winners", () => {
+    expect(describeEvent(event({
+      type: "round.finished", roundId: "00000000-0000-7000-8000-000000000010",
+      roundName: "Summer 2026", winners: [],
+    }))).toBe("Round Summer 2026 has finished");
+  });
 });
