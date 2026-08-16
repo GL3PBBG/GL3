@@ -18,6 +18,7 @@ import {
   PropertyListResponseSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
   RepairResponseSchema,
+  RoundListResponseSchema, RoundStandingsResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
   WeaponConditionDtoSchema,
@@ -40,6 +41,7 @@ import {
   type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
   type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
   type RepairResponse,
+  type RoundListResponse, type RoundStandingsResponse,
   type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
   type WeaponConditionDto,
@@ -110,10 +112,25 @@ export function useRanks() {
   });
 }
 
-export function useLeaderboard(kind: LeaderboardKind) {
+export function useLeaderboard(kind: LeaderboardKind, scope: "round" | "all") {
   return useQuery<LeaderboardResponse>({
-    queryKey: keys.leaderboard(kind),
-    queryFn: async () => LeaderboardResponseSchema.parse(await api(`/api/leaderboard/${kind}`)),
+    queryKey: keys.leaderboard(kind, scope),
+    queryFn: async () => LeaderboardResponseSchema.parse(await api(`/api/leaderboard/${kind}?scope=${scope}`)),
+  });
+}
+
+export function useRounds() {
+  return useQuery<RoundListResponse>({
+    queryKey: keys.rounds(),
+    queryFn: async () => RoundListResponseSchema.parse(await api("/api/rounds")),
+  });
+}
+
+export function useRoundStandings(roundId: string, kind: LeaderboardKind) {
+  return useQuery<RoundStandingsResponse>({
+    queryKey: keys.roundStandings(roundId, kind),
+    queryFn: async () =>
+      RoundStandingsResponseSchema.parse(await api(`/api/rounds/${roundId}/standings?kind=${kind}`)),
   });
 }
 
