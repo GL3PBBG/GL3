@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { adminPage as propertiesAdminPage } from "@gl3/plugin-properties";
-import { locations as coreLocations } from "../src/db/schema/index.js";
+import { locations as coreLocations, settings as coreSettings } from "../src/db/schema/index.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -173,5 +173,40 @@ describe("properties admin", () => {
     walk(propertiesAdminPage.view);
     expect(idKeys.filter((k) => /^id$|Id$/.test(k))).toEqual([]);
     expect(valueKeys).toContain("id");
+  });
+});
+
+/**
+ * N1: `income.default_rate` must be wired into admin create's fallback, not
+ * merely parsed. Settings are a boot-time snapshot (spec §4), so the row
+ * has to exist before the app starts — the `theft-chase.test.ts` reboot
+ * precedent. Placed last in the file: it closes and reboots the shared
+ * `app`, so no test after it may assume the default settings snapshot.
+ */
+describe("properties admin — default rate fallback", () => {
+  it("admin create without a rate falls back to properties.income.default_rate", async () => {
+    await closeServer();
+    await resetDb(db);
+    await db.insert(coreSettings).values({ key: "properties.income.default_rate", value: "777" });
+    ({ app, close: closeServer } = await bootTestServer());
+
+    const founder = await app.inject({
+      method: "POST", url: "/api/auth/register",
+      payload: { username: "RateFounder", password: "hunter2hunter2" },
+    });
+    adminToken = founder.json().token;
+
+    locationId = uuidv7();
+    await db.insert(coreLocations).values({ id: locationId, name: "Ratetown" });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "no-rate", cost: "10000" },
+    });
+    expect(res.statusCode).toBe(201);
+    const { id } = res.json() as { id: string };
+
+    const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id));
+    expect(row?.rate).toBe(777n);
   });
 });

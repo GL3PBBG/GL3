@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { locations, playerStats, transactions } from "../src/db/schema/index.js";
+import { locations, playerStats, settings, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -439,13 +439,75 @@ describe("properties routes", () => {
       .select({ amount: transactions.amount })
       .from(transactions)
       .where(eq(transactions.playerId, playerId));
-    const sumAmount = ledgerRows.reduce((s, r) => s + r.amount, 0n);
 
-    // The property-related ledger rows should account for the delta.
-    const propRows = ledgerRows.filter((_, i) => {
-      // All rows for this player are property-related in this test.
-      return true;
+    // Every ledger row for this player in this test is property-related.
+    expect(ledgerRows.reduce((s, r) => s + r.amount, 0n)).toBe(delta);
+  });
+});
+
+/**
+ * N13: `income.cap` is wired at three call sites (`index.ts` list, sell,
+ * claim) but was never proven end to end — a refactor could drop or swap
+ * the argument and every other test here would stay green, since their
+ * accruals sit far below the default 1,000,000 cap. Settings are a
+ * boot-time snapshot (spec §4), so the low cap must be seeded before this
+ * describe's own boot — the `theft-chase.test.ts` precedent. Placed last:
+ * it closes and reboots the shared `app`, so nothing after it may assume
+ * the default cap.
+ */
+describe("properties income cap enforcement", () => {
+  it("claim pays exactly the cap when accrued income exceeds it", async () => {
+    await closeServer();
+    await resetDb(db);
+    await db.insert(settings).values({ key: "properties.income.cap", value: "5000" });
+    ({ app, close: closeServer } = await bootTestServer());
+
+    ({ token, playerId } = await register());
+    auth = { authorization: `Bearer ${token}` };
+    locationId = await seedLocation();
+    await db.update(playerStats).set({ locationId, cash: 1_000_000n }).where(eq(playerStats.playerId, playerId));
+
+    // rate 1000/hr * 100 hours elapsed = 100,000 accrued, far past the 5000 cap.
+    const propId = await seedProperty(locationId, {
+      cost: 10_000n,
+      rate: 1_000n,
+      ownerPlayerId: playerId,
+      lastClaimedAt: new Date(Date.now() - 100 * 3600_000),
     });
-    expect(propRows.reduce((s, r) => s + r.amount, 0n)).toBe(delta);
+
+    const res = await claim(propId);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ claimed: "5000" });
+
+    const [row] = await db
+      .select({ profit: propertiesPlugin.profit })
+      .from(propertiesPlugin)
+      .where(eq(propertiesPlugin.id, propId));
+    expect(row?.profit).toBe(5000n);
+  });
+
+  it("sell payout is capped the same way", async () => {
+    await closeServer();
+    await resetDb(db);
+    await db.insert(settings).values({ key: "properties.income.cap", value: "5000" });
+    ({ app, close: closeServer } = await bootTestServer());
+
+    ({ token, playerId } = await register());
+    auth = { authorization: `Bearer ${token}` };
+    locationId = await seedLocation();
+    await db.update(playerStats).set({ locationId, cash: 1_000_000n }).where(eq(playerStats.playerId, playerId));
+
+    const propId = await seedProperty(locationId, {
+      cost: 10_000n,
+      rate: 1_000n,
+      ownerPlayerId: playerId,
+      lastClaimedAt: new Date(Date.now() - 100 * 3600_000),
+    });
+
+    const before = await cashOf(playerId);
+    const res = await sell(propId);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ payout: "15000" }); // cost 10,000 + capped accrued 5,000
+    expect(await cashOf(playerId)).toBe(before + 15_000n);
   });
 });
