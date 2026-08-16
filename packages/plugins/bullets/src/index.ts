@@ -195,6 +195,12 @@ export default definePlugin({
   basePaths: ["/api/bullets", "/api/admin/bullets"],
   routes: [buyRoute, adminListRoute, adminStockRoute],
   adminPages: [adminPage],
+  providesProperties: [{
+    id: "bullets",
+    name: "Bullet Factory",
+    price: 100_000_000n,          // $1,000,000 in cents — V2's hardcoded figure
+    leverLabel: "Price per bullet",
+  }],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot

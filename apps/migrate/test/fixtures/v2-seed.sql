@@ -108,17 +108,16 @@ INSERT INTO userInventory (UI_user, UI_item, UI_qty) VALUES
 INSERT INTO garage (GA_user, GA_car, GA_damage, GA_location) VALUES
   (1, 1, 10, 1),
   (77, 1, 0, 1); -- orphan: user 77 does not exist
--- Only locations 1 and 2 are seeded above, and the plugin table's current
--- unique(location_id) allows one property row per location, so only one of
--- the two V2 owner sentinels (0 = unowned, -1 = closed) fits here. The -1
--- row is the load-bearing one: it is the only case that distinguishes a
--- correct `PR_user > 0` check from a buggy `PR_user !== 0` one, which would
--- wrongly pass -1 to the user lookup and report a spurious orphan. The 0
--- case is deferred to Task 4, which re-keys this table to
--- (location_id, plugin_id) and restores a second row on location 1 with
--- PR_user = 0.
+-- Only locations 1 and 2 are seeded above. Task 4 re-keyed the plugin table
+-- to (location_id, plugin_id), so location 1 now carries two rows — 'casino'
+-- and 'bullets' — to exercise both V2 owner sentinels (0 = unowned,
+-- -1 = closed) without colliding on the new key. The -1 row (location 2) is
+-- the load-bearing one: it is the only case that distinguishes a correct
+-- `PR_user > 0` check from a buggy `PR_user !== 0` one, which would wrongly
+-- pass -1 to the user lookup and report a spurious orphan.
 INSERT INTO properties (PR_location, PR_module, PR_user, PR_cost, PR_profit) VALUES
   (1, 'casino', 1, 5000, 100),
+  (1, 'bullets', 0, 250, 0),     -- PR_user = 0: unowned
   (2, 'bullets', -1, 250, 0),    -- PR_user = -1: closed, migrates as unowned
   (99, 'casino', 1, 5000, 100);  -- orphan: location 99 does not exist
 

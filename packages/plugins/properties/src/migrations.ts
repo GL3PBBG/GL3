@@ -32,4 +32,18 @@ export const PROPERTIES_MIGRATIONS: { name: string; sql: string }[] = [
     name: "0002_location_unique",
     sql: `CREATE UNIQUE INDEX p_properties_location_key ON p_properties_properties (location_id)`,
   },
+  {
+    // V2 has no unique constraint at all; its logical key is
+    // (PR_location, PR_module). GL3's original unique(location_id) was a GL3
+    // invention and it is what stops a town having both a casino and a bullet
+    // factory. The old constraint was strictly stronger, so no existing row
+    // can violate the new one.
+    name: "0003_drop_location_unique",
+    sql: `DROP INDEX IF EXISTS p_properties_location_key`,
+  },
+  {
+    name: "0004_location_plugin_unique",
+    sql: `CREATE UNIQUE INDEX p_properties_location_plugin_key
+            ON p_properties_properties (location_id, plugin_id)`,
+  },
 ];
