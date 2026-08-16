@@ -126,6 +126,45 @@ describe("admin rounds: authorization", () => {
   });
 });
 
+describe("admin rounds: GET /api/admin/rounds", () => {
+  // Payload shape and ordering — the `starts_at ASC NULLS LAST` clause is
+  // duplicated across this route and /table, so a mistake in either copy is
+  // covered here as well as by the /table case below.
+  it("returns { rounds } ordered starts_at ASC NULLS LAST, ISO strings or null", async () => {
+    const founder = await registerPlayer("Founder");
+    const early = uuidv7();
+    const late = uuidv7();
+    const openEnded = uuidv7();
+    // Inserted out of chronological order on purpose, so a working ORDER BY
+    // is what puts them back in the right sequence — a no-op ORDER BY would
+    // pass a coincidentally-already-sorted fixture.
+    await db.insert(rounds).values([
+      { id: late, name: "Late", startsAt: addDays(EXIST_END, 5), endsAt: addDays(EXIST_END, 10) },
+      { id: early, name: "Early", startsAt: EXIST_START, endsAt: EXIST_END },
+      { id: openEnded, name: "NullStart", startsAt: null, endsAt: null },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/admin/rounds", headers: auth(founder.token) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json() as { rounds: { id: string; startsAt: string | null; endsAt: string | null; finalizedAt: string | null; name: string; status: string }[] };
+
+    // A NULL starts_at sorts LAST under NULLS LAST, so it must be the final entry.
+    expect(body.rounds.at(-1)?.id).toBe(openEnded);
+    // The two dated rows are in chronological order despite insertion order.
+    const dated = body.rounds.filter((r) => r.id !== openEnded);
+    expect(dated.map((r) => r.id)).toEqual([early, late]);
+
+    const earlyRow = body.rounds.find((r) => r.id === early)!;
+    expect(earlyRow).toMatchObject({ name: "Early", startsAt: iso(EXIST_START), endsAt: iso(EXIST_END) });
+    expect(earlyRow.finalizedAt).toBeNull();
+    expect(["finalized", "active", "ended", "scheduled"]).toContain(earlyRow.status);
+
+    const nullRow = body.rounds.find((r) => r.id === openEnded)!;
+    expect(nullRow.startsAt).toBeNull();
+    expect(nullRow.endsAt).toBeNull();
+  });
+});
+
 describe("admin rounds: overlap rejected at write time", () => {
   async function seedExisting(): Promise<{ token: string }> {
     const founder = await registerPlayer("Founder"); // first registration = auto-admin
@@ -201,6 +240,50 @@ describe("admin rounds: overlap rejected at write time", () => {
       },
     });
     expect(res.statusCode, res.body).toBe(204);
+  });
+
+  it("404s an edit to an unknown round id", async () => {
+    const { token } = await seedExisting();
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/rounds/edit", headers: auth(token),
+      payload: { roundId: uuidv7(), name: "Ghost", startsAt: iso(EXIST_START), endsAt: iso(EXIST_END) },
+    });
+    expect(res.statusCode, res.body).toBe(404);
+    expect(res.json()).toEqual({ error: "round_not_found" });
+  });
+
+  // The `coalesce(ends_at, 'infinity')` limb, exercised by an actual write —
+  // every V2-migrated install ships exactly one open-ended round, and this is
+  // the rule that forces an admin to give it an `ends_at` before scheduling
+  // the next season. `coalesce(ends_at, ends_at)`, or no coalesce at all,
+  // would otherwise pass every other case in this file.
+  describe("the open-ended (null ends_at) limb", () => {
+    const OPEN_START = new Date("2026-05-01T00:00:00.000Z");
+
+    async function seedOpenEnded(): Promise<{ token: string }> {
+      const founder = await registerPlayer("Founder");
+      await db.insert(rounds).values({ id: uuidv7(), name: "OpenEnded", startsAt: OPEN_START, endsAt: null });
+      return { token: founder.token };
+    }
+
+    it("rejects a create starting after an open-ended round's start", async () => {
+      const { token } = await seedOpenEnded();
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/rounds", headers: auth(token),
+        payload: { name: "AfterOpen", startsAt: iso(addDays(OPEN_START, 10)), endsAt: iso(addDays(OPEN_START, 20)) },
+      });
+      expect(res.statusCode, res.body).toBe(400);
+      expect(res.json()).toEqual({ error: "round_overlap" });
+    });
+
+    it("accepts a create ending at or before an open-ended round's start (half-open)", async () => {
+      const { token } = await seedOpenEnded();
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/rounds", headers: auth(token),
+        payload: { name: "BeforeOpen", startsAt: iso(addDays(OPEN_START, -10)), endsAt: iso(OPEN_START) },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+    });
   });
 });
 
@@ -282,8 +365,11 @@ describe("admin rounds: there is no \"end it now\" button", () => {
     const get = await app.inject({ method: "GET", url: "/api/rounds", headers: auth(founder.token) });
     expect(get.statusCode, get.body).toBe(200);
 
+    // `row` present AND its finalizedAt actually a Date — `not.toBeNull()`
+    // alone would pass vacuously if the row went missing (undefined !== null).
     const [row] = await db.select().from(rounds).where(eq(rounds.id, id));
-    expect(row?.finalizedAt).not.toBeNull();
+    expect(row).toBeDefined();
+    expect(row?.finalizedAt).toBeInstanceOf(Date);
   });
 });
 
