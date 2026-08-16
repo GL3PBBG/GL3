@@ -211,6 +211,11 @@ describe("properties admin", () => {
     });
     expect(duplicate.statusCode).toBe(409);
     expect(duplicate.json<{ error: string }>().error).toBe("location_type_taken");
+
+    // The failed duplicate insert left no partial or phantom row: still
+    // exactly the two rows (bullets, casino) from before the 409.
+    const rowsAfterDuplicate = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
+    expect(rowsAfterDuplicate).toHaveLength(2);
   });
 
   // Kept alongside the route-level test above rather than as a substitute
