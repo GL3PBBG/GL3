@@ -2,11 +2,26 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { definePlugin } from "@gl3/plugin-sdk";
 import { adminPage as propertiesAdminPage } from "@gl3/plugin-properties";
 import { locations as coreLocations, settings as coreSettings } from "../src/db/schema/index.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
+
+// A second declared property type, test-only. It exists so the coexistence
+// test can prove the (location_id, plugin_id) key with two REAL types — with
+// only `bullets` declared, that test could not tell the new key from the old
+// one. Deliberately not a shipped plugin: a declared type with no consumer
+// paying its owner would be a property you can buy and never earn from.
+const casinoPlugin = definePlugin({
+  id: "casino",
+  version: "1.0.0",
+  basePaths: ["/api/casino"],
+  providesProperties: [
+    { id: "casino", name: "Casino", price: 100_000_000n, leverLabel: "Max bet" },
+  ],
+});
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
@@ -16,7 +31,7 @@ let locationId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [casinoPlugin] }));
   const founder = await app.inject({
     method: "POST", url: "/api/auth/register",
     payload: { username: "Founder", password: "hunter2hunter2" },
@@ -78,27 +93,15 @@ describe("properties admin", () => {
   });
 
   // Was "409s a create for a location that already has a property" under the
-  // old unique(location_id) key. Since 0004_location_plugin_unique the key is
-  // (location_id, plugin_id), so a second create at the same location only
-  // 409s when it repeats the same declared type — a different type is
-  // covered by "allows two property types in the same location" below.
-  it("409s a create for a location that already has a property of that type", async () => {
-    await app.inject({
-      method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bullets", cost: "1000", rate: "100" },
-    });
-
-    const res = await app.inject({
-      method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bullets", cost: "2000", rate: "200" },
-    });
-    expect(res.statusCode).toBe(409);
-    expect(res.json<{ error: string }>().error).toBe("location_type_taken");
-
-    // Only one row for this location.
-    const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
-    expect(rows).toHaveLength(1);
-  });
+  // old unique(location_id) key, using two placeholder pluginIds ("first",
+  // "second") that no longer validate. Since 0004_location_plugin_unique the
+  // key is (location_id, plugin_id), a second create at the same location
+  // only 409s when it repeats the same declared type — a DIFFERENT type now
+  // legitimately succeeds. That is exactly what "allows two property types
+  // in the same location" below proves (using the two real declared types,
+  // bullets and casino), including the same-type duplicate 409 as its final
+  // step — so this test is folded into that one rather than kept alongside
+  // it as a near-duplicate.
 
   // Was "lists only unclaimed locations in the locations endpoint" under the
   // old unique(location_id) key. Since 0004_location_plugin_unique a claimed
@@ -179,6 +182,13 @@ describe("properties admin", () => {
     expect(res.json<{ error: string }>().error).toBe("unknown_property_type");
   });
 
+  // `casino` is a genuine second declared type (the test-only `casinoPlugin`
+  // above), so this is the test that actually distinguishes the new key from
+  // the old one: under the OLD unique(location_id), the `casino` create below
+  // would 409 just like the final `bullets` repeat does — it would never
+  // reach 201. Verified by temporarily reverting 0004 back to a bare
+  // location_id index and confirming this exact step turns 409 (see task
+  // report for the RED output).
   it("allows two property types in the same location", async () => {
     const first = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
@@ -190,9 +200,10 @@ describe("properties admin", () => {
       method: "POST", url: "/api/admin/properties", headers: auth(),
       payload: { locationId, pluginId: "casino", cost: "0" },
     });
-    // 'casino' is not declared by any installed plugin, so this is the
-    // undeclared-type refusal, not a uniqueness one.
-    expect(second.statusCode).toBe(404);
+    expect(second.statusCode).toBe(201);
+
+    const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
+    expect(rows).toHaveLength(2);
 
     const duplicate = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
@@ -200,33 +211,6 @@ describe("properties admin", () => {
     });
     expect(duplicate.statusCode).toBe(409);
     expect(duplicate.json<{ error: string }>().error).toBe("location_type_taken");
-  });
-
-  // The route-level test above can't actually prove the re-key: "bullets" is
-  // the only declared type in this task's plugin set, so its second create
-  // (a different, undeclared type) 404s at the registry check before ever
-  // reaching the DB — the same outcome the OLD unique(location_id) key would
-  // also have produced. This test bypasses the admin route (and its
-  // registry check) entirely and inserts straight into the table, so it
-  // proves 0004_location_plugin_unique itself: two DIFFERENT plugin_ids at
-  // one location both insert cleanly, and a THIRD insert repeating one of
-  // them collides. Under the old unique(location_id) key, the second insert
-  // below (not just the third) would already throw 23505.
-  it("db-level: two different plugin_ids coexist at one location, a repeat collides", async () => {
-    await db.insert(propertiesPlugin).values({
-      id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
-    });
-    await db.insert(propertiesPlugin).values({
-      id: uuidv7(), locationId, pluginId: "typeB", cost: 0n, rate: 0n, profit: 0n,
-    });
-    const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
-    expect(rows).toHaveLength(2);
-
-    await expect(
-      db.insert(propertiesPlugin).values({
-        id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
-      }),
-    ).rejects.toThrow();
   });
 
   it("never renders id as a table column, only as a select's valueKey", () => {
@@ -265,7 +249,7 @@ describe("properties admin — default rate fallback", () => {
     await closeServer();
     await resetDb(db);
     await db.insert(coreSettings).values({ key: "properties.income.default_rate", value: "777" });
-    ({ app, close: closeServer } = await bootTestServer());
+    ({ app, close: closeServer } = await bootTestServer({ plugins: [casinoPlugin] }));
 
     const founder = await app.inject({
       method: "POST", url: "/api/auth/register",
