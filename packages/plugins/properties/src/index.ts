@@ -357,10 +357,28 @@ function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional
   return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  if (typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505") return true;
-  if (err instanceof Error && err.cause !== null && typeof err.cause === "object" && "code" in err.cause && (err.cause as { code: string }).code === "23505") return true;
-  return false;
+/**
+ * Extracts a Postgres error code (`err.code` directly, or `err.cause.code`
+ * for a driver that wraps it), or null if `err` carries none. Generalised
+ * from the old `isUniqueViolation` so the create route can also translate
+ * `23503` (foreign-key violation, an unknown `locationId`) instead of
+ * letting it fall through to an unhandled 500.
+ */
+function pgErrorCode(err: unknown): string | null {
+  if (typeof err === "object" && err !== null && "code" in err && typeof (err as { code: unknown }).code === "string") {
+    return (err as { code: string }).code;
+  }
+  if (
+    err instanceof Error &&
+    err.cause !== null &&
+    typeof err.cause === "object" &&
+    err.cause !== undefined &&
+    "code" in err.cause &&
+    typeof (err.cause as { code: unknown }).code === "string"
+  ) {
+    return (err.cause as { code: string }).code;
+  }
+  return null;
 }
 
 const PropertyCreateSchema = z
@@ -368,7 +386,10 @@ const PropertyCreateSchema = z
     locationId: z.string().uuid(),
     pluginId: z.string().min(1).max(80),
     cost: AdminMoney,
-    rate: AdminMoney,
+    // Optional: blank (the page renderer's convention for a left-empty
+    // field, see `blankable` above) or omitted falls back to the plugin's
+    // `income.default_rate` setting in the handler below (spec §4).
+    rate: blankable(AdminMoney),
   })
   .strict();
 
@@ -408,8 +429,13 @@ const adminLocationsRoute = route({
 });
 
 /**
- * All locations as a TableRowsResponse. `id` is the update form's select
- * `valueKey`. Not rendered as a column.
+ * Existing properties only, as a TableRowsResponse. `id` is the update
+ * form's select `valueKey` — it must resolve to a real property, or an
+ * admin picking a location-with-no-property row would submit `id: ""` and
+ * get a bare 400 from `PropertyUpdateSchema` with no indication why. A
+ * location that has no property simply does not appear here; use
+ * `/api/admin/properties/locations` to find those. Not rendered as a
+ * table column.
  */
 const adminListRoute = route({
   method: "GET",
@@ -417,8 +443,6 @@ const adminListRoute = route({
   auth: "admin",
   handler: async (ctx) => {
     return ctx.transaction(async (tx) => {
-      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
-
       const props = await tx.db
         .select({
           id: propertiesTable.id,
@@ -428,26 +452,23 @@ const adminListRoute = route({
           cost: propertiesTable.cost,
           rate: propertiesTable.rate,
           profit: propertiesTable.profit,
+          locationName: locations.name,
           ownerName: players.username,
         })
         .from(propertiesTable)
+        .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
 
-      const propByLocation = new Map(props.map((p) => [p.locationId, p]));
-
-      const rows = allLocations.map((loc) => {
-        const p = propByLocation.get(loc.id);
-        return {
-          id: p?.id ?? "",
-          locationId: loc.id,
-          locationName: loc.name,
-          plugin: p?.pluginId ?? "",
-          ownerName: p?.ownerPlayerId ? (p?.ownerName ?? "") : "",
-          cost: p?.cost.toString() ?? "0",
-          rate: p?.rate.toString() ?? "0",
-          profit: p?.profit.toString() ?? "0",
-        };
-      });
+      const rows = props.map((p) => ({
+        id: p.id,
+        locationId: p.locationId,
+        locationName: p.locationName ?? "",
+        plugin: p.pluginId,
+        ownerName: p.ownerPlayerId ? (p.ownerName ?? "") : "",
+        cost: p.cost.toString(),
+        rate: p.rate.toString(),
+        profit: p.profit.toString(),
+      }));
 
       return { status: 200, body: { rows } };
     });
@@ -459,8 +480,14 @@ const adminCreateRoute = route({
   path: "/api/admin/properties",
   auth: "admin",
   body: PropertyCreateSchema,
+  // The INSERT takes FOR KEY SHARE on locations[L] via the location_id FK
+  // and acquires nothing afterwards (rule 6) — it cannot be half of a
+  // deadlock cycle with the buy/sell/claim routes' locations-then-player
+  // order, the same reasoning as adminUpdateRoute below.
   handler: async (ctx, { body }) => {
     const id = uuidv7();
+    const config = readPropertiesSettings((key) => ctx.settings.get(key));
+    const rate = body.rate !== undefined ? BigInt(body.rate) : config.income.defaultRate;
     try {
       await ctx.transaction(async (tx) => {
         await tx.db.insert(propertiesTable).values({
@@ -468,14 +495,15 @@ const adminCreateRoute = route({
           locationId: body.locationId,
           pluginId: body.pluginId,
           cost: BigInt(body.cost),
-          rate: BigInt(body.rate),
+          rate,
         });
       });
     } catch (err: unknown) {
+      const code = pgErrorCode(err);
       // unique(location_id) violation → 409
-      if (isUniqueViolation(err)) {
-        throw new PluginError("location_taken", 409);
-      }
+      if (code === "23505") throw new PluginError("location_taken", 409);
+      // location_id FK violation (unknown locationId) → 404
+      if (code === "23503") throw new PluginError("location_not_found", 404);
       throw err;
     }
     return { status: 201, body: { id } };

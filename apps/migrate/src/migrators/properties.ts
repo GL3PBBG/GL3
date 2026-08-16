@@ -30,7 +30,12 @@ export async function migrateProperties(pool: mysql.Pool, exec: Executor, report
       id: v3Id, locationId, pluginId: row.PR_module, ownerPlayerId,
       cost: BigInt(row.PR_cost), profit: BigInt(row.PR_profit),
       lastClaimedAt: ownerPlayerId ? new Date() : null,
-      rate: 500n, // default from properties.income.default_rate setting
+      // Hardcoded, NOT read from properties.income.default_rate — the
+      // migrator has no connection to the plugin's settings reader. The
+      // constant happens to match the setting's own default (500), so
+      // no migrated row is wrong today, but an operator who changes the
+      // setting will not see it reflected here (docs/STATUS.md).
+      rate: 500n,
     };
     await exec.insert(propertiesPlugin).values(values).onConflictDoUpdate({ target: propertiesPlugin.id, set: values });
     bumpTable(report, "properties", "written");

@@ -433,11 +433,15 @@ describe("properties lock ordering", () => {
 
     // The run did real work, not hundreds of refusals: properties actually
     // changed hands, and money actually moved to the bullets route.
-    const sells = observations.filter((o) => o.label === "sell" && o.status === 200).length;
     const travelled = observations.filter((o) => o.label === "travel" && o.status === 200).length;
     const bought = observations.filter((o) => o.label === "buy" && o.status === 200).length;
     expect(bought, `only ${bought} buys succeeded`).toBeGreaterThan(0);
-    expect(sells, `only ${sells} sells succeeded`).toBeGreaterThanOrEqual(0);
+    // N11: no floor on sells. Empirically (5 runs, 20 rounds each,
+    // `DATABASE_URL`/`REDIS_URL` local Postgres+Redis) sells landed at 0
+    // every time — this load mostly contends the single property between
+    // buy/claim/travel, and a round only sells when its own random buyer
+    // beat every other round's buyer to ownership first. That's legitimate
+    // scheduling variance, not a bug, so no `sells` assertion is made here.
     expect(travelled, `only ${travelled} travels succeeded`).toBeGreaterThan(ROUNDS);
 
     // Whatever the interleaving, the ledger still balances (rule 3). Cash
