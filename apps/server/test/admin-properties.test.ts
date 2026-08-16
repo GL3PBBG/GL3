@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { definePlugin } from "@gl3/plugin-sdk";
 import { adminPage as propertiesAdminPage } from "@gl3/plugin-properties";
-import { locations as coreLocations, settings as coreSettings } from "../src/db/schema/index.js";
+import { locations as coreLocations } from "../src/db/schema/index.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -74,13 +74,13 @@ describe("properties admin", () => {
   it("creates a property and lists it as a TableRowsResponse", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bullets", cost: "10000", rate: "500" },
+      payload: { locationId, pluginId: "bullets", cost: "10000" },
     });
     expect(res.statusCode).toBe(201);
     const { id } = res.json() as { id: string };
 
     const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id));
-    expect(row).toMatchObject({ locationId, pluginId: "bullets", cost: 10000n, rate: 500n });
+    expect(row).toMatchObject({ locationId, pluginId: "bullets", cost: 10000n });
 
     const list = await app.inject({ method: "GET", url: "/api/admin/properties", headers: auth() });
     expect(list.statusCode).toBe(200);
@@ -89,7 +89,6 @@ describe("properties admin", () => {
     expect(match!.locationId).toBe(locationId);
     expect(match!.plugin).toBe("bullets");
     expect(match!.cost).toBe("10000");
-    expect(match!.rate).toBe("500");
   });
 
   // Was "409s a create for a location that already has a property" under the
@@ -115,7 +114,7 @@ describe("properties admin", () => {
 
     await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bullets", cost: "1000", rate: "100" },
+      payload: { locationId, pluginId: "bullets", cost: "1000" },
     });
 
     const res = await app.inject({ method: "GET", url: "/api/admin/properties/locations", headers: auth() });
@@ -129,23 +128,23 @@ describe("properties admin", () => {
   it("updates a property with a blank pluginId and keeps the old value", async () => {
     const propId = uuidv7();
     await db.insert(propertiesPlugin).values({
-      id: propId, locationId, pluginId: "city-bank", cost: 10000n, rate: 500n, profit: 0n,
+      id: propId, locationId, pluginId: "city-bank", cost: 10000n, profit: 0n,
     });
 
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties/update", headers: auth(),
-      payload: { id: propId, pluginId: "", cost: "15000", rate: "600" },
+      payload: { id: propId, pluginId: "", cost: "15000" },
     });
     expect(res.statusCode).toBe(204);
 
     const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, propId));
-    expect(row).toMatchObject({ pluginId: "city-bank", cost: 15000n, rate: 600n });
+    expect(row).toMatchObject({ pluginId: "city-bank", cost: 15000n });
   });
 
   it("404s an update to an unknown id", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties/update", headers: auth(),
-      payload: { id: uuidv7(), pluginId: "", cost: "1", rate: "1" },
+      payload: { id: uuidv7(), pluginId: "", cost: "1" },
     });
     expect(res.statusCode).toBe(404);
   });
@@ -156,7 +155,7 @@ describe("properties admin", () => {
 
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bad", cost: "-5", rate: "100" },
+      payload: { locationId, pluginId: "bad", cost: "-5" },
     });
     expect(res.statusCode).toBe(400);
 
@@ -227,17 +226,17 @@ describe("properties admin", () => {
   // reachable, and reachable correctly, through the admin API.
   it("db-level: two different plugin_ids coexist at one location, a repeat collides", async () => {
     await db.insert(propertiesPlugin).values({
-      id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+      id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, profit: 0n,
     });
     await db.insert(propertiesPlugin).values({
-      id: uuidv7(), locationId, pluginId: "typeB", cost: 0n, rate: 0n, profit: 0n,
+      id: uuidv7(), locationId, pluginId: "typeB", cost: 0n, profit: 0n,
     });
     const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
     expect(rows).toHaveLength(2);
 
     await expect(
       db.insert(propertiesPlugin).values({
-        id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+        id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, profit: 0n,
       }),
     ).rejects.toThrow();
   });
@@ -263,40 +262,5 @@ describe("properties admin", () => {
     walk(propertiesAdminPage.view);
     expect(idKeys.filter((k) => /^id$|Id$/.test(k))).toEqual([]);
     expect(valueKeys).toContain("id");
-  });
-});
-
-/**
- * N1: `income.default_rate` must be wired into admin create's fallback, not
- * merely parsed. Settings are a boot-time snapshot (spec §4), so the row
- * has to exist before the app starts — the `theft-chase.test.ts` reboot
- * precedent. Placed last in the file: it closes and reboots the shared
- * `app`, so no test after it may assume the default settings snapshot.
- */
-describe("properties admin — default rate fallback", () => {
-  it("admin create without a rate falls back to properties.income.default_rate", async () => {
-    await closeServer();
-    await resetDb(db);
-    await db.insert(coreSettings).values({ key: "properties.income.default_rate", value: "777" });
-    ({ app, close: closeServer } = await bootTestServer({ plugins: [casinoPlugin] }));
-
-    const founder = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "RateFounder", password: "hunter2hunter2" },
-    });
-    adminToken = founder.json().token;
-
-    locationId = uuidv7();
-    await db.insert(coreLocations).values({ id: locationId, name: "Ratetown" });
-
-    const res = await app.inject({
-      method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bullets", cost: "10000" },
-    });
-    expect(res.statusCode).toBe(201);
-    const { id } = res.json() as { id: string };
-
-    const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id));
-    expect(row?.rate).toBe(777n);
   });
 });

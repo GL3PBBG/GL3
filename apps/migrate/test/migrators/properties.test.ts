@@ -52,14 +52,12 @@ describe("migrateProperties", () => {
       // under (location_id, plugin_id) — the re-keyed constraint from Task 4.
       const casino1 = rows.find((r) => r.pluginId === "casino" && r.ownerPlayerId !== null);
       expect(rows).toHaveLength(3);
-      expect(casino1).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n, rate: 500n });
-      expect(casino1!.lastClaimedAt).not.toBeNull();
+      expect(casino1).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n });
 
       const closedRows = rows.filter((r) => r.ownerPlayerId === null);
       expect(closedRows).toHaveLength(2);
       for (const closed of closedRows) {
         expect(closed.ownerPlayerId).toBeNull();
-        expect(closed.lastClaimedAt).toBeNull(); // unowned rows get no accrual clock
       }
 
       // PR_user = 0 (location 1, 'bullets') migrates unowned, same as the
@@ -67,7 +65,6 @@ describe("migrateProperties", () => {
       const unownedBullets1 = rows.find((r) => r.locationId === location1Id && r.pluginId === "bullets");
       expect(unownedBullets1).toBeDefined();
       expect(unownedBullets1!.ownerPlayerId).toBeNull();
-      expect(unownedBullets1!.lastClaimedAt).toBeNull();
 
       expect(report.orphans).toContainEqual({ table: "properties", v2Id: 99, reason: "location 99 does not exist" });
 

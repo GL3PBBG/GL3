@@ -202,8 +202,6 @@ export default defineWorkspace([
         "test/rounds-settings.test.ts",
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
-        "test/properties-settings.test.ts",
-        "test/properties-resolve.test.ts",
         "test/property-type-registry.test.ts",
       ],
     },
