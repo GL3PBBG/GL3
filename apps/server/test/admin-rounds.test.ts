@@ -447,44 +447,51 @@ describe("admin rounds: concurrent creates of the same window", () => {
     const founder = await registerPlayer("Founder");
     const payload = { name: "Race", startsAt: "2027-01-01T00:00:00.000Z", endsAt: "2027-01-10T00:00:00.000Z" };
 
+    // `blocker.reserve()` is inside its own try, whose finally always ends
+    // the pool — a rejecting reserve() before that finally existed leaked the
+    // pool (blocker.end() never ran), which could make a later file's
+    // `DROP DATABASE ... WITH (FORCE)` teardown lose its race.
     const blocker = postgres(config.databaseUrl, { max: 1 });
-    const t0 = await blocker.reserve();
-    const inFlight: Promise<LightMyRequestResponse>[] = [];
-
     try {
-      await t0`BEGIN`;
-      await t0`LOCK TABLE rounds IN ACCESS EXCLUSIVE MODE`;
+      const t0 = await blocker.reserve();
+      const inFlight: Promise<LightMyRequestResponse>[] = [];
 
-      const a = fire({
-        method: "POST", url: "/api/admin/rounds", headers: auth(founder.token), payload,
-      });
-      inFlight.push(a);
-      const b = fire({
-        method: "POST", url: "/api/admin/rounds", headers: auth(founder.token),
-        payload: { ...payload, name: "Race (other)" },
-      });
-      inFlight.push(b);
-      await waitForLockWaiters(2);
-
-      // Releases both from the same instant, with the interleaving fixed.
-      await t0`ROLLBACK`;
-
-      const [resA, resB] = await Promise.all([a, b]);
-      const codes = [resA.statusCode, resB.statusCode].sort();
-      expect(codes, `a=${resA.statusCode} ${resA.body} / b=${resB.statusCode} ${resB.body}`).toEqual([201, 400]);
-      const loser = resA.statusCode === 400 ? resA : resB;
-      expect(loser.json()).toEqual({ error: "round_overlap" });
-
-      const [{ n }] = await conn<{ n: number }[]>`SELECT count(*)::int AS n FROM rounds`;
-      expect(n).toBe(1);
-    } finally {
       try {
+        await t0`BEGIN`;
+        await t0`LOCK TABLE rounds IN ACCESS EXCLUSIVE MODE`;
+
+        const a = fire({
+          method: "POST", url: "/api/admin/rounds", headers: auth(founder.token), payload,
+        });
+        inFlight.push(a);
+        const b = fire({
+          method: "POST", url: "/api/admin/rounds", headers: auth(founder.token),
+          payload: { ...payload, name: "Race (other)" },
+        });
+        inFlight.push(b);
+        await waitForLockWaiters(2);
+
+        // Releases both from the same instant, with the interleaving fixed.
         await t0`ROLLBACK`;
-      } catch {
-        /* already rolled back */
+
+        const [resA, resB] = await Promise.all([a, b]);
+        const codes = [resA.statusCode, resB.statusCode].sort();
+        expect(codes, `a=${resA.statusCode} ${resA.body} / b=${resB.statusCode} ${resB.body}`).toEqual([201, 400]);
+        const loser = resA.statusCode === 400 ? resA : resB;
+        expect(loser.json()).toEqual({ error: "round_overlap" });
+
+        const [{ n }] = await conn<{ n: number }[]>`SELECT count(*)::int AS n FROM rounds`;
+        expect(n).toBe(1);
+      } finally {
+        try {
+          await t0`ROLLBACK`;
+        } catch {
+          /* already rolled back */
+        }
+        await Promise.allSettled(inFlight);
+        t0.release();
       }
-      await Promise.allSettled(inFlight);
-      t0.release();
+    } finally {
       await blocker.end();
     }
   }, 30_000);

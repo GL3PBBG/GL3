@@ -271,101 +271,108 @@ describe("rounds lock ordering", () => {
   it("settles a round released from the same barrier as a real attack and a real deposit", async () => {
     const ended = await seedEndedRound("Barrier", 40_000n, 90_000n);
 
+    // `blocker.reserve()` is inside its own try, whose finally always ends
+    // the pool — a rejecting reserve() before that finally existed leaked the
+    // pool (blocker.end() never ran), which could make a later file's
+    // `DROP DATABASE ... WITH (FORCE)` teardown lose its race.
     const blocker = postgres(config.databaseUrl, { max: 1 });
-    const t0 = await blocker.reserve();
-    const inFlight: Promise<LightMyRequestResponse>[] = [];
-
     try {
-      // ONE lock, and it is the first CONTENDED lock in the canonical order —
-      // the lowest-id player row. Nothing else is taken and nothing else is
-      // asked for, so this session cannot be half of a cycle.
-      await t0`BEGIN`;
-      await t0`SELECT player_id FROM player_stats WHERE player_id = ${playerA}::uuid FOR UPDATE`;
+      const t0 = await blocker.reserve();
+      const inFlight: Promise<LightMyRequestResponse>[] = [];
 
-      // Counterparty 1: a real combat attack A→B. `tx.locks.player` is its
-      // first statement and locks {A,B} ascending in ONE statement, so it
-      // parks on A holding nothing.
-      const attack = fire({
-        method: "POST",
-        url: `/api/combat/attack/${playerB}`,
-        headers: auth(tokenA),
-      });
-      inFlight.push(attack);
-      await waitForLockWaiters(1);
-
-      // Counterparty 2: a real bank deposit for A, which reaches
-      // `player_stats[A]` through `applyBalanceChange` — a different door
-      // again, and one that touches a single row.
-      const deposit = fire({
-        method: "POST",
-        url: "/api/bank/deposit",
-        headers: auth(tokenA),
-        payload: { amount: DEPOSIT.toString() },
-      });
-      inFlight.push(deposit);
-      await waitForLockWaiters(2);
-
-      // The finalize, queued LAST. GET /api/rounds calls ensureCurrentRound
-      // first, which is what makes an ordinary page view settle the round.
-      //
-      // Under the SHIPPED order it takes ROUNDS_LOCK (uncontended), freezes,
-      // ranks, then asks for {A,B} in one ascending statement — so it parks on
-      // A holding no player row at all, and nothing can cycle with it.
-      //
-      // Under a placing-order payout it takes B FIRST (B placed first: higher
-      // delta, higher id) and only then asks for A — so it waits on A while
-      // HOLDING B, which is exactly what the attack ahead of it wants once it
-      // is granted A. 40P01.
-      const settle = fire({ method: "GET", url: "/api/rounds", headers: auth(tokenCaller) });
-      inFlight.push(settle);
-      await waitForLockWaiters(3);
-
-      // Releases all three from the same instant, with the interleaving fixed.
-      await t0`ROLLBACK`;
-
-      const [attackRes, depositRes, settleRes] = await Promise.all([attack, deposit, settle]);
-
-      assertNoDeadlock("attack", attackRes);
-      assertNoDeadlock("deposit", depositRes);
-      assertNoDeadlock("settle", settleRes);
-      expect(attackRes.statusCode, `attack body: ${attackRes.body}`).toBe(200);
-      expect(depositRes.statusCode, `deposit body: ${depositRes.body}`).toBe(200);
-      expect(settleRes.statusCode, `settle body: ${settleRes.body}`).toBe(200);
-
-      // The finalize happened exactly once: one payout row per award actually
-      // won, with the seeded award table, in placing order — B first.
-      const payouts = await payoutsFor(ended);
-      expect(payouts).toHaveLength(2);   // two entrants, three awards
-      const byPlayer = new Map(payouts.map((p) => [p.playerId, p.amount]));
-      expect(byPlayer.get(playerB)).toBe(AWARD_POINTS[0]);
-      expect(byPlayer.get(playerA)).toBe(AWARD_POINTS[1]);
-      const finalized = await db.select().from(rounds).where(isNotNull(rounds.finalizedAt));
-      expect(finalized).toHaveLength(1);
-      expect(finalized[0]!.id).toBe(ended);
-
-      // The counterparties' money moved exactly once each. A deposit is two
-      // ledger legs in one transaction, so both are named rather than counted
-      // together — a re-applied deposit shows up as a second pair.
-      const banked = await db.select().from(transactions)
-        .where(and(eq(transactions.playerId, playerA), eq(transactions.reason, "bank.deposit")));
-      expect(banked.filter((r) => r.balanceKind === "cash").map((r) => r.amount)).toEqual([-DEPOSIT]);
-      expect(banked.filter((r) => r.balanceKind === "bank").map((r) => r.amount)).toEqual([DEPOSIT]);
-
-      // And the attack landed exactly once, for its one point of damage.
-      const shots = await db.select().from(combatLog).where(eq(combatLog.attackerId, playerA));
-      expect(shots).toHaveLength(1);
-      expect(shots[0]!.damage).toBe(1);
-
-      await expectConserved(playerA, AWARD_POINTS[1]!);
-      await expectConserved(playerB, AWARD_POINTS[0]!);
-    } finally {
       try {
+        // ONE lock, and it is the first CONTENDED lock in the canonical order —
+        // the lowest-id player row. Nothing else is taken and nothing else is
+        // asked for, so this session cannot be half of a cycle.
+        await t0`BEGIN`;
+        await t0`SELECT player_id FROM player_stats WHERE player_id = ${playerA}::uuid FOR UPDATE`;
+
+        // Counterparty 1: a real combat attack A→B. `tx.locks.player` is its
+        // first statement and locks {A,B} ascending in ONE statement, so it
+        // parks on A holding nothing.
+        const attack = fire({
+          method: "POST",
+          url: `/api/combat/attack/${playerB}`,
+          headers: auth(tokenA),
+        });
+        inFlight.push(attack);
+        await waitForLockWaiters(1);
+
+        // Counterparty 2: a real bank deposit for A, which reaches
+        // `player_stats[A]` through `applyBalanceChange` — a different door
+        // again, and one that touches a single row.
+        const deposit = fire({
+          method: "POST",
+          url: "/api/bank/deposit",
+          headers: auth(tokenA),
+          payload: { amount: DEPOSIT.toString() },
+        });
+        inFlight.push(deposit);
+        await waitForLockWaiters(2);
+
+        // The finalize, queued LAST. GET /api/rounds calls ensureCurrentRound
+        // first, which is what makes an ordinary page view settle the round.
+        //
+        // Under the SHIPPED order it takes ROUNDS_LOCK (uncontended), freezes,
+        // ranks, then asks for {A,B} in one ascending statement — so it parks on
+        // A holding no player row at all, and nothing can cycle with it.
+        //
+        // Under a placing-order payout it takes B FIRST (B placed first: higher
+        // delta, higher id) and only then asks for A — so it waits on A while
+        // HOLDING B, which is exactly what the attack ahead of it wants once it
+        // is granted A. 40P01.
+        const settle = fire({ method: "GET", url: "/api/rounds", headers: auth(tokenCaller) });
+        inFlight.push(settle);
+        await waitForLockWaiters(3);
+
+        // Releases all three from the same instant, with the interleaving fixed.
         await t0`ROLLBACK`;
-      } catch {
-        /* already rolled back */
+
+        const [attackRes, depositRes, settleRes] = await Promise.all([attack, deposit, settle]);
+
+        assertNoDeadlock("attack", attackRes);
+        assertNoDeadlock("deposit", depositRes);
+        assertNoDeadlock("settle", settleRes);
+        expect(attackRes.statusCode, `attack body: ${attackRes.body}`).toBe(200);
+        expect(depositRes.statusCode, `deposit body: ${depositRes.body}`).toBe(200);
+        expect(settleRes.statusCode, `settle body: ${settleRes.body}`).toBe(200);
+
+        // The finalize happened exactly once: one payout row per award actually
+        // won, with the seeded award table, in placing order — B first.
+        const payouts = await payoutsFor(ended);
+        expect(payouts).toHaveLength(2);   // two entrants, three awards
+        const byPlayer = new Map(payouts.map((p) => [p.playerId, p.amount]));
+        expect(byPlayer.get(playerB)).toBe(AWARD_POINTS[0]);
+        expect(byPlayer.get(playerA)).toBe(AWARD_POINTS[1]);
+        const finalized = await db.select().from(rounds).where(isNotNull(rounds.finalizedAt));
+        expect(finalized).toHaveLength(1);
+        expect(finalized[0]!.id).toBe(ended);
+
+        // The counterparties' money moved exactly once each. A deposit is two
+        // ledger legs in one transaction, so both are named rather than counted
+        // together — a re-applied deposit shows up as a second pair.
+        const banked = await db.select().from(transactions)
+          .where(and(eq(transactions.playerId, playerA), eq(transactions.reason, "bank.deposit")));
+        expect(banked.filter((r) => r.balanceKind === "cash").map((r) => r.amount)).toEqual([-DEPOSIT]);
+        expect(banked.filter((r) => r.balanceKind === "bank").map((r) => r.amount)).toEqual([DEPOSIT]);
+
+        // And the attack landed exactly once, for its one point of damage.
+        const shots = await db.select().from(combatLog).where(eq(combatLog.attackerId, playerA));
+        expect(shots).toHaveLength(1);
+        expect(shots[0]!.damage).toBe(1);
+
+        await expectConserved(playerA, AWARD_POINTS[1]!);
+        await expectConserved(playerB, AWARD_POINTS[0]!);
+      } finally {
+        try {
+          await t0`ROLLBACK`;
+        } catch {
+          /* already rolled back */
+        }
+        await Promise.allSettled(inFlight);
+        t0.release();
       }
-      await Promise.allSettled(inFlight);
-      t0.release();
+    } finally {
       await blocker.end();
     }
   }, 60_000);
