@@ -147,7 +147,25 @@ async function buildFullCrew(): Promise<string> {
 }
 
 beforeAll(async () => {
-  ({ app, close: closeServer } = await bootTestServer());
+  const booted = await bootTestServer();
+  app = booted.app;
+  closeServer = booted.close;
+
+  // `POST /api/oc/:id/execute` enqueues a REAL `resolve` job onto the live
+  // plugin worker bootTestServer starts, while every test below ALSO drives
+  // `resolve` manually through runPluginJob with a pinned seed and pinned
+  // settings (`oc.success_chance`). Both resolvers read the heist row and
+  // no-op unless status is still "executing" (oc/src/index.ts), so whichever
+  // commits first wins and the other silently does nothing — the manual run's
+  // pinned outcome is then not the outcome under test. Under load the live
+  // worker won the race and paid out `oc.payout` rows the chance-0 failure
+  // test asserts are absent. Pausing the queue means the enqueue still
+  // happens (the route's behaviour is unchanged) but no worker ever picks the
+  // job up, so the manual run is the only resolver. The queue prefix is
+  // random per boot, so this pause is invisible to every other test file.
+  const resolveQueue = booted.plugins.queues.get("oc:resolve");
+  if (!resolveQueue) throw new Error("oc:resolve queue not found — did the oc plugin's job name change?");
+  await resolveQueue.pause();
 });
 
 let locationId: string;
