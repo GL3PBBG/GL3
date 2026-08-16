@@ -21,9 +21,9 @@ describe("rowAction", () => {
     expect(rowAction(row, "alice")).toEqual({ kind: "buy" });
   });
 
-  it("returns claim with accrued when the viewer owns the property", () => {
+  it("returns owned with accrued when the viewer owns the property (Claim + Sell)", () => {
     const row = makeRow({ ownerName: "alice", accrued: "1200" });
-    expect(rowAction(row, "alice")).toEqual({ kind: "claim", accrued: "1200" });
+    expect(rowAction(row, "alice")).toEqual({ kind: "owned", accrued: "1200" });
   });
 
   it("returns none when another player owns the property", () => {
