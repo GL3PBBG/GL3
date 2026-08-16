@@ -309,16 +309,32 @@ unavailable here.
   `PropertyListResponseSchema` for the hand-written web page), again a patch.
   The registry now serves `@gl3/shared` `0.1.1`, `0.1.2` and `0.1.3`, and
   `@gl3/plugin-sdk@0.1.0`.
-- **Adding a variant to `GameEvent` breaks three places, and the third only
-  fails under the integration suite.** The two obvious ones are the exhaustive
-  switches in `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which
-  fail loudly with TS2366. The third is the `CORPUS` drift guard in
+- **Adding a variant to `GameEvent` breaks four places, and none of the last
+  two is a type error.** The two obvious ones are the exhaustive switches in
+  `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
+  with TS2366. The third is the `CORPUS` drift guard in
   `apps/server/test/plugin-ctx-core-events.test.ts`: `CoreEventInput` is
   derived from `GameEventSchema`, so a new variant reaches the SDK for free
-  and would reach the wire untested. `npm run typecheck` and the `@gl3/web`
-  project both pass with it missing. A change that widens the union must run
-  the whole of `npm run verify`; `player.backfired` shipped past two separate
-  task reviews on this exact gap.
+  and would reach the wire untested. **It needs Postgres and Redis, so it
+  fails only under the integration suite** — `npm run typecheck`, the
+  `@gl3/web` project and CI's `verify:ci` all pass with it missing.
+  `player.backfired` shipped past two separate task reviews on this exact gap.
+  The fourth is the hardcoded census `Set` in
+  `packages/shared/test/events.test.ts`, which asserts the complete list of
+  core event names against `GameEventSchema.options`. That one runs in the
+  `@gl3/shared` project, so CI does catch it — but `npm run typecheck` does
+  not, and it is a *separate* list from the `CORPUS` entries, so updating one
+  never updates the other. A change that widens the union must run the whole
+  of `npm run verify`; the rounds cluster hit the fourth place after twelve
+  green task-scoped runs.
+- **A core migration that adds a foreign key or an index breaks
+  `apps/server/test/schema.test.ts`.** It counts every FK by `ON DELETE` rule
+  and every non-primary-key index in `public`, with a comment block tracing
+  each number to the migration that moved it. The counts are a drift guard, so
+  the fix is always to restate them and extend the comment — never to loosen
+  the assertion. It lives in `@gl3/server:db-only`, so like the `CORPUS` guard
+  it fails only under the integration suite; `0011_round_entries` moved 34→36
+  FKs (two cascades) and 27→29 indexes and was caught nowhere else.
 - Conventional Commits.
 - **Plugin routes under `/api/admin/` must declare `auth: "admin"`** — enforced at
   boot by the loader. Core reserves the exact paths `/api/admin/plugins` and
