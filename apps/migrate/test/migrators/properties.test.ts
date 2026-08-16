@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../../server/src/db/client.js";
-import { properties } from "../../../server/src/db/schema/index.js";
+import { propertiesPlugin } from "../../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "../helpers/fixtures.js";
 import { createReport } from "../../src/report.js";
 import { migrateRoles } from "../../src/migrators/roles.js";
@@ -31,9 +31,10 @@ describe("migrateProperties", () => {
       await migrateProperties(pool, db, report);
 
       const vitoId = (await lookupV3Id(db, "users", 1))!;
-      const rows = await db.select().from(properties);
+      const rows = await db.select().from(propertiesPlugin);
       expect(rows).toHaveLength(1); // location 99 orphan dropped
-      expect(rows[0]).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n });
+      expect(rows[0]).toMatchObject({ pluginId: "casino", ownerPlayerId: vitoId, cost: 5000n, profit: 100n, rate: 500n });
+      expect(rows[0].lastClaimedAt).not.toBeNull(); // owned row gets a timestamp
       expect(report.orphans).toContainEqual({ table: "properties", v2Id: 99, reason: "location 99 does not exist" });
 
       await pool.end();

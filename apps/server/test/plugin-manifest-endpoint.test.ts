@@ -129,6 +129,21 @@ describe("GET /api/plugins", () => {
           name: "sold",
           describe: "{actorName} sold a {carName} for {payout}",
           invalidates: ["garage", "me"],
+        }, {
+          pluginId: "properties",
+          name: "bought",
+          describe: "{actorName} bought {propertyName} for {cost}",
+          invalidates: ["properties", "me"],
+        }, {
+          pluginId: "properties",
+          name: "sold",
+          describe: "{actorName} sold {propertyName} for {payout}",
+          invalidates: ["properties", "me"],
+        }, {
+          pluginId: "properties",
+          name: "income",
+          describe: "{actorName} claimed {amount} from {propertyName}",
+          invalidates: ["properties", "me"],
         }],
       });
     } finally {

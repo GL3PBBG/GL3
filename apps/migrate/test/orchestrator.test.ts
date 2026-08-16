@@ -3,10 +3,10 @@ import mysql from "mysql2/promise";
 import { createDb } from "../../server/src/db/client.js";
 import {
   crimes, gangMembers, gangs, idMap, items,
-  mailMessages, notifications, playerItems, players, properties, ranks, roles,
+  mailMessages, notifications, playerItems, players, ranks, roles,
   rounds, settings,
 } from "../../server/src/db/schema/index.js";
-import { bounties, detectiveSearches, garage } from "../src/pg/plugin-tables.js";
+import { bounties, detectiveSearches, garage, propertiesPlugin } from "../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "./helpers/fixtures.js";
 import { createReport } from "../src/report.js";
 import { runMigration } from "../src/orchestrator.js";
@@ -32,7 +32,7 @@ describe("runMigration", () => {
       expect(await db.select().from(gangMembers)).toHaveLength(3); // underboss, soldier, + Vito via boss cross-check
       expect(await db.select().from(playerItems)).toHaveLength(1);
       expect(await db.select().from(garage)).toHaveLength(1);
-      expect(await db.select().from(properties)).toHaveLength(1);
+      expect(await db.select().from(propertiesPlugin)).toHaveLength(1);
       expect(await db.select().from(mailMessages)).toHaveLength(3);
       expect(await db.select().from(notifications)).toHaveLength(1);
       expect(await db.select().from(bounties)).toHaveLength(1);

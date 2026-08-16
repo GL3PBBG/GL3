@@ -47,6 +47,7 @@ export const keys = {
   bounties: () => ["bounties"] as const,
   detectives: () => ["detectives"] as const,
   oc: () => ["oc"] as const,
+  properties: () => ["properties"] as const,
 
   // Admin sections (grant-gated).
   adminSections: () => ["admin", "sections"] as const,
