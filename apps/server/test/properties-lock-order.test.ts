@@ -436,12 +436,16 @@ describe("properties lock ordering", () => {
     const travelled = observations.filter((o) => o.label === "travel" && o.status === 200).length;
     const bought = observations.filter((o) => o.label === "buy" && o.status === 200).length;
     expect(bought, `only ${bought} buys succeeded`).toBeGreaterThan(0);
-    // N11: no floor on sells. Empirically (5 runs, 20 rounds each,
-    // `DATABASE_URL`/`REDIS_URL` local Postgres+Redis) sells landed at 0
-    // every time — this load mostly contends the single property between
-    // buy/claim/travel, and a round only sells when its own random buyer
-    // beat every other round's buyer to ownership first. That's legitimate
-    // scheduling variance, not a bug, so no `sells` assertion is made here.
+    // N11: no floor on sells, and it is structural rather than incidental.
+    // Only players 0-3 ever call `buy`; players 4-5 are the ones that call
+    // `sell`, so no seller can ever own the property it sells and every sell
+    // refuses `not_owned`. Measured: 0 successful sells across 5 runs of 20
+    // rounds. The refusals are still load-bearing for what this file tests —
+    // sell takes `tx.locks.location` BEFORE the ownership check
+    // (properties/src/index.ts:190,208), so its lock path contends with the
+    // travels above exactly as a successful sell would. Asserting a floor on
+    // successful sells would require reshaping the load; asserting `>= 0`
+    // would assert nothing.
     expect(travelled, `only ${travelled} travels succeeded`).toBeGreaterThan(ROUNDS);
 
     // Whatever the interleaving, the ledger still balances (rule 3). Cash
