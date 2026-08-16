@@ -304,6 +304,7 @@ export default defineWorkspace([
         "test/admin-inventory.test.ts",
         "test/admin-theft.test.ts",
         "test/admin-properties.test.ts",
+        "test/admin-rounds.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",
