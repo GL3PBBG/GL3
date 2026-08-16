@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { createDb } from "../../../server/src/db/client.js";
+import { idMap } from "../../../server/src/db/schema/index.js";
 import { propertiesPlugin } from "../../src/pg/plugin-tables.js";
 import { createIsolatedMysqlFixture, createIsolatedPgTarget } from "../helpers/fixtures.js";
 import { createReport } from "../../src/report.js";
@@ -11,7 +12,7 @@ import { migrateLocations } from "../../src/migrators/locations.js";
 import { migrateItems } from "../../src/migrators/items.js";
 import { migratePlayers } from "../../src/migrators/players.js";
 import { migrateProperties } from "../../src/migrators/properties.js";
-import { getOrCreateV3Id, lookupV3Id } from "../../src/id-map.js";
+import { lookupV3Id } from "../../src/id-map.js";
 
 describe("migrateProperties", () => {
   it("copies PR_module into plugin_id and drops the orphan-location row", async () => {
@@ -27,17 +28,21 @@ describe("migrateProperties", () => {
       await migrateItems(pool, db, createReport(false));
       await migratePlayers(pool, db, createReport(false));
 
-      // A user mapping for the -1 sentinel, which no real V2 database has.
-      // Its only purpose is to make the migrator's `PR_user > 0` guard
-      // OBSERVABLE: without the guard, `lookupV3Id(exec, "users", -1)` would
-      // resolve to this uuid and land in owner_player_id. With it, the row
-      // stays unowned. Delete this seeding and the test proves nothing.
-      const sentinelId = (await getOrCreateV3Id(db, "users", -1)).v3Id;
+      const vitoId = (await lookupV3Id(db, "users", 1))!;
+
+      // Map the -1 sentinel onto a REAL player's uuid. No V2 database contains
+      // user -1; this row exists only to make the migrator's `PR_user > 0` guard
+      // observable. Pointing it at an existing player (rather than a fresh uuid)
+      // is deliberate: without the guard, `lookupV3Id(exec, "users", -1)` resolves
+      // here and the insert SUCCEEDS with a bogus owner, so the assertion below is
+      // what fails. A dangling uuid would instead trip the owner_player_id foreign
+      // key inside migrateProperties, and the test would never reach any expect().
+      await db.insert(idMap).values({ v2Table: "users", v2Id: -1, v3Id: vitoId })
+        .onConflictDoNothing({ target: [idMap.v2Table, idMap.v2Id] });
 
       const report = createReport(false);
       await migrateProperties(pool, db, report);
 
-      const vitoId = (await lookupV3Id(db, "users", 1))!;
       const rows = await db.select().from(propertiesPlugin);
 
       // Location 1 'casino' (owned), location 2 'bullets' (PR_user = -1 ->
@@ -50,7 +55,6 @@ describe("migrateProperties", () => {
       const closed = rows.find((r) => r.ownerPlayerId === null);
       expect(closed).toBeDefined();
       expect(closed!.ownerPlayerId).toBeNull();
-      expect(closed!.ownerPlayerId).not.toBe(sentinelId);
       expect(closed!.lastClaimedAt).toBeNull(); // unowned rows get no accrual clock
 
       expect(report.orphans).toContainEqual({ table: "properties", v2Id: 99, reason: "location 99 does not exist" });
