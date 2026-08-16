@@ -213,6 +213,30 @@ describe("properties admin", () => {
     expect(duplicate.json<{ error: string }>().error).toBe("location_type_taken");
   });
 
+  // Kept alongside the route-level test above rather than as a substitute
+  // for it: this one bypasses the admin route (and its registry check,
+  // PropertyCreateSchema, and pgErrorCode→PluginError translation) and
+  // inserts straight into the table, so it is the tightest possible proof of
+  // the DB constraint itself, independent of anything the route layer does.
+  // The route-level test above is what proves the constraint is actually
+  // reachable, and reachable correctly, through the admin API.
+  it("db-level: two different plugin_ids coexist at one location, a repeat collides", async () => {
+    await db.insert(propertiesPlugin).values({
+      id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+    });
+    await db.insert(propertiesPlugin).values({
+      id: uuidv7(), locationId, pluginId: "typeB", cost: 0n, rate: 0n, profit: 0n,
+    });
+    const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
+    expect(rows).toHaveLength(2);
+
+    await expect(
+      db.insert(propertiesPlugin).values({
+        id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+      }),
+    ).rejects.toThrow();
+  });
+
   it("never renders id as a table column, only as a select's valueKey", () => {
     const idKeys: string[] = [];
     const valueKeys: string[] = [];
