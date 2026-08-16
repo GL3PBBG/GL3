@@ -1,13 +1,14 @@
 import { hasPermission, type PluginManifest } from "@gl3/plugin-sdk";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
-import { players, roleModuleAccess, roles } from "../db/schema/index.js";
+import { players, roleModuleAccess, rounds, roles } from "../db/schema/index.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { rolesPage } from "./roles-page.js";
+import { roundsPage } from "./rounds-page.js";
 
 const AssignBodySchema = z.object({
   username: z.string().min(1),
@@ -25,6 +26,34 @@ const GrantBodySchema = z.object({
   roleId: z.string().uuid(),
   moduleKey: z.string().min(1),
 }).strict();
+
+// `{ offset: true }` is not decoration: bare `.datetime()` accepts ONLY a `Z`
+// suffix and rejects "2026-09-01T00:00:00+02:00" with the same
+// `invalid_request` a malformed string gets — which looks fine in the web
+// form (`toISOString()` is always `Z`) and fails only for the admin using
+// `curl` from a non-UTC machine.
+const RoundCreateBodySchema = z.object({
+  name: z.string().transform((v) => v.trim()).pipe(z.string().min(1)),
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }),
+}).strict();
+
+const RoundEditBodySchema = RoundCreateBodySchema.extend({ roundId: z.string().uuid() }).strict();
+
+/** Shared with `game/rounds/service.ts`'s settle() — an admin write and a
+ *  rollover can then never interleave, so an edit cannot move `ends_at` out
+ *  from under a finalize that has already frozen `final_*` against it. */
+const ROUNDS_LOCK = 7461002;
+
+/** Status is derived, never stored. */
+function roundStatus(
+  row: { startsAt: Date | null; endsAt: Date | null; finalizedAt: Date | null }, now: Date,
+): string {
+  if (row.finalizedAt !== null) return "finalized";
+  if (row.startsAt === null || row.startsAt > now) return "scheduled";
+  if (row.endsAt !== null && row.endsAt <= now) return "ended";
+  return "active";
+}
 
 /** The `*` wildcard's label, kept out of the select's value — the value stays `*`. */
 const WILDCARD_LABEL = "* (every module)";
@@ -44,6 +73,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
   return [
     { id: "*", name: WILDCARD_LABEL },
     { id: "roles", name: "roles" },
+    { id: "rounds", name: "rounds" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
 }
@@ -80,6 +110,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "roles",
         pages: [{ pluginId: "roles", id: rolesPage.id, path: rolesPage.path, view: rolesPage.view }],
+      });
+    }
+    if (hasPermission(grants, "rounds")) {
+      sections.push({
+        pluginId: "rounds",
+        pages: [{ pluginId: "rounds", id: roundsPage.id, path: roundsPage.path, view: roundsPage.view }],
       });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });
@@ -222,5 +258,129 @@ export function registerAdminRoutes(
       eq(roleModuleAccess.moduleKey, parsed.data.moduleKey),
     ));
     return reply.code(204).send();
+  });
+
+  app.get("/api/admin/rounds", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "rounds")) return reply.code(403).send({ error: "forbidden" });
+
+    const now = new Date();
+    const rows = await db.select().from(rounds).orderBy(sql`${rounds.startsAt} asc nulls last`);
+    return reply.send({
+      rounds: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        startsAt: r.startsAt?.toISOString() ?? null,
+        endsAt: r.endsAt?.toISOString() ?? null,
+        finalizedAt: r.finalizedAt?.toISOString() ?? null,
+        status: roundStatus(r, now),
+      })),
+    });
+  });
+
+  // Table-source twin of GET /api/admin/rounds: pre-stringified rows. Never a
+  // spread of the drizzle row — TableRowsResponseSchema requires every value
+  // to be a string, and a raw Date/null fails the parse client-side, inside
+  // PageRenderer, where it looks like a rendering bug rather than a handler one.
+  app.get("/api/admin/rounds/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "rounds")) return reply.code(403).send({ error: "forbidden" });
+
+    const now = new Date();
+    const rows = await db.select().from(rounds).orderBy(sql`${rounds.startsAt} asc nulls last`);
+    return reply.send({
+      rows: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        startsAt: r.startsAt?.toISOString() ?? "",
+        endsAt: r.endsAt?.toISOString() ?? "",
+        status: roundStatus(r, now),
+      })),
+    });
+  });
+
+  app.post("/api/admin/rounds", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "rounds")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = RoundCreateBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const startsAt = new Date(parsed.data.startsAt);
+    const endsAt = new Date(parsed.data.endsAt);
+    if (endsAt <= startsAt) return reply.code(400).send({ error: "invalid_window" });
+
+    return db.transaction(async (tx) => {
+      // First statement — see ROUNDS_LOCK's comment. On its own, "SELECT for
+      // an overlap, then INSERT" is a textbook check-then-act with no unique
+      // index to fall back on, because an overlap is a predicate over two rows.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`);
+
+      // Half-open intervals: COALESCE(ends_at, 'infinity') so an open-ended
+      // round conflicts with everything after its start. starts_at IS NULL
+      // rows are excluded — they can never be active. Finalized rows are
+      // excluded — a settled round is history.
+      // Interpolated as ISO strings, not raw JS `Date`s: postgres.js's wire
+      // encoder throws on a bare `Date` parameter with no column-derived type
+      // to map it through (`ERR_INVALID_ARG_TYPE`), which the raw JS values
+      // on this predicate's right-hand sides are — unlike `rounds.startsAt`
+      // itself, whose column type carries the mapping. An ISO string needs no
+      // such mapping; Postgres compares it against `timestamptz` untyped.
+      const [clash] = await tx.select({ id: rounds.id }).from(rounds)
+        .where(sql`${rounds.finalizedAt} is null
+                   and ${rounds.startsAt} is not null
+                   and ${rounds.startsAt} < ${endsAt.toISOString()}
+                   and ${startsAt.toISOString()} < coalesce(${rounds.endsAt}, 'infinity'::timestamptz)`)
+        .limit(1);
+      if (clash) return reply.code(400).send({ error: "round_overlap" });
+
+      const id = uuidv7();
+      await tx.insert(rounds).values({ id, name: parsed.data.name, startsAt, endsAt });
+      return reply.code(201).send({ id });
+    });
+  });
+
+  app.post("/api/admin/rounds/edit", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "rounds")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = RoundEditBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const startsAt = new Date(parsed.data.startsAt);
+    const endsAt = new Date(parsed.data.endsAt);
+    if (endsAt <= startsAt) return reply.code(400).send({ error: "invalid_window" });
+
+    return db.transaction(async (tx) => {
+      // Same lock, first statement, as the create route — see ROUNDS_LOCK's
+      // comment: an admin write and a rollover can then never interleave.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`);
+
+      const [target] = await tx.select().from(rounds).where(eq(rounds.id, parsed.data.roundId));
+      if (!target) return reply.code(404).send({ error: "round_not_found" });
+      if (target.finalizedAt !== null) return reply.code(400).send({ error: "round_finalized" });
+
+      // Same ISO-string interpolation as the create route's overlap check —
+      // a bare `Date` here throws inside postgres.js's wire encoder.
+      const [clash] = await tx.select({ id: rounds.id }).from(rounds)
+        .where(sql`${rounds.finalizedAt} is null
+                   and ${rounds.startsAt} is not null
+                   and ${rounds.startsAt} < ${endsAt.toISOString()}
+                   and ${startsAt.toISOString()} < coalesce(${rounds.endsAt}, 'infinity'::timestamptz)
+                   and ${rounds.id} <> ${parsed.data.roundId}`)
+        .limit(1);
+      if (clash) return reply.code(400).send({ error: "round_overlap" });
+
+      await tx.update(rounds)
+        .set({ name: parsed.data.name, startsAt, endsAt })
+        .where(eq(rounds.id, parsed.data.roundId));
+      return reply.code(204).send();
+    });
   });
 }
