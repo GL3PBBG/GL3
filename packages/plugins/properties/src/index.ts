@@ -403,9 +403,12 @@ const PropertyUpdateSchema = z
   .strict();
 
 /**
- * Unclaimed locations as a TableRowsResponse — the create form's select
- * `optionsSource`. The 409 `location_taken` guard on the create route
- * covers the race window between the admin selecting and submitting.
+ * Every location as a TableRowsResponse — the create form's select
+ * `optionsSource`. It no longer filters out locations that already have a
+ * property: since `0004_location_plugin_unique` the key is
+ * (location_id, plugin_id), so a town with one type can still take another.
+ * The 409 `location_type_taken` guard on the create route is what rejects a
+ * genuine duplicate.
  */
 const adminLocationsRoute = route({
   method: "GET",
@@ -413,18 +416,31 @@ const adminLocationsRoute = route({
   auth: "admin",
   handler: async (ctx) => {
     return ctx.transaction(async (tx) => {
-      const claimed = await tx.db
-        .select({ locationId: propertiesTable.locationId })
-        .from(propertiesTable);
-      const claimedIds = new Set(claimed.map((c) => c.locationId));
-
-      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
-      const rows = allLocations
-        .filter((loc) => !claimedIds.has(loc.id))
+      const rows = (await tx.db.select({ id: locations.id, name: locations.name }).from(locations))
         .map((loc) => ({ locationId: loc.id, locationName: loc.name }));
-
       return { status: 200, body: { rows } };
     });
+  },
+});
+
+/**
+ * Every property type any installed plugin declares, as a TableRowsResponse —
+ * the create form's select `optionsSource`. `pluginId` is the select's
+ * `valueKey`; the human `name` is what an admin sees, so nobody types a plugin
+ * id by hand any more.
+ */
+const adminTypesRoute = route({
+  method: "GET",
+  path: "/api/admin/properties/types",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = ctx.propertyTypes.list().map((decl) => ({
+      pluginId: decl.id,
+      name: decl.name,
+      price: decl.price.toString(),
+      leverLabel: decl.leverLabel,
+    }));
+    return { status: 200, body: { rows } };
   },
 });
 
@@ -485,6 +501,9 @@ const adminCreateRoute = route({
   // deadlock cycle with the buy/sell/claim routes' locations-then-player
   // order, the same reasoning as adminUpdateRoute below.
   handler: async (ctx, { body }) => {
+    if (ctx.propertyTypes.get(body.pluginId) === null) {
+      throw new PluginError("unknown_property_type", 404);
+    }
     const id = uuidv7();
     const config = readPropertiesSettings((key) => ctx.settings.get(key));
     const rate = body.rate !== undefined ? BigInt(body.rate) : config.income.defaultRate;
@@ -500,8 +519,9 @@ const adminCreateRoute = route({
       });
     } catch (err: unknown) {
       const code = pgErrorCode(err);
-      // unique(location_id) violation → 409
-      if (code === "23505") throw new PluginError("location_taken", 409);
+      // unique(location_id, plugin_id) violation → this town already has a
+      // property of this type.
+      if (code === "23505") throw new PluginError("location_type_taken", 409);
       // location_id FK violation (unknown locationId) → 404
       if (code === "23503") throw new PluginError("location_not_found", 404);
       throw err;
@@ -516,6 +536,9 @@ const adminUpdateRoute = route({
   auth: "admin",
   body: PropertyUpdateSchema,
   handler: async (ctx, { body }) => {
+    if (body.pluginId !== undefined && ctx.propertyTypes.get(body.pluginId) === null) {
+      throw new PluginError("unknown_property_type", 404);
+    }
     // The property editor selects FOR UPDATE on exactly one
     // p_properties_properties row and locks nothing else. A transaction
     // holding exactly one lock cannot be half of a deadlock cycle, which is
@@ -580,7 +603,7 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminLocationsRoute, adminCreateRoute, adminUpdateRoute],
+  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute],
   events: [boughtEvent, soldEvent, incomeEvent],
   pages: [],
   adminPages: [adminPage],

@@ -59,58 +59,67 @@ describe("properties admin", () => {
   it("creates a property and lists it as a TableRowsResponse", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "city-bank", cost: "10000", rate: "500" },
+      payload: { locationId, pluginId: "bullets", cost: "10000", rate: "500" },
     });
     expect(res.statusCode).toBe(201);
     const { id } = res.json() as { id: string };
 
     const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id));
-    expect(row).toMatchObject({ locationId, pluginId: "city-bank", cost: 10000n, rate: 500n });
+    expect(row).toMatchObject({ locationId, pluginId: "bullets", cost: 10000n, rate: 500n });
 
     const list = await app.inject({ method: "GET", url: "/api/admin/properties", headers: auth() });
     expect(list.statusCode).toBe(200);
     const match = (list.json().rows as Record<string, string>[]).find((r) => r.id === id);
     expect(match).toBeDefined();
     expect(match!.locationId).toBe(locationId);
-    expect(match!.plugin).toBe("city-bank");
+    expect(match!.plugin).toBe("bullets");
     expect(match!.cost).toBe("10000");
     expect(match!.rate).toBe("500");
   });
 
-  it("409s a create for a location that already has a property", async () => {
+  // Was "409s a create for a location that already has a property" under the
+  // old unique(location_id) key. Since 0004_location_plugin_unique the key is
+  // (location_id, plugin_id), so a second create at the same location only
+  // 409s when it repeats the same declared type — a different type is
+  // covered by "allows two property types in the same location" below.
+  it("409s a create for a location that already has a property of that type", async () => {
     await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "first", cost: "1000", rate: "100" },
+      payload: { locationId, pluginId: "bullets", cost: "1000", rate: "100" },
     });
 
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "second", cost: "2000", rate: "200" },
+      payload: { locationId, pluginId: "bullets", cost: "2000", rate: "200" },
     });
     expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("location_type_taken");
 
     // Only one row for this location.
     const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
     expect(rows).toHaveLength(1);
   });
 
-  it("lists only unclaimed locations in the locations endpoint", async () => {
-    // Seed a second location so we can claim one and leave the other.
+  // Was "lists only unclaimed locations in the locations endpoint" under the
+  // old unique(location_id) key. Since 0004_location_plugin_unique a claimed
+  // location can still take a second property type, so the create form's
+  // location select must offer every location, claimed or not — the 409
+  // `location_type_taken` guard on the create route is what rejects a
+  // genuine duplicate.
+  it("lists every location in the locations endpoint, claimed or not", async () => {
     const locationId2 = uuidv7();
     await db.insert(coreLocations).values({ id: locationId2, name: "Othertown" });
 
-    // Claim locationId.
     await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "bank", cost: "1000", rate: "100" },
+      payload: { locationId, pluginId: "bullets", cost: "1000", rate: "100" },
     });
 
     const res = await app.inject({ method: "GET", url: "/api/admin/properties/locations", headers: auth() });
     expect(res.statusCode).toBe(200);
     const rows = res.json().rows as Record<string, string>[];
     const ids = rows.map((r) => r.locationId);
-    // locationId is claimed, so only locationId2 should appear.
-    expect(ids).not.toContain(locationId);
+    expect(ids).toContain(locationId);
     expect(ids).toContain(locationId2);
   });
 
@@ -150,6 +159,74 @@ describe("properties admin", () => {
 
     const after = await db.select().from(propertiesPlugin);
     expect(after).toHaveLength(beforeCount);
+  });
+
+  it("lists declared property types for the create form's select", async () => {
+    const res = await app.inject({
+      method: "GET", url: "/api/admin/properties/types", headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json<{ rows: { pluginId: string; name: string }[] }>().rows;
+    expect(rows.map((r) => r.pluginId)).toContain("bullets");
+  });
+
+  it("refuses to create a property with an undeclared type", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "not-a-plugin", cost: "0" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toBe("unknown_property_type");
+  });
+
+  it("allows two property types in the same location", async () => {
+    const first = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bullets", cost: "0" },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "casino", cost: "0" },
+    });
+    // 'casino' is not declared by any installed plugin, so this is the
+    // undeclared-type refusal, not a uniqueness one.
+    expect(second.statusCode).toBe(404);
+
+    const duplicate = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bullets", cost: "0" },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json<{ error: string }>().error).toBe("location_type_taken");
+  });
+
+  // The route-level test above can't actually prove the re-key: "bullets" is
+  // the only declared type in this task's plugin set, so its second create
+  // (a different, undeclared type) 404s at the registry check before ever
+  // reaching the DB — the same outcome the OLD unique(location_id) key would
+  // also have produced. This test bypasses the admin route (and its
+  // registry check) entirely and inserts straight into the table, so it
+  // proves 0004_location_plugin_unique itself: two DIFFERENT plugin_ids at
+  // one location both insert cleanly, and a THIRD insert repeating one of
+  // them collides. Under the old unique(location_id) key, the second insert
+  // below (not just the third) would already throw 23505.
+  it("db-level: two different plugin_ids coexist at one location, a repeat collides", async () => {
+    await db.insert(propertiesPlugin).values({
+      id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+    });
+    await db.insert(propertiesPlugin).values({
+      id: uuidv7(), locationId, pluginId: "typeB", cost: 0n, rate: 0n, profit: 0n,
+    });
+    const rows = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
+    expect(rows).toHaveLength(2);
+
+    await expect(
+      db.insert(propertiesPlugin).values({
+        id: uuidv7(), locationId, pluginId: "typeA", cost: 0n, rate: 0n, profit: 0n,
+      }),
+    ).rejects.toThrow();
   });
 
   it("never renders id as a table column, only as a select's valueKey", () => {
@@ -201,7 +278,7 @@ describe("properties admin — default rate fallback", () => {
 
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "no-rate", cost: "10000" },
+      payload: { locationId, pluginId: "bullets", cost: "10000" },
     });
     expect(res.statusCode).toBe(201);
     const { id } = res.json() as { id: string };
