@@ -315,7 +315,14 @@ export function registerAdminRoutes(
     const endsAt = new Date(parsed.data.endsAt);
     if (endsAt <= startsAt) return reply.code(400).send({ error: "invalid_window" });
 
-    return db.transaction(async (tx) => {
+    // Computed inside the transaction, replied after it commits — never
+    // `reply.send()` from inside the callback. A reply sent before COMMIT can
+    // report success for a row that a failed commit then rolls back, and
+    // Fastify logs a "reply already sent" rejection when the callback's own
+    // return races the already-sent reply. Every other transactional route in
+    // this codebase binds the transaction's result first
+    // (`game/hospital/routes.ts`, `game/rounds/service.ts`); this matches that.
+    const result = await db.transaction(async (tx) => {
       // First statement — see ROUNDS_LOCK's comment. On its own, "SELECT for
       // an overlap, then INSERT" is a textbook check-then-act with no unique
       // index to fall back on, because an overlap is a predicate over two rows.
@@ -337,12 +344,15 @@ export function registerAdminRoutes(
                    and ${rounds.startsAt} < ${endsAt.toISOString()}
                    and ${startsAt.toISOString()} < coalesce(${rounds.endsAt}, 'infinity'::timestamptz)`)
         .limit(1);
-      if (clash) return reply.code(400).send({ error: "round_overlap" });
+      if (clash) return { kind: "overlap" as const };
 
       const id = uuidv7();
       await tx.insert(rounds).values({ id, name: parsed.data.name, startsAt, endsAt });
-      return reply.code(201).send({ id });
+      return { kind: "created" as const, id };
     });
+
+    if (result.kind === "overlap") return reply.code(400).send({ error: "round_overlap" });
+    return reply.code(201).send({ id: result.id });
   });
 
   app.post("/api/admin/rounds/edit", { preHandler: [app.requireAuth] }, async (request, reply) => {
@@ -357,14 +367,16 @@ export function registerAdminRoutes(
     const endsAt = new Date(parsed.data.endsAt);
     if (endsAt <= startsAt) return reply.code(400).send({ error: "invalid_window" });
 
-    return db.transaction(async (tx) => {
+    // Computed inside the transaction, replied after it commits — see the
+    // create route's comment on the same shape.
+    const result = await db.transaction(async (tx) => {
       // Same lock, first statement, as the create route — see ROUNDS_LOCK's
       // comment: an admin write and a rollover can then never interleave.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`);
 
       const [target] = await tx.select().from(rounds).where(eq(rounds.id, parsed.data.roundId));
-      if (!target) return reply.code(404).send({ error: "round_not_found" });
-      if (target.finalizedAt !== null) return reply.code(400).send({ error: "round_finalized" });
+      if (!target) return { kind: "not_found" as const };
+      if (target.finalizedAt !== null) return { kind: "finalized" as const };
 
       // Same ISO-string interpolation as the create route's overlap check —
       // a bare `Date` here throws inside postgres.js's wire encoder.
@@ -375,12 +387,19 @@ export function registerAdminRoutes(
                    and ${startsAt.toISOString()} < coalesce(${rounds.endsAt}, 'infinity'::timestamptz)
                    and ${rounds.id} <> ${parsed.data.roundId}`)
         .limit(1);
-      if (clash) return reply.code(400).send({ error: "round_overlap" });
+      if (clash) return { kind: "overlap" as const };
 
       await tx.update(rounds)
         .set({ name: parsed.data.name, startsAt, endsAt })
         .where(eq(rounds.id, parsed.data.roundId));
-      return reply.code(204).send();
+      return { kind: "ok" as const };
     });
+
+    switch (result.kind) {
+      case "not_found": return reply.code(404).send({ error: "round_not_found" });
+      case "finalized": return reply.code(400).send({ error: "round_finalized" });
+      case "overlap": return reply.code(400).send({ error: "round_overlap" });
+      case "ok": return reply.code(204).send();
+    }
   });
 }
