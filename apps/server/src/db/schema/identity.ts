@@ -28,6 +28,8 @@ export const rounds = pgTable("rounds", {
   name: text("name").notNull(),
   startsAt: timestamp("starts_at", { withTimezone: true }),
   endsAt: timestamp("ends_at", { withTimezone: true }),
+  finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+  snapshottedAt: timestamp("snapshotted_at", { withTimezone: true }),
 });
 
 export const players = pgTable("players", {
@@ -84,6 +86,28 @@ export const playerStats = pgTable("player_stats", {
     .on(t.jailedUntil).where(sql`${t.jailedUntil} is not null`),
   hospitalUntilIdx: index("player_stats_hospital_until_idx")
     .on(t.hospitalUntil).where(sql`${t.hospitalUntil} is not null`),
+}));
+
+/**
+ * A round is a scoring window, not a wipe. This row is the snapshot taken when
+ * a player entered the round; standing = (final ?? current) - start. The
+ * `final_*` columns are NULL until the round is finalized, at which point they
+ * freeze the board forever. This is also the hall of fame — there is no second
+ * table of winners.
+ */
+export const roundEntries = pgTable("round_entries", {
+  roundId: uuid("round_id").notNull().references(() => rounds.id, { onDelete: "cascade" }),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  expAtStart: bigint("exp_at_start", { mode: "bigint" }).notNull().default(sql`0`),
+  cashAtStart: bigint("cash_at_start", { mode: "bigint" }).notNull().default(sql`0`),
+  bankAtStart: bigint("bank_at_start", { mode: "bigint" }).notNull().default(sql`0`),
+  finalExp: bigint("final_exp", { mode: "bigint" }),
+  finalCash: bigint("final_cash", { mode: "bigint" }),
+  finalBank: bigint("final_bank", { mode: "bigint" }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.roundId, t.playerId] }),
+  playerIdx: index("round_entries_player_idx").on(t.playerId),
 }));
 
 /** Mirrors V2 userTimers: open-ended key→time. Custom module keys must survive. */
