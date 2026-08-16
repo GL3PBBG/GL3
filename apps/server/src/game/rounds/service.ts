@@ -64,8 +64,9 @@ async function probe(exec: Db | Tx): Promise<ProbeRow | undefined> {
 
 /**
  * Activation steps 3-5 (§2.2a): the whole-population snapshot, the stamp, and
- * pointing every player at the round. Written once, reached twice — from the
- * standalone activation branch and from the settle loop after a finalize.
+ * pointing every player at the round. Reached from inside the settle loop's
+ * single call site — whether the round was already current when the loop
+ * started, or became current only after finalizing every round ahead of it.
  * Returns whether THIS call activated the round; the caller publishes
  * `round.started` only then.
  *

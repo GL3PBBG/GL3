@@ -53,7 +53,11 @@ describe("round activation snapshot", () => {
       const [row] = await db.select().from(players).where(eq(players.id, id));
       expect(row!.roundId).toBe(next);
     }
-    expect(ended).toBeTruthy();
+    // The same call finalized the predecessor before activating `next` — the
+    // settle loop's finalize-before-activate ordering, exercised here rather
+    // than merely asserted by construction.
+    const [prevRow] = await db.select().from(rounds).where(eq(rounds.id, ended));
+    expect(prevRow!.finalizedAt).not.toBeNull();
   });
 
   it("activates the very first round with no predecessor, exactly once", async () => {
