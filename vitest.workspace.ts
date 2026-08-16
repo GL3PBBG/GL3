@@ -309,6 +309,8 @@ export default defineWorkspace([
         "test/plugin-loader.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
+        "test/rounds-finalize.test.ts",
+        "test/rounds-snapshot.test.ts",
         "test/sentence-sweeper.test.ts",
         "test/sentence-sweeper-lock-order.test.ts",
         "test/sentence-sweeper-loop.test.ts",
