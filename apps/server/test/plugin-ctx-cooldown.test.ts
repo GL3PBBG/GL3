@@ -14,7 +14,7 @@ const leaderboardPrefix = `cooldown-test-${randomUUID()}`;
 
 const ctxFor = (pluginId: string) => createPluginCtx(
   { db: undefined as never, redis, queues: new Map(), settings: { "hello.greeting": "hi" }, leaderboardPrefix },
-  { pluginId, player: null, job: null, filters: [], propertyTypes: new Map() },
+  { pluginId, player: null, job: null, filters: [], propertyTypes: new Map(), installedPluginIds: new Set() },
 );
 
 describe("ctx.cooldown", () => {
