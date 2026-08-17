@@ -2009,8 +2009,10 @@ restocked hourly and that had never been ported.
   the `bullets.` namespace; the rename is a pure function of the key, so
   re-running still maps to the same row.
 - **`@gl3/shared` → `0.1.7`** for `BulletShopResponseSchema` (additive).
-  `@gl3/plugin-sdk` unchanged; both plugin packages are `private: true`. **Not
-  yet published to `npm.gl3.dev`.**
+  `@gl3/plugin-sdk` unchanged; both plugin packages are `private: true`.
+  **Published to `npm.gl3.dev`**, with the user's approval, following this
+  branch's commit — the registry now serves `@gl3/shared` `0.1.1` through
+  `0.1.7`, `latest` pointing at `0.1.7`.
 - Gate: bare `npm run verify`, exit code read from the process — **201 files /
   1568 tests, exit 0**, no unhandled rejections. Two hardcoded fixture counts
   failed first (`migrators/settings.test.ts` and `orchestrator.test.ts`, both

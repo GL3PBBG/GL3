@@ -185,7 +185,8 @@ filter point and clamped when charged — and a subscriber there **cannot** read
 its own settings namespace, because `runFilterChain` passes the *applying*
 plugin's ctx (the events mislabelling trap, now on record for settings too).
 `migrateSettings` gained a rename map for V2's six flat bullet keys.
-`@gl3/shared` → `0.1.7`, not yet published.
+`@gl3/shared` → `0.1.7`, published — the registry now serves `0.1.1`
+through `0.1.7`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
