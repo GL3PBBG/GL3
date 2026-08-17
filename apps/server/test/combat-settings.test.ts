@@ -22,10 +22,13 @@ describe("readCombatSettings", () => {
   it("returns a playable configuration from an empty settings table", () => {
     expect(readCombatSettings(NONE)).toEqual({
       cooldownSeconds: 60,
+      cooldownMaxSeconds: 3600,
       hospitalSeconds: 600,
       newbieExpThreshold: 100n,
       defaultWeaponAccuracy: 50,
-      unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1 },
+      // `dps` absent, not zero: a weapon (or fist) that declares no rate of
+      // fire keeps the flat cooldown. See combat-cooldown.test.ts.
+      unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1, dps: undefined },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
       repair: { costPerPoint: 1000n },
@@ -42,14 +45,17 @@ describe("readCombatSettings", () => {
       "unarmed.damage_min": "2",
       "unarmed.damage_max": "8",
       "unarmed.bullets_per_shot": "3",
+      "cooldown_max_seconds": "600",
+      "unarmed.dps": "2",
     }));
 
     expect(settings).toEqual({
       cooldownSeconds: 90,
+      cooldownMaxSeconds: 600,
       hospitalSeconds: 300,
       newbieExpThreshold: 250n,
       defaultWeaponAccuracy: 70,
-      unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3 },
+      unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3, dps: 2 },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
       repair: { costPerPoint: 1000n },

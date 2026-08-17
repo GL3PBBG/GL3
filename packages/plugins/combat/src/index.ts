@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
+import { cooldownSecondsFor } from "./cooldown.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
@@ -16,6 +17,8 @@ import { type CombatSettings, readCombatSettings } from "./settings.js";
 export { resolveShot, rollFor } from "./resolve.js";
 export type { Rolls, ShotOutcome, WeaponProfile } from "./resolve.js";
 export { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
+export { cooldownSecondsFor } from "./cooldown.js";
+export type { CooldownBounds, CooldownProfile } from "./cooldown.js";
 export { readCombatSettings } from "./settings.js";
 export type { CombatSettings } from "./settings.js";
 
@@ -144,6 +147,53 @@ async function loadArmor(tx: PluginTx, armorItemId: string | null): Promise<numb
   return parsed.success ? parsed.data.armor : 0;
 }
 
+/**
+ * How long this attacker's next cooldown lasts, read BEFORE the attack's own
+ * transaction opens.
+ *
+ * The ordering is forced. The cooldown is claimed ahead of the transaction on
+ * purpose — that is what stops a client spending nothing to discover who is
+ * attackable — but its TTL now depends on the equipped weapon, which the
+ * transaction does not load until well inside itself. So the weapon's pacing
+ * is read here, in its own read-only transaction (the ctx exposes no database
+ * outside one), taking no locks: one statement, joining the equipped item on
+ * `player_stats`.
+ *
+ * A weapon swapped between this read and the shot gives a cooldown sized for
+ * the old weapon. That is accepted: the alternative is claiming the cooldown
+ * after the roll, which hands back the free probe. It costs one weapon swap's
+ * worth of mis-pacing, once, to the player who did the swapping.
+ *
+ * Every fallback here mirrors `loadWeapon` — no row, a wrong item type, or
+ * malformed jsonb all mean "unarmed" — so a weapon combat will treat as fists
+ * is also paced as fists.
+ */
+async function cooldownForAttacker(
+  ctx: { transaction: <T>(fn: (tx: PluginTx) => Promise<T>) => Promise<T> },
+  playerId: string,
+  config: CombatSettings,
+): Promise<number> {
+  const unarmed = {
+    damageMin: config.unarmed.damageMin,
+    damageMax: config.unarmed.damageMax,
+    dps: config.unarmed.dps,
+  };
+
+  const profile = await ctx.transaction(async (tx) => {
+    const [row] = await tx.db
+      .select({ effects: items.effects, itemType: items.itemType })
+      .from(playerStats)
+      .leftJoin(items, eq(items.id, playerStats.weaponItemId))
+      .where(eq(playerStats.playerId, playerId));
+    if (!row || row.itemType !== ITEM_TYPE_WEAPON) return unarmed;
+    const parsed = WeaponEffectsSchema.safeParse(row.effects);
+    if (!parsed.success) return unarmed;
+    return parsed.data;
+  });
+
+  return cooldownSecondsFor(profile, config);
+}
+
 const attackRoute = route({
   method: "POST",
   path: "/api/combat/attack/:targetId",
@@ -161,7 +211,13 @@ const attackRoute = route({
     // 4xx: releasing would be a check-then-act on Redis (NOTES.md rule 2),
     // and keeping it denies a client a free probe for scanning who is
     // attackable at no cost.
-    const acquired = await ctx.cooldown.acquire("combat.attack", player.id, config.cooldownSeconds);
+    //
+    // Its length is the weapon's, not a flat number: `cooldownForAttacker`
+    // divides the weapon's average damage by its declared dps. A weapon
+    // declaring none — every migrated V2 item — still gets
+    // `combat.cooldown_seconds`.
+    const cooldownSeconds = await cooldownForAttacker(ctx, player.id, config);
+    const acquired = await ctx.cooldown.acquire("combat.attack", player.id, cooldownSeconds);
     if (!acquired) {
       const remaining = await ctx.cooldown.peek("combat.attack", player.id);
       throw new PluginError("cooldown", 429, {}, { "retry-after": String(remaining) });

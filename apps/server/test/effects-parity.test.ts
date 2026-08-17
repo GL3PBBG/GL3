@@ -25,6 +25,7 @@ describe("weapon effects schema parity", () => {
     armorPierce: 3,
     minRankExp: 400,
     backfireChance: 4,
+    dps: 0.5,
   };
 
   it("parses one fixture identically through both copies", () => {
@@ -40,5 +41,23 @@ describe("weapon effects schema parity", () => {
     const bad = { damageMin: 9, damageMax: 2 };
     expect(CombatWeapon.safeParse(bad).success).toBe(false);
     expect(InventoryWeapon.safeParse(bad).success).toBe(false);
+  });
+
+  it("keeps a fractional dps as a float in both", () => {
+    // `dps` is the second float in the schema after `critMultiplier`, and the
+    // one that matters most: 0.5 rounded to an integer is either 0 (an
+    // Infinity cooldown) or 1 (double the intended rate of fire).
+    expect(CombatWeapon.parse(fixture).dps).toBe(0.5);
+    expect(InventoryWeapon.parse(fixture).dps).toBe(0.5);
+  });
+
+  it("rejects a non-positive dps in both", () => {
+    // Zero would be a division by zero in `cooldownSecondsFor`. It refuses one
+    // defensively, but the schema is where a hand-written row should die.
+    for (const dps of [0, -1]) {
+      const bad = { damageMin: 1, damageMax: 2, dps };
+      expect(CombatWeapon.safeParse(bad).success).toBe(false);
+      expect(InventoryWeapon.safeParse(bad).success).toBe(false);
+    }
   });
 });

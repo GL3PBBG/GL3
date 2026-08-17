@@ -1,7 +1,7 @@
 import type { InventoryItem } from "@gl3/shared";
 import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
-import { numericEffect } from "../lib/effects.js";
+import { numericEffect, weaponStatLine } from "../lib/effects.js";
 import styles from "./pages.module.css";
 
 /**
@@ -16,10 +16,9 @@ const CONSUMABLE = "consumable";
 
 function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
   if (item.itemType === WEAPON) {
-    const min = numericEffect(item.effects, "damageMin");
-    const max = numericEffect(item.effects, "damageMax");
-    if (min === null || max === null) return <span className={styles.muted}>unusable</span>;
-    return <span className={styles.muted}>{min}–{max} damage</span>;
+    const line = weaponStatLine(item.effects);
+    if (line === null) return <span className={styles.muted}>unusable</span>;
+    return <span className={styles.muted}>{line}</span>;
   }
   if (item.itemType === ARMOR) {
     const armor = numericEffect(item.effects, "armor");
