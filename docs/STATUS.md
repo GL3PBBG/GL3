@@ -1669,8 +1669,9 @@ takes the repo's plugin→plugin dependency edges from two to four
 (`casino → properties`, `blackjack → casino`); the graph stays acyclic and
 the franchise design's "look again at the third edge" was done and recorded in
 the spec — re-examine at edge six. **Eight of eighteen plugins now declare
-migrations**, up from seven of sixteen: casino's `0000_sessions` is the only
-new one, and a game plugin owning no tables *by design* is what lets a
+migrations**, up from seven of sixteen: casino's `0001_sessions` and
+`0002_one_open_session` are the only new ones, and a game plugin owning no
+tables *by design* is what lets a
 third-party game ship without a migration runner touching the database.
 
 **The extension point is a filter, not a manifest field.** The hub exports
@@ -1763,8 +1764,36 @@ sets back out of the schemas (a `discriminatedUnion` reports `issue.options`)
 rather than restating a third hand-maintained copy, and runs in CI's
 `verify:ci`.
 
-**Suite.** 192 files / 1479 tests, `npm run verify` exit 0 — the exit code
-itself, not the summary line.
+**Suite.** 195 files / 1499 tests, `npm run verify` **exit 0** — the exit code
+read from the process itself, not the summary line and not the harness's own
+completion status. That distinction earned its keep on this branch: the run
+before this one reported "completed (exit code 0)" while the real code was
+**1**, because the command ended in `; echo "exit=$?"` and the shell returned
+`echo`'s status. One test was red — `casino-lock-order`'s ABBA case, a bare
+500 on `lockPlayersForUpdate` with no SQLSTATE — and the summary line alone
+would have shipped it.
+
+That failure is **unexplained and recorded as open**, not cleared. It did not
+recur on the green run, but "it passed the second time" is the weakest
+possible clearing: it is 5/5 green standalone and 3/3 green under deliberate
+eight-file contention, so it needs full-suite density, and the log carried no
+`40P01`, no `PostgresError` and no dropped connection — so the cross-talk
+explanation that covers `properties-lock-order`'s round-19 failure does not
+cover this one. Two failures of the same shape (a bare 500 on a `FOR UPDATE`
+under full-suite load, in two different files) are now on record.
+`routes.ts` logs the driver error's `cause` from this branch on, which is the
+one datum both diagnoses lacked.
+
+**The suite got 3.5x faster on this branch** and it was not an optimisation
+hunt — the wall clock became the obstacle. `resetDb` truncated one table per
+statement: 1.32s against 41 *empty* tables, all of it 39 separate WAL flushes
+and lock acquisitions. One `TRUNCATE a, b, c ... CASCADE` costs 0.25s. ~87
+files call it, most per test, so it landed on the majority of 776 integration
+tests. Test time 5872s → 1481s, wall 1000s → 269s. Measured, not guessed:
+argon2 was 42ms a hash and `bootTestServer` was already memoised per file —
+the same "argon2id is slow" red herring this repo has recorded once before.
+Note the speedup raises concurrency *density*, which is a plausible reason a
+latent contention bug surfaced on the run above.
 
 **The final whole-branch review found what eleven task reviews could not,**
 and it is worth recording why: nothing on the branch asserted view *content*.

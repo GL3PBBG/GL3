@@ -177,11 +177,30 @@ events per hand (one per blackjack hand floods the feed), so no new
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **192 files / 1479 tests** as of `feat/casino-blackjack`, backed by a
+Suite: **195 files / 1499 tests** as of `feat/casino-blackjack`, backed by a
 bare `npm run verify` on that branch that **exited 0** with no unhandled
-rejections (`a25da12`; the final review's fix wave landed after it and was
-re-run scoped, so a fresh bare run is still owed at the merge gate). Note
-`apps/migrate`'s
+rejections. **The run takes ~270s, down from ~1000s**, because `resetDb`
+truncated one table per statement (1.32s against 41 *empty* tables — 39
+separate WAL flushes) and now issues one `TRUNCATE a, b, c ... CASCADE` (0.25s);
+~87 files call it, most per test. Profile before optimising here: argon2 is
+42ms a hash and `bootTestServer` is already memoised per file, so the obvious
+suspects are the wrong ones — the second time this repo has recorded that
+exact red herring.
+**Read the exit code from the process, not from a wrapper.** The gate run
+before the green one was reported by the harness as "completed (exit code 0)"
+while the real status was **1** — the command ended in `; echo "exit=$?"`, so
+the shell returned `echo`'s status and one red test (`casino-lock-order`'s
+ABBA case) would have shipped as green.
+That failure is **open, not cleared**: a bare 500 on `lockPlayersForUpdate`
+with no SQLSTATE, 5/5 green standalone and 3/3 green under eight-file
+contention, with no `40P01`, no `PostgresError` and no dropped connection in
+the log — so the cross-talk story that explains `properties-lock-order`'s
+round-19 failure does not explain this one. Two failures of that same shape
+are now on record. `plugins/routes.ts` logs the driver error's `cause`
+(SQLSTATE, detail, table) from this branch on, which is the datum both
+diagnoses lacked. Note the 3.5x speedup raises concurrency *density*, which is
+a plausible reason a latent contention bug surfaced when it did.
+Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
