@@ -4,11 +4,11 @@ import type { ComponentType, CSSProperties } from "react";
 export type CardComponent = ComponentType<{ style?: CSSProperties }>;
 
 /**
- * An EXPLICIT map, not `deck[code]`. The library's README shows
- * `import * as deck` with a dynamic lookup, which defeats tree-shaking
- * entirely and pulls all ~558 KB of SVG into the bundle whether a page shows
- * one card or none. Listing the components keeps the bundler's dead-code
- * analysis working.
+ * An EXPLICIT map, not `deck[code]` (the library's README shows a dynamic
+ * lookup). This buys compile-time typo safety, not bundle size: the map
+ * below statically references all 56 exports, so there is no unused export
+ * for either form to strip — a card code that isn't a real export fails
+ * `tsc` here instead of silently resolving to `undefined` at render time.
  */
 const CARDS: Record<string, CardComponent> = {
   Ha: deck.Ha, H2: deck.H2, H3: deck.H3, H4: deck.H4, H5: deck.H5, H6: deck.H6, H7: deck.H7,
