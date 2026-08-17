@@ -33,7 +33,7 @@ export interface GameDef<S = unknown> {
    */
   maxPayoutMultiplier: number;
   /** Validates the act body's `action`. Rule: zod every external boundary. */
-  action: z.ZodTypeAny;
+  action: z.ZodType<unknown>;
   start(input: { wager: bigint; seed: string }): GameStep<S>;
   act(state: S, action: unknown): GameStep<S>;
   /** Total returned to the player. 0 = loss, wager = push, 2×wager = win. */
