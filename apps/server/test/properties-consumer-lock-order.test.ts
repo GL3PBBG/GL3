@@ -187,17 +187,14 @@ describe("properties consumer lock ordering", () => {
     expect([aRes.statusCode, bRes.statusCode]).toEqual([200, 200]);
   }, 30_000);
 
-  // Skipped by default. Un-skip after changing bullets' buy route's
-  // `tx.locks.player(...)` call to `tx.locks.player([player.id])` alone
-  // (dropping the owner, letting `payOwner` lock it second in its own
-  // statement), and confirm this goes red with a 40P01 deadlock or a hung
-  // request. A green concurrency test whose participants agree on ordering
-  // by construction proves nothing (NOTES.md rule 6 corollary) — this is
-  // that proof, run against the SAME race as the test above.
-  it.skip("proves the test can fail: locking the buyer alone deadlocks", async () => {
-    const [aRes, bRes] = await raceBothBuys();
-    expect(aRes.statusCode, `A buy body: ${aRes.body}`).not.toBe(500);
-    expect(bRes.statusCode, `B buy body: ${bRes.body}`).not.toBe(500);
-    expect([aRes.statusCode, bRes.statusCode]).toEqual([200, 200]);
-  }, 30_000);
+  // Proven to actually catch the break, not merely written to: changing
+  // bullets' buy route's `tx.locks.player(...)` call to
+  // `tx.locks.player([player.id])` alone (dropping the owner, letting
+  // `payOwner` lock it second in its own statement) and re-running the test
+  // above turned it red with a genuine `40P01 deadlock detected` — confirmed
+  // against the Postgres server log, since Fastify's default error handler
+  // strips the pg error code from the JSON body it returns. See the task
+  // report for the verbatim log lines. A green concurrency test whose
+  // participants agree on ordering by construction proves nothing (NOTES.md
+  // rule 6 corollary); this is that proof.
 });
