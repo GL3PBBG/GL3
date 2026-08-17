@@ -1,22 +1,24 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
+import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
-import { readPropertiesSettings } from "./settings.js";
-import { accruedSince } from "./resolve.js";
 import { adminPage } from "./pages.js";
+import { seizeOnKill } from "./seizure.js";
 
-// Re-exported so tests can import the parser and types directly.
-export { readPropertiesSettings, type PropertiesSettings } from "./settings.js";
-export { accruedSince } from "./resolve.js";
+export { ownerAt, payOwner, type PropertyOwnership } from "./api.js";
+export { propertiesTable } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Params schema — id in the path, validated by the loader via `params`.
 // ---------------------------------------------------------------------------
 
 const PropertyParamsSchema = z.object({ id: z.string().uuid() });
+
+/** A bigint-safe amount on the wire: digits only, never a JSON number.
+ *  Shared by the lever body and the admin create/update bodies. */
+const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer string");
 
 // ---------------------------------------------------------------------------
 // List route (read-only, no locks)
@@ -30,7 +32,6 @@ const listRoute = route({
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
 
     return ctx.transaction(async (tx) => {
       const rows = await tx.db
@@ -40,8 +41,7 @@ const listRoute = route({
           pluginId: propertiesTable.pluginId,
           ownerPlayerId: propertiesTable.ownerPlayerId,
           cost: propertiesTable.cost,
-          rate: propertiesTable.rate,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
+          profit: propertiesTable.profit,
           locationName: locations.name,
           ownerName: players.username,
         })
@@ -49,23 +49,26 @@ const listRoute = route({
         .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
 
-      const now = new Date();
       return {
         status: 200,
         body: {
           rows: rows.map((row) => {
+            const decl = ctx.propertyTypes.get(row.pluginId);
             const isOwner = row.ownerPlayerId === player.id;
-            const accrued = isOwner
-              ? accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now)
-              : 0n;
             return {
               id: row.id,
+              locationId: row.locationId,
               locationName: row.locationName ?? "",
               pluginId: row.pluginId,
-              rate: row.rate.toString(),
+              typeName: decl?.name ?? row.pluginId,
+              // "" when the type is not installed: there is no declared price,
+              // so the row is not buyable and the page renders no Buy button.
+              price: decl === null ? "" : decl.price.toString(),
+              leverLabel: decl?.leverLabel ?? "",
               ownerName: row.ownerPlayerId ? (row.ownerName ?? "") : "—",
-              cost: row.cost.toString(),
-              accrued: accrued.toString(),
+              // The lever and the P&L are the owner's business only.
+              lever: isOwner ? row.cost.toString() : "",
+              profit: isOwner ? row.profit.toString() : "",
             };
           }),
         },
@@ -78,257 +81,292 @@ const listRoute = route({
 // Buy route
 // ---------------------------------------------------------------------------
 
+const BuyBodySchema = z.object({
+  pluginId: z.string().min(1).max(80),
+  locationId: z.string().uuid(),
+}).strict();
+
+/**
+ * V2's `method_own()`, which lived in each consumer module (bullets, blackjack)
+ * as copy-pasted code. GL3 keeps it here once: the price comes from the
+ * consumer's `providesProperties` declaration, so a new franchise needs no new
+ * buy route.
+ *
+ * The row is created lazily on first purchase, as V2 does — the table ships
+ * empty. V2's insert races (two concurrent first-buys make two rows, since its
+ * only key is PR_id); here the location lock is taken first, so the two
+ * serialise and the second sees the row the first inserted.
+ */
 const buyRoute = route({
   method: "POST",
-  path: "/api/properties/:id/buy",
+  path: "/api/properties/buy",
   accessInJail: false,
   accessInHospital: true,
-  params: PropertyParamsSchema,
-  handler: async (ctx, { params }) => {
+  body: BuyBodySchema,
+  handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
+    const decl = ctx.propertyTypes.get(body.pluginId);
+    if (decl === null) throw new PluginError("unknown_property_type", 404);
 
-      // RULE 6: location first, then player — the established order for the
-      // location↔player pair (travel/bullets deadlock).
-      await tx.locks.location(before.locationId);
+    return ctx.transaction(async (tx) => {
+      // RULE 6: location first, then player.
+      await tx.locks.location(body.locationId);
       await tx.locks.player([player.id]);
 
-      // Lock-then-recheck (TOCTOU).
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== null) throw new PluginError("already_owned", 409);
-
       const [stats] = await tx.db
-        .select({ cash: playerStats.cash })
+        .select({ locationId: playerStats.locationId, cash: playerStats.cash })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
-      if (stats === undefined || stats.cash < row.cost) {
-        throw new PluginError("insufficient_funds", 409);
+      if (stats === undefined) throw new PluginError("no_location", 409);
+      if (stats.locationId !== body.locationId) throw new PluginError("wrong_location", 409);
+      if (stats.cash < decl.price) throw new PluginError("insufficient_funds", 409);
+
+      const [existing] = await tx.db
+        .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
+        .from(propertiesTable)
+        .where(and(
+          eq(propertiesTable.locationId, body.locationId),
+          eq(propertiesTable.pluginId, body.pluginId),
+        ))
+        .for("update");
+      if (existing !== undefined && existing.ownerPlayerId !== null) {
+        // Including when the caller already owns it — buying your own is the
+        // same error, as in the shipped route.
+        throw new PluginError("already_owned", 409);
       }
 
-      const now = new Date();
       await tx.economy.applyBalanceChange({
         playerId: player.id,
-        amount: -row.cost,
+        amount: -decl.price,
         kind: "cash",
         reason: "properties.buy",
       });
-      await tx.db
-        .update(propertiesTable)
-        .set({ ownerPlayerId: player.id, lastClaimedAt: now })
-        .where(eq(propertiesTable.id, row.id));
 
-      // Fetch the location name for the event payload under the same tx.
+      let propertyId: string;
+      if (existing === undefined) {
+        propertyId = uuidv7();
+        await tx.db.insert(propertiesTable).values({
+          id: propertyId,
+          locationId: body.locationId,
+          pluginId: body.pluginId,
+          ownerPlayerId: player.id,
+        });
+      } else {
+        propertyId = existing.id;
+        // cost = 0: a new owner inherits no lever, matching V2's transfer().
+        await tx.db
+          .update(propertiesTable)
+          .set({ ownerPlayerId: player.id, cost: 0n })
+          .where(eq(propertiesTable.id, propertyId));
+      }
+
       const [loc] = await tx.db
         .select({ name: locations.name })
         .from(locations)
-        .where(eq(locations.id, row.locationId));
+        .where(eq(locations.id, body.locationId));
 
       await tx.events.publish({
         name: "bought",
         actorId: player.id,
         actorName: player.username,
         audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", cost: row.cost.toString() },
+        payload: {
+          typeName: decl.name,
+          locationName: loc?.name ?? "",
+          price: decl.price.toString(),
+        },
       });
 
-      return { status: 200, body: { propertyId: row.id } };
+      return { status: 200, body: { propertyId } };
     });
   },
 });
 
-// ---------------------------------------------------------------------------
-// Sell route
-// ---------------------------------------------------------------------------
+/**
+ * Locks location → player, re-reads the row FOR UPDATE and verifies the caller
+ * owns it. 404 for both "no such row" and "not yours" — 404-not-403 so a
+ * property's existence is not probeable, the shipped convention.
+ *
+ * `alsoLock` names any OTHER players this route also needs locked (transfer's
+ * target). RULE 6: the caller and every name in `alsoLock` go through this
+ * ONE `tx.locks.player` call — `tx.locks.player` sorts and dedupes *within* a
+ * call but has no memory across calls in the same transaction, so a caller
+ * that took the caller's row here and then took a second, separate
+ * `tx.locks.player` call later for a second player is two lock statements,
+ * not one, and that is exactly what let A-transfers-to-B deadlock against
+ * B-transfers-to-A (fixed; see `properties-lock-order.test.ts`).
+ */
+async function loadOwnedRow(
+  tx: PluginTx, propertyId: string, playerId: string, alsoLock: readonly string[] = [],
+): Promise<{ id: string; locationId: string; pluginId: string; cost: bigint; profit: bigint }> {
+  const [before] = await tx.db
+    .select({ locationId: propertiesTable.locationId })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId));
+  if (before === undefined) throw new PluginError("property_not_found", 404);
 
-const sellRoute = route({
+  await tx.locks.location(before.locationId);
+  await tx.locks.player([playerId, ...alsoLock]);
+
+  const [row] = await tx.db
+    .select({
+      id: propertiesTable.id,
+      locationId: propertiesTable.locationId,
+      pluginId: propertiesTable.pluginId,
+      ownerPlayerId: propertiesTable.ownerPlayerId,
+      cost: propertiesTable.cost,
+      profit: propertiesTable.profit,
+    })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId))
+    .for("update");
+  if (row === undefined) throw new PluginError("property_not_found", 404);
+  if (row.ownerPlayerId !== playerId) throw new PluginError("not_owned", 404);
+  return { id: row.id, locationId: row.locationId, pluginId: row.pluginId, cost: row.cost, profit: row.profit };
+}
+
+/** V2's `$100` floor on PR_cost, in GL3's cents. */
+const LEVER_FLOOR = 10_000n;
+
+const LeverBodySchema = z.object({ value: NonNegativeIntegerString }).strict();
+
+/** V2's `method_cost`: the owner sets the consumer's local price or limit. */
+const leverRoute = route({
   method: "POST",
-  path: "/api/properties/:id/sell",
+  path: "/api/properties/:id/lever",
+  accessInJail: true,
+  accessInHospital: true,
+  params: PropertyParamsSchema,
+  body: LeverBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const value = BigInt(body.value);
+    if (value < LEVER_FLOOR) throw new PluginError("lever_too_low", 400);
+
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
+      await tx.db.update(propertiesTable).set({ cost: value }).where(eq(propertiesTable.id, row.id));
+    });
+    return { status: 204 };
+  },
+});
+
+const TransferBodySchema = z.object({ username: z.string().min(1).max(64) }).strict();
+
+/**
+ * V2's `method_transfer`. Zeroes the lever on handover, as V2 does.
+ *
+ * RULE 6: this is a player↔player pair, and both players go through
+ * `loadOwnedRow`'s ONE `tx.locks.player` call (via `alsoLock`) — that single
+ * sorted, deduped statement is what makes A-transfers-to-B safe against
+ * B-transfers-to-A. `target` is resolved from `players` (no lock needed for a
+ * plain lookup) BEFORE `loadOwnedRow` runs, specifically so its id can be
+ * folded into that one call rather than locked separately afterwards; a
+ * second, later `tx.locks.player` call for the caller's row already held is
+ * NOT a no-op across transactions — it is a second lock statement, and two
+ * transactions taking their two statements in opposite orders is exactly an
+ * ABBA cycle. A real 40P01 shipped from that shape once; do not reintroduce a
+ * second player-lock call in this route.
+ *
+ * Consequence: `player_not_found` / `cannot_transfer_to_self` now resolve
+ * before the property's own `property_not_found` / `not_owned` — verified
+ * against every existing test, none of which relied on the old order.
+ */
+const transferRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/transfer",
+  accessInJail: false,
+  accessInHospital: true,
+  params: PropertyParamsSchema,
+  body: TransferBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    await ctx.transaction(async (tx) => {
+      const [target] = await tx.db
+        .select({ id: players.id, username: players.username })
+        .from(players)
+        .where(eq(players.username, body.username));
+      if (target === undefined) throw new PluginError("player_not_found", 404);
+      if (target.id === player.id) throw new PluginError("cannot_transfer_to_self", 409);
+
+      const row = await loadOwnedRow(tx, params.id, player.id, [target.id]);
+
+      await tx.db
+        .update(propertiesTable)
+        .set({ ownerPlayerId: target.id, cost: 0n })
+        .where(eq(propertiesTable.id, row.id));
+
+      const [loc] = await tx.db
+        .select({ name: locations.name }).from(locations).where(eq(locations.id, row.locationId));
+      const decl = ctx.propertyTypes.get(row.pluginId);
+
+      await tx.events.publish({
+        name: "transferred",
+        actorId: player.id,
+        actorName: player.username,
+        audience: { kind: "player", playerId: target.id },
+        payload: { typeName: decl?.name ?? row.pluginId, locationName: loc?.name ?? "" },
+      });
+    });
+    return { status: 204 };
+  },
+});
+
+/** V2's `method_drop`/`method_dropDo`: a DELETE with no refund. GL3 keeps the
+ *  row and unowns it, so its lifetime P&L survives its owners. */
+const dropRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/drop",
   accessInJail: false,
   accessInHospital: true,
   params: PropertyParamsSchema,
   handler: async (ctx, { params }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
 
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
-
-      await tx.locks.location(before.locationId);
-      await tx.locks.player([player.id]);
-
-      // Lock-then-recheck.
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
-          rate: propertiesTable.rate,
-          profit: propertiesTable.profit,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== player.id) throw new PluginError("not_owned", 404);
-
-      const now = new Date();
-      const accrued = accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now);
-      const payout = row.cost + accrued;
-
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: payout,
-        kind: "cash",
-        reason: "properties.sell",
-      });
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
       await tx.db
         .update(propertiesTable)
-        .set({
-          ownerPlayerId: null,
-          lastClaimedAt: null,
-          profit: sql`${propertiesTable.profit} + ${accrued}`,
-        })
+        .set({ ownerPlayerId: null, cost: 0n })
         .where(eq(propertiesTable.id, row.id));
 
-      // Fetch the location name for the event payload.
       const [loc] = await tx.db
-        .select({ name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, row.locationId));
+        .select({ name: locations.name }).from(locations).where(eq(locations.id, row.locationId));
+      const decl = ctx.propertyTypes.get(row.pluginId);
 
       await tx.events.publish({
-        name: "sold",
+        name: "dropped",
         actorId: player.id,
         actorName: player.username,
         audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", payout: payout.toString() },
+        payload: { typeName: decl?.name ?? row.pluginId, locationName: loc?.name ?? "" },
       });
-
-      return { status: 200, body: { payout: payout.toString() } };
     });
+    return { status: 204 };
   },
 });
 
-// ---------------------------------------------------------------------------
-// Claim route
-// ---------------------------------------------------------------------------
-
-const claimRoute = route({
+/** V2's `method_reset`: a stat reset. Moves no money and publishes nothing. */
+const resetRoute = route({
   method: "POST",
-  path: "/api/properties/:id/claim",
-  accessInJail: false,
+  path: "/api/properties/:id/reset",
+  accessInJail: true,
   accessInHospital: true,
   params: PropertyParamsSchema,
   handler: async (ctx, { params }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
-
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
-
-      await tx.locks.location(before.locationId);
-      await tx.locks.player([player.id]);
-
-      // Lock-then-recheck.
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          lastClaimedAt: propertiesTable.lastClaimedAt,
-          rate: propertiesTable.rate,
-          profit: propertiesTable.profit,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== player.id) throw new PluginError("not_owned", 404);
-
-      const now = new Date();
-      const accrued = accruedSince(row.lastClaimedAt, row.rate, config.income.cap, now);
-
-      // Zero-claim: return immediately, do NOT touch last_claimed_at.
-      if (accrued === 0n) {
-        return { status: 200, body: { claimed: "0" } };
-      }
-
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: accrued,
-        kind: "cash",
-        reason: "properties.income",
-      });
-      await tx.db
-        .update(propertiesTable)
-        .set({
-          lastClaimedAt: now,
-          profit: sql`${propertiesTable.profit} + ${accrued}`,
-        })
-        .where(eq(propertiesTable.id, row.id));
-
-      // Fetch the location name for the event payload.
-      const [loc] = await tx.db
-        .select({ name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, row.locationId));
-
-      await tx.events.publish({
-        name: "income",
-        actorId: player.id,
-        actorName: player.username,
-        audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", amount: accrued.toString() },
-      });
-
-      return { status: 200, body: { claimed: accrued.toString() } };
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
+      await tx.db.update(propertiesTable).set({ profit: 0n }).where(eq(propertiesTable.id, row.id));
     });
+    return { status: 204 };
   },
 });
 
@@ -344,8 +382,6 @@ export { adminPage } from "./pages.js";
 // ---------------------------------------------------------------------------
 // Admin routes
 // ---------------------------------------------------------------------------
-
-const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
 
 /**
  * The page renderer posts every field in a form, sending "" for the ones the
@@ -385,11 +421,7 @@ const PropertyCreateSchema = z
   .object({
     locationId: z.string().uuid(),
     pluginId: z.string().min(1).max(80),
-    cost: AdminMoney,
-    // Optional: blank (the page renderer's convention for a left-empty
-    // field, see `blankable` above) or omitted falls back to the plugin's
-    // `income.default_rate` setting in the handler below (spec §4).
-    rate: blankable(AdminMoney),
+    cost: NonNegativeIntegerString,
   })
   .strict();
 
@@ -397,15 +429,17 @@ const PropertyUpdateSchema = z
   .object({
     id: z.string().uuid(),
     pluginId: blankable(z.string().min(1).max(80)),
-    cost: AdminMoney,
-    rate: AdminMoney,
+    cost: NonNegativeIntegerString,
   })
   .strict();
 
 /**
- * Unclaimed locations as a TableRowsResponse — the create form's select
- * `optionsSource`. The 409 `location_taken` guard on the create route
- * covers the race window between the admin selecting and submitting.
+ * Every location as a TableRowsResponse — the create form's select
+ * `optionsSource`. It no longer filters out locations that already have a
+ * property: since `0004_location_plugin_unique` the key is
+ * (location_id, plugin_id), so a town with one type can still take another.
+ * The 409 `location_type_taken` guard on the create route is what rejects a
+ * genuine duplicate.
  */
 const adminLocationsRoute = route({
   method: "GET",
@@ -413,18 +447,31 @@ const adminLocationsRoute = route({
   auth: "admin",
   handler: async (ctx) => {
     return ctx.transaction(async (tx) => {
-      const claimed = await tx.db
-        .select({ locationId: propertiesTable.locationId })
-        .from(propertiesTable);
-      const claimedIds = new Set(claimed.map((c) => c.locationId));
-
-      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
-      const rows = allLocations
-        .filter((loc) => !claimedIds.has(loc.id))
+      const rows = (await tx.db.select({ id: locations.id, name: locations.name }).from(locations))
         .map((loc) => ({ locationId: loc.id, locationName: loc.name }));
-
       return { status: 200, body: { rows } };
     });
+  },
+});
+
+/**
+ * Every property type any installed plugin declares, as a TableRowsResponse —
+ * the create form's select `optionsSource`. `pluginId` is the select's
+ * `valueKey`; the human `name` is what an admin sees, so nobody types a plugin
+ * id by hand any more.
+ */
+const adminTypesRoute = route({
+  method: "GET",
+  path: "/api/admin/properties/types",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = ctx.propertyTypes.list().map((decl) => ({
+      pluginId: decl.id,
+      name: decl.name,
+      price: decl.price.toString(),
+      leverLabel: decl.leverLabel,
+    }));
+    return { status: 200, body: { rows } };
   },
 });
 
@@ -450,7 +497,6 @@ const adminListRoute = route({
           pluginId: propertiesTable.pluginId,
           ownerPlayerId: propertiesTable.ownerPlayerId,
           cost: propertiesTable.cost,
-          rate: propertiesTable.rate,
           profit: propertiesTable.profit,
           locationName: locations.name,
           ownerName: players.username,
@@ -466,7 +512,6 @@ const adminListRoute = route({
         plugin: p.pluginId,
         ownerName: p.ownerPlayerId ? (p.ownerName ?? "") : "",
         cost: p.cost.toString(),
-        rate: p.rate.toString(),
         profit: p.profit.toString(),
       }));
 
@@ -482,12 +527,13 @@ const adminCreateRoute = route({
   body: PropertyCreateSchema,
   // The INSERT takes FOR KEY SHARE on locations[L] via the location_id FK
   // and acquires nothing afterwards (rule 6) — it cannot be half of a
-  // deadlock cycle with the buy/sell/claim routes' locations-then-player
+  // deadlock cycle with buy's or loadOwnedRow's locations-then-player
   // order, the same reasoning as adminUpdateRoute below.
   handler: async (ctx, { body }) => {
+    if (ctx.propertyTypes.get(body.pluginId) === null) {
+      throw new PluginError("unknown_property_type", 404);
+    }
     const id = uuidv7();
-    const config = readPropertiesSettings((key) => ctx.settings.get(key));
-    const rate = body.rate !== undefined ? BigInt(body.rate) : config.income.defaultRate;
     try {
       await ctx.transaction(async (tx) => {
         await tx.db.insert(propertiesTable).values({
@@ -495,13 +541,13 @@ const adminCreateRoute = route({
           locationId: body.locationId,
           pluginId: body.pluginId,
           cost: BigInt(body.cost),
-          rate,
         });
       });
     } catch (err: unknown) {
       const code = pgErrorCode(err);
-      // unique(location_id) violation → 409
-      if (code === "23505") throw new PluginError("location_taken", 409);
+      // unique(location_id, plugin_id) violation → this town already has a
+      // property of this type.
+      if (code === "23505") throw new PluginError("location_type_taken", 409);
       // location_id FK violation (unknown locationId) → 404
       if (code === "23503") throw new PluginError("location_not_found", 404);
       throw err;
@@ -516,6 +562,9 @@ const adminUpdateRoute = route({
   auth: "admin",
   body: PropertyUpdateSchema,
   handler: async (ctx, { body }) => {
+    if (body.pluginId !== undefined && ctx.propertyTypes.get(body.pluginId) === null) {
+      throw new PluginError("unknown_property_type", 404);
+    }
     // The property editor selects FOR UPDATE on exactly one
     // p_properties_properties row and locks nothing else. A transaction
     // holding exactly one lock cannot be half of a deadlock cycle, which is
@@ -532,7 +581,6 @@ const adminUpdateRoute = route({
         .update(propertiesTable)
         .set({
           cost: BigInt(body.cost),
-          rate: BigInt(body.rate),
           ...(body.pluginId !== undefined && { pluginId: body.pluginId }),
         })
         .where(eq(propertiesTable.id, body.id));
@@ -549,22 +597,22 @@ const adminUpdateRoute = route({
 
 const boughtEvent = {
   name: "bought",
-  payload: z.object({ propertyName: z.string(), cost: z.string() }),
-  describe: "{actorName} bought {propertyName} for {cost}",
+  payload: z.object({ typeName: z.string(), locationName: z.string(), price: z.string() }),
+  describe: "{actorName} bought the {typeName} in {locationName} for {price}",
   invalidates: ["properties", "me"],
 };
 
-const soldEvent = {
-  name: "sold",
-  payload: z.object({ propertyName: z.string(), payout: z.string() }),
-  describe: "{actorName} sold {propertyName} for {payout}",
+const droppedEvent = {
+  name: "dropped",
+  payload: z.object({ typeName: z.string(), locationName: z.string() }),
+  describe: "{actorName} dropped the {typeName} in {locationName}",
   invalidates: ["properties", "me"],
 };
 
-const incomeEvent = {
-  name: "income",
-  payload: z.object({ propertyName: z.string(), amount: z.string() }),
-  describe: "{actorName} claimed {amount} from {propertyName}",
+const transferredEvent = {
+  name: "transferred",
+  payload: z.object({ typeName: z.string(), locationName: z.string() }),
+  describe: "{actorName} transferred the {typeName} in {locationName} to you",
   invalidates: ["properties", "me"],
 };
 
@@ -580,8 +628,12 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute, claimRoute, adminListRoute, adminLocationsRoute, adminCreateRoute, adminUpdateRoute],
-  events: [boughtEvent, soldEvent, incomeEvent],
+  routes: [
+    listRoute, buyRoute, leverRoute, transferRoute, dropRoute, resetRoute,
+    adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute,
+  ],
+  events: [boughtEvent, droppedEvent, transferredEvent],
   pages: [],
   adminPages: [adminPage],
+  filters: [seizeOnKill],
 });

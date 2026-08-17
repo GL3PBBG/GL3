@@ -38,6 +38,7 @@ export {
   type PluginManifest,
   type PluginManifestInput,
   type PluginMigration,
+  type PropertyTypeDecl,
 } from "./manifest.js";
 export { route, type PluginRoute, type RouteDef, type RouteResult } from "./route.js";
 export { hasPermission } from "./authz.js";

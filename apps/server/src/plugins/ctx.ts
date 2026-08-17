@@ -1,6 +1,6 @@
 import type {
   CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput,
-  PluginTx,
+  PluginTx, PropertyTypeDecl,
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
@@ -54,6 +54,7 @@ export interface PluginCtxOptions {
   player: PlayerSnapshot | null;
   job: JobContext | null;
   filters: readonly FilterSubscription[];
+  propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
 }
 
 /**
@@ -287,6 +288,10 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     },
     settings: {
       get: (key) => deps.settings[`${options.pluginId}.${key}`] ?? null,
+    },
+    propertyTypes: {
+      get: (id) => options.propertyTypes.get(id) ?? null,
+      list: () => [...options.propertyTypes.values()],
     },
     log: {
       info: (message, fields) => console.log({ plugin: options.pluginId, ...fields }, message),
