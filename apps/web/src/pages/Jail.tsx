@@ -13,6 +13,7 @@ export function Jail(): JSX.Element {
   // a sentence that expired minutes ago (see lib/countdown.ts).
   const jailSeconds = useSentenceCountdown(
     "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+    jail.dataUpdatedAt,
   );
 
   if (jail.isLoading) return <Loading what="jail status" />;

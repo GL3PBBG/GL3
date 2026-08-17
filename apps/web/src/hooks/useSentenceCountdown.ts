@@ -17,8 +17,14 @@ import { countdownSeconds } from "../lib/countdown.js";
  *
  * Pass `undefined` when there is no active sentence: the anchor is skipped and
  * the hook stays at 0 without disturbing the shared deadline map.
+ *
+ * Pass the query's `dataUpdatedAt` as `asOfMs`: a page mounting reads the
+ * cached response first, and anchoring that stale reading at "now" restarts the
+ * sentence at full length on screen (see lib/countdown.ts).
  */
-export function useSentenceCountdown(id: string, snapshotSeconds: number | undefined): number {
+export function useSentenceCountdown(
+  id: string, snapshotSeconds: number | undefined, asOfMs?: number,
+): number {
   const { remaining, seed } = useCountdowns();
   // Not state: it must not itself trigger a render, and the render that reads
   // it is always driven by the tick or by a fresh snapshot anyway.
@@ -26,9 +32,9 @@ export function useSentenceCountdown(id: string, snapshotSeconds: number | undef
 
   useEffect(() => {
     if (snapshotSeconds === undefined || snapshotSeconds <= 0) return;
-    seed(id, snapshotSeconds);
+    seed(id, snapshotSeconds, asOfMs);
     anchored.current = true;
-  }, [id, snapshotSeconds, seed]);
+  }, [id, snapshotSeconds, asOfMs, seed]);
 
   return countdownSeconds(remaining[id], snapshotSeconds ?? 0, anchored.current);
 }
