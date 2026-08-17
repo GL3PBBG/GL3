@@ -193,6 +193,18 @@ describe("properties routes", () => {
     expect(res.json<{ error: string }>().error).toBe("not_owned");
   });
 
+  it("404s a lever change on a property id that doesn't exist at all", async () => {
+    // loadOwnedRow's OTHER 404 branch — no such row, distinct from "not
+    // yours" above. Same status and error shape for both (404-not-403, so a
+    // property's existence is not probeable), but a different code path.
+    const res = await app.inject({
+      method: "POST", url: `/api/properties/${uuidv7()}/lever`, headers: playerHeaders,
+      payload: { value: "12345" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toBe("property_not_found");
+  });
+
   it("transfers to another player and zeroes the lever", async () => {
     const res = await app.inject({
       method: "POST", url: `/api/properties/${propertyId}/transfer`, headers: playerHeaders,
@@ -202,6 +214,22 @@ describe("properties routes", () => {
     const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
     expect(row!.ownerPlayerId).toBe(otherPlayerId);
     expect(row!.cost).toBe(0n); // V2 zeroes PR_cost on handover
+  });
+
+  it("refuses transferring a property to yourself with 409", async () => {
+    // otherPlayerId owns propertyId at this point in the story (previous
+    // test). own-transfer target resolution runs BEFORE loadOwnedRow now
+    // (Fix round 1: folding the target into loadOwnedRow's one player-lock
+    // call), so this exercises that early check specifically.
+    const res = await app.inject({
+      method: "POST", url: `/api/properties/${propertyId}/transfer`, headers: otherPlayerHeaders,
+      payload: { username: otherUsername },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("cannot_transfer_to_self");
+    // No side effect: still owned by the same player.
+    const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
+    expect(row!.ownerPlayerId).toBe(otherPlayerId);
   });
 
   it("transfers to an unknown player with 404", async () => {

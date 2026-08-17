@@ -15,6 +15,10 @@ export { propertiesTable } from "./schema.js";
 
 const PropertyParamsSchema = z.object({ id: z.string().uuid() });
 
+/** A bigint-safe amount on the wire: digits only, never a JSON number.
+ *  Shared by the lever body and the admin create/update bodies. */
+const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer string");
+
 // ---------------------------------------------------------------------------
 // List route (read-only, no locks)
 // ---------------------------------------------------------------------------
@@ -183,9 +187,18 @@ const buyRoute = route({
  * Locks location → player, re-reads the row FOR UPDATE and verifies the caller
  * owns it. 404 for both "no such row" and "not yours" — 404-not-403 so a
  * property's existence is not probeable, the shipped convention.
+ *
+ * `alsoLock` names any OTHER players this route also needs locked (transfer's
+ * target). RULE 6: the caller and every name in `alsoLock` go through this
+ * ONE `tx.locks.player` call — `tx.locks.player` sorts and dedupes *within* a
+ * call but has no memory across calls in the same transaction, so a caller
+ * that took the caller's row here and then took a second, separate
+ * `tx.locks.player` call later for a second player is two lock statements,
+ * not one, and that is exactly what let A-transfers-to-B deadlock against
+ * B-transfers-to-A (fixed; see `properties-lock-order.test.ts`).
  */
 async function loadOwnedRow(
-  tx: PluginTx, propertyId: string, playerId: string,
+  tx: PluginTx, propertyId: string, playerId: string, alsoLock: readonly string[] = [],
 ): Promise<{ id: string; locationId: string; pluginId: string; cost: bigint; profit: bigint }> {
   const [before] = await tx.db
     .select({ locationId: propertiesTable.locationId })
@@ -194,7 +207,7 @@ async function loadOwnedRow(
   if (before === undefined) throw new PluginError("property_not_found", 404);
 
   await tx.locks.location(before.locationId);
-  await tx.locks.player([playerId]);
+  await tx.locks.player([playerId, ...alsoLock]);
 
   const [row] = await tx.db
     .select({
@@ -216,9 +229,7 @@ async function loadOwnedRow(
 /** V2's `$100` floor on PR_cost, in GL3's cents. */
 const LEVER_FLOOR = 10_000n;
 
-const LeverBodySchema = z.object({
-  value: z.string().regex(/^\d+$/, "nonnegative integer string"),
-}).strict();
+const LeverBodySchema = z.object({ value: NonNegativeIntegerString }).strict();
 
 /** V2's `method_cost`: the owner sets the consumer's local price or limit. */
 const leverRoute = route({
@@ -247,10 +258,21 @@ const TransferBodySchema = z.object({ username: z.string().min(1).max(64) }).str
 /**
  * V2's `method_transfer`. Zeroes the lever on handover, as V2 does.
  *
- * RULE 6: this is a player↔player pair. Both players go through ONE
- * `tx.locks.player([a, b])` call, which sorts and dedupes — that is what makes
- * A-transfers-to-B safe against B-transfers-to-A. `loadOwnedRow` has already
- * taken the caller's row; taking it again inside the pair call is a no-op.
+ * RULE 6: this is a player↔player pair, and both players go through
+ * `loadOwnedRow`'s ONE `tx.locks.player` call (via `alsoLock`) — that single
+ * sorted, deduped statement is what makes A-transfers-to-B safe against
+ * B-transfers-to-A. `target` is resolved from `players` (no lock needed for a
+ * plain lookup) BEFORE `loadOwnedRow` runs, specifically so its id can be
+ * folded into that one call rather than locked separately afterwards; a
+ * second, later `tx.locks.player` call for the caller's row already held is
+ * NOT a no-op across transactions — it is a second lock statement, and two
+ * transactions taking their two statements in opposite orders is exactly an
+ * ABBA cycle. A real 40P01 shipped from that shape once; do not reintroduce a
+ * second player-lock call in this route.
+ *
+ * Consequence: `player_not_found` / `cannot_transfer_to_self` now resolve
+ * before the property's own `property_not_found` / `not_owned` — verified
+ * against every existing test, none of which relied on the old order.
  */
 const transferRoute = route({
   method: "POST",
@@ -264,8 +286,6 @@ const transferRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
 
     await ctx.transaction(async (tx) => {
-      const row = await loadOwnedRow(tx, params.id, player.id);
-
       const [target] = await tx.db
         .select({ id: players.id, username: players.username })
         .from(players)
@@ -273,7 +293,7 @@ const transferRoute = route({
       if (target === undefined) throw new PluginError("player_not_found", 404);
       if (target.id === player.id) throw new PluginError("cannot_transfer_to_self", 409);
 
-      await tx.locks.player([player.id, target.id]);
+      const row = await loadOwnedRow(tx, params.id, player.id, [target.id]);
 
       await tx.db
         .update(propertiesTable)
@@ -362,8 +382,6 @@ export { adminPage } from "./pages.js";
 // Admin routes
 // ---------------------------------------------------------------------------
 
-const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
-
 /**
  * The page renderer posts every field in a form, sending "" for the ones the
  * admin left blank (`PageRenderer.tsx`'s form `onSubmit`). Blank is
@@ -402,7 +420,7 @@ const PropertyCreateSchema = z
   .object({
     locationId: z.string().uuid(),
     pluginId: z.string().min(1).max(80),
-    cost: AdminMoney,
+    cost: NonNegativeIntegerString,
   })
   .strict();
 
@@ -410,7 +428,7 @@ const PropertyUpdateSchema = z
   .object({
     id: z.string().uuid(),
     pluginId: blankable(z.string().min(1).max(80)),
-    cost: AdminMoney,
+    cost: NonNegativeIntegerString,
   })
   .strict();
 

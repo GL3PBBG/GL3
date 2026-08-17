@@ -184,18 +184,20 @@ function assertTolerated(round: number, o: Observed): void {
 
 let regCounter = 0;
 
-async function register(): Promise<{ token: string; playerId: string }> {
+async function register(): Promise<{ token: string; playerId: string; username: string }> {
   regCounter += 1;
+  const username = `Landlord${regCounter}`;
   const res = await app.inject({
     method: "POST",
     url: "/api/auth/register",
     // Registration is rate-limited per IP and the app is booted once, so every
     // registration in this file shares one bucket unless the address differs.
     remoteAddress: `10.55.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Landlord${regCounter}`, password: "hunter2hunter2" },
+    payload: { username, password: "hunter2hunter2" },
   });
   expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
+  const body = res.json<{ token: string; playerId: string }>();
+  return { ...body, username };
 }
 
 const auth = (token: string): { authorization: string } => ({ authorization: `Bearer ${token}` });
@@ -347,6 +349,100 @@ describe("properties lock ordering", () => {
       await Promise.allSettled(inFlight);
       t0.release();
       await blocker.end();
+    }
+  }, 60_000);
+
+  it("does not deadlock when two players transfer to each other concurrently, repeatedly", async () => {
+    // Regression for a real bug caught in review, not a hypothetical: the
+    // shipped `transferRoute` once took the caller's own row through
+    // `loadOwnedRow`'s `tx.locks.player` call, then took a SECOND, separate
+    // `tx.locks.player([caller, target])` call after resolving the target.
+    // `tx.locks.player` sorts and dedupes WITHIN a call but remembers
+    // nothing ACROSS calls in the same transaction, so two players
+    // transferring to each other at the same moment each already held their
+    // OWN row from call 1 and then blocked on the OTHER's row in call 2 — a
+    // genuine ABBA cycle, a real 40P01, an uncaught 500. Fixed by folding the
+    // target into `loadOwnedRow`'s ONE `tx.locks.player` call via its
+    // `alsoLock` parameter (`packages/plugins/properties/src/index.ts`).
+    //
+    // Not a barrier this time: a barrier can only sequence what happens
+    // BETWEEN two separate HTTP requests, and this bug lived entirely
+    // INSIDE one transaction's two lock statements, which nothing outside
+    // the process can pause between. Instead this fires many concurrent
+    // A<->B transfer pairs back to back: ownership swaps every round, so
+    // the SAME two player rows are genuinely fought over, in opposite
+    // directions, every single round — only the exact timing of the race is
+    // left to chance. Proven to actually reproduce the bug: see the fix
+    // report for a run against the pre-fix two-call shape landing a real
+    // 40P01/500, not an assertion mismatch.
+    const pa = await register();
+    const pb = await register();
+
+    const locA = uuidv7();
+    const locB = uuidv7();
+    await db.insert(locations).values([
+      { id: locA, name: "Twinbridge-A", travelCost: 0n, travelCooldownSeconds: 1, bulletStock: 0, bulletCost: 1n },
+      { id: locB, name: "Twinbridge-B", travelCost: 0n, travelCooldownSeconds: 1, bulletStock: 0, bulletCost: 1n },
+    ]);
+    await db
+      .update(playerStats)
+      .set({ cash: STARTING_CASH })
+      .where(inArray(playerStats.playerId, [pa.playerId, pb.playerId]));
+
+    // Two DIFFERENT locations, one property each — this isolates the test to
+    // the player-lock cycle only; the two transfers below never contend for
+    // the same locations[] row, so any deadlock caught here can only be the
+    // player-pair one.
+    await db.update(playerStats).set({ locationId: locA }).where(eq(playerStats.playerId, pa.playerId));
+    const buyA = await fire({
+      method: "POST", url: "/api/properties/buy", headers: auth(pa.token),
+      payload: { pluginId: "bullets", locationId: locA },
+    });
+    expect(buyA.statusCode, `buyA body: ${buyA.body}`).toBe(200);
+    const propA = buyA.json<{ propertyId: string }>().propertyId;
+
+    await db.update(playerStats).set({ locationId: locB }).where(eq(playerStats.playerId, pb.playerId));
+    const buyB = await fire({
+      method: "POST", url: "/api/properties/buy", headers: auth(pb.token),
+      payload: { pluginId: "bullets", locationId: locB },
+    });
+    expect(buyB.statusCode, `buyB body: ${buyB.body}`).toBe(200);
+    const propB = buyB.json<{ propertyId: string }>().propertyId;
+
+    const TRANSFER_ROUNDS = 40;
+    // Tracks current ownership so every round's callers genuinely own what
+    // they're transferring — no DB read needed, the swap is deterministic.
+    let paOwnsA = true;
+    let pbOwnsB = true;
+
+    for (let round = 0; round < TRANSFER_ROUNDS; round += 1) {
+      const callerOfA = paOwnsA ? pa : pb;
+      const targetOfA = paOwnsA ? pb : pa;
+      const callerOfB = pbOwnsB ? pb : pa;
+      const targetOfB = pbOwnsB ? pa : pb;
+
+      const [resA, resB] = await Promise.all([
+        fire({
+          method: "POST", url: `/api/properties/${propA}/transfer`, headers: auth(callerOfA.token),
+          payload: { username: targetOfA.username },
+        }),
+        fire({
+          method: "POST", url: `/api/properties/${propB}/transfer`, headers: auth(callerOfB.token),
+          payload: { username: targetOfB.username },
+        }),
+      ]);
+
+      const where = `round ${round}`;
+      expect(resA.statusCode, `${where} transfer A body: ${resA.body}`).not.toBe(500);
+      expect(resB.statusCode, `${where} transfer B body: ${resB.body}`).not.toBe(500);
+      // Every round's callers legitimately own what they're transferring, so
+      // under correct behaviour both always succeed — a genuine correctness
+      // check, not just "didn't crash".
+      expect(resA.statusCode, `${where} transfer A body: ${resA.body}`).toBe(204);
+      expect(resB.statusCode, `${where} transfer B body: ${resB.body}`).toBe(204);
+
+      paOwnsA = !paOwnsA;
+      pbOwnsB = !pbOwnsB;
     }
   }, 60_000);
 
