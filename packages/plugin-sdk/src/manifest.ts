@@ -15,6 +15,35 @@ export interface PluginMigration {
 const MigrationSchema = z.object({ name: z.string().min(1), sql: z.string().min(1) }).strict();
 
 /**
+ * A property type a plugin declares itself the implementer of — V2's
+ * `PR_module` made explicit. The `properties` plugin stores `id` in
+ * `plugin_id`; the loader collects every declaration into a registry so an
+ * admin picks from a list rather than typing a string, and so an unknown
+ * string cannot be bought.
+ *
+ * `id` must equal the declaring plugin's own id, and a plugin may declare at
+ * most one: V2's key is `(PR_location, PR_module)`, one row per module per
+ * town, and a second type would need a discriminator that key does not have.
+ */
+export interface PropertyTypeDecl {
+  id: string;
+  name: string;
+  /** Acquisition price in cents. V2 hardcoded $1,000,000 → 100_000_000n. */
+  price: bigint;
+  /** What `cost` means for this type, shown next to the owner's input. */
+  leverLabel: string;
+}
+
+const PropertyTypeDeclSchema = z
+  .object({
+    id: z.string().regex(PLUGIN_ID_PATTERN),
+    name: z.string().min(1),
+    price: z.bigint().positive(),
+    leverLabel: z.string().min(1),
+  })
+  .strict();
+
+/**
  * What a plugin author writes. Every collection is optional here and required
  * on `PluginManifest`; normalising once in `definePlugin` is what stops every
  * downstream consumer from writing `?? []` under `exactOptionalPropertyTypes`.
@@ -32,6 +61,7 @@ export interface PluginManifestInput {
   events?: PluginEventDecl[];
   jobs?: Record<string, unknown>;
   provides?: FilterPoint<unknown>[];
+  providesProperties?: PropertyTypeDecl[];
   filters?: FilterSubscription[];
 }
 
@@ -48,6 +78,7 @@ export interface PluginManifest {
   events: PluginEventDecl[];
   jobs: Record<string, unknown>;
   provides: FilterPoint<unknown>[];
+  providesProperties: PropertyTypeDecl[];
   filters: FilterSubscription[];
 }
 
@@ -110,6 +141,7 @@ const InputSchema = z
     events: z.array(PluginEventDeclSchema).optional(),
     jobs: z.record(z.unknown()).optional(),
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
+    providesProperties: z.array(PropertyTypeDeclSchema).optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
   .strict()
@@ -141,6 +173,24 @@ const InputSchema = z
       }
       seen.add(migration.name);
     });
+    if (manifest.providesProperties !== undefined) {
+      if (manifest.providesProperties.length > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["providesProperties"],
+          message: "a plugin may declare at most one property type",
+        });
+      }
+      manifest.providesProperties.forEach((decl, index) => {
+        if (decl.id !== manifest.id) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["providesProperties", index, "id"],
+            message: `must equal the plugin's own id ("${manifest.id}")`,
+          });
+        }
+      });
+    }
   });
 
 /**
@@ -181,6 +231,7 @@ export function definePlugin(input: PluginManifestInput): PluginManifest {
     events: parsed.events ?? [],
     jobs: parsed.jobs ?? {},
     provides: parsed.provides ?? [],
+    providesProperties: parsed.providesProperties ?? [],
     filters: parsed.filters ?? [],
   };
 }

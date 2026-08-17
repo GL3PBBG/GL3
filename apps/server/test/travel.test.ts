@@ -63,7 +63,9 @@ async function travelWithTransactionHook(
 
   const deps = { db, redis, queues: new Map(), settings: {}, leaderboardPrefix };
   const player = await loadSnapshot(deps, playerId);
-  const ctx = createPluginCtx(deps, { pluginId: travelPlugin.id, player, job: null, filters: travelPlugin.filters });
+  const ctx = createPluginCtx(deps, {
+    pluginId: travelPlugin.id, player, job: null, filters: travelPlugin.filters, propertyTypes: new Map(),
+  });
 
   const realTransaction = ctx.transaction.bind(ctx);
   const hookedTransaction: PluginCtx["transaction"] = async (fn) => {
