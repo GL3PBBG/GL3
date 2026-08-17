@@ -7,7 +7,8 @@ import {
   type PluginCtx, type PluginTx, type ViewNode,
 } from "@gl3/plugin-sdk";
 import {
-  assertHouseCanCover, escrow, guardGame, resolveHouse, resolvePayout, settleSession, type House,
+  assertHouseCanCover, escrow, frozenHouse, guardGame, resolveHouse, resolvePayout, settleSession,
+  type House,
 } from "./engine.js";
 import { buildRegistry, games, type GameDef } from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
@@ -193,8 +194,9 @@ const lobbyRoute = route({
 
       // An EXPIRED hand is reported as no hand at all: the spec's Resume is for
       // an unexpired session (§4.4), and this one is not resumable — the next
-      // `play` forfeits it and opens a new one. Reporting it would offer a
-      // Resume that `act` answers 409 to.
+      // `play` forfeits it and opens a new one, and `act` refuses it with 409
+      // `session_expired`. Reporting it here would offer a Resume that leads
+      // straight to that refusal.
       const live = open !== undefined && expiresAt(open.createdAt, expiryMinutes) > new Date()
         ? open
         : null;
@@ -441,6 +443,9 @@ const actRoute = route({
           id: casinoSessions.id,
           gameId: casinoSessions.gameId,
           locationId: casinoSessions.locationId,
+          // The house this hand was dealt against, stamped at `play` and
+          // never updated — spec §4.1 freezes it for the hand.
+          propertyId: casinoSessions.propertyId,
         })
         .from(casinoSessions)
         .where(eq(casinoSessions.playerId, player.id))
@@ -455,7 +460,11 @@ const actRoute = route({
       // FOR UPDATE — identical order to `play`.
       await tx.locks.location(pre.locationId);
 
-      const house = await resolveHouse(tx, pre.gameId, pre.locationId, readMaxBet(ctx.settings));
+      // The FROZEN house (spec §4.1/§4.3), not a fresh `resolveHouse`: this
+      // hand's wager went to whoever owned the table when it was dealt, so a
+      // table bought or dropped since must not take the payout. See
+      // `frozenHouse` for what that does and does not guard.
+      const house = await frozenHouse(tx, pre.propertyId, readMaxBet(ctx.settings));
 
       await lockBothPlayers(tx, player.id, house.ownerId);
 
@@ -466,6 +475,15 @@ const actRoute = route({
         .for("update");
       if (session === undefined) throw new PluginError("no_session", 404);
       if (session.status !== "open") throw new PluginError("session_closed", 409);
+      // An EXPIRED hand is not playable. The lobby hides it and `play`
+      // forfeits it; `act` used to carry on dealing to it indefinitely, so a
+      // hand could be abandoned past its expiry and then resumed anyway. It is
+      // NOT forfeited here — the forfeit belongs to `play`, which is where the
+      // player's next hand replaces it, and settling one on a refused action
+      // would take the wager inside the very call that refuses to act.
+      if (expiresAt(session.createdAt, readExpiryMinutes(ctx.settings)) <= new Date()) {
+        throw new PluginError("session_expired", 409);
+      }
 
       // The game's OWN schema, and a failure here is the caller's fault, not
       // the server's: `body.action` is an unvalidated `z.unknown()` envelope

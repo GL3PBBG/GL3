@@ -110,10 +110,12 @@ async function seedSession(opts: {
   cursor: number;
   shoe: string[];
   status?: "open" | "settled";
+  createdAt?: Date;
 }): Promise<Seeded> {
   const sessionId = uuidv7();
   await db.insert(casinoSessions).values({
     id: sessionId,
+    ...(opts.createdAt === undefined ? {} : { createdAt: opts.createdAt }),
     playerId: opts.playerId,
     gameId: "blackjack",
     locationId: opts.locationId,
@@ -499,6 +501,74 @@ describe("POST /api/casino/act", () => {
     expect(body.step).toBe("act");
 
     expect(await cashOf(playerId)).toBe(cashBefore);
+  });
+
+  it("settles against the house FROZEN at play, not whoever owns the table now", async () => {
+    // Spec §4.1: `property_id` is "resolved at `play` and frozen for the hand",
+    // and §4.3 gives the reason — a house that changes hands mid-hand must not
+    // move the payout to someone who never took the wager. The route used to
+    // re-resolve the house on every `act`, so this hand's payout was debited
+    // from whoever happened to own the table at the moment it settled.
+    const { token, playerId } = await register();
+    const { playerId: latecomerId } = await register();
+    const locationId = await seedLocation();
+
+    const wager = 10_000n;
+    // The town was UNOWNED at `play`: the wager sank, nobody was credited.
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+    await placePlayer(latecomerId, locationId, 10_000_000n);
+
+    const { sessionId } = await seedSession({
+      playerId, locationId, propertyId: null, wager,
+      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
+    });
+
+    // ...and someone buys the table while the hand is in play.
+    await seedHouse(locationId, latecomerId, 0n);
+
+    const cashBefore = await cashOf(playerId);
+    const latecomerBefore = await cashOf(latecomerId);
+
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(200);
+    const payout = BigInt(res.json<{ payout: string }>().payout);
+    expect(payout).toBe(wager); // push
+
+    // The player is paid either way — the hand is theirs.
+    expect(await cashOf(playerId)).toBe(cashBefore + payout);
+    // The new owner is NOT debited for a wager they never received.
+    expect(await cashOf(latecomerId)).toBe(latecomerBefore);
+
+    const row = await sessionRow(sessionId);
+    expect(row?.propertyId).toBeNull();
+    expect(row?.status).toBe("settled");
+  });
+
+  it("refuses to act on a hand that has already expired", async () => {
+    // The lobby hides an expired hand and `play` forfeits it; `act` used to
+    // carry on playing one indefinitely, which made the lobby's own comment
+    // ("a Resume that `act` answers 409 to") false. All three now agree.
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    const { sessionId } = await seedSession({
+      playerId, locationId, propertyId: null, wager: 10_000n,
+      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
+      createdAt: new Date(Date.now() - 45 * 60_000),   // default expiry is 30m
+    });
+
+    const cashBefore = await cashOf(playerId);
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("session_expired");
+
+    // Refused, not settled: the row stays open for the forfeit `play` does,
+    // and no money moves here.
+    expect(await cashOf(playerId)).toBe(cashBefore);
+    const row = await sessionRow(sessionId);
+    expect(row?.status).toBe("open");
+    expect(row?.settledAt).toBeNull();
   });
 
   it("acting on another player's session: 404", async () => {
