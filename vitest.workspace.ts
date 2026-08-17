@@ -225,6 +225,7 @@ export default defineWorkspace([
         "test/casino-registry.test.ts",
         "test/casino-settings.test.ts",
         "test/blackjack-rules.test.ts",
+        "test/blackjack-view.test.ts",
       ],
     },
     ...srcAliases,
