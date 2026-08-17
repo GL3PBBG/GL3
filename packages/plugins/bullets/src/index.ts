@@ -5,7 +5,10 @@ import {
 import { ownerAt, payOwner } from "@gl3/plugin-properties";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { locations, playerStats } from "./schema.js";
+import { locations, playerStats, settings } from "./schema.js";
+import { readBulletSettings } from "./settings.js";
+import { restockIfDue } from "./restock.js";
+import { capLever } from "./lever-cap.js";
 
 /**
  * Ported from `apps/server/src/game/bullets/routes.ts` and `service.ts`:
@@ -18,6 +21,22 @@ import { locations, playerStats } from "./schema.js";
  */
 const BuyBulletsSchema = z.object({ quantity: z.number().int().positive() });
 
+export { readBulletSettings, type BulletSettings } from "./settings.js";
+import type { BulletSettings } from "./settings.js";
+export { restockIfDue, type RestockResult } from "./restock.js";
+
+/**
+ * The price a purchase actually costs: the franchise owner's lever when a
+ * factory is owned and the owner has set one, the location's admin price
+ * otherwise, and never above the `max_cost` cap. V2's admin caps the owner
+ * (`adminModule::method_options`); this is the read-side half of that, and the
+ * lever route's filter subscriber below is the set-side half.
+ */
+function effectiveCost(lever: bigint | null, locationCost: bigint, maxCost: bigint | null): bigint {
+  const base = lever ?? locationCost;
+  return maxCost !== null && base > maxCost ? maxCost : base;
+}
+
 // --- Admin schemas ---
 
 const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
@@ -26,6 +45,25 @@ const StockBodySchema = z.object({
   bulletStock: z.coerce.number().int().nonnegative(),
   bulletCost: AdminMoney,
 }).strict();
+
+/** Blank is how the admin form says "unlimited" — see `readBulletSettings`. */
+const Unlimitable = z.union([z.literal(""), z.string().regex(/^\d+$/, "digits or blank")]);
+const OptionsBodySchema = z.object({
+  stockMinPerHour: z.coerce.number().int().nonnegative(),
+  stockMaxPerHour: z.coerce.number().int().nonnegative(),
+  maxStock: z.coerce.number().int().nonnegative(),
+  maxCost: Unlimitable,
+  maxBuy: Unlimitable,
+}).strict();
+
+/** The five keys V2's `method_options` edits, in the order the panel lists them. */
+const OPTION_LABELS: readonly (readonly [keyof BulletSettings, string, string])[] = [
+  ["stockMinPerHour", "stock_min_per_hour", "Stock min per hour"],
+  ["stockMaxPerHour", "stock_max_per_hour", "Stock max per hour"],
+  ["maxStock", "max_stock", "Max stock"],
+  ["maxCost", "max_cost", "Max bullet cost"],
+  ["maxBuy", "max_buy", "Max bullets per purchase"],
+];
 
 // --- Admin routes ---
 
@@ -46,10 +84,77 @@ const adminListRoute = route({
   },
 });
 
+/**
+ * V2's `adminModule::method_options`. Reads and writes the `settings` TABLE,
+ * not `ctx.settings` — the snapshot is boot-time, so this panel must show what
+ * the next boot will read rather than what this process happens to hold. That
+ * is also why an edit here changes nothing until the server restarts, which
+ * the panel says out loud.
+ */
+const adminOptionsListRoute = route({
+  method: "GET", path: "/api/admin/bullets/options", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(settings));
+    const stored = new Map(rows.map((r) => [r.key, r.value]));
+    const config = readBulletSettings((key) => stored.get(`bullets.${key}`) ?? null);
+
+    return {
+      status: 200,
+      body: {
+        rows: OPTION_LABELS.map(([field, key, label]) => {
+          const value = config[field];
+          return { key, label, value: value === null ? "unlimited" : value.toString() };
+        }),
+      },
+    };
+  },
+});
+
+const adminOptionsRoute = route({
+  method: "POST", path: "/api/admin/bullets/options", auth: "admin",
+  body: OptionsBodySchema,
+  handler: async (ctx, { body }) => {
+    // `readBulletSettings` would silently raise the max to meet the min, which
+    // is the right thing for a value already in the database and the wrong
+    // thing for a form submission — an admin who inverts them has made a
+    // mistake and should be told.
+    if (body.stockMinPerHour > body.stockMaxPerHour) {
+      throw new PluginError("min_above_max", 400);
+    }
+
+    const values = [
+      { key: "bullets.stock_min_per_hour", value: String(body.stockMinPerHour) },
+      { key: "bullets.stock_max_per_hour", value: String(body.stockMaxPerHour) },
+      { key: "bullets.max_stock", value: String(body.maxStock) },
+      // Stored blank rather than deleted so the row round-trips; blank, absent
+      // and unparseable all read as unlimited.
+      { key: "bullets.max_cost", value: body.maxCost },
+      { key: "bullets.max_buy", value: body.maxBuy },
+    ];
+    await ctx.transaction(async (tx) => {
+      for (const row of values) {
+        await tx.db.insert(settings).values(row)
+          .onConflictDoUpdate({ target: settings.key, set: { value: row.value } });
+      }
+    });
+    return { status: 204 };
+  },
+});
+
 const adminStockRoute = route({
   method: "POST", path: "/api/admin/bullets/stock", auth: "admin",
   body: StockBodySchema,
   handler: async (ctx, { body }) => {
+    // The ops override is still bound by the same ceilings the restock and the
+    // buy route obey, so admin and gameplay cannot disagree about the limits.
+    const config = readBulletSettings((key) => ctx.settings.get(key));
+    if (body.bulletStock > config.maxStock) {
+      throw new PluginError("stock_above_max", 400, { maxStock: config.maxStock });
+    }
+    if (config.maxCost !== null && BigInt(body.bulletCost) > config.maxCost) {
+      throw new PluginError("cost_above_max", 400, { maxCost: config.maxCost.toString() });
+    }
+
     const updated = await ctx.transaction(async (tx) => {
       const result = await tx.db.update(locations)
         .set({
@@ -69,21 +174,102 @@ const adminPage: PageSchema = {
   id: "bullets-admin",
   path: "/admin/bullets",
   view: {
-    kind: "panel", title: "Bullet stock",
+    kind: "panel", title: "Bullets",
     children: [
-      { kind: "table", source: "GET /api/admin/bullets/stock", columns: [
-        { key: "name", label: "Name" },
-        { key: "bulletStock", label: "Stock" },
-        { key: "bulletCost", label: "Cost" },
-      ] },
-      { kind: "form", action: "POST /api/admin/bullets/stock", submitLabel: "Set stock", fields: [
-        { name: "locationId", label: "Location", type: "select", optionsSource: "GET /api/admin/bullets/stock", valueKey: "id", labelKey: "name" },
-        { name: "bulletStock", label: "Bullet stock", type: "number" },
-        { name: "bulletCost", label: "Bullet cost", type: "money" },
-      ] },
+      {
+        kind: "panel", title: "Bullet stock",
+        children: [
+          { kind: "table", source: "GET /api/admin/bullets/stock", columns: [
+            { key: "name", label: "Name" },
+            { key: "bulletStock", label: "Stock" },
+            { key: "bulletCost", label: "Cost" },
+          ] },
+          { kind: "form", action: "POST /api/admin/bullets/stock", submitLabel: "Set stock", fields: [
+            { name: "locationId", label: "Location", type: "select", optionsSource: "GET /api/admin/bullets/stock", valueKey: "id", labelKey: "name" },
+            { name: "bulletStock", label: "Bullet stock", type: "number" },
+            { name: "bulletCost", label: "Bullet cost", type: "money" },
+          ] },
+        ],
+      },
+      {
+        kind: "panel", title: "Options",
+        children: [
+          { kind: "text", value: "Restock runs lazily on the bullet shop, catching up at most 12 hours. These take effect on the next server restart." },
+          { kind: "table", source: "GET /api/admin/bullets/options", columns: [
+            { key: "label", label: "Option" },
+            { key: "value", label: "Value" },
+          ] },
+          { kind: "form", action: "POST /api/admin/bullets/options", submitLabel: "Update options", fields: [
+            { name: "stockMinPerHour", label: "Stock min per hour", type: "number" },
+            { name: "stockMaxPerHour", label: "Stock max per hour", type: "number" },
+            { name: "maxStock", label: "Max stock", type: "number" },
+            // `text`, not `money`/`number`: blank is a meaningful value here
+            // (unlimited) and a typed field cannot express it.
+            { name: "maxCost", label: "Max bullet cost (blank = unlimited)", type: "text" },
+            { name: "maxBuy", label: "Max bullets per purchase (blank = unlimited)", type: "text" },
+          ] },
+        ],
+      },
     ],
   },
 };
+
+/**
+ * The restock trigger, and the page's read. It exists because V2 called
+ * `restock()` on the bullets module load and GL3 has nowhere else to put it:
+ * a core plugin cannot declare jobs, and hanging the restock off the purchase
+ * would deadlock — the web page disables the buy button at zero stock, so the
+ * buy that would refill the town can never be made.
+ *
+ * It also answers the price the buy route will actually charge. The page used
+ * to read `locations.bullet_cost` from `GET /api/locations` while the buy
+ * route charged the owner's lever, so an owned town displayed a price it would
+ * not honour.
+ */
+const shopRoute = route({
+  method: "GET",
+  path: "/api/bullets/shop",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const config = readBulletSettings((key) => ctx.settings.get(key));
+
+    return ctx.transaction(async (tx) => {
+      // First, and before any location row is read: it locks every location
+      // ascending, and a read taken before it would be stale by the time it
+      // returned.
+      await restockIfDue(tx.db, config);
+
+      const [stats] = await tx.db
+        .select({ locationId: playerStats.locationId, bullets: playerStats.bullets })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      const locationId = stats?.locationId;
+      if (!locationId) throw new PluginError("no_location", 409);
+
+      const [location] = await tx.db.select().from(locations).where(eq(locations.id, locationId));
+      if (!location) throw new PluginError("no_location", 409);
+
+      const franchise = await ownerAt(tx, "bullets", locationId);
+      const unitCost = effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost);
+
+      return {
+        status: 200,
+        body: {
+          locationId,
+          locationName: location.name,
+          bulletStock: location.bulletStock,
+          // Money crosses the wire as a decimal string; stock and the cap are
+          // counts and stay JSON numbers, as `bulletStock` already does in the
+          // buy response.
+          unitCost: unitCost.toString(),
+          maxBuy: config.maxBuy,
+          bullets: (stats?.bullets ?? 0n).toString(),
+        },
+      };
+    });
+  },
+});
 
 const buyRoute = route({
   method: "POST",
@@ -97,6 +283,13 @@ const buyRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
     const { quantity } = body;
+    const config = readBulletSettings((key) => ctx.settings.get(key));
+
+    // V2's `maxBulletBuy`. Checked before the transaction opens: it reads no
+    // row, so there is nothing to lock and nothing to be stale.
+    if (config.maxBuy !== null && quantity > config.maxBuy) {
+      throw new PluginError("quantity_above_max", 400, { maxBuy: config.maxBuy });
+    }
 
     return ctx.transaction(async (tx) => {
       // (1) Unlocked read, preserved verbatim from core (`service.ts:32`). A
@@ -137,7 +330,10 @@ const buyRoute = route({
       // so the location's admin-editable price stands — V2's
       // `if (!!$owner["cost"])`.
       const franchise = await ownerAt(tx, "bullets", locationId);
-      const unitCost = franchise?.lever ?? location.bulletCost;
+      // `max_cost` clamps here as well as rejecting at lever-set time: the cap
+      // can be lowered after an owner has already set a higher lever, and the
+      // figure charged has to follow the cap, not the stale lever.
+      const unitCost = effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost);
       const cost = unitCost * BigInt(quantity);
 
       // RULE 6, player↔player half: buyer and owner go through ONE sorted
@@ -215,8 +411,12 @@ export default definePlugin({
   id: "bullets",
   version: "1.0.0",
   basePaths: ["/api/bullets", "/api/admin/bullets"],
-  routes: [buyRoute, adminListRoute, adminStockRoute],
+  routes: [shopRoute, buyRoute, adminListRoute, adminStockRoute, adminOptionsListRoute, adminOptionsRoute],
   adminPages: [adminPage],
+  // V2's maxBulletCost, enforced where the owner sets their price. The read
+  // side clamps too (`effectiveCost`), because the cap can be lowered after a
+  // lever was already accepted.
+  filters: [capLever],
   providesProperties: [{
     id: "bullets",
     name: "Bullet Factory",

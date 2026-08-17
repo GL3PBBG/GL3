@@ -41,12 +41,12 @@ export function invalidationKeys(
     case "player.travelled":
       // Stock is per-location and the shop query is not keyed by location, so
       // without this a traveller keeps seeing the city they left.
-      return [keys.me(), keys.locations(), keys.shop()];
+      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop()];
     case "bank.transacted":
       return [keys.me()];
     case "bullets.purchased":
       // Stock is per-location and shown in the shop, so the list is stale too.
-      return [keys.me(), keys.locations()];
+      return [keys.me(), keys.locations(), keys.bulletShop()];
     case "player.rankedUp":
       return [keys.me(), keys.ranks()];
     case "player.attacked":

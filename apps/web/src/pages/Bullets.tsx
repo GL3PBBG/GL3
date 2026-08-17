@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useBuyBullets, useJail, useLocations, useMe } from "../api/queries.js";
+import { useBulletShop, useBuyBullets, useJail, useMe } from "../api/queries.js";
 import { canAfford, multiplyMoney } from "../lib/money.js";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -8,17 +8,20 @@ import styles from "./pages.module.css";
 export function Bullets(): JSX.Element {
   const me = useMe();
   const jail = useJail();
-  const locations = useLocations();
+  // Not useLocations(): the shop route carries the price the buy route will
+  // actually charge (an owned factory's lever, capped by the admin's
+  // max_cost), and reading it is what runs the hourly restock. The locations
+  // list knows neither.
+  const shop = useBulletShop();
   const buy = useBuyBullets();
   const [quantity, setQuantity] = useState("10");
 
-  if (locations.isLoading || !me.data) return <Loading what="the shop" />;
+  if (shop.isLoading || !me.data) return <Loading what="the shop" />;
 
-  const here = locations.data?.locations.find((location) => location.current);
+  const here = shop.data;
 
-  // A brand-new player has locationId null, so every location reports
-  // current:false and POST /api/bullets/buy answers 409 no_location. Say so
-  // instead of rendering a form that can only fail.
+  // A brand-new player has locationId null, so the shop route answers 409
+  // no_location. Say so instead of rendering a form that can only fail.
   if (here === undefined) {
     return (
       <Panel title="Bullets">
@@ -31,15 +34,17 @@ export function Bullets(): JSX.Element {
   }
 
   const count = /^\d+$/.test(quantity) ? Number(quantity) : 0;
-  const total = count > 0 ? multiplyMoney(here.bulletCost, count) : "0";
-  const valid = count > 0 && count <= here.bulletStock && canAfford(me.data.cash, total);
+  const total = count > 0 ? multiplyMoney(here.unitCost, count) : "0";
+  const overCap = here.maxBuy !== null && count > here.maxBuy;
+  const valid = count > 0 && count <= here.bulletStock && !overCap && canAfford(me.data.cash, total);
   const jailed = jail.data?.jailed === true;
 
   return (
-    <Panel title={`Bullets — ${here.name}`}>
+    <Panel title={`Bullets — ${here.locationName}`}>
       <p className={styles.meta}>
-        <Money value={here.bulletCost} /> each · {here.bulletStock} in stock · you hold{" "}
-        <Amount value={me.data.bullets} />
+        <Money value={here.unitCost} /> each · {here.bulletStock} in stock · you hold{" "}
+        <Amount value={here.bullets} />
+        {here.maxBuy !== null ? <> · {here.maxBuy} max per purchase</> : null}
       </p>
 
       <div className={styles.form}>
@@ -66,6 +71,9 @@ export function Bullets(): JSX.Element {
       {jailed ? <p className={styles.bad}>No shopping from jail.</p> : null}
       {count > here.bulletStock ? (
         <p role="alert" className={styles.bad}>Only {here.bulletStock} left here.</p>
+      ) : null}
+      {overCap ? (
+        <p role="alert" className={styles.bad}>At most {here.maxBuy} per purchase.</p>
       ) : null}
       <ErrorText error={buy.error} />
     </Panel>

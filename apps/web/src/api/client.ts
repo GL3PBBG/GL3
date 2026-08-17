@@ -20,12 +20,15 @@ export interface ApiErrorDetail {
   remainingSeconds?: number | undefined;
   /** 409 insufficient_stock — how many bullets the location actually has. */
   available?: number | undefined;
+  /** 400 quantity_above_max — the admin's per-purchase bullet cap. */
+  maxBuy?: number | undefined;
 }
 
 export class ApiError extends Error {
   readonly retryAfter: number | undefined;
   readonly remainingSeconds: number | undefined;
   readonly available: number | undefined;
+  readonly maxBuy: number | undefined;
 
   constructor(readonly status: number, readonly code: string, detail: ApiErrorDetail = {}) {
     super(`${status} ${code}`);
@@ -33,6 +36,7 @@ export class ApiError extends Error {
     this.retryAfter = detail.retryAfter;
     this.remainingSeconds = detail.remainingSeconds;
     this.available = detail.available;
+    this.maxBuy = detail.maxBuy;
   }
 }
 
@@ -67,6 +71,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       retryAfter: asCount(body["retryAfter"]) ?? fromHeader,
       remainingSeconds: asCount(body["remainingSeconds"]) ?? fromHeader,
       available: asCount(body["available"]),
+      maxBuy: asCount(body["maxBuy"]),
     });
   }
   if (response.status === 204) return undefined as T;

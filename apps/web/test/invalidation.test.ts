@@ -45,12 +45,18 @@ describe("invalidationKeys", () => {
   });
 
   it("refreshes the shop's stock after a purchase, not just the wallet", () => {
-    expect(invalidationKeys(event("bullets.purchased"), VIEWER)).toEqual([keys.me(), keys.locations()]);
+    // bulletShop is the page's own read since the restock landed: it carries
+    // the stock and the effective price, which locations() does not.
+    expect(invalidationKeys(event("bullets.purchased"), VIEWER)).toEqual([
+      keys.me(), keys.locations(), keys.bulletShop(),
+    ]);
   });
 
   it("refreshes the wallet and locations on travel", () => {
+    // The bullet shop is per-location and its key is not, so a traveller would
+    // otherwise keep seeing the stock and price of the town they left.
     expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([
-      keys.me(), keys.locations(), keys.shop(),
+      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(),
     ]);
   });
 
