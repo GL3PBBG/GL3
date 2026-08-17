@@ -50,6 +50,7 @@ const auth = () => ({ authorization: `Bearer ${adminToken}` });
 const ADMIN_ROUTES: { method: "GET" | "POST"; url: string }[] = [
   { method: "GET", url: "/api/admin/properties" },
   { method: "GET", url: "/api/admin/properties/locations" },
+  { method: "GET", url: "/api/admin/properties/types" },
   { method: "POST", url: "/api/admin/properties" },
   { method: "POST", url: "/api/admin/properties/update" },
 ];
@@ -215,6 +216,38 @@ describe("properties admin", () => {
     // exactly the two rows (bullets, casino) from before the 409.
     const rowsAfterDuplicate = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
     expect(rowsAfterDuplicate).toHaveLength(2);
+  });
+
+  // adminUpdateRoute has its own try/catch on the same `23505` (Fix 1 of the
+  // final review pass): under the old unique(location_id), location_id was
+  // never updatable so update could never violate the index and needed no
+  // guard. Since 0004_location_plugin_unique, pluginId IS updatable, so
+  // retyping one row to a type its location already has now can violate the
+  // key — and without a catch here, that 23505 was an uncaught 500 on a
+  // well-formed admin request.
+  it("409s an update that retypes a property to one its location already has", async () => {
+    const bullets = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bullets", cost: "0" },
+    });
+    expect(bullets.statusCode).toBe(201);
+    const casino = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "casino", cost: "0" },
+    });
+    expect(casino.statusCode).toBe(201);
+    const { id: casinoId } = casino.json() as { id: string };
+
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties/update", headers: auth(),
+      payload: { id: casinoId, pluginId: "bullets", cost: "0" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("location_type_taken");
+
+    // The failed update left the casino row exactly as it was.
+    const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, casinoId));
+    expect(row).toMatchObject({ pluginId: "casino" });
   });
 
   // Kept alongside the route-level test above rather than as a substitute

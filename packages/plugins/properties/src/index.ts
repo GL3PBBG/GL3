@@ -49,30 +49,58 @@ const listRoute = route({
         .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
 
-      return {
-        status: 200,
-        body: {
-          rows: rows.map((row) => {
-            const decl = ctx.propertyTypes.get(row.pluginId);
-            const isOwner = row.ownerPlayerId === player.id;
-            return {
-              id: row.id,
-              locationId: row.locationId,
-              locationName: row.locationName ?? "",
-              pluginId: row.pluginId,
-              typeName: decl?.name ?? row.pluginId,
-              // "" when the type is not installed: there is no declared price,
-              // so the row is not buyable and the page renders no Buy button.
-              price: decl === null ? "" : decl.price.toString(),
-              leverLabel: decl?.leverLabel ?? "",
-              ownerName: row.ownerPlayerId ? (row.ownerName ?? "") : "—",
-              // The lever and the P&L are the owner's business only.
-              lever: isOwner ? row.cost.toString() : "",
-              profit: isOwner ? row.profit.toString() : "",
-            };
-          }),
-        },
-      };
+      const realRows = rows.map((row) => {
+        const decl = ctx.propertyTypes.get(row.pluginId);
+        const isOwner = row.ownerPlayerId === player.id;
+        return {
+          id: row.id,
+          locationId: row.locationId,
+          locationName: row.locationName ?? "",
+          pluginId: row.pluginId,
+          typeName: decl?.name ?? row.pluginId,
+          // "" when the type is not installed: there is no declared price,
+          // so the row is not buyable and the page renders no Buy button.
+          price: decl === null ? "" : decl.price.toString(),
+          leverLabel: decl?.leverLabel ?? "",
+          ownerName: row.ownerPlayerId ? (row.ownerName ?? "") : "—",
+          // The lever and the P&L are the owner's business only.
+          lever: isOwner ? row.cost.toString() : "",
+          profit: isOwner ? row.profit.toString() : "",
+        };
+      });
+
+      // The row is created lazily on first purchase (see `buyRoute`), so a
+      // franchise nobody has bought yet has no real row here and would
+      // otherwise have no list entry and no Buy button — unreachable from
+      // the UI. Synthesize one unowned row per (declared type × location)
+      // pair the query above did not already return, so every buyable
+      // franchise is listed even before its first sale.
+      const covered = new Set(rows.map((row) => `${row.locationId}:${row.pluginId}`));
+      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
+      const syntheticRows: (typeof realRows)[number][] = [];
+      for (const decl of ctx.propertyTypes.list()) {
+        for (const loc of allLocations) {
+          if (covered.has(`${loc.id}:${decl.id}`)) continue;
+          syntheticRows.push({
+            // Composite, not a uuid — deliberately: nothing may treat this as
+            // a real property row id. The page uses `row.id` only as a React
+            // key, and buy posts `{ pluginId, locationId }` separately, so
+            // this never reaches the server as an id.
+            id: `${loc.id}:${decl.id}`,
+            locationId: loc.id,
+            locationName: loc.name,
+            pluginId: decl.id,
+            typeName: decl.name,
+            price: decl.price.toString(),
+            leverLabel: decl.leverLabel,
+            ownerName: "—",
+            lever: "",
+            profit: "",
+          });
+        }
+      }
+
+      return { status: 200, body: { rows: [...realRows, ...syntheticRows] } };
     });
   },
 });
@@ -505,15 +533,23 @@ const adminListRoute = route({
         .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
 
-      const rows = props.map((p) => ({
-        id: p.id,
-        locationId: p.locationId,
-        locationName: p.locationName ?? "",
-        plugin: p.pluginId,
-        ownerName: p.ownerPlayerId ? (p.ownerName ?? "") : "",
-        cost: p.cost.toString(),
-        profit: p.profit.toString(),
-      }));
+      const rows = props.map((p) => {
+        const decl = ctx.propertyTypes.get(p.pluginId);
+        return {
+          id: p.id,
+          locationId: p.locationId,
+          locationName: p.locationName ?? "",
+          plugin: p.pluginId,
+          // The update form's select label — since 0004_location_plugin_unique
+          // a town can hold several rows, so `locationName` alone (the old
+          // label, from the one-row-per-town era) is no longer unique enough
+          // for an admin to tell them apart.
+          label: `${p.locationName ?? ""} — ${decl?.name ?? p.pluginId}`,
+          ownerName: p.ownerPlayerId ? (p.ownerName ?? "") : "",
+          cost: p.cost.toString(),
+          profit: p.profit.toString(),
+        };
+      });
 
       return { status: 200, body: { rows } };
     });
@@ -570,22 +606,30 @@ const adminUpdateRoute = route({
     // holding exactly one lock cannot be half of a deadlock cycle, which is
     // why this route introduces no new deadlock edge — do not grow a second
     // lock in this route.
-    const updated = await ctx.transaction(async (tx) => {
-      const [existing] = await tx.db
-        .select()
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, body.id))
-        .for("update");
-      if (existing === undefined) return false;
-      await tx.db
-        .update(propertiesTable)
-        .set({
-          cost: BigInt(body.cost),
-          ...(body.pluginId !== undefined && { pluginId: body.pluginId }),
-        })
-        .where(eq(propertiesTable.id, body.id));
-      return true;
-    });
+    let updated: boolean;
+    try {
+      updated = await ctx.transaction(async (tx) => {
+        const [existing] = await tx.db
+          .select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.id, body.id))
+          .for("update");
+        if (existing === undefined) return false;
+        await tx.db
+          .update(propertiesTable)
+          .set({
+            cost: BigInt(body.cost),
+            ...(body.pluginId !== undefined && { pluginId: body.pluginId }),
+          })
+          .where(eq(propertiesTable.id, body.id));
+        return true;
+      });
+    } catch (err: unknown) {
+      // unique(location_id, plugin_id) violation → retyping this row to a
+      // type its location already has, same as adminCreateRoute's guard.
+      if (pgErrorCode(err) === "23505") throw new PluginError("location_type_taken", 409);
+      throw err;
+    }
     if (!updated) throw new PluginError("property_not_found", 404);
     return { status: 204 };
   },

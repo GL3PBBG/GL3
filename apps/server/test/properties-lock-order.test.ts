@@ -77,9 +77,14 @@ let playerIds: string[] = [];
 let barrierToken: string;
 let barrierId: string;
 
-/** Every successful buy and every tolerated refusal seen anywhere in this file. */
+/** Every successful buy and every tolerated `buy`-route refusal seen in this
+ *  file. Scoped to `buy` specifically, not every label: `travel`'s own
+ *  `on_cooldown`/`already_there` refusals are guaranteed by its cooldown and
+ *  by same-destination requests regardless of whether `buy`'s ownership
+ *  check does anything at all, so counting every label's 4xx would make the
+ *  assertion below pass even with that check deleted. */
 let successfulBuys = 0;
-let refusals = 0;
+let buyRefusals = 0;
 
 function fire(opts: InjectOptions): Promise<LightMyRequestResponse> {
   // app.inject() is lazy — it dispatches only when something calls .then.
@@ -132,7 +137,7 @@ async function observe(
     if (parsed.success) error = parsed.data.error;
   }
   if (label === "buy" && res.statusCode === 200) successfulBuys += 1;
-  if (res.statusCode >= 400) refusals += 1;
+  if (label === "buy" && res.statusCode >= 400) buyRefusals += 1;
   return { label, status: res.statusCode, error, body: res.body };
 }
 
@@ -243,7 +248,7 @@ beforeAll(async () => {
   }
   ({ token: barrierToken, playerId: barrierId } = await register());
   successfulBuys = 0;
-  refusals = 0;
+  buyRefusals = 0;
 
   // Five times the property price comfortably covers one purchase plus
   // ROUNDS rounds of 1-cent bullet buys, per player.
@@ -532,12 +537,13 @@ describe("properties lock ordering", () => {
     }
   }, 120_000);
 
-  it("observed at least one successful buy and one refusal", async () => {
-    // The load above is real, not a stream of no-ops: something succeeded and
-    // something was refused. Delete the ownership check on the buy route and
-    // successfulBuys climbs while refusals vanish; delete nothing and both
-    // counters sit above zero through every green run.
+  it("observed at least one successful buy and one buy refusal", async () => {
+    // The load above is real, not a stream of no-ops on the buy route
+    // specifically: something bought successfully and something was refused
+    // by `buy` itself (already_owned / insufficient_funds / wrong_location).
+    // Scoped to `buy`'s own refusals, not every route's — see the comment on
+    // `buyRefusals` above for why an unscoped counter would pass vacuously.
     expect(successfulBuys, `successful buys this run: ${successfulBuys}`).toBeGreaterThanOrEqual(1);
-    expect(refusals, `refusals this run: ${refusals}`).toBeGreaterThanOrEqual(1);
+    expect(buyRefusals, `buy refusals this run: ${buyRefusals}`).toBeGreaterThanOrEqual(1);
   });
 });
