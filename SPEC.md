@@ -72,7 +72,7 @@ Audited from `install/schema.sql`, `install/data.sql`, per-module `schema.sql` f
 | `gangInvites`, `gangLogs` | Invites; append-only gang audit log | `GL_time` unix int |
 | `userInventory` | (user, item, qty) composite PK | straightforward |
 | `garage` | Player cars | `GA_damage` %, `GA_location` — cars are location-bound |
-| `properties` | Ownable per-location businesses | **`PR_module` varchar names the module implementing the property** — string coupling to plugin ids; keep as `plugin_id` string in GL3 |
+| `properties` | Ownable per-location businesses | **`PR_module` varchar(128) names the module implementing the property** — string coupling to plugin ids; keep as `plugin_id` string in GL3. Owner column is **`PR_user`** (`NOT NULL DEFAULT 0`), where `0` = unowned and `-1` = closed. No unique constraint: the logical key is `(PR_location, PR_module)`, several properties per town |
 | `bounties` | Open contracts | `B_user` placer, `B_userToKill`, `B_cost` |
 | `detectives` | Searches for hiding players | `D_start`/`D_end` window, `D_success` |
 | `mail` | PMs, threaded via `M_parent` | `M_type`, `M_read` int-bools |
@@ -162,7 +162,7 @@ gang_members       (gang_id, player_id) PK, joined_at            -- replaces US_
 gang_permissions   (gang_id, player_id, permission) PK
 gang_invites       id, gang_id FK, invited_player_id FK, invited_by_player_id FK, created_at
 gang_logs          id, gang_id FK, player_id FK nullable, message, created_at
-properties         id, location_id FK, plugin_id varchar, owner_player_id FK nullable,
+properties         id, location_id FK, plugin_id varchar(128), owner_player_id FK nullable,
                    cost bigint, profit bigint
 bounties           id, placed_by FK, target FK, amount bigint, created_at, claimed_by FK nullable
 detective_searches id, player_id FK, target_player_id FK, detectives int,

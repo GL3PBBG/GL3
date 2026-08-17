@@ -4,6 +4,7 @@ import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import { createRng } from "../game/rng.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
+import { collectPropertyTypes } from "./property-types.js";
 
 /**
  * The function shape a plugin's job handler must satisfy. `manifest.jobs` is
@@ -69,6 +70,11 @@ export async function runPluginJob(
     player: null,
     job: { id: jobId, seed, rng: createRng(seed) },
     filters: manifest.filters,
+    // `runPluginJob` receives one manifest, not the set — the same narrowing
+    // `filters` above already has. No job reads the registry today; if one
+    // ever needs a type another plugin declares, this signature is what has
+    // to widen.
+    propertyTypes: collectPropertyTypes([manifest]),
   });
 
   try {

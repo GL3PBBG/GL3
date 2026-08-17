@@ -44,8 +44,6 @@ export const propertiesPlugin = pgTable("p_properties_properties", {
   ownerPlayerId: uuid("owner_player_id"),
   cost: bigint("cost", { mode: "bigint" }).notNull(),
   profit: bigint("profit", { mode: "bigint" }).notNull(),
-  lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
-  rate: bigint("rate", { mode: "bigint" }).notNull(),
 });
 
 /** Mirrors `packages/plugins/theft/src/migrations.ts` `0001_cars`. */

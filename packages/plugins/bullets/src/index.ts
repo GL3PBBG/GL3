@@ -2,6 +2,7 @@ import {
   definePlugin, InsufficientFundsError, PluginError, route,
   type PageSchema,
 } from "@gl3/plugin-sdk";
+import { ownerAt, payOwner } from "@gl3/plugin-properties";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { locations, playerStats } from "./schema.js";
@@ -131,8 +132,25 @@ const buyRoute = route({
         throw new PluginError("insufficient_stock", 409, { available: location.bulletStock });
       }
 
-      // (6) bigint throughout — quantity is an integer, cost is money.
-      const cost = location.bulletCost * BigInt(quantity);
+      // V2: the factory's owner sets the bullet price and takes half the sale
+      // (bullets.inc.php:86 and :225). A null lever means the owner set none,
+      // so the location's admin-editable price stands — V2's
+      // `if (!!$owner["cost"])`.
+      const franchise = await ownerAt(tx, "bullets", locationId);
+      const unitCost = franchise?.lever ?? location.bulletCost;
+      const cost = unitCost * BigInt(quantity);
+
+      // RULE 6, player↔player half: buyer and owner go through ONE sorted
+      // tx.locks.player call BEFORE either balance moves. payOwner takes the
+      // owner's lock itself, but taking it second — after the buyer's —
+      // would be an ABBA cycle against a simultaneous buy in the other
+      // direction. Regression:
+      // apps/server/test/properties-consumer-lock-order.test.ts.
+      await tx.locks.player(
+        franchise === null || franchise.ownerId === player.id
+          ? [player.id]
+          : [player.id, franchise.ownerId],
+      );
 
       // (7) Takes the player lock. (8) Core's InsufficientFundsError is
       // translated to the SDK's by the ctx; the loader maps only PluginError,
@@ -151,6 +169,10 @@ const buyRoute = route({
           throw new PluginError("insufficient_funds", 409);
         }
         throw error;
+      }
+
+      if (franchise !== null) {
+        await payOwner(tx, franchise.propertyId, cost / 2n, "properties.bullets");
       }
 
       // (9) The stock value read under the lock at step 4, minus the purchase.
@@ -195,6 +217,12 @@ export default definePlugin({
   basePaths: ["/api/bullets", "/api/admin/bullets"],
   routes: [buyRoute, adminListRoute, adminStockRoute],
   adminPages: [adminPage],
+  providesProperties: [{
+    id: "bullets",
+    name: "Bullet Factory",
+    price: 100_000_000n,          // $1,000,000 in cents — V2's hardcoded figure
+    leverLabel: "Price per bullet",
+  }],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot

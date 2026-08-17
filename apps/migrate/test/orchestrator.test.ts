@@ -32,7 +32,7 @@ describe("runMigration", () => {
       expect(await db.select().from(gangMembers)).toHaveLength(3); // underboss, soldier, + Vito via boss cross-check
       expect(await db.select().from(playerItems)).toHaveLength(1);
       expect(await db.select().from(garage)).toHaveLength(1);
-      expect(await db.select().from(propertiesPlugin)).toHaveLength(1);
+      expect(await db.select().from(propertiesPlugin)).toHaveLength(3); // owned + PR_user=0 unowned + PR_user=-1 closed-as-unowned
       expect(await db.select().from(mailMessages)).toHaveLength(3);
       expect(await db.select().from(notifications)).toHaveLength(1);
       expect(await db.select().from(bounties)).toHaveLength(1);

@@ -1,4 +1,5 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
+import { collectPropertyTypes } from "./property-types.js";
 
 /** Core owns these; a plugin claiming one is a hard boot failure (spec: Routes). */
 export const RESERVED_BASE_PATHS = [
@@ -271,4 +272,10 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
       }
     }
   }
+
+  // A duplicate declared property type id is a hard boot failure, same as a
+  // duplicate table or page id above. `collectPropertyTypes` already throws
+  // with the "plugin validation failed — " prefix `fail()` uses, so calling
+  // it here for its side effect is enough — the result itself is unused.
+  collectPropertyTypes(manifests);
 }

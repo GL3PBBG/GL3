@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import bulletsPlugin from "@gl3/plugin-bullets";
+import propertiesPlugin from "@gl3/plugin-properties";
 import type { RouteResult } from "@gl3/plugin-sdk";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { locations, players, playerStats, transactions } from "../src/db/schema/index.js";
+import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
@@ -27,6 +29,16 @@ const buy = (forPlayerId: string, quantity: number) =>
   callPluginRoute(bulletsPlugin, "POST", "/api/bullets/buy", {
     db, redis, leaderboardPrefix, playerId: forPlayerId, body: { quantity },
   });
+
+beforeAll(async () => {
+  // This file drives the bullets route through callPluginRoute, not
+  // bootTestServer, so nothing else applies the properties plugin's
+  // migrations first — and bullets now queries properties' table via
+  // ownerAt/payOwner (Task 9). resetDb() below truncates but never drops,
+  // so running this once here (idempotent, tracked in plugin_migrations) is
+  // enough for every test in the file.
+  await runPluginMigrations(db, [propertiesPlugin]);
+});
 
 beforeEach(async () => {
   await resetDb(db);
