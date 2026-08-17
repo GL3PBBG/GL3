@@ -26,4 +26,14 @@ describe("card component map", () => {
     const { ViewNodeSchema } = await import("@gl3/plugin-sdk");
     expect(() => ViewNodeSchema.parse({ kind: "cards", cards: [...CARD_CODES] })).not.toThrow();
   });
+
+  it("agrees with the WIRE schema too, not just the SDK's", async () => {
+    // The SDK schema gates authoring; @gl3/shared's gates the wire, and a node
+    // has to clear BOTH to reach the renderer. `cards` shipped in the SDK and
+    // not in @gl3/shared, so a payload carrying one — a manifest-declared page,
+    // or the casino lobby's resume view — failed the client-side parse of the
+    // whole payload on an invalid discriminator. Same node, both schemas.
+    const { ViewNodeDtoSchema } = await import("@gl3/shared");
+    expect(() => ViewNodeDtoSchema.parse({ kind: "cards", cards: [...CARD_CODES] })).not.toThrow();
+  });
 });
