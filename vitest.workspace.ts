@@ -223,6 +223,7 @@ export default defineWorkspace([
         "test/theft-resolve.test.ts",
         "test/property-type-registry.test.ts",
         "test/casino-registry.test.ts",
+        "test/casino-settings.test.ts",
         "test/blackjack-rules.test.ts",
       ],
     },

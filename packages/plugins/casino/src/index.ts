@@ -14,6 +14,12 @@ import { fromStorableState, toStorableState } from "./state.js";
 
 export { casinoSessions } from "./schema.js";
 export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
+// The readers are exported for the same reason `@gl3/plugin-theft` exports
+// `readTheftSettings`: they are pure, and their contract (defaults, the digits
+// guard, the expiry ceiling) is worth pinning in a DB-free unit test.
+export {
+  MAX_SESSION_EXPIRY_MINUTES, readExpiryMinutes, readMaxBet, readMinBet,
+} from "./settings.js";
 // Re-exported so a test can assert against the same page object rather than a
 // hand-copied duplicate of its view tree — the properties convention.
 export { adminPage } from "./pages.js";
@@ -489,14 +495,14 @@ function sameNumber(a: string, b: string): boolean {
 }
 
 /**
- * `readExpiryMinutes` answers a JS `number`, and `String` renders anything
- * from 1e21 up in exponential notation — a form neither an admin nor
- * `sameNumber` can read. `BigInt` renders the digits in full, and is safe
- * because a digits-only row can only produce an integer (every double at that
- * magnitude is one). The non-integer tail is `Infinity`, from a row of ~309+
- * digits: rendered by `String` as "Infinity", it fails `sameNumber` and the
- * row reads `ignored`, which is the honest answer for a number nothing can
- * act on.
+ * SECOND line of defence, kept deliberately. `MAX_SESSION_EXPIRY_MINUTES` now
+ * clamps the reader, so `effective` can no longer reach the 1e21 magnitude at
+ * which `String` switches to exponential notation — but this function is what
+ * made that case render instead of throwing, and a future ceiling change
+ * should not silently re-open it. `BigInt` renders the digits in full and is
+ * safe because a digits-only row can only produce an integer; the non-integer
+ * tail (`Infinity`, now unreachable through the clamp) falls back to `String`,
+ * fails `sameNumber`, and reads `ignored`.
  */
 function renderMinutes(minutes: number): string {
   return Number.isInteger(minutes) ? BigInt(minutes).toString() : String(minutes);

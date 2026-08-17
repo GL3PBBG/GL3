@@ -4,7 +4,9 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { on } from "@gl3/plugin-sdk";
-import casinoPlugin, { adminPage as casinoAdminPage, games, type GameDef } from "@gl3/plugin-casino";
+import casinoPlugin, {
+  adminPage as casinoAdminPage, games, MAX_SESSION_EXPIRY_MINUTES, type GameDef,
+} from "@gl3/plugin-casino";
 import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
@@ -284,6 +286,75 @@ describe("GET /api/casino", () => {
     expect(body.session?.view).toBeNull();
   });
 
+  it("does not forfeit a live hand when the expiry setting is absurd", async () => {
+    // THE PATH THAT COSTS A PLAYER MONEY. `settings.value` is unbounded `text`;
+    // before `MAX_SESSION_EXPIRY_MINUTES` a ~309+ digit row read as `Infinity`,
+    // `expiresAt` became an Invalid Date, and an Invalid Date compares FALSE
+    // against every date — which is precisely the test `play` uses to decide a
+    // hand is still live. Every open hand therefore read as expired: the lobby
+    // hid it and the next `play` forfeited it on sight, taking the hand and the
+    // wager escrowed in it. An absurd expiry must mean "never expires", which
+    // is what a clamped century does.
+    //
+    // Driven through `callPluginRoute` because settings load once at boot, with
+    // a deterministic stand-in game: blackjack can settle at deal, and this
+    // test needs a hand that is certainly OPEN when the second play arrives.
+    const NEVER_SETTLES: GameDef = {
+      id: "casino",
+      name: "Endless hand",
+      maxPayoutMultiplier: 1,
+      action: z.unknown(),
+      start: () => ({ state: {}, view: { kind: "text", value: "dealt" }, done: false }),
+      act: () => ({ state: {}, view: { kind: "text", value: "over" }, done: true }),
+      settle: () => 0n,
+    };
+    const manifest = {
+      ...casinoPlugin,
+      filters: [on(games, (_ctx, list: GameDef[]) => [...list, NEVER_SETTLES])],
+    };
+    const absurd = { "casino.session_expiry_minutes": "9".repeat(400) };
+
+    const punter = await register();
+    const locationId = await seedLocation();
+    await placePlayer(punter.playerId, locationId, 1_000_000n);
+    const call = (settings: Record<string, string>) => callPluginRoute(
+      manifest, "POST", "/api/casino/play",
+      {
+        db, redis, leaderboardPrefix: "casino-lobby-test", playerId: punter.playerId,
+        body: { gameId: "casino", wager: "100000" }, settings,
+      },
+    );
+
+    const opened = await call(absurd);
+    expect(opened.status).toBe(200);
+    const first = (opened.body as { sessionId: string; done: boolean });
+    expect(first.done).toBe(false);
+
+    // A hand opened seconds ago is LIVE, whatever the setting says. Under the
+    // unclamped reader this call answered 200 — it forfeited the hand above and
+    // dealt a new one.
+    await expect(call(absurd)).rejects.toMatchObject({ code: "session_open" });
+
+    // And the hand is untouched: still open, not settled behind the player.
+    const rows = await db.select().from(casinoSessions)
+      .where(eq(casinoSessions.playerId, punter.playerId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(first.sessionId);
+    expect(rows[0]?.status).toBe("open");
+    expect(rows[0]?.settledAt).toBeNull();
+
+    // The lobby still offers it, rather than hiding a hand it thinks is dead.
+    const lobbyRes = await callPluginRoute(manifest, "GET", "/api/casino", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: punter.playerId,
+      settings: absurd,
+    });
+    const session = (lobbyRes.body as LobbyBody).session;
+    expect(session?.sessionId).toBe(first.sessionId);
+    // Roughly a century out, and a real date rather than an Invalid one.
+    expect(Number.isNaN(new Date(session?.expiresAt ?? "").getTime())).toBe(false);
+    expect(new Date(session?.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now());
+  });
+
   it("409s a player who is nowhere, the answer play gives", async () => {
     const nowhere = await register();
     const res = await lobby(nowhere.token);
@@ -496,47 +567,43 @@ describe("the casino admin section", () => {
       .toMatchObject({ value: "30", source: "ignored (0)" });
   });
 
-  it("renders an absurd expiry instead of throwing on it", async () => {
+  it("renders an absurd expiry as the clamped value, and says it was not taken as typed", async () => {
     // `settings.value` is unbounded `text`, so nothing stops an admin typing a
-    // 22-digit expiry. `readExpiryMinutes` goes through `Number`, and `String`
-    // renders anything from 1e21 up as "1e+21" — which is not a digit string,
-    // so a `BigInt()` on it is a SyntaxError. Uncaught, that 500s the whole
-    // admin page rather than rendering a row.
-    const big = "1000000000000000000000";                 // 1e21, exactly a double
-    const notADouble = "1000000000000000000001";           // rounds to 1e21, so ≠ typed
-    const beyondDouble = "9".repeat(400);                  // Number() → Infinity
+    // 22-digit expiry. Two separate defects lived here: `String(1e21)` is
+    // "1e+21", which `BigInt()` rejects — an uncaught SyntaxError that 500'd
+    // the whole page — and, worse, an unclamped reader made `expiresAt` an
+    // Invalid Date and cost players live hands (see the play-path test above).
+    // `MAX_SESSION_EXPIRY_MINUTES` closes both: what is in force is the
+    // ceiling, and the row says so rather than claiming the typed value is
+    // configured.
+    const ceiling = String(MAX_SESSION_EXPIRY_MINUTES);
+    const expiryRow = async (raw: string) => {
+      const res = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+        db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+        settings: { "casino.session_expiry_minutes": raw },
+      });
+      expect(res.status, `raw: ${raw}`).toBe(200);
+      return (res.body as { rows: { key: string; value: string; source: string }[] }).rows
+        .find((row) => row.key === "session_expiry_minutes");
+    };
 
-    const res = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
-      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
-      settings: { "casino.session_expiry_minutes": big },
-    });
-    expect(res.status).toBe(200);
-    const row = (res.body as { rows: { key: string; value: string; source: string }[] }).rows
-      .find((r) => r.key === "session_expiry_minutes");
-    // Full digits, not "1e+21" — and honestly labelled: 1e21 IS exactly what
-    // the reader answers for this row, so it is configured, not ignored.
-    expect(row).toMatchObject({ value: big, source: "configured" });
+    // 1e21, exactly representable as a double — but far past the ceiling, so
+    // what is in force is the ceiling and NOT what was typed. "ignored" is the
+    // honest label: the value did not survive the reader intact.
+    expect(await expiryRow("1000000000000000000000"))
+      .toMatchObject({ value: ceiling, source: "ignored (1000000000000000000000)" });
 
-    // One past the last exactly-representable double: `Number` rounds it, so
-    // what is in force is NOT what was typed, and the row says so.
-    const off = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
-      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
-      settings: { "casino.session_expiry_minutes": notADouble },
-    });
-    expect(off.status).toBe(200);
-    expect((off.body as { rows: { key: string; value: string; source: string }[] }).rows
-      .find((r) => r.key === "session_expiry_minutes"))
-      .toMatchObject({ value: big, source: `ignored (${notADouble})` });
+    // The tail that used to come back as Infinity — the one that broke `play`.
+    // It renders as a real number now, never "Infinity".
+    const nines = "9".repeat(400);
+    expect(await expiryRow(nines)).toMatchObject({ value: ceiling, source: `ignored (${nines})` });
 
-    // And the tail that is not a number at all once `Number` has had it.
-    const infinite = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
-      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
-      settings: { "casino.session_expiry_minutes": beyondDouble },
-    });
-    expect(infinite.status).toBe(200);
-    expect((infinite.body as { rows: { key: string; value: string; source: string }[] }).rows
-      .find((r) => r.key === "session_expiry_minutes"))
-      .toMatchObject({ value: "Infinity", source: `ignored (${beyondDouble})` });
+    // At the ceiling exactly: in force as typed, so configured.
+    expect(await expiryRow(ceiling)).toMatchObject({ value: ceiling, source: "configured" });
+
+    // A large but sane value is untouched — the clamp costs no legitimate
+    // configuration, which is the whole argument for a century-wide ceiling.
+    expect(await expiryRow("525600")).toMatchObject({ value: "525600", source: "configured" });
   });
 
   it("lists open hands, marking the stale ones", async () => {
