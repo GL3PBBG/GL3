@@ -473,22 +473,50 @@ const actRoute = route({
  * `10.00` silently does nothing, and "ignored" is the only place an admin
  * could ever see that.
  */
+/**
+ * Two digit strings compared BY VALUE, so `"010000"` matches `"10000"`.
+ *
+ * TOTAL — it answers false where `BigInt()` would throw, and that is the whole
+ * point. `settings.value` is unbounded `text`, and an earlier version compared
+ * `BigInt(raw) === BigInt(effective)` with only `raw` guarded: a 22-digit
+ * expiry made `effective` `"1e+21"` (see `renderMinutes`) and `BigInt("1e+21")`
+ * is a `SyntaxError`, so the admin page 500'd instead of rendering the row.
+ * Both sides are guarded here, so an unreadable value degrades to `ignored`.
+ */
+function sameNumber(a: string, b: string): boolean {
+  if (!/^\d+$/.test(a) || !/^\d+$/.test(b)) return false;
+  return BigInt(a) === BigInt(b);
+}
+
+/**
+ * `readExpiryMinutes` answers a JS `number`, and `String` renders anything
+ * from 1e21 up in exponential notation — a form neither an admin nor
+ * `sameNumber` can read. `BigInt` renders the digits in full, and is safe
+ * because a digits-only row can only produce an integer (every double at that
+ * magnitude is one). The non-integer tail is `Infinity`, from a row of ~309+
+ * digits: rendered by `String` as "Infinity", it fails `sameNumber` and the
+ * row reads `ignored`, which is the honest answer for a number nothing can
+ * act on.
+ */
+function renderMinutes(minutes: number): string {
+  return Number.isInteger(minutes) ? BigInt(minutes).toString() : String(minutes);
+}
+
 function settingRow(
   ctx: PluginCtx, key: string, label: string, effective: string,
 ): { key: string; label: string; value: string; source: string } {
   const raw = ctx.settings.get(key);
   if (raw === null) return { key, label, value: effective, source: "default" };
   // NUMERIC comparison, not string. `effective` is canonical — the readers
-  // return `BigInt(raw).toString()` / `String(Number(raw))` — while the stored
-  // row need not be: `"010000"` passes `readBigint`'s digits test and IS in
-  // force as 10000. Comparing the strings rendered `ignored (010000)`, telling
-  // an admin their live value was being ignored. The digits guard is not
-  // belt-and-braces either: it is both what makes `BigInt(raw)` safe and
-  // exactly the readers' own acceptance rule, so `ignored` now means the value
-  // really did fall back to the coded default — a malformed `"10.00"`, or a
-  // `session_expiry_minutes` of `"0"` that `readExpiryMinutes` rejects for
-  // being non-positive.
-  const inForce = /^\d+$/.test(raw) && BigInt(raw) === BigInt(effective);
+  // return `BigInt(raw).toString()` / the `renderMinutes` above — while the
+  // stored row need not be: `"010000"` passes `readBigint`'s digits test and IS
+  // in force as 10000. Comparing the strings rendered `ignored (010000)`,
+  // telling an admin their live value was being ignored. So `ignored` now
+  // means the value really did fail to survive the reader — a malformed
+  // `"10.00"`, a `session_expiry_minutes` of `"0"` that `readExpiryMinutes`
+  // rejects for being non-positive, or a magnitude that came back as something
+  // other than the digits that were typed.
+  const inForce = sameNumber(raw, effective);
   return { key, label, value: effective, source: inForce ? "configured" : `ignored (${raw})` };
 }
 
@@ -503,7 +531,7 @@ const adminSettingsRoute = route({
         rows: [
           settingRow(ctx, "min_bet", "Minimum bet", readMinBet(ctx.settings).toString()),
           settingRow(ctx, "max_bet", "Maximum bet (no house lever)", readMaxBet(ctx.settings).toString()),
-          settingRow(ctx, "session_expiry_minutes", "Hand expiry (minutes)", String(readExpiryMinutes(ctx.settings))),
+          settingRow(ctx, "session_expiry_minutes", "Hand expiry (minutes)", renderMinutes(readExpiryMinutes(ctx.settings))),
         ],
       },
     };

@@ -496,6 +496,49 @@ describe("the casino admin section", () => {
       .toMatchObject({ value: "30", source: "ignored (0)" });
   });
 
+  it("renders an absurd expiry instead of throwing on it", async () => {
+    // `settings.value` is unbounded `text`, so nothing stops an admin typing a
+    // 22-digit expiry. `readExpiryMinutes` goes through `Number`, and `String`
+    // renders anything from 1e21 up as "1e+21" — which is not a digit string,
+    // so a `BigInt()` on it is a SyntaxError. Uncaught, that 500s the whole
+    // admin page rather than rendering a row.
+    const big = "1000000000000000000000";                 // 1e21, exactly a double
+    const notADouble = "1000000000000000000001";           // rounds to 1e21, so ≠ typed
+    const beyondDouble = "9".repeat(400);                  // Number() → Infinity
+
+    const res = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+      settings: { "casino.session_expiry_minutes": big },
+    });
+    expect(res.status).toBe(200);
+    const row = (res.body as { rows: { key: string; value: string; source: string }[] }).rows
+      .find((r) => r.key === "session_expiry_minutes");
+    // Full digits, not "1e+21" — and honestly labelled: 1e21 IS exactly what
+    // the reader answers for this row, so it is configured, not ignored.
+    expect(row).toMatchObject({ value: big, source: "configured" });
+
+    // One past the last exactly-representable double: `Number` rounds it, so
+    // what is in force is NOT what was typed, and the row says so.
+    const off = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+      settings: { "casino.session_expiry_minutes": notADouble },
+    });
+    expect(off.status).toBe(200);
+    expect((off.body as { rows: { key: string; value: string; source: string }[] }).rows
+      .find((r) => r.key === "session_expiry_minutes"))
+      .toMatchObject({ value: big, source: `ignored (${notADouble})` });
+
+    // And the tail that is not a number at all once `Number` has had it.
+    const infinite = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+      settings: { "casino.session_expiry_minutes": beyondDouble },
+    });
+    expect(infinite.status).toBe(200);
+    expect((infinite.body as { rows: { key: string; value: string; source: string }[] }).rows
+      .find((r) => r.key === "session_expiry_minutes"))
+      .toMatchObject({ value: "Infinity", source: `ignored (${beyondDouble})` });
+  });
+
   it("lists open hands, marking the stale ones", async () => {
     const punter = await register();
     const locationId = await seedLocation();

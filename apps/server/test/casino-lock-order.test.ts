@@ -287,12 +287,15 @@ describe("casino lock ordering", () => {
     // `play`'s open-hand pre-read takes no lock, so both requests read "no open
     // hand" before either commits. What separates them is the FOR UPDATE
     // re-read at the THIRD step of the lock order (spec §5's diagram: location
-    // → both players in one call → the session row): the loser acquires the
-    // player lock only after the winner commits, and READ COMMITTED gives that
-    // re-read a fresh snapshot, so it sees the winner's row and answers 409.
-    // Without it the loser reaches its INSERT and the p_casino_sessions_one_open
-    // partial index rejects it — an uncaught 23505, i.e. HTTP 500 on a
-    // well-formed request. Shown red exactly that way; see the task report.
+    // → both players in one call → the session row). Both requests target the
+    // IDENTICAL location row, so the loser actually blocks at step ONE,
+    // `tx.locks.location`, and never reaches the player lock until the winner
+    // has committed and released it; either way its re-read runs afterwards,
+    // and READ COMMITTED gives that statement a fresh snapshot, so it sees the
+    // winner's row and answers 409. Without the re-read the loser reaches its
+    // INSERT and the p_casino_sessions_one_open partial index rejects it — an
+    // uncaught 23505, i.e. HTTP 500 on a well-formed request. Shown red exactly
+    // that way; see the task report.
     //
     // Unowned town, so the lock set is exactly {locations[L], player_stats[P]}
     // and no house owner is involved.
@@ -301,9 +304,7 @@ describe("casino lock ordering", () => {
     // immediately (either side, ~1 hand in 11), and a winner who settles at
     // deal leaves NO open hand, so the loser legitimately gets a second 200.
     // That outcome is correct behaviour, not the case under test, so the race
-    // is re-run with fresh players until the winner's hand stays open. The
-    // no-500 assertion is checked on EVERY attempt, including the discarded
-    // ones — a 500 fails the test wherever it appears.
+    // is re-run with fresh players until the winner's hand stays open.
     let saw409 = false;
     for (let attempt = 0; attempt < 15 && !saw409; attempt += 1) {
       const player = await register();
@@ -319,15 +320,30 @@ describe("casino lock ordering", () => {
       // THE ASSERTION. A 23505 escaping as a 500 lands here.
       expect(statuses, `bodies: ${first.body} | ${second.body}`).not.toContain(500);
 
+      // CHECKED ON EVERY ATTEMPT, INCLUDING THE DISCARDED ONES, because all
+      // three hold in both outcomes — a 200 does NOT mean the hand settled,
+      // `play` answers 200 for an open hand too, so the discarded branch must
+      // not assume anything about how many rows are open. It asks the
+      // responses instead: each 200 wrote exactly one row, an open row is
+      // exactly a `done: false` body, and two open hands is the rule itself
+      // breaking.
+      const won = [first, second].filter((res) => res.statusCode === 200);
+      const wonBodies = won.map((res) => res.json<{ done: boolean }>());
+      const rows = await db.select().from(casinoSessions)
+        .where(eq(casinoSessions.playerId, player.playerId));
+      const open = rows.filter((row) => row.status === "open");
+
+      expect(rows, `bodies: ${first.body} | ${second.body}`).toHaveLength(won.length);
+      expect(open, `bodies: ${first.body} | ${second.body}`)
+        .toHaveLength(wonBodies.filter((body) => !body.done).length);
+      expect(open.length).toBeLessThanOrEqual(1);
+
       const refused = [first, second].filter((res) => res.statusCode === 409);
       if (refused.length === 0) {
-        // Both won: the first hand settled at deal. Two settled rows, none
-        // open — the invariant still holds, so this attempt proves nothing
-        // about the 409 path and is retried.
+        // Both won, which can only mean the winner settled at deal — its row
+        // freed the table before the loser's re-read. The loser's OWN hand may
+        // then be open or settled, which is why nothing above assumes.
         expect(statuses).toEqual([200, 200]);
-        const rows = await db.select().from(casinoSessions)
-          .where(eq(casinoSessions.playerId, player.playerId));
-        expect(rows.filter((row) => row.status === "open")).toHaveLength(0);
         continue;
       }
 
@@ -338,8 +354,6 @@ describe("casino lock ordering", () => {
       expect(refused[0]?.json<{ error: string }>().error).toBe("session_open");
 
       // And the invariant the 409 protects: one hand, open, on the table.
-      const rows = await db.select().from(casinoSessions)
-        .where(eq(casinoSessions.playerId, player.playerId));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.status).toBe("open");
     }
