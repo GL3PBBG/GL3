@@ -130,9 +130,30 @@ describe("GET /api/plugins", () => {
           describe: "{actorName} sold a {carName} for {payout}",
           invalidates: ["garage", "me"],
         }, {
+          // This whole `events` array is a hand-maintained census with no
+          // type-level tie to the plugin manifests it asserts against — it
+          // only catches drift when this file itself changes. `properties`
+          // shed its `income` model on `feat/properties-franchise`: `bought`'s
+          // describe string changed and `dropped`/`transferred` were added,
+          // both here to match `packages/plugins/properties/src/index.ts`'s
+          // `events: [boughtEvent, droppedEvent, transferredEvent]`. There is
+          // deliberately no `seized` event — a `killResolved` filter
+          // subscriber runs under the *applying* plugin's ctx (combat's), so
+          // publishing from it would go out mislabelled as `combat`'s; seizure
+          // notifies the victim via `tx.notify` instead.
           pluginId: "properties",
           name: "bought",
-          describe: "{actorName} bought {propertyName} for {cost}",
+          describe: "{actorName} bought the {typeName} in {locationName} for {price}",
+          invalidates: ["properties", "me"],
+        }, {
+          pluginId: "properties",
+          name: "dropped",
+          describe: "{actorName} dropped the {typeName} in {locationName}",
+          invalidates: ["properties", "me"],
+        }, {
+          pluginId: "properties",
+          name: "transferred",
+          describe: "{actorName} transferred the {typeName} in {locationName} to you",
           invalidates: ["properties", "me"],
         }],
       });
