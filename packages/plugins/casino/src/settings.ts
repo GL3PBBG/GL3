@@ -14,9 +14,36 @@ function readBigint(settings: SettingsReader, key: string, fallback: bigint): bi
 export function readMinBet(s: SettingsReader): bigint { return readBigint(s, "min_bet", DEFAULT_MIN_BET); }
 export function readMaxBet(s: SettingsReader): bigint { return readBigint(s, "max_bet", DEFAULT_MAX_BET); }
 
+/**
+ * The ceiling on `session_expiry_minutes`: 100 years, in minutes.
+ *
+ * NOT a balance decision — it is what keeps the expiry ARITHMETIC valid.
+ * `settings.value` is unbounded `text`, so an admin can store 400 digits;
+ * `Number` answers `Infinity` for those, `Infinity > 0` passes the check
+ * below, and `new Date(createdAt + Infinity * 60_000)` is an **Invalid Date**,
+ * which compares `false` against every date. That comparison is exactly how
+ * `index.ts` decides a hand is still live, so a false there means EVERY open
+ * hand reads as expired: the lobby hides it and the next `play` forfeits it on
+ * sight, costing the player their hand and the wager escrowed in it. A live
+ * gameplay defect reachable from one settings row.
+ *
+ * 100 years is picked so the clamp can never cost a legitimate configuration —
+ * a hand that expires in a century does not expire — while leaving
+ * `createdAt + minutes` five orders of magnitude inside the ±8.64e15 ms a
+ * `Date` can represent, so no plausible `created_at` can push it out of range.
+ * Clamping here rather than in `expiresAt` fixes both call sites at once.
+ */
+export const MAX_SESSION_EXPIRY_MINUTES = 52_596_000; // 100 × 365.25 × 24 × 60
+
 export function readExpiryMinutes(s: SettingsReader): number {
   const raw = s.get("session_expiry_minutes");
   if (raw === null || !/^\d+$/.test(raw)) return DEFAULT_SESSION_EXPIRY_MINUTES;
   const parsed = Number(raw);
-  return parsed > 0 ? parsed : DEFAULT_SESSION_EXPIRY_MINUTES;
+  // Unchanged contract: non-positive falls back to the default. Written
+  // `!(parsed > 0)` so a NaN — unreachable through the digits guard, but one
+  // regex edit away — falls back rather than sailing through.
+  if (!(parsed > 0)) return DEFAULT_SESSION_EXPIRY_MINUTES;
+  // `Math.min(Infinity, MAX)` is MAX, so the absurd tail lands on the ceiling
+  // rather than on a value no date arithmetic can survive.
+  return Math.min(parsed, MAX_SESSION_EXPIRY_MINUTES);
 }
