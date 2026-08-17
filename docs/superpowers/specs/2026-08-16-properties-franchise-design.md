@@ -167,11 +167,11 @@ declaring two types would need a discriminator the key does not have.)*
 point and admin page collection. Duplicate ids across plugins are a boot
 failure, matching the existing route-collision behaviour.
 
-The registry is exposed to the `properties` plugin — and to nothing else —
-through the plugin ctx as `ctx.propertyTypes`. *(This is a read-only view of
-loader state, not core reaching into a plugin's table, so it does not violate
-the core/plugin boundary. It is the same shape as the existing `ctx.settings`
-snapshot.)*
+The registry is exposed on every plugin's ctx as `ctx.propertyTypes`
+(`get(id)` / `list()`). It is read-only loader state derived from manifests —
+the same data `GET /api/plugins` already serves publicly — so there is nothing
+to withhold, and a per-plugin ctx variant for one field would not earn its
+complexity. It is the same shape as the existing `ctx.settings` accessor.
 
 ### 2.3 Unregistered rows stay alive
 

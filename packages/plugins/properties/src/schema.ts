@@ -1,9 +1,17 @@
 import { sql } from "drizzle-orm";
-import { bigint, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, pgTable, text, uuid } from "drizzle-orm/pg-core";
 
 /**
  * The table this plugin OWNS. `migrations.ts` is the definition and this
  * handle must be kept in step with it by hand.
+ *
+ * `cost` is the OWNER'S LEVER, not a purchase price (V2's PR_cost): the
+ * consumer plugin reads it as its local price or limit. Zero means "the owner
+ * has set none — consumer, use your own default". The acquisition price lives
+ * in the consumer's `providesProperties` declaration.
+ *
+ * `profit` is lifetime P&L and MAY BE NEGATIVE: a consumer that makes the
+ * owner the house (V2's blackjack) debits through `payOwner`.
  */
 export const propertiesTable = pgTable("p_properties_properties", {
   id: uuid("id").primaryKey(),
@@ -12,8 +20,6 @@ export const propertiesTable = pgTable("p_properties_properties", {
   ownerPlayerId: uuid("owner_player_id"),
   cost: bigint("cost", { mode: "bigint" }).notNull().default(sql`0`),
   profit: bigint("profit", { mode: "bigint" }).notNull().default(sql`0`),
-  lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
-  rate: bigint("rate", { mode: "bigint" }).notNull().default(sql`0`),
 });
 
 /**

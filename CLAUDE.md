@@ -115,12 +115,46 @@ cascade FKs — the fourth place a new variant must reach turned out to be
 plan and caught only under the whole-tree suite (see the four-places note
 below). `@gl3/shared` took an additive patch bump to `0.1.4` for the new
 events plus `dto/rounds.ts`; `@gl3/plugin-sdk` needed none.
+**Properties as franchises** has since shipped on `feat/properties-franchise`,
+replacing the flat-rate income model from the properties cluster above with
+V2's real mechanic, read from source after the fact (`SPEC.md:75` and `:165`
+named the owner column `PR_owner`; it is `PR_user`, and the M4 migrator's
+matching defect — a live bug independent of this cluster — is fixed in the
+same branch). `plugin_id` is now live: the table's key moved from
+`unique(location_id)` to `unique(location_id, plugin_id)`, so a casino and a
+bullet factory coexist in one town, each declared via a new manifest field
+(`providesProperties`) collected into a registry on **every** plugin's ctx
+(`ctx.propertyTypes`, spec amended in place to say so). `rate` and
+`last_claimed_at` are gone along with the claim and sell routes — there is no
+clock any more. Income is consumer-paid: `cost` is reinterpreted as the
+owner's lever (bullets reads it as price-per-bullet, falling back to the
+location's own price when unset), and `@gl3/plugin-properties` exports
+`ownerAt`/`payOwner` for any plugin willing to pay a franchise owner. `bullets`
+is the first consumer — a dependency on `@gl3/plugin-properties`, the second
+plugin→plugin dependency edge after `bounties`→`combat` — paying the owner
+half of every bullet sale. Seizure on death **disowns** a victim's properties
+game-wide rather than transferring them to the shooter (the shooter already
+takes the kill's payout); it notifies via `tx.notify` rather than a plugin
+event, because a `combat.killResolved` filter subscriber runs under the
+*applying* plugin's ctx, so a `tx.events.publish` there would be mislabelled
+as combat's. `drop` has no refund, matching V2's DELETE — a property is a
+one-way money sink. `@gl3/shared` took an additive patch bump to `0.1.5`
+(`PropertyRowSchema`/`PropertyListResponseSchema` change shape); `@gl3/plugin-
+sdk` took its first-ever bump, `0.1.1`, for `providesProperties` and
+`ctx.propertyTypes`.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **177 files / 1370 tests**, `npm run verify` exit 0. Note `apps/migrate`'s
+Suite: **181 files / 1380 tests** as of `feat/properties-franchise`, backed by
+a bare `npm run verify` on HEAD `e7ea8af` that **exited 0** with no unhandled
+rejections. An earlier full run on this branch was exit 1 (a migration gap in
+`economy-invariant.test.ts`, a stale hardcoded events census in
+`plugin-manifest-endpoint.test.ts`) and the one after it was *void* rather
+than failing — 1307 passed, zero failures, 22 files at `(0 test)` — because a
+concurrent session shared this machine's Postgres and Redis. See
+`docs/STATUS.md`'s properties-franchise section. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -235,15 +269,22 @@ unavailable here.
    through `lockGangAndPlayerForUpdate`; every location↔player path is
    locations-first — a single row via `lockLocationForUpdate` (bullets, and
    theft's steal/sell/repair through `tx.locks.location`, and properties'
-   buy/sell/claim through `tx.locks.location`) or
+   buy/lever/transfer/drop/reset through `tx.locks.location` — `sell` and
+   `claim` are gone, retired with the accrual clock on
+   `feat/properties-franchise`) or
    several via `lockLocationsForUpdate`, which sorts them ascending (travel
    locks both its source and destination through it). Player↔player is the
    third pair, added by combat: `lockPlayersForUpdate` dedupes and sorts
    ascending in one statement, which is what makes A-shoots-B safe against
-   B-shoots-A. Regression tests: `test/gang-lock-order.test.ts`,
+   B-shoots-A — `test/properties-consumer-lock-order.test.ts` is the second
+   player↔player regression after combat's own, proving a consumer plugin
+   that calls `payOwner` (bullets, buying from an owned factory) locks both
+   the buyer and the owner in the one sorted call rather than two, which
+   `test/properties-lock-order.test.ts`'s ABBA case caught for `transfer`
+   independently. Regression tests: `test/gang-lock-order.test.ts`,
    `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`,
-   `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`
-   (`economy/ledger.ts`).
+   `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`,
+   `test/properties-consumer-lock-order.test.ts` (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing
@@ -340,9 +381,16 @@ unavailable here.
   widened the surface additively (the `round.started` and `round.finished`
   `GameEvent` variants, plus `dto/rounds.ts`), again a patch, and
   `@gl3/plugin-sdk` needed no bump because its `CoreEventInput` is derived
-  from `GameEvent` rather than restated. The registry now serves
-  `@gl3/shared` `0.1.1`, `0.1.2`, `0.1.3` and `0.1.4`, and
-  `@gl3/plugin-sdk@0.1.0`.
+  from `GameEvent` rather than restated. **The properties-franchise cluster
+  bumped both manifests** — `packages/shared/package.json` to `0.1.5`
+  (`PropertyRowSchema`/`PropertyListResponseSchema` changed shape: `accrued`/
+  `rate` out, `lever`/`price`/`typeName` in — breaking in shape but shipped as
+  a patch under the same `0.x`-additive-only reasoning as every bump above)
+  and `packages/plugin-sdk/package.json` to `0.1.1`, its **first bump ever**
+  (`providesProperties` on the manifest, `ctx.propertyTypes` on every plugin's
+  ctx). **Both have since been published**, with the user's approval, following
+  this branch's commit. The registry now serves `@gl3/shared` `0.1.1` through
+  `0.1.5` and `@gl3/plugin-sdk` `0.1.0` and `0.1.1`.
 - **Adding a variant to `GameEvent` breaks four places, and none of the last
   two is a type error.** The two obvious ones are the exhaustive switches in
   `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly

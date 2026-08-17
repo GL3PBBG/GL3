@@ -227,15 +227,18 @@ CREATE TABLE garage (
   PRIMARY KEY (GA_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
-CREATE TABLE properties (
-  PR_id INT(11) NOT NULL AUTO_INCREMENT,
-  PR_location INT(11) NOT NULL,
-  PR_module VARCHAR(50) NOT NULL,
-  PR_owner INT(11) DEFAULT NULL,
-  PR_cost INT(11) NOT NULL DEFAULT 0,
-  PR_profit INT(11) NOT NULL DEFAULT 0,
-  PRIMARY KEY (PR_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+-- Verbatim from V2 install/schema.sql. Do NOT "tidy" this: the absent unique
+-- constraint on PR_location is real (V2 keys on (PR_location, PR_module) by
+-- convention only), and PR_user NOT NULL DEFAULT 0 carries two sentinels -
+-- 0 = unowned, -1 = closed.
+CREATE TABLE IF NOT EXISTS `properties` (
+  `PR_id` INT(11) NOT NULL PRIMARY KEY AUTO_INCREMENT ,
+  `PR_location` INT(11) NOT NULL ,
+  `PR_module` VARCHAR(128) NOT NULL ,
+  `PR_user` int(11) NOT NULL DEFAULT 0,
+  `PR_cost` int(11) NOT NULL DEFAULT 0,
+  `PR_profit` INT(11) NOT NULL DEFAULT 0
+) ENGINE = InnoDB;
 
 CREATE TABLE bounties (
   B_id INT(11) NOT NULL AUTO_INCREMENT,
