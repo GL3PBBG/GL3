@@ -142,6 +142,24 @@ function act(token: string, action: string) {
   });
 }
 
+/**
+ * Every card code a response's `view` puts on screen.
+ *
+ * Walks the JSON the route actually sent rather than the `ViewNode` the game
+ * built, because the point of the assertion below is what reaches the PLAYER:
+ * a code that never crosses this boundary cannot be read out of the payload,
+ * whatever the session row holds. `unknown` + narrowing, never a cast.
+ */
+function cardsIn(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(cardsIn);
+  if (node === null || typeof node !== "object") return [];
+  const obj: Record<string, unknown> = { ...node };
+  if (obj["kind"] === "cards" && Array.isArray(obj["cards"])) {
+    return obj["cards"].filter((c): c is string => typeof c === "string");
+  }
+  return Object.values(obj).flatMap(cardsIn);
+}
+
 async function sessionRow(sessionId: string) {
   const [row] = await db.select().from(casinoSessions).where(eq(casinoSessions.id, sessionId));
   return row;
@@ -205,6 +223,38 @@ describe("POST /api/casino/act", () => {
     const row = await sessionRow(sessionId);
     expect(row?.status).toBe("settled");
     expect(row?.settledAt).not.toBeNull();
+  });
+
+  it("never sends the dealer's hole card to a player who is still choosing", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    // Dealer H10 up, H6 in the hole. Seeing H6 means seeing that the dealer
+    // is on 16 and must draw — the single most valuable fact at the table.
+    await seedSession({
+      playerId, locationId, propertyId: null, wager: 10_000n,
+      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["H4", "D9"],
+    });
+
+    const hit = await act(token, "hit");
+    expect(hit.statusCode).toBe(200);
+    const body = hit.json<{ done: boolean; view: unknown }>();
+    expect(body.done).toBe(false);
+
+    const cards = cardsIn(body.view);
+    expect(cards).toContain("H10");                                  // the up-card
+    expect(cards).not.toContain("H6");                               // the hole card
+    expect(cards.filter((c) => c === "B1" || c === "B2")).toHaveLength(1);
+    // Nor through the total: 16 is what H10+H6 makes.
+    expect(JSON.stringify(body.view)).not.toContain("\"16\"");
+
+    // And it is revealed the moment the hand is over.
+    const stand = await act(token, "stand");
+    expect(stand.statusCode).toBe(200);
+    const final = stand.json<{ done: boolean; view: unknown }>();
+    expect(final.done).toBe(true);
+    expect(cardsIn(final.view)).toContain("H6");
   });
 
   it("a push returns exactly the wager (net zero for both sides)", async () => {
