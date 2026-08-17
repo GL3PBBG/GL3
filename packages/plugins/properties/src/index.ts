@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
+import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
@@ -76,9 +76,231 @@ const listRoute = route({
 // Buy route
 // ---------------------------------------------------------------------------
 
+const BuyBodySchema = z.object({
+  pluginId: z.string().min(1).max(80),
+  locationId: z.string().uuid(),
+}).strict();
+
+/**
+ * V2's `method_own()`, which lived in each consumer module (bullets, blackjack)
+ * as copy-pasted code. GL3 keeps it here once: the price comes from the
+ * consumer's `providesProperties` declaration, so a new franchise needs no new
+ * buy route.
+ *
+ * The row is created lazily on first purchase, as V2 does — the table ships
+ * empty. V2's insert races (two concurrent first-buys make two rows, since its
+ * only key is PR_id); here the location lock is taken first, so the two
+ * serialise and the second sees the row the first inserted.
+ */
 const buyRoute = route({
   method: "POST",
-  path: "/api/properties/:id/buy",
+  path: "/api/properties/buy",
+  accessInJail: false,
+  accessInHospital: true,
+  body: BuyBodySchema,
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const decl = ctx.propertyTypes.get(body.pluginId);
+    if (decl === null) throw new PluginError("unknown_property_type", 404);
+
+    return ctx.transaction(async (tx) => {
+      // RULE 6: location first, then player.
+      await tx.locks.location(body.locationId);
+      await tx.locks.player([player.id]);
+
+      const [stats] = await tx.db
+        .select({ locationId: playerStats.locationId, cash: playerStats.cash })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      if (stats === undefined) throw new PluginError("no_location", 409);
+      if (stats.locationId !== body.locationId) throw new PluginError("wrong_location", 409);
+      if (stats.cash < decl.price) throw new PluginError("insufficient_funds", 409);
+
+      const [existing] = await tx.db
+        .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
+        .from(propertiesTable)
+        .where(and(
+          eq(propertiesTable.locationId, body.locationId),
+          eq(propertiesTable.pluginId, body.pluginId),
+        ))
+        .for("update");
+      if (existing !== undefined && existing.ownerPlayerId !== null) {
+        // Including when the caller already owns it — buying your own is the
+        // same error, as in the shipped route.
+        throw new PluginError("already_owned", 409);
+      }
+
+      await tx.economy.applyBalanceChange({
+        playerId: player.id,
+        amount: -decl.price,
+        kind: "cash",
+        reason: "properties.buy",
+      });
+
+      let propertyId: string;
+      if (existing === undefined) {
+        propertyId = uuidv7();
+        await tx.db.insert(propertiesTable).values({
+          id: propertyId,
+          locationId: body.locationId,
+          pluginId: body.pluginId,
+          ownerPlayerId: player.id,
+        });
+      } else {
+        propertyId = existing.id;
+        // cost = 0: a new owner inherits no lever, matching V2's transfer().
+        await tx.db
+          .update(propertiesTable)
+          .set({ ownerPlayerId: player.id, cost: 0n })
+          .where(eq(propertiesTable.id, propertyId));
+      }
+
+      const [loc] = await tx.db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, body.locationId));
+
+      await tx.events.publish({
+        name: "bought",
+        actorId: player.id,
+        actorName: player.username,
+        audience: { kind: "player", playerId: player.id },
+        payload: {
+          typeName: decl.name,
+          locationName: loc?.name ?? "",
+          price: decl.price.toString(),
+        },
+      });
+
+      return { status: 200, body: { propertyId } };
+    });
+  },
+});
+
+/**
+ * Locks location → player, re-reads the row FOR UPDATE and verifies the caller
+ * owns it. 404 for both "no such row" and "not yours" — 404-not-403 so a
+ * property's existence is not probeable, the shipped convention.
+ */
+async function loadOwnedRow(
+  tx: PluginTx, propertyId: string, playerId: string,
+): Promise<{ id: string; locationId: string; pluginId: string; cost: bigint; profit: bigint }> {
+  const [before] = await tx.db
+    .select({ locationId: propertiesTable.locationId })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId));
+  if (before === undefined) throw new PluginError("property_not_found", 404);
+
+  await tx.locks.location(before.locationId);
+  await tx.locks.player([playerId]);
+
+  const [row] = await tx.db
+    .select({
+      id: propertiesTable.id,
+      locationId: propertiesTable.locationId,
+      pluginId: propertiesTable.pluginId,
+      ownerPlayerId: propertiesTable.ownerPlayerId,
+      cost: propertiesTable.cost,
+      profit: propertiesTable.profit,
+    })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId))
+    .for("update");
+  if (row === undefined) throw new PluginError("property_not_found", 404);
+  if (row.ownerPlayerId !== playerId) throw new PluginError("not_owned", 404);
+  return { id: row.id, locationId: row.locationId, pluginId: row.pluginId, cost: row.cost, profit: row.profit };
+}
+
+/** V2's `$100` floor on PR_cost, in GL3's cents. */
+const LEVER_FLOOR = 10_000n;
+
+const LeverBodySchema = z.object({
+  value: z.string().regex(/^\d+$/, "nonnegative integer string"),
+}).strict();
+
+/** V2's `method_cost`: the owner sets the consumer's local price or limit. */
+const leverRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/lever",
+  accessInJail: true,
+  accessInHospital: true,
+  params: PropertyParamsSchema,
+  body: LeverBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const value = BigInt(body.value);
+    if (value < LEVER_FLOOR) throw new PluginError("lever_too_low", 400);
+
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
+      await tx.db.update(propertiesTable).set({ cost: value }).where(eq(propertiesTable.id, row.id));
+    });
+    return { status: 204 };
+  },
+});
+
+const TransferBodySchema = z.object({ username: z.string().min(1).max(64) }).strict();
+
+/**
+ * V2's `method_transfer`. Zeroes the lever on handover, as V2 does.
+ *
+ * RULE 6: this is a player↔player pair. Both players go through ONE
+ * `tx.locks.player([a, b])` call, which sorts and dedupes — that is what makes
+ * A-transfers-to-B safe against B-transfers-to-A. `loadOwnedRow` has already
+ * taken the caller's row; taking it again inside the pair call is a no-op.
+ */
+const transferRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/transfer",
+  accessInJail: false,
+  accessInHospital: true,
+  params: PropertyParamsSchema,
+  body: TransferBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
+
+      const [target] = await tx.db
+        .select({ id: players.id, username: players.username })
+        .from(players)
+        .where(eq(players.username, body.username));
+      if (target === undefined) throw new PluginError("player_not_found", 404);
+      if (target.id === player.id) throw new PluginError("cannot_transfer_to_self", 409);
+
+      await tx.locks.player([player.id, target.id]);
+
+      await tx.db
+        .update(propertiesTable)
+        .set({ ownerPlayerId: target.id, cost: 0n })
+        .where(eq(propertiesTable.id, row.id));
+
+      const [loc] = await tx.db
+        .select({ name: locations.name }).from(locations).where(eq(locations.id, row.locationId));
+      const decl = ctx.propertyTypes.get(row.pluginId);
+
+      await tx.events.publish({
+        name: "transferred",
+        actorId: player.id,
+        actorName: player.username,
+        audience: { kind: "player", playerId: target.id },
+        payload: { typeName: decl?.name ?? row.pluginId, locationName: loc?.name ?? "" },
+      });
+    });
+    return { status: 204 };
+  },
+});
+
+/** V2's `method_drop`/`method_dropDo`: a DELETE with no refund. GL3 keeps the
+ *  row and unowns it, so its lifetime P&L survives its owners. */
+const dropRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/drop",
   accessInJail: false,
   accessInHospital: true,
   params: PropertyParamsSchema,
@@ -86,73 +308,44 @@ const buyRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    return ctx.transaction(async (tx) => {
-      // Unlocked read, only to learn WHICH row (and location) we act on.
-      const [before] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id));
-      if (before === undefined) throw new PluginError("property_not_found", 404);
-
-      // RULE 6: location first, then player — the established order for the
-      // location↔player pair (travel/bullets deadlock).
-      await tx.locks.location(before.locationId);
-      await tx.locks.player([player.id]);
-
-      // Lock-then-recheck (TOCTOU).
-      const [row] = await tx.db
-        .select({
-          id: propertiesTable.id,
-          locationId: propertiesTable.locationId,
-          ownerPlayerId: propertiesTable.ownerPlayerId,
-          cost: propertiesTable.cost,
-        })
-        .from(propertiesTable)
-        .where(eq(propertiesTable.id, params.id))
-        .for("update");
-      if (row === undefined) throw new PluginError("property_not_found", 404);
-      if (row.ownerPlayerId !== null) throw new PluginError("already_owned", 409);
-
-      const [stats] = await tx.db
-        .select({ cash: playerStats.cash })
-        .from(playerStats)
-        .where(eq(playerStats.playerId, player.id));
-      if (stats === undefined || stats.cash < row.cost) {
-        throw new PluginError("insufficient_funds", 409);
-      }
-
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: -row.cost,
-        kind: "cash",
-        reason: "properties.buy",
-      });
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
       await tx.db
         .update(propertiesTable)
-        .set({ ownerPlayerId: player.id })
+        .set({ ownerPlayerId: null, cost: 0n })
         .where(eq(propertiesTable.id, row.id));
 
-      // Fetch the location name for the event payload under the same tx.
       const [loc] = await tx.db
-        .select({ name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, row.locationId));
+        .select({ name: locations.name }).from(locations).where(eq(locations.id, row.locationId));
+      const decl = ctx.propertyTypes.get(row.pluginId);
 
       await tx.events.publish({
-        name: "bought",
+        name: "dropped",
         actorId: player.id,
         actorName: player.username,
         audience: { kind: "player", playerId: player.id },
-        payload: { propertyName: loc?.name ?? "", cost: row.cost.toString() },
+        payload: { typeName: decl?.name ?? row.pluginId, locationName: loc?.name ?? "" },
       });
-
-      return { status: 200, body: { propertyId: row.id } };
     });
+    return { status: 204 };
+  },
+});
+
+/** V2's `method_reset`: a stat reset. Moves no money and publishes nothing. */
+const resetRoute = route({
+  method: "POST",
+  path: "/api/properties/:id/reset",
+  accessInJail: true,
+  accessInHospital: true,
+  params: PropertyParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    await ctx.transaction(async (tx) => {
+      const row = await loadOwnedRow(tx, params.id, player.id);
+      await tx.db.update(propertiesTable).set({ profit: 0n }).where(eq(propertiesTable.id, row.id));
+    });
+    return { status: 204 };
   },
 });
 
@@ -315,7 +508,7 @@ const adminCreateRoute = route({
   body: PropertyCreateSchema,
   // The INSERT takes FOR KEY SHARE on locations[L] via the location_id FK
   // and acquires nothing afterwards (rule 6) — it cannot be half of a
-  // deadlock cycle with the buy/sell/claim routes' locations-then-player
+  // deadlock cycle with buy's or loadOwnedRow's locations-then-player
   // order, the same reasoning as adminUpdateRoute below.
   handler: async (ctx, { body }) => {
     if (ctx.propertyTypes.get(body.pluginId) === null) {
@@ -385,8 +578,22 @@ const adminUpdateRoute = route({
 
 const boughtEvent = {
   name: "bought",
-  payload: z.object({ propertyName: z.string(), cost: z.string() }),
-  describe: "{actorName} bought {propertyName} for {cost}",
+  payload: z.object({ typeName: z.string(), locationName: z.string(), price: z.string() }),
+  describe: "{actorName} bought the {typeName} in {locationName} for {price}",
+  invalidates: ["properties", "me"],
+};
+
+const droppedEvent = {
+  name: "dropped",
+  payload: z.object({ typeName: z.string(), locationName: z.string() }),
+  describe: "{actorName} dropped the {typeName} in {locationName}",
+  invalidates: ["properties", "me"],
+};
+
+const transferredEvent = {
+  name: "transferred",
+  payload: z.object({ typeName: z.string(), locationName: z.string() }),
+  describe: "{actorName} transferred the {typeName} in {locationName} to you",
   invalidates: ["properties", "me"],
 };
 
@@ -402,8 +609,11 @@ export default definePlugin({
     properties: "p_properties_properties",
   },
   migrations: PROPERTIES_MIGRATIONS,
-  routes: [listRoute, buyRoute, adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute],
-  events: [boughtEvent],
+  routes: [
+    listRoute, buyRoute, leverRoute, transferRoute, dropRoute, resetRoute,
+    adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute,
+  ],
+  events: [boughtEvent, droppedEvent, transferredEvent],
   pages: [],
   adminPages: [adminPage],
 });

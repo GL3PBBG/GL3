@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
@@ -31,16 +31,28 @@ import { bootTestServer } from "./helpers/server.js";
  * nothing, and firing a buy and a travel together and hoping they interleave
  * is a coin flip per round. The first test below holds `locations[L]` on a
  * separate connection, queues a real travel behind it, then queues a real buy
- * behind that, and releases them from one instant with the interleaving
- * already fixed. Under the shipped order the buy waits holding nothing and
- * then commits; under a player-first inversion it deadlocks against the
- * travel and answers 500.
+ * BY THE SAME PLAYER behind that, and releases them from one instant with the
+ * interleaving fixed. Under the shipped order the buy waits holding nothing,
+ * then loses the race for real (travel already moved the player away by the
+ * time it wakes) and correctly answers `wrong_location`; under a player-first
+ * inversion it deadlocks against the travel instead and answers 500. Same
+ * player on both requests is what makes this an ABBA candidate at all — see
+ * the in-test comment for why.
  *
  * The blocker is not itself an out-of-order actor: it takes exactly one lock,
  * `locations[L]`, which is the FIRST lock in the canonical order. A
  * transaction holding one lock cannot be half of a cycle.
  *
  * Waits are on observed lock state in pg_stat_activity, never a sleep.
+ *
+ * BUY'S SHAPE (Task 7). Buy is no longer `/api/properties/:id/buy` — it is
+ * `POST /api/properties/buy` with `{pluginId, locationId}` in the body, and
+ * the row is created lazily on first purchase rather than pre-seeded. Every
+ * buy below targets `pluginId: "bullets"` (the Bullet Factory franchise,
+ * bullets' `providesProperties` declaration, $1,000,000 / 100,000,000 cents)
+ * — the only property type any core plugin declares. `sell` and `claim` are
+ * gone (Task 5 dropped the accrual clock they served); the load test below
+ * no longer drives them.
  */
 
 const { db, sql: conn } = testDb();
@@ -50,17 +62,16 @@ const redis = createRedis(loadConfig(process.env).redisUrl);
 const PLAYERS = 8;
 const ROUNDS = 20;
 
+/** Bullets' declared property price — packages/plugins/bullets/src/index.ts. */
+const PROPERTY_PRICE = 100_000_000n;
+const STARTING_CASH = 5n * PROPERTY_PRICE;
+
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 /** L is generated FIRST, so `L < C` as uuidv7s — travel locks both rows in
  * ascending id order, which makes L the row it blocks on. */
 let lId: string;
 let cId: string;
-/** One property at L, one at C — both seeded unowned. The barrier test runs
- * FIRST, buys the property at L, then sells it back so the load test starts
- * from an unowned row (one property per location, unique index). */
-let lPropId: string;
-let cPropId: string;
 let tokens: string[] = [];
 let playerIds: string[] = [];
 let barrierToken: string;
@@ -98,7 +109,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 const ErrorBodySchema = z.object({ error: z.string() });
 
 interface Observed {
-  label: "buy" | "sell" | "claim" | "travel" | "bullets";
+  label: "buy" | "travel" | "bullets";
   status: number;
   error: string | null;
   body: string;
@@ -132,9 +143,11 @@ async function observe(
  *
  *   buy       already_owned        another player won this property first
  *             insufficient_funds   cash ran out mid-run
- *             property_not_found   never expected; enumerated for exhaustiveness
- *   sell      not_owned            the property is unowned or another's
- *   claim     not_owned            same
+ *             wrong_location       this player's OWN travel (below) landed
+ *                                  first and moved them off the location the
+ *                                  buy targeted — the same legitimate race
+ *                                  the barrier test above proves is not a
+ *                                  deadlock
  *   travel    on_cooldown          the 1s per-location travel cooldown
  *             already_there        destination == current, decided pre-lock
  *             location_changed     three retries lost to the caller's own moves
@@ -143,18 +156,14 @@ async function observe(
  *             no_location          the location row has no bullet shop
  */
 const ALLOWED_ERRORS: Record<Observed["label"], readonly string[]> = {
-  buy: ["already_owned", "insufficient_funds", "property_not_found"],
-  sell: ["not_owned"],
-  claim: ["not_owned"],
+  buy: ["already_owned", "insufficient_funds", "wrong_location"],
   travel: ["on_cooldown", "already_there", "location_changed"],
   bullets: ["insufficient_stock", "insufficient_funds", "no_location"],
 };
 
-/** Success is narrow too: a sell of an owned property always pays out. */
+/** Success is narrow too: every route answers exactly one 2xx. */
 const ALLOWED_OK: Record<Observed["label"], readonly number[]> = {
   buy: [200],
-  sell: [200],
-  claim: [200],
   travel: [200],
   bullets: [200],
 };
@@ -191,22 +200,13 @@ async function register(): Promise<{ token: string; playerId: string }> {
 
 const auth = (token: string): { authorization: string } => ({ authorization: `Bearer ${token}` });
 
-async function seedProperty(
-  locId: string,
-  fields: { cost?: bigint; rate?: bigint; ownerPlayerId?: string | null },
-): Promise<string> {
-  const id = uuidv7();
-  await db.insert(propertiesPlugin).values({
-    id,
-    locationId: locId,
-    pluginId: "properties",
-    cost: fields.cost ?? 1_000n,
-    rate: fields.rate ?? 500n,
-    ownerPlayerId: fields.ownerPlayerId ?? null,
-    profit: 0n,
-    lastClaimedAt: fields.ownerPlayerId ? new Date() : null,
-  });
-  return id;
+/** Finds the (possibly not-yet-created) bullets-franchise property row at `locId`. */
+async function propertyIdAt(locId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ id: propertiesPlugin.id })
+    .from(propertiesPlugin)
+    .where(and(eq(propertiesPlugin.locationId, locId), eq(propertiesPlugin.pluginId, "bullets")));
+  return row?.id;
 }
 
 beforeAll(async () => {
@@ -229,11 +229,8 @@ beforeAll(async () => {
     { id: cId, name: "Cashburg", travelCost: 0n, travelCooldownSeconds: 1, bulletStock: 1_000_000, bulletCost: 1n },
   ]);
 
-  lPropId = await seedProperty(lId, {});
-  cPropId = await seedProperty(cId, {});
-  // NOTE: only ONE property per location (unique index `p_properties_location_key`),
-  // so the barrier test reuses `lPropId` — it runs first, while the row is
-  // still unowned, and sells it back at the end so the load test starts clean.
+  // No property rows pre-seeded — buy creates one lazily on first purchase,
+  // at whichever of L/C a request names.
 
   tokens = [];
   playerIds = [];
@@ -246,9 +243,11 @@ beforeAll(async () => {
   successfulBuys = 0;
   refusals = 0;
 
+  // Five times the property price comfortably covers one purchase plus
+  // ROUNDS rounds of 1-cent bullet buys, per player.
   await db
     .update(playerStats)
-    .set({ locationId: lId, cash: 1_000_000n, jailedUntil: null, hospitalUntil: null })
+    .set({ locationId: lId, cash: STARTING_CASH, jailedUntil: null, hospitalUntil: null })
     .where(inArray(playerStats.playerId, [...playerIds, barrierId]));
 });
 
@@ -264,7 +263,7 @@ afterAll(async () => {
 });
 
 describe("properties lock ordering", () => {
-  it("commits the buy when a travel is committed inside its lock window", async () => {
+  it("queues the buy safely behind a travel racing the same player, with no deadlock", async () => {
     await redis.del(cooldownKey(barrierId, "travel"));
     await db.update(playerStats).set({ locationId: lId }).where(eq(playerStats.playerId, barrierId));
 
@@ -283,17 +282,24 @@ describe("properties lock ordering", () => {
       inFlight.push(travel);
       await waitForLockWaiters(1);
 
-      // The real buy of the property at L, queued BEHIND the travel on the
-      // same row. It has already read the property row unlocked by the time it
-      // gets here — that read is what the re-read after the lock re-checks.
+      // The real buy of the bullets franchise at L, by the SAME player,
+      // queued BEHIND the travel on the same row. Reusing the same player
+      // for both is what makes this an ABBA candidate at all: a buy and a
+      // travel for two DIFFERENT players never contend for the same
+      // player_stats row, so a player-first buy couldn't deadlock against
+      // them regardless of order — the shared player row is the second edge
+      // of the cycle.
       //
       // Under the SHIPPED order this request holds nothing while it waits.
-      // Under a player-first inversion it holds player_stats[P], which the
-      // travel wants after it gets locations[L] — the cycle, and a 40P01.
+      // Under a player-first inversion it would already hold
+      // player_stats[barrierId] while travel — queued ahead of it for
+      // locations[L] — holds locations[L] wanting that same row next: the
+      // cycle, and a 40P01.
       const buy = fire({
         method: "POST",
-        url: `/api/properties/${lPropId}/buy`,
+        url: "/api/properties/buy",
         headers: auth(barrierToken),
+        payload: { pluginId: "bullets", locationId: lId },
       });
       inFlight.push(buy);
       await waitForLockWaiters(2);
@@ -304,37 +310,34 @@ describe("properties lock ordering", () => {
       const [travelRes, buyRes] = await Promise.all([travel, buy]);
 
       // A deadlock is uncaught: 40P01 -> HTTP 500 on a well-formed request.
+      // That absence is the whole proof — what each request answers with
+      // otherwise is ordinary business logic, not a lock-order property.
       expect(travelRes.statusCode, `travel body: ${travelRes.body}`).not.toBe(500);
       expect(buyRes.statusCode, `buy body: ${buyRes.body}`).not.toBe(500);
 
       expect(travelRes.statusCode, `travel body: ${travelRes.body}`).toBe(200);
-      expect(buyRes.statusCode, `buy body: ${buyRes.body}`).toBe(200);
-      successfulBuys += 1;
 
-      // The buy committed: the barrier player owns the property at L while
-      // standing in C — ownership follows the property's location, not the
-      // player's.
-      const [owned] = await db
-        .select({ ownerPlayerId: propertiesPlugin.ownerPlayerId })
-        .from(propertiesPlugin)
-        .where(eq(propertiesPlugin.id, lPropId));
-      expect(owned?.ownerPlayerId).toBe(barrierId);
+      // Travel was queued FIRST for locations[L] (rule 6: it locks source and
+      // destination together, taking both before touching player_stats), so
+      // it wins the row and commits first, moving the player to C. The buy
+      // holds nothing while parked — that is the shipped order — so by the
+      // time it finally gets locations[L] and re-reads player_stats under
+      // its own lock, the player has genuinely left. `wrong_location` is
+      // correct, not a symptom: the lock-then-recheck TOCTOU guard is what
+      // stops the buy from acting on the stale "still at L" it read before
+      // ever taking a lock.
+      expect(buyRes.statusCode, `buy body: ${buyRes.body}`).toBe(409);
+      expect(JSON.parse(buyRes.body)).toMatchObject({ error: "wrong_location" });
+
+      // No side effect: the buy's PluginError aborts its transaction before
+      // any write to propertiesTable, so no row exists at L.
+      expect(await propertyIdAt(lId)).toBeUndefined();
 
       const [moved] = await db
         .select({ locationId: playerStats.locationId })
         .from(playerStats)
         .where(eq(playerStats.playerId, barrierId));
       expect(moved?.locationId).toBe(cId);
-
-      // Hand the row back so the load test below starts from unowned at both
-      // locations — one property per location, unique index, so this row is
-      // the load test's L-side buy target.
-      const sellBack = await fire({
-        method: "POST",
-        url: `/api/properties/${lPropId}/sell`,
-        headers: auth(barrierToken),
-      });
-      expect(sellBack.statusCode, `sell body: ${sellBack.body}`).toBe(200);
     } finally {
       try {
         await t0`ROLLBACK`;
@@ -347,9 +350,9 @@ describe("properties lock ordering", () => {
     }
   }, 60_000);
 
-  it("survives repeated buys, sells, claims, purchases and travels contending for the same rows", async () => {
+  it("survives repeated buys, purchases and travels contending for the same rows", async () => {
     // NOT the regression proof — without the barrier the interleaving is luck.
-    // This covers the four shipped handlers coexisting under real load, each
+    // This covers the shipped handlers coexisting under real load, each
     // taking its locks through its OWN code path: properties' tx.locks.location
     // + tx.locks.player, bullets' tx.locks.location + applyBalanceChange,
     // travel's tx.locks.locations + tx.locks.player. No shared driver.
@@ -363,8 +366,9 @@ describe("properties lock ordering", () => {
       }
 
       // Read where everyone is, so every travel below is a real move rather
-      // than a pre-lock `already_there`, and every buy targets the property at
-      // the player's own location so the two rows both stay hot.
+      // than a pre-lock `already_there`, and every buy targets wherever the
+      // player currently stands — the request whose lock order is under test,
+      // aimed at the row the travels of the SAME player contend for.
       const where = new Map<string, string | null>();
       const rows = await db
         .select({ playerId: playerStats.playerId, locationId: playerStats.locationId })
@@ -378,28 +382,12 @@ describe("properties lock ordering", () => {
         const id = playerIds[i]!;
         const at = where.get(id);
         const destination = at === lId ? cId : lId;
-        // Buy the property at wherever the player currently stands — this is
-        // the request whose lock order is under test, aimed at the row the
-        // travels of the SAME player contend for.
-        const propAt = at === lId ? lPropId : cPropId;
-        const otherProp = at === lId ? cPropId : lPropId;
-        const buy = (propId: string): Promise<Observed> =>
+        const buy = (): Promise<Observed> =>
           observe("buy", fire({
             method: "POST",
-            url: `/api/properties/${propId}/buy`,
+            url: "/api/properties/buy",
             headers: auth(token),
-          }));
-        const sell = (propId: string): Promise<Observed> =>
-          observe("sell", fire({
-            method: "POST",
-            url: `/api/properties/${propId}/sell`,
-            headers: auth(token),
-          }));
-        const claim = (propId: string): Promise<Observed> =>
-          observe("claim", fire({
-            method: "POST",
-            url: `/api/properties/${propId}/claim`,
-            headers: auth(token),
+            payload: { pluginId: "bullets", locationId: at },
           }));
         const travel = (): Promise<Observed> =>
           observe("travel", fire({ method: "POST", url: `/api/travel/${destination}`, headers: auth(token) }));
@@ -411,15 +399,10 @@ describe("properties lock ordering", () => {
             payload: { quantity: 1 },
           }));
 
-        if (i < 4) {
+        if (i < 6) {
           // A buy racing its OWN travel on the same location row: the natural
           // producer of the ABBA window, whichever way the two land.
-          pending.push(buy(propAt), travel());
-        } else if (i < 6) {
-          // Sell/claim the property at the player's location (may be `not_owned`
-          // if nobody owns it or another player does) — keeps sell's and
-          // claim's lock paths in the mix against the travels above.
-          pending.push(sell(propAt), claim(otherProp));
+          pending.push(buy(), travel());
         } else {
           pending.push(bullets(), travel());
         }
@@ -436,21 +419,12 @@ describe("properties lock ordering", () => {
     const travelled = observations.filter((o) => o.label === "travel" && o.status === 200).length;
     const bought = observations.filter((o) => o.label === "buy" && o.status === 200).length;
     expect(bought, `only ${bought} buys succeeded`).toBeGreaterThan(0);
-    // N11: no floor on sells, and it is structural rather than incidental.
-    // Only players 0-3 ever call `buy`; players 4-5 are the ones that call
-    // `sell`, so no seller can ever own the property it sells and every sell
-    // refuses `not_owned`. Measured: 0 successful sells across 5 runs of 20
-    // rounds. The refusals are still load-bearing for what this file tests —
-    // sell takes `tx.locks.location` BEFORE the ownership check
-    // (properties/src/index.ts:190,208), so its lock path contends with the
-    // travels above exactly as a successful sell would. Asserting a floor on
-    // successful sells would require reshaping the load; asserting `>= 0`
-    // would assert nothing.
     expect(travelled, `only ${travelled} travels succeeded`).toBeGreaterThan(ROUNDS);
 
     // Whatever the interleaving, the ledger still balances (rule 3). Cash
-    // movements here: property buy −cost, sell +cost+accrued, claim +accrued,
-    // bullets −quantity×price. Travel is free by seed (travelCost 0).
+    // movements here: property buy −100,000,000 (once per location, since
+    // nothing in this load drops or transfers it back), bullets
+    // −quantity×price. Travel is free by seed (travelCost 0).
     for (const id of playerIds) {
       const ledger = await db.select().from(transactions).where(eq(transactions.playerId, id));
       const sum = ledger.reduce((acc, r) => acc + (r.balanceKind === "cash" ? r.amount : 0n), 0n);
@@ -458,7 +432,7 @@ describe("properties lock ordering", () => {
         .select({ cash: playerStats.cash })
         .from(playerStats)
         .where(eq(playerStats.playerId, id));
-      expect(stats?.cash).toBe(1_000_000n + sum);
+      expect(stats?.cash).toBe(STARTING_CASH + sum);
     }
   }, 120_000);
 
