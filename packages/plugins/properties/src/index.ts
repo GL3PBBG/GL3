@@ -6,6 +6,9 @@ import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 
+export { ownerAt, payOwner, type PropertyOwnership } from "./api.js";
+export { propertiesTable } from "./schema.js";
+
 // ---------------------------------------------------------------------------
 // Params schema — id in the path, validated by the loader via `params`.
 // ---------------------------------------------------------------------------

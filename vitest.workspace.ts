@@ -323,6 +323,7 @@ export default defineWorkspace([
         "test/garage.test.ts",
         "test/properties-events.test.ts",
         "test/properties-lock-order.test.ts",
+        "test/properties-pay-owner.test.ts",
         "test/properties-routes.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
