@@ -67,6 +67,7 @@ export async function callPluginRoute(
     job: null,
     filters: manifest.filters,
     propertyTypes: new Map(),
+    installedPluginIds: new Set([manifest.id]),
   });
 
   // The route's OWN schemas, so a test cannot pass a body the real route

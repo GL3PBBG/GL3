@@ -135,6 +135,13 @@ describe("renderNode", () => {
     }]);
   });
 
+  it("maps a cards node to a cards instruction, codes intact", () => {
+    const out = renderNode({ kind: "cards", cards: ["Sa", "H10", "J1"] }, {});
+    expect(out).toEqual<RenderInstruction[]>([
+      { kind: "cards", cards: ["Sa", "H10", "J1"] },
+    ]);
+  });
+
   it("nests arbitrarily deep panels", () => {
     const node = {
       kind: "panel" as const, title: "outer",

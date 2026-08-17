@@ -75,6 +75,9 @@ export async function runPluginJob(
     // ever needs a type another plugin declares, this signature is what has
     // to widen.
     propertyTypes: collectPropertyTypes([manifest]),
+    // Same narrowing as propertyTypes above: a job sees only its own plugin's
+    // id today. No job calls buildRegistry yet.
+    installedPluginIds: new Set([manifest.id]),
   });
 
   try {

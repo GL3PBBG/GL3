@@ -55,6 +55,7 @@ export interface PluginCtxOptions {
   job: JobContext | null;
   filters: readonly FilterSubscription[];
   propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
+  installedPluginIds: ReadonlySet<string>;
 }
 
 /**
@@ -293,6 +294,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       get: (id) => options.propertyTypes.get(id) ?? null,
       list: () => [...options.propertyTypes.values()],
     },
+    installedPluginIds: options.installedPluginIds,
     log: {
       info: (message, fields) => console.log({ plugin: options.pluginId, ...fields }, message),
       warn: (message, fields) => console.warn({ plugin: options.pluginId, ...fields }, message),
