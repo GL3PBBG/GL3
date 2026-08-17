@@ -43,10 +43,19 @@ INSERT INTO itemMeta (IM_item, IM_key, IM_value) VALUES
   (1, 'rarity', 'common');
 INSERT INTO premiumMembership (PM_id, PM_name, PM_seconds, PM_cost) VALUES
   (1, 'VIP Week', 604800, 500);
+-- The five bullet options plus the restock cursor are V2's flat keys; GL3
+-- namespaces every plugin setting as `<pluginId>.<key>`, so migrateSettings
+-- renames these six rather than copying them verbatim like the rest.
 INSERT INTO settings (S_key, S_value) VALUES
   ('pointsName', 'Respect Points'),
   ('gangName', 'Family'),
-  ('detectiveReport', '1');
+  ('detectiveReport', '1'),
+  ('bulletsStockMinPerHour', '1000'),
+  ('bulletsStockMaxPerHour', '1500'),
+  ('maxBulletStock', '25000'),
+  ('maxBulletCost', '900'),
+  ('maxBulletBuy', '250'),
+  ('lastBulletRestock', '1420070400');
 
 -- Users. Legacy passwords are sha256(U_id . plaintext) — SPEC §1.1/§4.3.
 -- Plaintext noted per row for the Task 31 login end-to-end test; never

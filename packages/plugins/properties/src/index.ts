@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { definePlugin, filterPoint, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
@@ -260,6 +260,23 @@ const LEVER_FLOOR = 10_000n;
 
 const LeverBodySchema = z.object({ value: NonNegativeIntegerString }).strict();
 
+/**
+ * A lever is whatever the declaring plugin says it is (a price per bullet, a
+ * table limit), so only that plugin can say whether a figure is acceptable.
+ * This point lets it refuse one: a subscriber throwing a `PluginError` aborts
+ * the set, and returning the value unchanged accepts it. Shaped after
+ * `combat.killResolved`, the first cross-plugin filter to ship.
+ *
+ * `bullets` is the first subscriber, enforcing V2's `maxBulletCost`.
+ */
+export interface LeverSet {
+  propertyTypeId: string;
+  propertyId: string;
+  playerId: string;
+  value: bigint;
+}
+export const leverSet = filterPoint<LeverSet>("properties.leverSet");
+
 /** V2's `method_cost`: the owner sets the consumer's local price or limit. */
 const leverRoute = route({
   method: "POST",
@@ -273,6 +290,20 @@ const leverRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
     const value = BigInt(body.value);
     if (value < LEVER_FLOOR) throw new PluginError("lever_too_low", 400);
+
+    // The declaring plugin's veto. Filters cannot join the caller's write
+    // (spec: Filters), so the type is read in its own transaction first and
+    // the chain runs between the two — a subscriber that throws stops the set
+    // before anything is written. A row that is missing or not the caller's is
+    // left to `loadOwnedRow` below, which owns those two errors.
+    const [existing] = await ctx.transaction(async (tx) =>
+      tx.db.select({ pluginId: propertiesTable.pluginId }).from(propertiesTable)
+        .where(eq(propertiesTable.id, params.id)));
+    if (existing) {
+      await ctx.filters.apply(leverSet, {
+        propertyTypeId: existing.pluginId, propertyId: params.id, playerId: player.id, value,
+      });
+    }
 
     await ctx.transaction(async (tx) => {
       const row = await loadOwnedRow(tx, params.id, player.id);

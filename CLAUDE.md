@@ -172,6 +172,20 @@ sorted `tx.locks.player([player, owner])` → the session row `FOR UPDATE`. No
 events per hand (one per blackjack hand floods the feed), so no new
 `GameEvent` variant. `@gl3/shared` went to `0.1.6` and `@gl3/plugin-sdk` to
 `0.1.2` and then `0.1.3`; all three are published.
+**Bullet restock** has since shipped on `feat/bullets-restock`: V2's hourly
+`restock()` was never ported, so `bullet_stock` only ever drained. It is now
+lazy under `pg_advisory_xact_lock(7461003)` (no cron — a core plugin cannot
+declare jobs), fired by a new `GET /api/bullets/shop`, which had to be a *read*
+because the page disables the buy button at zero stock. It takes every location
+row `ORDER BY id FOR UPDATE`, ascending, which is a new edge in the lock graph
+(`test/bullets-restock-lock-order.test.ts`, demonstrated red against `desc`).
+V2's five options became admin-editable settings — `max_buy` and `max_cost`,
+the latter both rejected at lever-set through a new `properties.leverSet`
+filter point and clamped when charged — and a subscriber there **cannot** read
+its own settings namespace, because `runFilterChain` passes the *applying*
+plugin's ctx (the events mislabelling trap, now on record for settings too).
+`migrateSettings` gained a rename map for V2's six flat bullet keys.
+`@gl3/shared` → `0.1.7`, not yet published.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id

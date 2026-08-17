@@ -6,15 +6,38 @@ import type { Executor } from "../pg/types.js";
 interface SettingRow { S_key: string; S_value: string | null; }
 
 /**
- * No id_map here: settings.key is a natural key, identical on both sides
- * (V2's S_key IS the GL3 key). ON CONFLICT (key) DO UPDATE alone gives
- * idempotency — see Global Constraints, "Not every table needs id_map".
+ * V2's settings are flat; GL3 namespaces every plugin setting as
+ * `<pluginId>.<key>`, because `ctx.settings.get` looks the key up that way.
+ * A verbatim copy would therefore leave an operator's tuned bullet options
+ * unreadable and silently revert the game to the built-in defaults — a
+ * failure with no error anywhere. These six are the only keys any GL3 plugin
+ * reads today; everything else in the table is still core's or unread, and
+ * keeps its V2 name.
+ */
+const RENAMES: Readonly<Record<string, string>> = {
+  bulletsStockMinPerHour: "bullets.stock_min_per_hour",
+  bulletsStockMaxPerHour: "bullets.stock_max_per_hour",
+  maxBulletStock: "bullets.max_stock",
+  maxBulletCost: "bullets.max_cost",
+  maxBulletBuy: "bullets.max_buy",
+  // Carried over rather than reset: V2's own 12-hour catch-up clamp bounds
+  // what a years-stale cursor can pay out.
+  lastBulletRestock: "bullets.last_restock",
+};
+
+/**
+ * No id_map here: settings.key is a natural key, identical on both sides for
+ * every key but the six renamed above. ON CONFLICT (key) DO UPDATE alone gives
+ * idempotency — see Global Constraints, "Not every table needs id_map" — and
+ * the rename is a pure function of the key, so a re-run maps to the same
+ * target row.
  */
 export async function migrateSettings(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [rows] = await pool.query<(SettingRow & mysql.RowDataPacket)[]>("SELECT S_key, S_value FROM settings");
   for (const row of rows) {
     bumpTable(report, "settings", "read");
-    await exec.insert(settings).values({ key: row.S_key, value: row.S_value ?? "" })
+    const key = RENAMES[row.S_key] ?? row.S_key;
+    await exec.insert(settings).values({ key, value: row.S_value ?? "" })
       .onConflictDoUpdate({ target: settings.key, set: { value: row.S_value ?? "" } });
     bumpTable(report, "settings", "written");
   }

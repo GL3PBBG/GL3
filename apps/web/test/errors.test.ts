@@ -59,6 +59,15 @@ describe("describeError", () => {
     expect(message).not.toContain("bullets");
   });
 
+  it("names the cap in the bullets limit codes", () => {
+    // The two an ordinary player can hit: a purchase over max_buy, and a
+    // factory owner pricing above max_cost.
+    expect(describeError(new ApiError(400, "quantity_above_max", { maxBuy: 250 })))
+      .toBe("You can buy at most 250 bullets at a time.");
+    expect(describeError(new ApiError(400, "lever_above_cap")))
+      .toBe("That price is above the limit the admin set.");
+  });
+
   it("describes not_sold_here and no_location", () => {
     expect(describeError(new ApiError(409, "not_sold_here"))).toBeTruthy();
     expect(describeError(new ApiError(409, "no_location"))).toBeTruthy();
