@@ -77,6 +77,7 @@ export function registerPluginRoutes(
             job: null,
             filters: collectFilters(manifests),
             propertyTypes: collectPropertyTypes(manifests),
+            installedPluginIds: new Set(manifests.map((m) => m.id)),
           });
 
           try {
@@ -90,6 +91,24 @@ export function registerPluginRoutes(
                 reply.header(name, value);
               }
               return reply.code(error.status).send({ error: error.code, ...error.extra });
+            }
+            // Drizzle wraps a driver error as `DrizzleQueryError` and puts the
+            // SQL in `message` — but the SQLSTATE, the detail and the table
+            // name all live on `cause`, which nothing was reading. A 500 then
+            // reaches the client (and the test log) as a bare "Failed query:
+            // select ... for update" with NO code, which is unactionable:
+            // 40P01 (deadlock), 55P03 (lock timeout) and a dropped connection
+            // are indistinguishable from each other in that string. Two
+            // load-dependent failures on this repo's lock-order tests have now
+            // been diagnosed blind for exactly this reason. Logging the cause
+            // does not change the response.
+            const cause: unknown = error instanceof Error ? error.cause : undefined;
+            if (cause !== null && typeof cause === "object") {
+              const pg: Record<string, unknown> = { ...cause };
+              request.log.error(
+                { pgCode: pg["code"], pgDetail: pg["detail"], pgTable: pg["table_name"], pgMessage: pg["message"] },
+                "plugin route failed with a driver error",
+              );
             }
             throw error;
           }

@@ -19,6 +19,8 @@
     { "path": "./packages/plugins/detectives" },
     { "path": "./packages/plugins/theft" },
     { "path": "./packages/plugins/properties" },
+    { "path": "./packages/plugins/casino" },
+    { "path": "./packages/plugins/blackjack" },
     { "path": "./apps/server" },
     { "path": "./apps/web" },
     { "path": "./apps/migrate" },

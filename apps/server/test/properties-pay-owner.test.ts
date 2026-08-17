@@ -18,7 +18,10 @@ const redis = createRedis(loadConfig(process.env).redisUrl);
 
 const leaderboardPrefix = `payowner-test-${uuidv7()}`;
 const deps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
-const opts = { pluginId: "bullets", player: null, job: null, filters: [], propertyTypes: new Map() };
+const opts = {
+  pluginId: "bullets", player: null, job: null, filters: [], propertyTypes: new Map(),
+  installedPluginIds: new Set(["bullets"]),
+};
 const ctx = createPluginCtx(deps(), opts);
 
 let locationId: string;

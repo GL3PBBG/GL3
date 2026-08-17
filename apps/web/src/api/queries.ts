@@ -4,7 +4,9 @@ import {
   AdminSectionsResponseSchema,
   AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
-  BuyBulletsResponseSchema, BuyItemResponseSchema, CombatLogResponseSchema,
+  BuyBulletsResponseSchema, BuyItemResponseSchema,
+  CasinoLobbyResponseSchema, CasinoStepResponseSchema,
+  CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
   DetectiveListResponseSchema, DischargeResponseSchema, EquipResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
@@ -25,7 +27,9 @@ import {
   type AdminSectionsResponse,
   type AttackResponse, type BankStatusResponse, type BountyListResponse,
   type BuyBulletsResponse,
-  type BuyItemRequest, type BuyItemResponse, type CombatLogResponse,
+  type BuyItemRequest, type BuyItemResponse,
+  type CasinoLobbyResponse, type CasinoStepResponse,
+  type CombatLogResponse,
   type CombatTargetListResponse, type CreateGangRequest,
   type CrimeListResponse,
   type DetectiveListResponse, type DischargeResponse,
@@ -850,6 +854,63 @@ export function useResetProperty(propertyId: string) {
   return useMutation<void, Error, void>({
     mutationFn: async () => api<void>(`/api/properties/${propertyId}/reset`, { method: "POST" }),
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Casino
+// ---------------------------------------------------------------------------
+
+/** The tables in the town the player is standing in, plus their own open hand. */
+export function useCasino() {
+  return useQuery<CasinoLobbyResponse>({
+    queryKey: keys.casino(),
+    queryFn: async () => CasinoLobbyResponseSchema.parse(await api("/api/casino")),
+  });
+}
+
+/**
+ * Opens a hand. `wager` is a decimal string all the way down — it is a bigint
+ * server-side, and passing it through Number here is exactly the floating-point
+ * reintroduction the money rule forbids.
+ *
+ * A one-shot game (or blackjack dealing a natural) comes back `done: true` with
+ * a payout and no session ever opens, so the caller must read `done` rather
+ * than assume a hand is now in play.
+ */
+export function usePlayCasino() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoStepResponse, Error, { gameId: string; wager: string }>({
+    mutationFn: async (input) =>
+      CasinoStepResponseSchema.parse(
+        await api("/api/casino/play", { method: "POST", body: JSON.stringify(input) }),
+      ),
+    onSettled: () => {
+      // The wager left the player's cash whether the hand won, lost or 409'd
+      // partway — refresh both even on failure.
+      void queryClient.invalidateQueries({ queryKey: keys.casino() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+/**
+ * Advances the caller's open hand. The action is whatever the game's own
+ * `action` schema accepts (blackjack: "hit" | "stand" | "double") — the hub
+ * validates only the envelope, so this stays a string here.
+ */
+export function useCasinoAct() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoStepResponse, Error, string>({
+    mutationFn: async (action) =>
+      CasinoStepResponseSchema.parse(
+        await api("/api/casino/act", { method: "POST", body: JSON.stringify({ action }) }),
+      ),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.casino() });
+      // A double raises the wager and a settle pays out, so cash moves here too.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
   });
 }
 

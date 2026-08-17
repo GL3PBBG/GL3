@@ -12,8 +12,10 @@
   "dependencies": {
     "@gl3/hello-plugin": "*",
     "@gl3/plugin-bank": "*",
+    "@gl3/plugin-blackjack": "*",
     "@gl3/plugin-bounties": "*",
     "@gl3/plugin-bullets": "*",
+    "@gl3/plugin-casino": "*",
     "@gl3/plugin-combat": "*",
     "@gl3/plugin-crimes": "*",
     "@gl3/plugin-detectives": "*",

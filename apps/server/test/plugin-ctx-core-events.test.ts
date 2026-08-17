@@ -35,7 +35,10 @@ const leaderboardPrefix = `pcce-test-${randomUUID()}`;
 
 const deps = (): Parameters<typeof createPluginCtx>[0] =>
   ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
-const opts = { pluginId: "t", player: null, job: null, filters: [], propertyTypes: new Map() };
+const opts = {
+  pluginId: "t", player: null, job: null, filters: [], propertyTypes: new Map(),
+  installedPluginIds: new Set<string>(),
+};
 
 /**
  * `game:events` is one global channel shared by every test file running in

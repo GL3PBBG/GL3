@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Drizzle handles for three plugin-owned tables that server tests need to seed
@@ -76,6 +76,21 @@ export const propertiesPlugin = pgTable("p_properties_properties", {
   ownerPlayerId: uuid("owner_player_id"),
   cost: bigint("cost", { mode: "bigint" }).notNull(),
   profit: bigint("profit", { mode: "bigint" }).notNull(),
+});
+
+/** Mirrors `packages/plugins/casino/src/migrations.ts` `0001_sessions`. */
+export const casinoSessions = pgTable("p_casino_sessions", {
+  id: uuid("id").primaryKey(),
+  playerId: uuid("player_id").notNull(),
+  gameId: text("game_id").notNull(),
+  locationId: uuid("location_id").notNull(),
+  propertyId: uuid("property_id"),
+  wager: bigint("wager", { mode: "bigint" }).notNull().default(sql`0`),
+  state: jsonb("state").notNull(),
+  status: text("status").notNull(),
+  seed: text("seed").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  settledAt: timestamp("settled_at", { withTimezone: true }),
 });
 
 /** Mirrors `packages/plugins/theft/src/migrations.ts` `0001_cars`. */
