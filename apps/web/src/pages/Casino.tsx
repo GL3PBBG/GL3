@@ -7,7 +7,7 @@ import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
-import type { CasinoGame, CasinoSessionView } from "@gl3/shared";
+import type { CasinoGame, CasinoSessionView, CasinoStepResponse } from "@gl3/shared";
 
 /**
  * Why the wager the player typed cannot be staked, in the server's own order.
@@ -68,13 +68,13 @@ const ACTION_LABELS: Readonly<Record<HandAction, string>> = {
 /**
  * The hand on screen, from whichever source is freshest.
  *
- * `stake` is what was staked to OPEN the hand. A `double` raises it, and
- * `POST /api/casino/act` does not return the new figure — so the stake is not
- * re-rendered mid-hand. The payout below it is the server's own number and the
- * cash in the shell HUD is refreshed from `/api/auth/me`, so nothing the player
- * acts on is derived from this field.
+ * `stake` always comes from the server, never from the string the player
+ * typed: blackjack's double raises the wager mid-hand, and the step response
+ * is the only place that new figure exists — the session row is gone once the
+ * hand settles, and a raise that settles in the same call never reaches the
+ * lobby at all.
  */
-interface LiveHand {
+export interface LiveHand {
   readonly sessionId: string;
   readonly gameName: string;
   readonly stake: string;
@@ -97,6 +97,41 @@ function resumedHand(session: CasinoSessionView): LiveHand {
     expiresAt: session.expiresAt,
     source: "resumed",
     actsTaken: 0,
+  };
+}
+
+/** A hand this page has just dealt. `play` reports no expiry — only the lobby
+ *  computes one — so the countdown appears on a resumed hand and not here. */
+export function dealtHand(step: CasinoStepResponse, gameName: string): LiveHand {
+  return {
+    sessionId: step.sessionId,
+    gameName,
+    stake: step.wager,
+    view: step.view,
+    done: step.done,
+    payout: step.payout ?? null,
+    expiresAt: null,
+    source: "dealt",
+    actsTaken: 0,
+  };
+}
+
+/**
+ * The hand after a step. `stake` follows `step.wager`, which is what makes a
+ * doubled hand show the doubled figure rather than the one it opened with —
+ * the number a blackjack player watches hardest.
+ *
+ * `source` and `expiresAt` are carried over: whether the page dealt this hand
+ * is a fact about the hand, not about the step, and `handActions` reads it.
+ */
+export function advanceHand(current: LiveHand, step: CasinoStepResponse): LiveHand {
+  return {
+    ...current,
+    stake: step.wager,
+    view: step.view,
+    done: step.done,
+    payout: step.payout ?? null,
+    actsTaken: current.actsTaken + 1,
   };
 }
 
@@ -181,20 +216,7 @@ export function Casino(): JSX.Element {
 
   function onPlay(game: CasinoGame): void {
     play.mutate({ gameId: game.gameId, wager }, {
-      onSuccess: (step) => {
-        setHand({
-          sessionId: step.sessionId,
-          gameName: game.name,
-          stake: wager,
-          view: step.view,
-          done: step.done,
-          payout: step.payout ?? null,
-          // `play` reports no expiry; only the lobby computes one.
-          expiresAt: null,
-          source: "dealt",
-          actsTaken: 0,
-        });
-      },
+      onSuccess: (step) => { setHand(dealtHand(step, game.name)); },
     });
   }
 
@@ -203,15 +225,7 @@ export function Casino(): JSX.Element {
   // would be handed `null` and drop the whole table.
   function onAct(current: LiveHand, action: HandAction): void {
     act.mutate(action, {
-      onSuccess: (step) => {
-        setHand({
-          ...current,
-          view: step.view,
-          done: step.done,
-          payout: step.payout ?? null,
-          actsTaken: current.actsTaken + 1,
-        });
-      },
+      onSuccess: (step) => { setHand(advanceHand(current, step)); },
     });
   }
 

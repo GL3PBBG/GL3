@@ -170,7 +170,13 @@ describe("POST /api/casino/play", () => {
 
     const res = await play(token, "blackjack", "100000");
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ done: boolean; payout?: string }>();
+    const body = res.json<{ done: boolean; wager: string; payout?: string }>();
+
+    // `play` echoes the stake on both branches. Not an information gap the way
+    // `act`'s is — the caller sent this figure — but it is what lets the two
+    // routes share one response shape, and it is canonical where the request
+    // need not be (`BigInt("007").toString()` is `"7"`).
+    expect(body.wager).toBe("100000");
 
     // The wager is always escrowed. If `start` also settled the hand (a
     // natural), the payout moves back on top of it in the same call — so the

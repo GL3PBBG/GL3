@@ -332,7 +332,10 @@ const playRoute = route({
         });
         return {
           status: 200,
-          body: { sessionId, view: step.view, done: true, payout: payout.toString() },
+          body: {
+            sessionId, view: step.view, done: true,
+            wager: wager.toString(), payout: payout.toString(),
+          },
         };
       }
 
@@ -347,7 +350,18 @@ const playRoute = route({
         status: "open",
         seed,
       });
-      return { status: 200, body: { sessionId, view: step.view, done: false } };
+      // `wager` here is NOT the information gap `act`'s is — the caller sent
+      // this figure and `play` never changes it. It is on both routes so that
+      // the two share one response shape and the field can be REQUIRED rather
+      // than optional: a stake the page reads from the response on every step
+      // has no branch where it falls back to the string the player typed, and
+      // an untestable fallback is worse than an echoed field. It is also
+      // canonical where the request need not be — `BigInt("007").toString()`
+      // is `"7"`.
+      return {
+        status: 200,
+        body: { sessionId, view: step.view, done: false, wager: wager.toString() },
+      };
     });
   },
 });
@@ -459,11 +473,22 @@ const actRoute = route({
         await settleSession(tx, pre.id, player.id, pre.gameId, house, payout);
         return {
           status: 200,
-          body: { sessionId: pre.id, view: step.view, done: true, payout: payout.toString() },
+          body: {
+            sessionId: pre.id, view: step.view, done: true,
+            wager: wager.toString(), payout: payout.toString(),
+          },
         };
       }
 
-      return { status: 200, body: { sessionId: pre.id, view: step.view, done: false } };
+      // `wager` on BOTH branches, and it is the local above rather than
+      // `session.wager`: a `wagerDelta` (blackjack's double) has already
+      // raised it, and this response is the ONLY place the caller can learn
+      // the new figure — the session row goes away when the hand settles, and
+      // a raise that settles in the same call never reaches the lobby at all.
+      return {
+        status: 200,
+        body: { sessionId: pre.id, view: step.view, done: false, wager: wager.toString() },
+      };
     });
   },
 });

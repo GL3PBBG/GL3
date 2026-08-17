@@ -182,8 +182,12 @@ describe("POST /api/casino/act", () => {
 
     const hitRes = await act(token, "hit");
     expect(hitRes.statusCode).toBe(200);
-    const hitBody = hitRes.json<{ done: boolean }>();
+    const hitBody = hitRes.json<{ done: boolean; wager: string }>();
     expect(hitBody.done).toBe(false);
+    // The unfinished branch reports the wager too — an act that does not raise
+    // it still has to say what it is, or the page needs a "no figure this
+    // time" branch that can never be exercised.
+    expect(hitBody.wager).toBe(wager.toString());
     // player now 9 (H2+H3+H4) — no money moves on a non-settling act.
     expect(await cashOf(playerId)).toBe(cashBefore);
 
@@ -291,10 +295,15 @@ describe("POST /api/casino/act", () => {
 
     const res = await act(token, "double");
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ done: boolean; payout: string }>();
+    const body = res.json<{ done: boolean; wager: string; payout: string }>();
     expect(body.done).toBe(true);
 
     const newWager = wager * 2n; // 20,000
+    // The RAISED wager, reported back. This response is the only place the
+    // caller can learn it: the hand settles in the same call, so the session
+    // row is `settled` before any lobby read could see the new figure, and a
+    // client that assumed its own opening stake would show half the truth.
+    expect(body.wager).toBe(newWager.toString());
     const payout = BigInt(body.payout);
     expect(payout).toBe(newWager * 2n); // dealer bust, double win on the new wager
 
