@@ -6,7 +6,7 @@ export interface PropertyOwnership {
   propertyId: string;
   ownerId: string;
   /**
-   * The owner's lever: `cost` when non-zero, else `null`, meaning "the owner
+   * The owner's lever: `cost` when > 0n, else `null`, meaning "the owner
    * has not set one — use your own default". V2 does exactly this
    * (`bullets.inc.php:86`: `if (!!$owner["cost"]) $this->setCost(...)`), and
    * it is why the manifest declares no default: bullets' fallback is the
@@ -48,19 +48,45 @@ export async function ownerAt(
  * V2's `Property::updateProfit()` plus the balance write its callers do by
  * hand; folded together here so a consumer cannot move one without the other.
  *
- * LOCK ORDER (rule 6). This takes `tx.locks.player([ownerId])`, which is a
- * no-op if the caller already holds that row. A consumer that also acts on a
- * DIFFERENT player (the buyer) MUST have taken both through ONE
- * `tx.locks.player([buyer, ownerId])` call before calling this — that helper
- * sorts and dedupes, and it is what makes owner-buys-from-own-shop safe
- * against a second player buying at the same moment. Locking the buyer first
- * and letting this take the owner second is an ABBA cycle.
+ * LOCK ORDER (rule 6). This is order-CONFORMING on its own, not merely
+ * order-dependent on the caller: an unlocked pre-read of `owner_player_id`
+ * (the same idiom `ownerAt` uses), then `tx.locks.player([ownerId])`, and
+ * only then the `FOR UPDATE` re-read that decides who actually gets paid. A
+ * caller that touches no other player may call this holding nothing.
+ *
+ * MUST: a consumer that also acts on a DIFFERENT player in the same
+ * transaction (the buyer) MUST resolve the owner (via `ownerAt`) and take
+ * both through ONE sorted `tx.locks.player([buyer, ownerId])` call BEFORE
+ * calling this or moving any balance. Re-locking an already-held row within
+ * one transaction is a no-op re-acquisition, never a wait, so that pre-lock
+ * does not conflict with the lock this function takes on its own — but
+ * locking the buyer alone and letting THIS function lock the owner
+ * afterwards, in its own separate statement, is exactly the ABBA shape that
+ * deadlocks against the reverse purchase (owner buying from buyer's own
+ * shop at the same moment).
  * Regression: `apps/server/test/properties-consumer-lock-order.test.ts`.
+ *
+ * TOCTOU. If ownership changes between the unlocked pre-read and the locked
+ * re-read (a transfer lands in that gap), the row this function locked is
+ * the PRE-read owner's, not the new one's — paying the new owner would move
+ * money for a player whose row this call never locked, reopening the exact
+ * hole this function exists to close. So it skips the payout instead:
+ * `moved` is 0n for this call. The next call against the same property (the
+ * new owner's next sale) reads the correct owner and pays them.
  */
 export async function payOwner(
   tx: PluginTx, propertyId: string, amount: bigint, reason: string,
 ): Promise<bigint> {
   if (amount === 0n) return 0n;
+
+  // Unlocked pre-read to learn who to lock, exactly `ownerAt`'s idiom.
+  const [pre] = await tx.db
+    .select({ ownerPlayerId: propertiesTable.ownerPlayerId })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId));
+  if (pre === undefined || pre.ownerPlayerId === null) return 0n;
+
+  await tx.locks.player([pre.ownerPlayerId]);
 
   const [row] = await tx.db
     .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
@@ -68,9 +94,10 @@ export async function payOwner(
     .where(eq(propertiesTable.id, propertyId))
     .for("update");
   if (row === undefined || row.ownerPlayerId === null) return 0n;
+  // TOCTOU recheck — see the doc comment above.
+  if (row.ownerPlayerId !== pre.ownerPlayerId) return 0n;
 
   const ownerId = row.ownerPlayerId;
-  await tx.locks.player([ownerId]);
 
   let moved = amount;
   if (amount < 0n) {

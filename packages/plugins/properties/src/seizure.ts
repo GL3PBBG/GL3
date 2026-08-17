@@ -41,9 +41,10 @@ export const seizeOnKill = on(killResolved, async (ctx, value) => {
       .returning({ id: propertiesTable.id });
     if (seized.length === 0) return;
 
+    const noun = seized.length === 1 ? "property" : "properties";
     await tx.notify(
       value.victimId,
-      `${seized.length} of your properties were seized after your death.`,
+      `${seized.length} of your ${noun} ${seized.length === 1 ? "was" : "were"} seized after your death.`,
     );
   });
   return value;
