@@ -2,6 +2,7 @@ import { definePlugin } from "@gl3/plugin-sdk";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 
 export { casinoSessions } from "./schema.js";
+export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
 
 export default definePlugin({
   id: "casino",
