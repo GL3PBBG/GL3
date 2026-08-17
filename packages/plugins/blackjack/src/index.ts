@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { definePlugin, on } from "@gl3/plugin-sdk";
+import { definePlugin, on, type ViewNode } from "@gl3/plugin-sdk";
 import { games, type GameDef, type GameStep } from "@gl3/plugin-casino";
 import { handValue, isNatural, playDealer, shuffle, type BlackjackState } from "./rules.js";
 import { renderState } from "./view.js";
@@ -57,6 +57,12 @@ export const BLACKJACK: GameDef<BlackjackState> = {
 
     const done = playDealer(state);
     return { state: done, view: renderState(done), done: true };
+  },
+
+  /** The lobby's resume view — the same `renderState` `start` and `act`
+   *  return, applied to a hand loaded back out of the session row. */
+  view(state): ViewNode {
+    return renderState(state);
   },
 
   settle(state, wager): bigint {
