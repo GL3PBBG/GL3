@@ -563,6 +563,15 @@ not by its summary — and not while another agent is running one.
    exists because blackjack's double down forced it; a roulette or poker port
    will likely force one more thing. Expect a `GameDef` revision at the second
    game and keep the type unpublished until then.
+
+   **Update: the revision landed early, and not from where this predicted.**
+   `view?(state)` (§3) was forced by the HUB — §4.2's lobby had to redraw an
+   in-progress hand and no second game was involved — during Task 9, before
+   any second game exists. That is the more interesting outcome: the pressure
+   on this interface comes from what the engine itself needs of a game, not
+   only from what the next game needs of the engine, so a second game is no
+   longer the only event to watch for. Keeping the type unpublished still
+   stands.
 5. **Casinos concentrate wealth.** A house that wins over time takes cash from
    many players to one. That is the intended mechanic and the same shape as
    V2's, but it interacts with rounds: a house owner's takings move the very
