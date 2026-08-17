@@ -12,6 +12,8 @@ export const keys = {
   jail: () => ["jail"] as const,
   crimes: () => ["crimes"] as const,
   locations: () => ["locations"] as const,
+  /** The bullet shop: stock, the effective price, and the per-purchase cap. */
+  bulletShop: () => ["bulletShop"] as const,
   ranks: () => ["ranks"] as const,
   leaderboard: (kind: LeaderboardKind, scope: "round" | "all") => ["leaderboard", kind, scope] as const,
   rounds: () => ["rounds"] as const,

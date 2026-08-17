@@ -4,7 +4,7 @@ import {
   AdminSectionsResponseSchema,
   AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
-  BuyBulletsResponseSchema, BuyItemResponseSchema,
+  BulletShopResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
   CasinoLobbyResponseSchema, CasinoStepResponseSchema,
   CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
@@ -26,6 +26,7 @@ import {
   WeaponConditionDtoSchema,
   type AdminSectionsResponse,
   type AttackResponse, type BankStatusResponse, type BountyListResponse,
+  type BulletShopResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse,
   type CasinoLobbyResponse, type CasinoStepResponse,
@@ -192,6 +193,22 @@ export function useBank() {
   });
 }
 
+/**
+ * The bullet shop. Replaces reading stock out of `useLocations()`: this
+ * carries the price the buy route will really charge, and reading it is what
+ * runs the hourly restock — so a town at zero stock refills when a player
+ * opens the page, which is the only moment they can reach it.
+ */
+export function useBulletShop() {
+  return useQuery<BulletShopResponse>({
+    queryKey: keys.bulletShop(),
+    queryFn: async () => BulletShopResponseSchema.parse(await api("/api/bullets/shop")),
+    // A player who is nowhere gets a 409 from this route; the page renders the
+    // "travel somewhere first" branch off the error rather than retrying it.
+    retry: false,
+  });
+}
+
 export function useBuyBullets() {
   const queryClient = useQueryClient();
   return useMutation<BuyBulletsResponse, Error, number>({
@@ -202,6 +219,7 @@ export function useBuyBullets() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.me() });
       void queryClient.invalidateQueries({ queryKey: keys.locations() });
+      void queryClient.invalidateQueries({ queryKey: keys.bulletShop() });
     },
   });
 }
