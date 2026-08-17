@@ -233,6 +233,16 @@ export interface PluginCtx {
     get(id: string): PropertyTypeDecl | null;
     list(): readonly PropertyTypeDecl[];
   };
+  /**
+   * Every installed plugin's id, from the loader's manifest list — the same
+   * shape as `propertyTypes` above, added for the same reason: cross-plugin,
+   * loader-only data a route handler cannot otherwise see. `casino`'s
+   * `buildRegistry` is the first consumer — it validates a `GameDef.id`
+   * declared through a filter subscription against real installed ids, which
+   * `definePlugin` cannot check for `providesProperties` (spec §3, the
+   * validation-gap risk).
+   */
+  readonly installedPluginIds: ReadonlySet<string>;
   readonly log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;

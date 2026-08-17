@@ -53,6 +53,12 @@ export const keys = {
   detectives: () => ["detectives"] as const,
   oc: () => ["oc"] as const,
   properties: () => ["properties"] as const,
+  // Not keyed by location, for the same reason as `shop`: the lobby answers
+  // for wherever the caller currently is. Unlike `shop` it is NOT listed under
+  // player.travelled in ws/invalidation.ts — travelling is only reachable from
+  // another page, so the remount refetches it anyway (staleTime is 0). Add it
+  // there the day something can move the player without leaving /casino.
+  casino: () => ["casino"] as const,
 
   // Admin sections (grant-gated).
   adminSections: () => ["admin", "sections"] as const,

@@ -2,26 +2,27 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { definePlugin } from "@gl3/plugin-sdk";
 import { adminPage as propertiesAdminPage } from "@gl3/plugin-properties";
 import { locations as coreLocations } from "../src/db/schema/index.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 
-// A second declared property type, test-only. It exists so the coexistence
-// test can prove the (location_id, plugin_id) key with two REAL types — with
-// only `bullets` declared, that test could not tell the new key from the old
-// one. Deliberately not a shipped plugin: a declared type with no consumer
-// paying its owner would be a property you can buy and never earn from.
-const casinoPlugin = definePlugin({
-  id: "casino",
-  version: "1.0.0",
-  basePaths: ["/api/casino"],
-  providesProperties: [
-    { id: "casino", name: "Casino", price: 100_000_000n, leverLabel: "Max bet" },
-  ],
-});
+// The coexistence test below needs a SECOND declared property type — with only
+// `bullets` declared it could not tell the (location_id, plugin_id) key from
+// the old bare unique(location_id). It used to supply one itself, as a
+// test-only `definePlugin({ id: "casino", ... })` stub passed to
+// `bootTestServer`. That stub is gone: the casino cluster made `casino` a real
+// CORE plugin id, and `withCorePlugins` silently FILTERS an optional plugin
+// whose id collides with a core one (core-plugins.ts:50) — so the stub was
+// dropped at boot, its type never registered, and both tests below 404'd with
+// `unknown_property_type`. Nothing warned; the collision is invisible at boot.
+//
+// `blackjack` replaces it and is strictly better than the stub ever was: it is
+// a genuinely shipped type (blackjack/src/index.ts:84) whose owner a real
+// consumer pays (casino's `payOwner`), which is exactly the property the old
+// comment here said a test-only type could not have.
+const SECOND_TYPE = "blackjack";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
@@ -31,7 +32,7 @@ let locationId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [casinoPlugin] }));
+  if (!app) ({ app, close: closeServer } = await bootTestServer());
   const founder = await app.inject({
     method: "POST", url: "/api/auth/register",
     payload: { username: "Founder", password: "hunter2hunter2" },
@@ -99,7 +100,7 @@ describe("properties admin", () => {
   // only 409s when it repeats the same declared type — a DIFFERENT type now
   // legitimately succeeds. That is exactly what "allows two property types
   // in the same location" below proves (using the two real declared types,
-  // bullets and casino), including the same-type duplicate 409 as its final
+  // bullets and blackjack), including the same-type duplicate 409 as its final
   // step — so this test is folded into that one rather than kept alongside
   // it as a near-duplicate.
 
@@ -182,13 +183,12 @@ describe("properties admin", () => {
     expect(res.json<{ error: string }>().error).toBe("unknown_property_type");
   });
 
-  // `casino` is a genuine second declared type (the test-only `casinoPlugin`
-  // above), so this is the test that actually distinguishes the new key from
-  // the old one: under the OLD unique(location_id), the `casino` create below
-  // would 409 just like the final `bullets` repeat does — it would never
-  // reach 201. Verified by temporarily reverting 0004 back to a bare
-  // location_id index and confirming this exact step turns 409 (see task
-  // report for the RED output).
+  // `SECOND_TYPE` is a genuine second declared type, so this is the test that
+  // actually distinguishes the new key from the old one: under the OLD
+  // unique(location_id), the second create below would 409 just like the final
+  // `bullets` repeat does — it would never reach 201. Verified by temporarily
+  // reverting 0004 back to a bare location_id index and confirming this exact
+  // step turns 409 (see task report for the RED output).
   it("allows two property types in the same location", async () => {
     const first = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
@@ -198,7 +198,7 @@ describe("properties admin", () => {
 
     const second = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "casino", cost: "0" },
+      payload: { locationId, pluginId: SECOND_TYPE, cost: "0" },
     });
     expect(second.statusCode).toBe(201);
 
@@ -213,7 +213,7 @@ describe("properties admin", () => {
     expect(duplicate.json<{ error: string }>().error).toBe("location_type_taken");
 
     // The failed duplicate insert left no partial or phantom row: still
-    // exactly the two rows (bullets, casino) from before the 409.
+    // exactly the two rows (bullets, SECOND_TYPE) from before the 409.
     const rowsAfterDuplicate = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.locationId, locationId));
     expect(rowsAfterDuplicate).toHaveLength(2);
   });
@@ -231,23 +231,23 @@ describe("properties admin", () => {
       payload: { locationId, pluginId: "bullets", cost: "0" },
     });
     expect(bullets.statusCode).toBe(201);
-    const casino = await app.inject({
+    const second = await app.inject({
       method: "POST", url: "/api/admin/properties", headers: auth(),
-      payload: { locationId, pluginId: "casino", cost: "0" },
+      payload: { locationId, pluginId: SECOND_TYPE, cost: "0" },
     });
-    expect(casino.statusCode).toBe(201);
-    const { id: casinoId } = casino.json() as { id: string };
+    expect(second.statusCode).toBe(201);
+    const { id: secondId } = second.json() as { id: string };
 
     const res = await app.inject({
       method: "POST", url: "/api/admin/properties/update", headers: auth(),
-      payload: { id: casinoId, pluginId: "bullets", cost: "0" },
+      payload: { id: secondId, pluginId: "bullets", cost: "0" },
     });
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("location_type_taken");
 
-    // The failed update left the casino row exactly as it was.
-    const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, casinoId));
-    expect(row).toMatchObject({ pluginId: "casino" });
+    // The failed update left the SECOND_TYPE row exactly as it was.
+    const [row] = await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, secondId));
+    expect(row).toMatchObject({ pluginId: SECOND_TYPE });
   });
 
   // Kept alongside the route-level test above rather than as a substitute

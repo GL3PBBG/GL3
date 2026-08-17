@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { Hand } from "../components/PlayingCard.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
 import styles from "../pages/pages.module.css";
@@ -358,6 +359,8 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             refetchSignal={refetchSignal}
           />
         );
+      case "cards":
+        return <Hand key={index} codes={inst.cards} />;
     }
   }
 

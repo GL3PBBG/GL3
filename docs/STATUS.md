@@ -1652,6 +1652,210 @@ than failing (`Tests 1307 passed`, zero failures, 22 real test files at
 driving the same Postgres and Redis — isolation on this machine needs a
 separate *database*, not a separate worktree.
 
+### Casino engine and blackjack — a game is a filter subscription
+
+Spec: `docs/superpowers/specs/2026-08-17-casino-blackjack-design.md`. Plan:
+`docs/superpowers/plans/2026-08-17-casino-blackjack.md`. Branch
+`feat/casino-blackjack`. SPEC §6 listed the casino as v1.1 — "ship the schema,
+stub the gameplay"; the schema shipped in M0 and the stub was never filled.
+Everything about *money* follows V2's `blackjack.inc.php` (`:124` the
+hardcoded $1,000,000 property, `:276` `PR_cost` read as the maximum bet,
+`:297` the wager credited to the owner, `:406` the payout debited from it);
+everything about *cards* is GL3's own, so the tests are the only specification
+of the rules.
+
+**Two packages, not one, and the split is load-bearing.**
+`@gl3/plugin-casino` is the hub — the `p_casino_sessions` table, escrow,
+payout, house resolution, the lobby and the extension point — and declares
+**no** property type. `@gl3/plugin-blackjack` is the first game — pure rules,
+no tables, no routes — and declares the house through `providesProperties`.
+Naming the game plugin `blackjack` is what makes a migrated V2 database's
+`plugin_id = 'blackjack'` property rows light up on install, owner and lever
+intact; naming it `casino` would have stranded them permanently. The hub
+declaring no type is what keeps "who is the house" unambiguous: for a hand of
+game `G` in town `T` the house is the owner of `(T, G)` and nobody else. That
+takes the repo's plugin→plugin dependency edges from two to four
+(`casino → properties`, `blackjack → casino`); the graph stays acyclic and
+the franchise design's "look again at the third edge" was done and recorded in
+the spec — re-examine at edge six. **Eight of eighteen plugins now declare
+migrations**, up from seven of sixteen: casino's `0001_sessions` and
+`0002_one_open_session` are the only new ones, and a game plugin owning no
+tables *by design* is what lets a
+third-party game ship without a migration runner touching the database.
+
+**The extension point is a filter, not a manifest field.** The hub exports
+`games = filterPoint<GameDef[]>("casino.games")` and a game subscribes with
+`on(games, (_ctx, list) => [...list, MY_GAME])` — `bounties → combat`'s
+`killResolved` shape exactly. Chosen over `providesCasinoGames` because
+filters already carry functions and are already collected by the loader, so
+the whole extension point costs no SDK surface and no republish, and a generic
+SDK gains no casino-shaped field. The price, recorded as a known risk: a
+`GameDef` arrives inside a subscription, so `definePlugin` cannot validate its
+id the way it validates `providesProperties` — the hub builds its registry per
+request and throws on an id that is not an installed plugin id or that
+collides. That is a request-time failure where the property registry gets a
+boot-time one.
+
+**`GameDef` gained a fourth member during implementation**, and from an
+unpredicted direction: `view?(state)`, forced by the **hub** rather than by a
+second game. §4.2's lobby has to redraw an in-progress hand from stored state,
+and nothing could — a `ViewNode` was otherwise reachable only inside a
+`GameStep`, `state` is opaque game-owned jsonb, `act` cannot peek because
+every action mutates, and the hub must not import a game to render it. Spec §3
+was amended in place. Optional, so a game that omits it resumes viewless
+rather than failing to install.
+
+**Sessions and money.** One `p_casino_sessions` row per hand, with a partial
+unique index on `(player_id) WHERE status = 'open'` — one open hand per player
+**across all games**, OC's one-active-heist shape, which is what makes the
+escrow accounting single-threaded per player. The wager is escrowed at `play`
+(player debited, house credited through `payOwner`) so the net across a hand
+is correct with no second bookkeeping concept: a push returns the wager, a
+loss returns nothing. There is no settle route — a hand settles inside
+whichever call returns `done: true`, so a one-shot game opens and settles in a
+single `play`. An unowned town is a real, specified case rather than an edge:
+the escrow sinks and the payout is a faucet, bounded by the `max_bet` setting.
+Abandoned hands expire lazily (`session_expiry_minutes`): the lobby hides one,
+the next `play` forfeits it, and `act` refuses it — no cron.
+
+**The house exposure check is the load-bearing money guard.** `payOwner`
+*clamps* a debit to the owner's cash, so without an up-front check a player who
+wins more than the house holds is silently short-paid, with no error anywhere
+and a ledger that still balances. `assertHouseCanCover` runs before the wager
+is taken and again on every `wagerDelta` (blackjack's double), because a
+doubled hand is still 2.5× of the *current* wager.
+
+**Lock order (rule 6).** Casino is a locations-first cluster, joining bullets,
+theft and properties: `tx.locks.location` → **one** deduped, sorted
+`tx.locks.player([player, owner])` → the session row `FOR UPDATE` → `payOwner`
+(a no-op re-acquisition). The single call for both players is what makes
+owner-plays-at-own-table safe against a second player at the same table;
+locking the player first and letting `payOwner` take the owner second is the
+ABBA cycle `properties/src/api.ts:51-58` documents.
+`apps/server/test/casino-lock-order.test.ts` proves it with participants that
+do **not** all acquire through the same helper, and its deliberate-inversion
+red was a real `40P01` read out of the Postgres server log — Fastify strips
+the pg code, so the response body never shows it.
+
+**A `cards` view node** (`{ kind: "cards", cards: ["Sq","H2","B1"] }`, twelfth
+kind) is the reason an installed third-party game is not second-class: rules
+extensibility is solved by the filter point, and without a card node UI
+extensibility is not — a game that cannot ship React into our bundle could
+only render a hand as text. `@letele/playing-cards` (CC0, 0.1.0, abandoned
+2023) supplies the SVGs; it ships **no type declarations** despite its
+manifest naming some, and is **not resolvable by bare Node** (only a `module`
+field), so it needs an ambient declaration enumerating all 56 exports and a
+`resolve.mainFields` restoration on the `@gl3/web` vitest project. Only its
+assets are relied on, and the licence means they can be vendored if it ever
+breaks. The whole deck lands in the bundle (860.86 kB, 266 kB gzip, over
+Vite's 500 kB warning) — shrinking it needs a lazy import or vendoring and is
+follow-up, not part of this cluster.
+
+**No events per hand.** One event per blackjack hand floods the feed — the
+same reasoning that killed the franchise design's `income` event. Each route
+returns the current view directly, so there is no invalidation to trigger
+either, and no new core `GameEvent` variant, so the four-places rule does not
+fire.
+
+**Package versions.** `@gl3/shared` `0.1.5` → `0.1.6` (`dto/casino.ts`, plus
+the `cards` leaf that Task 1 added to the SDK's `ViewNodeSchema` and never to
+shared's `ViewNodeDtoSchema` — a real defect: `PluginsPayloadSchema.parse` is
+all-or-nothing, so a declared page carrying a `cards` node would have taken
+down the entire plugin payload, nav included). `@gl3/plugin-sdk` `0.1.1` →
+`0.1.2` (the `cards` leaf; `installedPluginIds` on `PluginCtx`, which nothing
+carried and `buildRegistry` needs) and then → `0.1.3`, a third publish
+tightening its own `"@gl3/shared"` range from `^0.1.0` to `^0.1.6`. That range
+documents the coupling and cannot enforce it: the parse that actually fails is
+in the **browser bundle**, whose copy of shared comes from `apps/web`'s own
+dependency, not from the SDK's tree. The durable fix is
+`packages/plugin-sdk/test/view-node-parity.test.ts`, which reads both leaf-kind
+sets back out of the schemas (a `discriminatedUnion` reports `issue.options`)
+rather than restating a third hand-maintained copy, and runs in CI's
+`verify:ci`.
+
+**Suite.** 195 files / 1499 tests, `npm run verify` **exit 0** — the exit code
+read from the process itself, not the summary line and not the harness's own
+completion status. That distinction earned its keep on this branch: the run
+before this one reported "completed (exit code 0)" while the real code was
+**1**, because the command ended in `; echo "exit=$?"` and the shell returned
+`echo`'s status. One test was red — `casino-lock-order`'s ABBA case, a bare
+500 on `lockPlayersForUpdate` with no SQLSTATE — and the summary line alone
+would have shipped it.
+
+That failure is **unexplained and recorded as open**, not cleared. It did not
+recur on the green run, but "it passed the second time" is the weakest
+possible clearing: it is 5/5 green standalone and 3/3 green under deliberate
+eight-file contention, so it needs full-suite density, and the log carried no
+`40P01`, no `PostgresError` and no dropped connection — so the cross-talk
+explanation that covers `properties-lock-order`'s round-19 failure does not
+cover this one. Two failures of the same shape (a bare 500 on a `FOR UPDATE`
+under full-suite load, in two different files) are now on record.
+`routes.ts` logs the driver error's `cause` from this branch on, which is the
+one datum both diagnoses lacked.
+
+**The suite got 3.5x faster on this branch** and it was not an optimisation
+hunt — the wall clock became the obstacle. `resetDb` truncated one table per
+statement: 1.32s against 41 *empty* tables, all of it 39 separate WAL flushes
+and lock acquisitions. One `TRUNCATE a, b, c ... CASCADE` costs 0.25s. ~87
+files call it, most per test, so it landed on the majority of 776 integration
+tests. Test time 5872s → 1481s, wall 1000s → 269s. Measured, not guessed:
+argon2 was 42ms a hash and `bootTestServer` was already memoised per file —
+the same "argon2id is slow" red herring this repo has recorded once before.
+Note the speedup raises concurrency *density*, which is a plausible reason a
+latent contention bug surfaced on the run above.
+
+**The final whole-branch review found what eleven task reviews could not,**
+and it is worth recording why: nothing on the branch asserted view *content*.
+
+- **The dealer's hole card was never hidden.** `renderState` emitted both
+  dealer cards and the dealer's true total at every phase, including while the
+  player was choosing hit/stand/double — worth roughly +7-10% EV, which
+  inverts the house edge against a player-owned franchise. Task 1 put the
+  face-down backs `B1`/`B2` into all three card vocabularies and Task 5 wrote
+  the view without them; they were dead code from the day they shipped, and no
+  test could break when it was fixed. `blackjack-view.test.ts` (6 tests) now
+  covers the pure `start`/`act`/`view` surface and `casino-act.test.ts`
+  asserts what crosses the wire mid-hand.
+- **The hub bounded none of the figures a `GameDef` returned.** Spec §3 says a
+  game "cannot get money wrong, because it never touches money", which holds
+  only if the hub bounds what it is handed: a payout above
+  `maxPayoutMultiplier × wager` was credited in full while the house leg was
+  clamped, minting the difference (a pure faucet in an unowned town); a
+  negative `wagerDelta` turned escrow into a credit; a non-finite multiplier
+  threw a RangeError out of `BigInt()`. `resolvePayout` is now the one place
+  `game.settle` is called, and `exposureOf` the one place the cap is computed.
+  Blackjack does none of these — this was the gap between the trust boundary
+  the spec claimed and the one that existed, which matters because the next
+  game comes from a stranger. `casino-rogue-game.test.ts` (6 tests) installs a
+  deliberately hostile game through the real filter point and asserts the hub
+  refuses it.
+- **A game's own zod rejection and any thrown `Error` were 500s.**
+  `game.action.parse` inside the handler and blackjack's two `throw new
+  Error(...)` calls all reached `routes.ts`'s re-throw, where this repo's rule
+  is that an unvalidated boundary returns a clean 400. Now `invalid_action`
+  and `game_error` (carrying the game's own message as `detail`); the lobby's
+  `view` degrades to `null` on a throw rather than taking down the whole
+  response. The web page's workaround — Double withheld on any resumed hand,
+  because an illegal one could only 500 — is gone with it.
+- **`session.property_id` was written and read by nothing.** `act`
+  re-resolved the house every call, so a town unowned at `play` sank the wager
+  and then debited the payout from whoever had bought the table since.
+  `frozenHouse` resolves by the stored id. The freeze pins the **row, not the
+  person**: a `transfer` moves `owner_player_id` on the same row and hands the
+  open position over with the table. Spec §4.3 was amended to say exactly that
+  rather than keep claiming more than the code delivers.
+
+**Known gaps, deliberately left.** `withCorePlugins` silently drops an
+optional plugin whose id collides with a core one — it cost this cluster two
+red tests whose message pointed nowhere near the cause, and the same collision
+could silently drop a third-party plugin in production; a boot-time throw or
+warn looks right, but it is a core loader change, not a casino one.
+`adminSessionsRoute`'s `openedAt: row.createdAt.toISOString()` throws
+`RangeError` on an Invalid Date — unreachable through any exposed surface
+(`created_at` is `.notNull().defaultNow()`, no route accepts it, and M4 never
+touches this table), so a guard there would be dead code no test could
+justify.
+
 ### Weapon DPS paces the attack cooldown
 
 A small combat tweak, not a cluster: no migration, no new table, no plugin, and

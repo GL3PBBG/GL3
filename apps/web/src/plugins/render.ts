@@ -25,6 +25,7 @@ export type RenderInstruction =
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
   | { kind: "form"; action: string; submitLabel: string; fields: FormField[] }
   | { kind: "table"; source: string; columns: { key: string; label: string }[] }
+  | { kind: "cards"; cards: string[] }
   | { kind: "panelHeader"; title: string };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -102,6 +103,9 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       };
     });
     return [{ kind: "form", action: String(node.action), submitLabel: String(node.submitLabel), fields }];
+  }
+  if (isNode(node, "cards")) {
+    return [{ kind: "cards", cards: childArray(node.cards).map(String) }];
   }
   if (isNode(node, "table")) {
     const columns = childArray(node.columns).map((c) => ({

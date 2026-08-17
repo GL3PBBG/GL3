@@ -72,6 +72,12 @@ const srcAliases = {
       "@gl3/plugin-properties": fileURLToPath(
         new URL("./packages/plugins/properties/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-casino": fileURLToPath(
+        new URL("./packages/plugins/casino/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-blackjack": fileURLToPath(
+        new URL("./packages/plugins/blackjack/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -180,7 +186,20 @@ export default defineWorkspace([
       root: "./apps/web",
       include: ["test/**/*.test.ts"],
     },
-    ...srcAliases,
+    resolve: {
+      alias: srcAliases.resolve.alias,
+      // Vitest hardcodes `resolve.mainFields: []` for every project's SSR
+      // module resolution (its own "vitest:project" plugin, deliberately —
+      // "by default Vite resolves `module` field, which not always a native
+      // ESM module"). That default is correct in general but makes
+      // @letele/playing-cards@0.1.0 unresolvable here: it ships ONLY a
+      // "module" field (no "main", no "exports"), so with mainFields: []
+      // Node's own entry-point fallback runs and finds nothing. Restoring
+      // "module" for this one project — not the whole workspace — lets
+      // Vite's bundler-aware resolver find it the same way `vite build`
+      // already does for the production bundle.
+      mainFields: ["module", "main"],
+    },
   },
   {
     test: {
@@ -204,6 +223,10 @@ export default defineWorkspace([
         "test/theft-settings.test.ts",
         "test/theft-resolve.test.ts",
         "test/property-type-registry.test.ts",
+        "test/casino-registry.test.ts",
+        "test/casino-settings.test.ts",
+        "test/blackjack-rules.test.ts",
+        "test/blackjack-view.test.ts",
       ],
     },
     ...srcAliases,
@@ -255,6 +278,12 @@ export default defineWorkspace([
         "test/bounties-lock-order.test.ts",
         "test/bullets-property.test.ts",
         "test/bullets.test.ts",
+        "test/casino-boot.test.ts",
+        "test/casino-play.test.ts",
+        "test/casino-act.test.ts",
+        "test/casino-lock-order.test.ts",
+        "test/casino-lobby.test.ts",
+        "test/casino-rogue-game.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",

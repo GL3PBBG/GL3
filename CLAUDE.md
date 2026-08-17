@@ -142,19 +142,72 @@ one-way money sink. `@gl3/shared` took an additive patch bump to `0.1.5`
 (`PropertyRowSchema`/`PropertyListResponseSchema` change shape); `@gl3/plugin-
 sdk` took its first-ever bump, `0.1.1`, for `providesProperties` and
 `ctx.propertyTypes`.
+**The casino and blackjack** have since shipped on `feat/casino-blackjack`,
+SPEC §6's v1.1 stub filled at last. Two packages, and the split is
+load-bearing: `@gl3/plugin-casino` is the hub (the `p_casino_sessions` table,
+escrow, payout, house resolution, the lobby) and declares **no** property
+type, while `@gl3/plugin-blackjack` is the first game — pure rules, no tables,
+no routes — and declares the house through `providesProperties`, which is what
+makes a migrated V2 database's `plugin_id = 'blackjack'` rows light up on
+install. So **eight of eighteen plugins declare migrations** rather than seven
+of sixteen, and a game plugin owns no tables by design: its state is opaque
+jsonb in the session row. A game registers through a filter point
+(`games = filterPoint<GameDef[]>("casino.games")`, `bounties → combat`'s
+shape) rather than a manifest field, so the extension point costs no SDK
+surface — at the price of request-time rather than boot-time id validation.
+`GameDef` is `start`/`act`/`settle`/`view`, all pure: a game returns a payout
+FIGURE and the hub writes every ledger row, but that boundary only holds
+because the hub BOUNDS the figure (`resolvePayout` clamps to
+`maxPayoutMultiplier × wager` and refuses a negative one; a negative
+`wagerDelta` and a non-finite multiplier are refused too), and a game's own
+throw becomes a clean 400 rather than a 500. Money follows V2 exactly (the
+wager escrowed to the owner at `play`, the payout debited from them at
+settle — the owner is the house and can lose); `assertHouseCanCover` runs
+before the wager is taken and again on every raise, because `payOwner` clamps
+a debit to the owner's cash and would otherwise short-pay a winner in
+silence. `property_id` is frozen at `play` and `act` settles against that row,
+which pins the row and not the person — a `transfer` still hands the open
+position over. Casino is a locations-first cluster: `tx.locks.location` → ONE
+sorted `tx.locks.player([player, owner])` → the session row `FOR UPDATE`. No
+events per hand (one per blackjack hand floods the feed), so no new
+`GameEvent` variant. `@gl3/shared` went to `0.1.6` and `@gl3/plugin-sdk` to
+`0.1.2` and then `0.1.3`; all three are published.
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **181 files / 1380 tests** as of `feat/properties-franchise`, backed by
-a bare `npm run verify` on HEAD `e7ea8af` that **exited 0** with no unhandled
-rejections. An earlier full run on this branch was exit 1 (a migration gap in
-`economy-invariant.test.ts`, a stale hardcoded events census in
-`plugin-manifest-endpoint.test.ts`) and the one after it was *void* rather
-than failing — 1307 passed, zero failures, 22 files at `(0 test)` — because a
-concurrent session shared this machine's Postgres and Redis. See
-`docs/STATUS.md`'s properties-franchise section. Note `apps/migrate`'s
+Suite: **195 files / 1499 tests** as of `feat/casino-blackjack`, backed by a
+bare `npm run verify` on that branch that **exited 0** with no unhandled
+rejections. **The run takes ~270s, down from ~1000s**, because `resetDb`
+truncated one table per statement (1.32s against 41 *empty* tables — 39
+separate WAL flushes) and now issues one `TRUNCATE a, b, c ... CASCADE` (0.25s);
+~87 files call it, most per test. Profile before optimising here: argon2 is
+42ms a hash and `bootTestServer` is already memoised per file, so the obvious
+suspects are the wrong ones — the second time this repo has recorded that
+exact red herring.
+**Read the exit code from the process, not from a wrapper.** The gate run
+before the green one was reported by the harness as "completed (exit code 0)"
+while the real status was **1** — the command ended in `; echo "exit=$?"`, so
+the shell returned `echo`'s status and one red test (`casino-lock-order`'s
+ABBA case) would have shipped as green.
+That failure is **open, not cleared**: a bare 500 on `lockPlayersForUpdate`
+with no SQLSTATE, 5/5 green standalone and 3/3 green under eight-file
+contention, with no `40P01`, no `PostgresError` and no dropped connection in
+the log — so the cross-talk story that explains `properties-lock-order`'s
+round-19 failure does not explain this one. Two failures of that same shape
+are now on record. `plugins/routes.ts` logs the driver error's `cause`
+(SQLSTATE, detail, table) from this branch on, which is the datum both
+diagnoses lacked. Note the 3.5x speedup raises concurrency *density*, which is
+a plausible reason a latent contention bug surfaced when it did.
+**A concurrent session makes a run *void*, not failing** — the
+properties-franchise cluster saw `1307 passed, zero failures, 22 files at
+(0 test)` because another agent shared this machine's Postgres and Redis. Zero
+failures with files reporting no tests is cross-talk, not a green suite; check
+`pgrep -fa vitest` and `select datname from pg_database where datname like
+'gl3_tmpl%'` before starting a gate run. See `docs/STATUS.md`'s
+properties-franchise section.
+Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
@@ -273,7 +326,9 @@ unavailable here.
    `claim` are gone, retired with the accrual clock on
    `feat/properties-franchise`) or
    several via `lockLocationsForUpdate`, which sorts them ascending (travel
-   locks both its source and destination through it). Player↔player is the
+   locks both its source and destination through it), and casino's
+   `play`/`act` through `tx.locks.location` before ONE sorted
+   `tx.locks.player([player, owner])` and then the session row `FOR UPDATE`. Player↔player is the
    third pair, added by combat: `lockPlayersForUpdate` dedupes and sorts
    ascending in one statement, which is what makes A-shoots-B safe against
    B-shoots-A — `test/properties-consumer-lock-order.test.ts` is the second
@@ -284,7 +339,8 @@ unavailable here.
    independently. Regression tests: `test/gang-lock-order.test.ts`,
    `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`,
    `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`,
-   `test/properties-consumer-lock-order.test.ts` (`economy/ledger.ts`).
+   `test/properties-consumer-lock-order.test.ts`,
+   `test/casino-lock-order.test.ts` (`economy/ledger.ts`).
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing
@@ -313,10 +369,11 @@ unavailable here.
   tables appear only when `loadPlugins` → `runPluginMigrations` runs. A file
   using `callPluginRoute` or `runPluginJob` directly needs an explicit
   `await runPluginMigrations(db, [thePlugin])`, or every test in it dies on
-  42P01. Seven plugins now own tables (`inventory`, `oc`, `bounties`,
-  `detectives`, `combat`, `theft`, `properties`), so this catches far more files than it
-  used to — `economy-invariant.test.ts` and `detectives-worker.test.ts` are
-  the worked examples.
+  42P01. Eight plugins now own tables (`inventory`, `oc`, `bounties`,
+  `detectives`, `combat`, `theft`, `properties`, `casino`), so this catches far more files than it
+  used to — `economy-invariant.test.ts`, `detectives-worker.test.ts` and
+  `casino-rogue-game.test.ts` are the worked examples (the last needs
+  `properties` migrated too, because `ownerAt` reads its table on every hand).
 - **A new *workspace-local* plugin package has eight registration sites, three
   of which fail silently or remotely** (plus a ninth that is per-*test-file*,
   below). All eight are consequences of living in
@@ -389,8 +446,21 @@ unavailable here.
   and `packages/plugin-sdk/package.json` to `0.1.1`, its **first bump ever**
   (`providesProperties` on the manifest, `ctx.propertyTypes` on every plugin's
   ctx). **Both have since been published**, with the user's approval, following
-  this branch's commit. The registry now serves `@gl3/shared` `0.1.1` through
-  `0.1.5` and `@gl3/plugin-sdk` `0.1.0` and `0.1.1`.
+  this branch's commit. **The casino cluster published three more**:
+  `@gl3/shared@0.1.6` (`dto/casino.ts`, plus the `cards` leaf that had shipped
+  in the SDK's `ViewNodeSchema` and never in shared's `ViewNodeDtoSchema` — a
+  real defect, since `PluginsPayloadSchema.parse` is all-or-nothing and a
+  declared page carrying a `cards` node would have taken down the whole plugin
+  payload), `@gl3/plugin-sdk@0.1.2` (that leaf, plus `installedPluginIds` on
+  `PluginCtx`), and `@gl3/plugin-sdk@0.1.3`, which only tightens its own
+  `"@gl3/shared"` range from `^0.1.0` to `^0.1.6`. That range documents the
+  coupling and cannot enforce it — the parse that fails is in the browser
+  bundle, whose copy of shared comes from `apps/web`'s own dependency, not the
+  SDK's. The guard that does enforce it is
+  `packages/plugin-sdk/test/view-node-parity.test.ts`, which reads both
+  leaf-kind sets back out of the schemas and runs in CI's `verify:ci`. The
+  registry now serves `@gl3/shared` `0.1.1` through `0.1.6` and
+  `@gl3/plugin-sdk` `0.1.0` through `0.1.3`.
 - **Adding a variant to `GameEvent` breaks four places, and none of the last
   two is a type error.** The two obvious ones are the exhaustive switches in
   `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
