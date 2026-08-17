@@ -1,4 +1,8 @@
-import { useMe, useProperties, useBuyProperty, useClaimProperty, useSellProperty } from "../api/queries.js";
+import { useState } from "react";
+import {
+  useMe, useProperties, useBuyProperty,
+  useSetLever, useTransferProperty, useDropProperty, useResetProperty,
+} from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import type { PropertyRow } from "@gl3/shared";
@@ -6,20 +10,83 @@ import type { PropertyRow } from "@gl3/shared";
 export function rowAction(
   row: PropertyRow,
   viewerUsername: string | undefined,
-): { kind: "buy" } | { kind: "owned"; accrued: string } | { kind: "none" } {
-  if (row.ownerName === "—") return { kind: "buy" };
+):
+  | { kind: "buy"; price: string }
+  | { kind: "owned"; lever: string; profit: string; leverLabel: string }
+  | { kind: "none" } {
   if (viewerUsername !== undefined && row.ownerName === viewerUsername) {
-    return { kind: "owned", accrued: row.accrued };
+    return { kind: "owned", lever: row.lever, profit: row.profit, leverLabel: row.leverLabel };
   }
+  // "" price means the row's type is not installed — nothing to buy.
+  if (row.ownerName === "—" && row.price !== "") return { kind: "buy", price: row.price };
   return { kind: "none" };
+}
+
+/** Mirrors the server's `NonNegativeIntegerString`: digits only. */
+function isValidLever(raw: string): boolean {
+  return /^\d+$/.test(raw);
+}
+
+function OwnedControls({
+  propertyId, leverLabel, lever, profit,
+}: { propertyId: string; leverLabel: string; lever: string; profit: string }): JSX.Element {
+  const setLever = useSetLever(propertyId);
+  const transfer = useTransferProperty(propertyId);
+  const drop = useDropProperty(propertyId);
+  const reset = useResetProperty(propertyId);
+  const [leverValue, setLeverValue] = useState(lever);
+  const [username, setUsername] = useState("");
+  const validLever = isValidLever(leverValue);
+  const validUsername = username.length >= 1;
+
+  return (
+    <span className={styles.actions}>
+      <span className={styles.meta}>P&amp;L <Money value={profit} /></span>
+      <label>
+        <span className={styles.meta}>{leverLabel} </span>
+        <input
+          inputMode="numeric"
+          value={leverValue}
+          onChange={(e) => { setLeverValue(e.target.value.trim()); }}
+          aria-label={leverLabel}
+        />
+      </label>
+      <button
+        type="button"
+        disabled={!validLever || setLever.isPending}
+        onClick={() => setLever.mutate(leverValue)}
+      >
+        Set
+      </button>
+      <input
+        maxLength={30}
+        value={username}
+        placeholder="Transfer to"
+        onChange={(e) => { setUsername(e.target.value.trim()); }}
+        aria-label="Transfer to username"
+      />
+      <button
+        type="button"
+        disabled={!validUsername || transfer.isPending}
+        onClick={() => transfer.mutate(username, { onSuccess: () => { setUsername(""); } })}
+      >
+        Transfer
+      </button>
+      <button type="button" disabled={drop.isPending} onClick={() => drop.mutate()}>
+        Drop
+      </button>
+      <button type="button" disabled={reset.isPending} onClick={() => reset.mutate()}>
+        Reset
+      </button>
+      <ErrorText error={setLever.error ?? transfer.error ?? drop.error ?? reset.error} />
+    </span>
+  );
 }
 
 export function Properties(): JSX.Element {
   const properties = useProperties();
   const me = useMe();
   const buy = useBuyProperty();
-  const claim = useClaimProperty();
-  const sell = useSellProperty();
 
   if (properties.isLoading) return <Loading what="properties" />;
   if (properties.error) return <ErrorText error={properties.error} />;
@@ -35,17 +102,15 @@ export function Properties(): JSX.Element {
         <ul className={styles.rows}>
           {rows.map((row) => {
             const action = rowAction(row, me.data?.username);
+            const buyingThisRow =
+              buy.variables?.pluginId === row.pluginId && buy.variables?.locationId === row.locationId;
             return (
               <li key={row.id} className={styles.row}>
                 <span>
-                  {row.locationName}
-                  <span className={styles.muted}> &middot; {row.pluginId}</span>
-                  <span className={styles.muted}> &middot; rate <Money value={row.rate} />/hr</span>
+                  {row.typeName}
+                  <span className={styles.muted}> &middot; {row.locationName}</span>
                   {action.kind === "buy" ? (
-                    <span className={styles.muted}> &middot; cost <Money value={row.cost} /></span>
-                  ) : null}
-                  {action.kind === "owned" ? (
-                    <span className={styles.muted}> &middot; accrued <Money value={action.accrued} /></span>
+                    <span className={styles.muted}> &middot; <Money value={action.price} /></span>
                   ) : null}
                   {" "}&middot; owner {row.ownerName}
                 </span>
@@ -53,32 +118,20 @@ export function Properties(): JSX.Element {
                   <button
                     type="button"
                     disabled={buy.isPending}
-                    onClick={() => buy.mutate(row.id)}
+                    onClick={() => buy.mutate({ pluginId: row.pluginId, locationId: row.locationId })}
                   >
                     Buy
                   </button>
                 ) : null}
                 {action.kind === "owned" ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={claim.isPending}
-                      onClick={() => claim.mutate(row.id)}
-                    >
-                      Claim
-                    </button>
-                    <button
-                      type="button"
-                      disabled={sell.isPending}
-                      onClick={() => sell.mutate(row.id)}
-                    >
-                      Sell
-                    </button>
-                  </>
+                  <OwnedControls
+                    propertyId={row.id}
+                    leverLabel={action.leverLabel}
+                    lever={action.lever}
+                    profit={action.profit}
+                  />
                 ) : null}
-                <ErrorText error={buy.isError && buy.variables === row.id ? buy.error : undefined} />
-                <ErrorText error={claim.isError && claim.variables === row.id ? claim.error : undefined} />
-                <ErrorText error={sell.isError && sell.variables === row.id ? sell.error : undefined} />
+                <ErrorText error={buy.isError && buyingThisRow ? buy.error : undefined} />
               </li>
             );
           })}
