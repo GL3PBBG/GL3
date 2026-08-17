@@ -5,6 +5,7 @@ import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk
 import { propertiesTable, locations, players, playerStats } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
+import { seizeOnKill } from "./seizure.js";
 
 export { ownerAt, payOwner, type PropertyOwnership } from "./api.js";
 export { propertiesTable } from "./schema.js";
@@ -634,4 +635,5 @@ export default definePlugin({
   events: [boughtEvent, droppedEvent, transferredEvent],
   pages: [],
   adminPages: [adminPage],
+  filters: [seizeOnKill],
 });
