@@ -1534,7 +1534,7 @@ plugin's ctx as `ctx.propertyTypes` — not only the properties plugin's own;
 the spec was amended in place to say so, since the registry is the same
 loader-derived data `GET /api/plugins` already serves publicly. The table's
 key moves from `unique(location_id)` to `unique(location_id, plugin_id)`
-(plugin migration `0003_location_plugin_unique`), so a casino and a bullet
+(plugin migration `0004_location_plugin_unique`), so a casino and a bullet
 factory now coexist in one town. Admin edits `plugin_id` as a select over the
 registry instead of free text.
 
@@ -1584,10 +1584,10 @@ silently matched to spec:**
 `PropertyListResponseSchema` change shape (`accrued`/`rate` out,
 `lever`/`price`/`typeName` in) — breaking in shape, but shipped as a patch
 under the same `0.x`-additive reasoning as every prior bump, since no
-external consumer of either symbol exists yet. **Both bumps are manifest-only
-as of this writing** — publishing to `npm.gl3.dev` is an irreversible,
-outward-facing action and was deliberately held back from the implementer
-for the user's own call, to follow this branch's commit.
+external consumer of either symbol exists yet. **Both have since been
+published**, with the user's approval, following this branch's commit — the
+registry now serves `@gl3/shared` `0.1.1` through `0.1.5` and
+`@gl3/plugin-sdk` `0.1.0` and `0.1.1`.
 
 **Test files.** Six new: `properties-consumer-lock-order` (1, the second
 player↔player lock-order regression after combat's own — proves a consumer

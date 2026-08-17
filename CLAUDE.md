@@ -388,12 +388,9 @@ unavailable here.
   a patch under the same `0.x`-additive-only reasoning as every bump above)
   and `packages/plugin-sdk/package.json` to `0.1.1`, its **first bump ever**
   (`providesProperties` on the manifest, `ctx.propertyTypes` on every plugin's
-  ctx). **Neither is published yet** — publishing to `npm.gl3.dev` is
-  irreversible and outward-facing, so per an explicit ruling it is held back
-  from the implementer and surfaced to the user directly; the version bumps
-  landed in this branch's commit, the two `npm publish` calls did not. The
-  registry itself still serves `@gl3/shared` `0.1.1` through `0.1.4` and
-  `@gl3/plugin-sdk@0.1.0` until that publish happens.
+  ctx). **Both have since been published**, with the user's approval, following
+  this branch's commit. The registry now serves `@gl3/shared` `0.1.1` through
+  `0.1.5` and `@gl3/plugin-sdk` `0.1.0` and `0.1.1`.
 - **Adding a variant to `GameEvent` breaks four places, and none of the last
   two is a type error.** The two obvious ones are the exhaustive switches in
   `apps/web` — `lib/eventCopy.ts` and `ws/invalidation.ts`, which fail loudly
