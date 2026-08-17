@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkWager, handActions } from "../src/pages/Casino.js";
+import { advanceHand, checkWager, dealtHand, handActions } from "../src/pages/Casino.js";
+import type { LiveHand } from "../src/pages/Casino.js";
 import {
   CasinoLobbyResponseSchema, CasinoStepResponseSchema,
 } from "@gl3/shared";
@@ -56,6 +57,63 @@ describe("handActions", () => {
     // The card count is not knowable from an opaque ViewNode, so a resumed
     // hand is treated as already in progress.
     expect(handActions("resumed", 0)).toEqual(["hit", "stand"]);
+  });
+});
+
+describe("the hand on screen", () => {
+  const SESSION = "0192f0a0-0000-7000-8000-000000000002";
+  const view = { kind: "panel", title: "Blackjack", children: [] };
+
+  const opened: LiveHand = {
+    sessionId: SESSION,
+    gameName: "Blackjack",
+    stake: "25000",
+    view,
+    done: false,
+    payout: null,
+    expiresAt: null,
+    source: "dealt",
+    actsTaken: 0,
+  };
+
+  it("takes the opening stake from the server, not from what was typed", () => {
+    const hand = dealtHand(
+      { sessionId: SESSION, view, done: false, wager: "25000" }, "Blackjack",
+    );
+    expect(hand.stake).toBe("25000");
+    expect(hand.source).toBe("dealt");
+    expect(hand.payout).toBeNull();
+  });
+
+  it("follows a DOUBLE: the stake shown is the doubled one, not the opening one", () => {
+    // The whole point of `wager` on the step response. blackjack's double
+    // raises the wager through GameStep.wagerDelta and settles in the same
+    // call, so this response is the only place the new figure ever exists:
+    // the session row is gone by the time the lobby could report it.
+    const doubled = advanceHand(opened, {
+      sessionId: SESSION, view, done: true, wager: "50000", payout: "125000",
+    });
+    expect(doubled.stake).toBe("50000");
+    expect(doubled.payout).toBe("125000");
+    expect(doubled.done).toBe(true);
+  });
+
+  it("leaves the stake alone on a step that does not raise it", () => {
+    const hit = advanceHand(opened, { sessionId: SESSION, view, done: false, wager: "25000" });
+    expect(hit.stake).toBe("25000");
+    expect(hit.payout).toBeNull();
+  });
+
+  it("counts the act, which is what withdraws Double", () => {
+    const hit = advanceHand(opened, { sessionId: SESSION, view, done: false, wager: "25000" });
+    expect(hit.actsTaken).toBe(1);
+    expect(handActions(hit.source, hit.actsTaken)).toEqual(["hit", "stand"]);
+  });
+
+  it("carries `source` across a step — it is a fact about the hand, not the step", () => {
+    const resumed: LiveHand = { ...opened, source: "resumed" };
+    expect(advanceHand(resumed, { sessionId: SESSION, view, done: false, wager: "25000" }).source)
+      .toBe("resumed");
   });
 });
 
@@ -125,23 +183,37 @@ describe("the lobby DTO", () => {
 describe("the step DTO", () => {
   const view = { kind: "panel", title: "Blackjack", children: [] };
 
-  it("parses an unfinished hand, which carries no payout", () => {
+  it("parses an unfinished hand, which carries a wager but no payout", () => {
     const parsed = CasinoStepResponseSchema.parse({
-      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: false,
+      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: false, wager: "25000",
     });
+    expect(parsed.wager).toBe("25000");
     expect(parsed.payout).toBeUndefined();
   });
 
   it("parses a settled hand's payout as a decimal string", () => {
     const parsed = CasinoStepResponseSchema.parse({
-      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: true, payout: "50000",
+      sessionId: "0192f0a0-0000-7000-8000-000000000002",
+      view, done: true, wager: "50000", payout: "125000",
     });
-    expect(parsed.payout).toBe("50000");
+    expect(parsed.payout).toBe("125000");
   });
 
-  it("rejects a payout sent as a JSON number", () => {
+  it("requires the wager — both routes send it on every branch", () => {
+    // Optional would buy the page a fallback that can never run and can never
+    // be tested. Required says what the wire actually is.
     expect(() => CasinoStepResponseSchema.parse({
-      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: true, payout: 50000,
+      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: false,
+    })).toThrow();
+  });
+
+  it("rejects money sent as a JSON number", () => {
+    expect(() => CasinoStepResponseSchema.parse({
+      sessionId: "0192f0a0-0000-7000-8000-000000000002",
+      view, done: true, wager: "50000", payout: 125000,
+    })).toThrow();
+    expect(() => CasinoStepResponseSchema.parse({
+      sessionId: "0192f0a0-0000-7000-8000-000000000002", view, done: false, wager: 25000,
     })).toThrow();
   });
 });
