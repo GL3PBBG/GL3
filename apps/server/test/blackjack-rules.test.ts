@@ -59,6 +59,48 @@ describe("blackjack game", () => {
     expect(BLACKJACK.settle(step.state, WAGER)).toBe(WAGER);
   });
 
+  it("pays a plain win at 2× — neither side natural, neither busts", () => {
+    const state: BlackjackState = { ...baseState(), player: ["Sk", "Sq"], dealer: ["Dk", "D8"] };
+    expect(BLACKJACK.settle(state, WAGER)).toBe(WAGER * 2n);
+  });
+
+  it("pays 2× when the dealer busts", () => {
+    const state: BlackjackState = { ...baseState(), player: ["S9", "H8"], dealer: ["Dk", "Dq", "D5"] };
+    expect(BLACKJACK.settle(state, WAGER)).toBe(WAGER * 2n);
+  });
+
+  it("pushes at exactly 1× when both sides are natural — never the 3:2 rate", () => {
+    const state: BlackjackState = { ...baseState(), player: ["Sa", "Sk"], dealer: ["Da", "Dk"] };
+    expect(BLACKJACK.settle(state, WAGER)).toBe(WAGER);
+  });
+
+  it("returns 0 when the dealer is natural and the player is not", () => {
+    const state: BlackjackState = { ...baseState(), player: ["S9", "H8"], dealer: ["Da", "Dk"] };
+    expect(BLACKJACK.settle(state, WAGER)).toBe(0n);
+  });
+
+  // settle()'s push branch (`player === dealer`) never needs an explicit
+  // "dealer natural beats a non-natural 21" case, because that hand is
+  // structurally unreachable: start() gates on isNatural() for BOTH sides
+  // before act() can ever draw a third card, so a 3-card 21 can never face a
+  // dealer natural. These two tests pin that gate directly — the invariant
+  // settle()'s payout table silently depends on. If a future change let act()
+  // continue past a natural, settle() would keep compiling and its own tests
+  // above would stay green, while mispaying real hands.
+  it("start() ends the hand immediately on a player natural", () => {
+    // "natural-22" was found empirically: cards 0/2 deal player Sj,Ca (21)
+    // while cards 1/3 deal dealer C9,D9 (18) — a player natural, dealer not.
+    const step = BLACKJACK.start({ wager: WAGER, seed: "natural-22" });
+    expect(step.done).toBe(true);
+  });
+
+  it("start() ends the hand immediately on a dealer natural", () => {
+    // "dealer-natural-5" was found empirically: cards 0/2 deal player S4,S10
+    // (14) while cards 1/3 deal dealer Dk,Ha (21) — a dealer natural, player not.
+    const step = BLACKJACK.start({ wager: WAGER, seed: "dealer-natural-5" });
+    expect(step.done).toBe(true);
+  });
+
   it("stands the dealer on 17", () => {
     const state: BlackjackState = { ...baseState(), player: ["Sk", "H9"], dealer: ["Dk", "C7"] };
     const step = BLACKJACK.act(state, "stand");
