@@ -124,7 +124,7 @@ describe("properties events", () => {
     });
   });
 
-  it("publishes dropped with typeName and locationName", async () => {
+  it("publishes dropped with typeName, locationName and the refund paid", async () => {
     const { ownerToken, ownerId, propertyId } = await setupOwnedProperty();
 
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
@@ -135,7 +135,8 @@ describe("properties events", () => {
       url: `/api/properties/${propertyId}/drop`,
       headers: { authorization: `Bearer ${ownerToken}` },
     });
-    expect(res.statusCode).toBe(204);
+    // 200 with the refund, not 204: a drop pays half the declared price back.
+    expect(res.statusCode).toBe(200);
 
     const event: GameEvent = GameEventSchema.parse(await waiting);
     expect(event).toMatchObject({
@@ -144,7 +145,11 @@ describe("properties events", () => {
       name: "dropped",
       actorId: ownerId,
       audience: { kind: "player", playerId: ownerId },
-      payload: { typeName: "Bullet Factory", locationName: expect.any(String) },
+      payload: {
+        typeName: "Bullet Factory",
+        locationName: expect.any(String),
+        refund: expect.stringMatching(/^\d+$/),
+      },
     });
   });
 
