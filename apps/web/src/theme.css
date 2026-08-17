@@ -17,3 +17,30 @@ button:disabled { opacity: 0.45; cursor: default; }
 input { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 0.4rem 0.6rem; }
 a { color: var(--accent); }
 h1, h2, h3 { line-height: 1.2; }
+
+/* Playing cards (components/PlayingCard.tsx). These rules are load-bearing,
+   not decoration: the component renders its SVG at `height: 100%; width:
+   100%` of this span, so without a size here the span is an auto-sized inline
+   box and the SVG falls back to its own intrinsic dimensions — which is why
+   the cards rendered enormous. `--card-w` is the one knob; the 5:7 ratio the
+   component's comment describes lives here, where it can actually apply. */
+:root { --card-w: 56px; }
+.hand { display: inline-flex; gap: 0.25rem; vertical-align: middle; }
+.card {
+  display: inline-block;
+  width: var(--card-w);
+  aspect-ratio: 5 / 7;
+  /* aspect-ratio is enough on its own in every browser this app targets, but
+     an explicit height keeps the box correct if a container ever stretches
+     it. */
+  height: calc(var(--card-w) * 7 / 5);
+  line-height: 0;
+}
+/* The unknown-code fallback has no SVG inside it, so it needs its own visible
+   body — otherwise it is an empty box and a bad card code looks like nothing
+   at all rather than like a card we could not read. */
+.card--unknown {
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
