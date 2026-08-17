@@ -15,6 +15,7 @@ import inventoryPlugin from "@gl3/plugin-inventory";
 import combatPlugin from "@gl3/plugin-combat";
 import theftPlugin from "@gl3/plugin-theft";
 import propertiesPlugin from "@gl3/plugin-properties";
+import casinoPlugin from "@gl3/plugin-casino";
 
 /**
  * Ported core modules — plugin-served, never optional. A static `import`
@@ -35,6 +36,7 @@ export const CORE_PLUGINS: readonly PluginManifest[] = [
   mailPlugin, gangsPlugin, inventoryPlugin, combatPlugin, bountiesPlugin, detectivesPlugin, ocPlugin,
   theftPlugin,
   propertiesPlugin,
+  casinoPlugin,
 ];
 
 /**

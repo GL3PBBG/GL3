@@ -72,6 +72,9 @@ const srcAliases = {
       "@gl3/plugin-properties": fileURLToPath(
         new URL("./packages/plugins/properties/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-casino": fileURLToPath(
+        new URL("./packages/plugins/casino/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -267,6 +270,7 @@ export default defineWorkspace([
         "test/bounties-lock-order.test.ts",
         "test/bullets-property.test.ts",
         "test/bullets.test.ts",
+        "test/casino-boot.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",
