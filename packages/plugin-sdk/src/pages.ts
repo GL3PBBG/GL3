@@ -144,7 +144,6 @@ const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
   | z.infer<typeof Leaf>
-  | { kind: "cards"; cards: string[] }
   | { kind: "panel"; title: string; children: ViewNode[] }
   | { kind: "list"; items: ViewNode[] };
 
@@ -153,7 +152,7 @@ export type ViewNode =
  * type annotation zod requires for `z.lazy` — inference cannot close the loop
  * on its own.
  *
- * One flat `discriminatedUnion` over all eleven kinds, rather than
+ * One flat `discriminatedUnion` over all twelve kinds, rather than
  * `union([Leaf, panel, list])`. The two are equivalent in what they accept and
  * reject; they are not equivalent in what they report. `ZodUnion` aborts on
  * failure and emits a single `invalid_union` issue at the path of the
