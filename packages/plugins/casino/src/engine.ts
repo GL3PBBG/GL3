@@ -58,6 +58,18 @@ export async function escrow(
     playerId, amount: -amount, kind: "cash", reason: `casino.${gameId}.wager`,
   });
   if (house.propertyId !== null) {
+    // The return value is DISCARDED, and that is a decision, not an oversight.
+    // `payOwner` answers 0n when the property's owner changed between its own
+    // unlocked pre-read and its locked re-read. Every properties acquisition
+    // and disposal route is locations-first, so `tx.locks.location` (held by
+    // the caller) excludes all of them — except `seizeOnKill`, which takes no
+    // location lock and no player lock and still disowns a victim's rows on
+    // every kill. Seized here, the wager is debited from the player and
+    // credited to nobody: the hand degrades to the unowned-town sink the
+    // spec already defines, the money is conserved (every movement is still a
+    // ledger row), and `play`'s up-front `assertHouseCanCover` has already
+    // ruled out short-paying a winner. Pinned by
+    // `apps/server/test/casino-lock-order.test.ts`.
     await payOwner(tx, house.propertyId, amount, `casino.${gameId}.wager`);
   }
 }
@@ -76,6 +88,11 @@ export async function settleSession(
 ): Promise<void> {
   if (payout > 0n) {
     if (house.propertyId !== null) {
+      // Return value DISCARDED for the same reason as `escrow`'s above: a
+      // house seized by `seizeOnKill` between `ownerAt` and this call answers
+      // 0n, and the payout becomes a faucet rather than a debit to a player
+      // whose row this transaction never locked. The player is paid either
+      // way — a seizure mid-hand must not cost the winner their money.
       await payOwner(tx, house.propertyId, -payout, `casino.${gameId}.payout`);
     }
     await tx.economy.applyBalanceChange({
