@@ -1652,6 +1652,50 @@ than failing (`Tests 1307 passed`, zero failures, 22 real test files at
 driving the same Postgres and Redis — isolation on this machine needs a
 separate *database*, not a separate worktree.
 
+### Weapon DPS paces the attack cooldown
+
+A small combat tweak, not a cluster: no migration, no new table, no plugin, and
+no `@gl3/shared` or `@gl3/plugin-sdk` change (item `effects` crosses the wire as
+`z.unknown()` and is parsed on each side, so a new field needs no DTO).
+
+The attack cooldown used to be one flat number for every weapon
+(`combat.cooldown_seconds`, 60). Weapons now declare `dps` in `items.effects`,
+and the cooldown is the weapon's **average** damage divided by it — 10 damage at
+1 dps waits 10 seconds, the same weapon at 0.5 dps waits 20. The average, not
+the roll, because the cooldown is claimed *before* the transaction that rolls
+damage (the ordering that denies a client a free probe of who is attackable), so
+the roll does not exist yet when the TTL must be chosen; averaging also makes a
+weapon's rhythm a property of the weapon rather than of luck.
+
+- `cooldownSecondsFor` (`packages/plugins/combat/src/cooldown.ts`) is pure with
+  respect to time and RNG, like `resolve.ts`, and tests in the no-DB
+  `@gl3/server:unit` project (`test/combat-cooldown.test.ts`).
+- **A weapon declaring no `dps` keeps the flat cooldown.** Every migrated V2
+  item is in that case — `itemEffects` has no such column — so the live game
+  paces exactly as it did. Same optional-field shape as `accuracy` and
+  `backfireChance`.
+- Two clamps, both load-bearing: a floor of 1 (Redis `SET ... EX 0` fails — the
+  `travel_cooldown_seconds = 0` crash below) and a ceiling from the new
+  `combat.cooldown_max_seconds` (3600), without which `dps: 0.001` on a
+  10-damage weapon is a near-three-hour lockout from one admin typo.
+- Fists are paced by `combat.unarmed.dps`, absent by default. It is read by a
+  new `rate()` reader because the existing `num()` **floors** — a floored 0.5 is
+  0, which reads as "unpaced".
+- The route reads the equipped weapon's pacing in its own **read-only, lock-free
+  transaction** before claiming the cooldown (`cooldownForAttacker`), since the
+  attack transaction does not load the weapon until far too late and the ctx
+  exposes no database outside a transaction. A weapon swapped between that read
+  and the shot is paced as the old weapon: accepted, and cheaper than handing
+  back the free probe.
+- `dps` is settable and visible in the inventory admin section (a `decimal`
+  form field — a `number` input's default `step="1"` refuses 0.5 — plus a table
+  column), and non-positive values 400 at the route rather than dividing by zero
+  downstream. `effects.ts` is the hand-kept verbatim copy pair, so the field
+  went into **both** `combat` and `inventory`; `test/effects-parity.test.ts`
+  enforces that.
+- Not done, deliberately: the player-facing `/inventory` and `/shop` stat lines
+  still show damage only, and `/combat` still shows no cooldown ahead of a shot.
+
 ### Installing a plugin without forking core
 
 The optional-plugin import map used to be a hand-written literal in

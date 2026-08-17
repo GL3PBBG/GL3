@@ -112,6 +112,47 @@ describe("inventory admin", () => {
       expect(res.statusCode).toBe(400);
     });
 
+    // `dps` is what paces the attack cooldown (combat's `cooldownSecondsFor`).
+    // Unreachable from the admin UI, a weapon could only ever be created
+    // unpaced — the same regression the five stats above were added for.
+    it("creates a weapon carrying a fractional dps", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: {
+          name: "Slow Cannon", itemType: "weapon",
+          damageMin: 10, damageMax: 10, dps: 0.5,
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      // 0.5, not 0 and not 1: the coercion must not round a rate of fire.
+      expect(row?.effects).toMatchObject({ dps: 0.5 });
+    });
+
+    it("treats a blank dps as absent, leaving the weapon on the flat cooldown", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: {
+          name: "Unpaced", itemType: "weapon",
+          damageMin: 5, damageMax: 9, dps: "",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).not.toHaveProperty("dps");
+    });
+
+    it("rejects a non-positive dps", async () => {
+      // Zero is a division by zero downstream; the route is where it should die.
+      for (const dps of [0, -1]) {
+        const res = await app.inject({
+          method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+          payload: { name: "Frozen", itemType: "weapon", damageMin: 1, damageMax: 2, dps },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+    });
+
     it("creates an armor item", async () => {
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items", headers: auth(),
@@ -155,7 +196,7 @@ describe("inventory admin", () => {
           name: "Lupara", itemType: "weapon",
           damageMin: 10, damageMax: 20, accuracy: 65,
           bulletsPerShot: 2, critChance: 10, critMultiplier: 1.5,
-          armorPierce: 3, minRankExp: 100,
+          armorPierce: 3, minRankExp: 100, dps: 1.5,
         },
       });
       expect(create.statusCode).toBe(201);
@@ -176,6 +217,7 @@ describe("inventory admin", () => {
         critMultiplier: "1.5",
         armorPierce: "3",
         minRankExp: "100",
+        dps: "1.5",
         armor: "",
         heal: "",
       });
