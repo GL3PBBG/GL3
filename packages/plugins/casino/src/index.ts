@@ -70,6 +70,10 @@ const lobbyRoute = route({
         .from(locations)
         .where(eq(locations.id, locationId));
 
+      // SEQUENTIAL ON PURPOSE — do not "fix" this into `Promise.all`. Every
+      // query here runs on the ONE connection this `ctx.transaction` holds, so
+      // firing them concurrently would interleave statements on a single
+      // session rather than parallelise anything.
       const houses = new Map<string, House>();
       for (const [gameId] of registry) {
         houses.set(gameId, await resolveHouse(tx, gameId, locationId, fallbackMaxBet));
@@ -473,8 +477,19 @@ function settingRow(
   ctx: PluginCtx, key: string, label: string, effective: string,
 ): { key: string; label: string; value: string; source: string } {
   const raw = ctx.settings.get(key);
-  const source = raw === null ? "default" : raw === effective ? "configured" : `ignored (${raw})`;
-  return { key, label, value: effective, source };
+  if (raw === null) return { key, label, value: effective, source: "default" };
+  // NUMERIC comparison, not string. `effective` is canonical — the readers
+  // return `BigInt(raw).toString()` / `String(Number(raw))` — while the stored
+  // row need not be: `"010000"` passes `readBigint`'s digits test and IS in
+  // force as 10000. Comparing the strings rendered `ignored (010000)`, telling
+  // an admin their live value was being ignored. The digits guard is not
+  // belt-and-braces either: it is both what makes `BigInt(raw)` safe and
+  // exactly the readers' own acceptance rule, so `ignored` now means the value
+  // really did fall back to the coded default — a malformed `"10.00"`, or a
+  // `session_expiry_minutes` of `"0"` that `readExpiryMinutes` rejects for
+  // being non-positive.
+  const inForce = /^\d+$/.test(raw) && BigInt(raw) === BigInt(effective);
+  return { key, label, value: effective, source: inForce ? "configured" : `ignored (${raw})` };
 }
 
 const adminSettingsRoute = route({

@@ -279,6 +279,75 @@ describe("casino lock ordering", () => {
     expect([aRes.statusCode, bRes.statusCode]).toEqual([200, 200]);
   }, 30_000);
 
+  it("answers 200 + a clean 409, never a 500, when ONE player fires two plays at once", async () => {
+    // THE SAME-PLAYER RACE. Every other test in this file races two DIFFERENT
+    // players; nothing anywhere raced one player against themselves, and that
+    // is the interleaving the one-open-hand rule actually lives or dies on.
+    //
+    // `play`'s open-hand pre-read takes no lock, so both requests read "no open
+    // hand" before either commits. What separates them is the FOR UPDATE
+    // re-read at the THIRD step of the lock order (spec §5's diagram: location
+    // → both players in one call → the session row): the loser acquires the
+    // player lock only after the winner commits, and READ COMMITTED gives that
+    // re-read a fresh snapshot, so it sees the winner's row and answers 409.
+    // Without it the loser reaches its INSERT and the p_casino_sessions_one_open
+    // partial index rejects it — an uncaught 23505, i.e. HTTP 500 on a
+    // well-formed request. Shown red exactly that way; see the task report.
+    //
+    // Unowned town, so the lock set is exactly {locations[L], player_stats[P]}
+    // and no house owner is involved.
+    //
+    // RETRIED, and not as a flake budget: blackjack's `start` settles a natural
+    // immediately (either side, ~1 hand in 11), and a winner who settles at
+    // deal leaves NO open hand, so the loser legitimately gets a second 200.
+    // That outcome is correct behaviour, not the case under test, so the race
+    // is re-run with fresh players until the winner's hand stays open. The
+    // no-500 assertion is checked on EVERY attempt, including the discarded
+    // ones — a 500 fails the test wherever it appears.
+    let saw409 = false;
+    for (let attempt = 0; attempt < 15 && !saw409; attempt += 1) {
+      const player = await register();
+      const locationId = await seedLocation();
+      await placePlayer(player.playerId, locationId, PLAYER_CASH);
+
+      const [first, second] = await raceTwoPlays(
+        { token: player.token, id: player.playerId },
+        { token: player.token, id: player.playerId },
+      );
+      const statuses = [first.statusCode, second.statusCode];
+
+      // THE ASSERTION. A 23505 escaping as a 500 lands here.
+      expect(statuses, `bodies: ${first.body} | ${second.body}`).not.toContain(500);
+
+      const refused = [first, second].filter((res) => res.statusCode === 409);
+      if (refused.length === 0) {
+        // Both won: the first hand settled at deal. Two settled rows, none
+        // open — the invariant still holds, so this attempt proves nothing
+        // about the 409 path and is retried.
+        expect(statuses).toEqual([200, 200]);
+        const rows = await db.select().from(casinoSessions)
+          .where(eq(casinoSessions.playerId, player.playerId));
+        expect(rows.filter((row) => row.status === "open")).toHaveLength(0);
+        continue;
+      }
+
+      saw409 = true;
+      // Exactly one of each, and the refusal is the route's own clean error.
+      expect(statuses.filter((code) => code === 200)).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect(refused[0]?.json<{ error: string }>().error).toBe("session_open");
+
+      // And the invariant the 409 protects: one hand, open, on the table.
+      const rows = await db.select().from(casinoSessions)
+        .where(eq(casinoSessions.playerId, player.playerId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("open");
+    }
+    if (!saw409) {
+      throw new Error("15 races in a row had the winner settle at deal — a shuffle bug, not a flake");
+    }
+  }, 60_000);
+
   it("deadlocks when a caller takes the player lock before the location lock", async () => {
     const player = await register();
     const locationId = await seedLocation();

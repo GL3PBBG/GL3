@@ -33,6 +33,7 @@ let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 /** The first player registered after `resetDb` becomes the Administrator. */
 let adminToken: string;
+let adminPlayerId: string;
 
 let regCounter = 0;
 
@@ -135,7 +136,9 @@ beforeAll(async () => {
   await resetDb(db);
   ({ app, close: closeServer } = await bootTestServer());
   // FIRST registration in this file, so this is the Administrator.
-  adminToken = (await register()).token;
+  const founder = await register();
+  adminToken = founder.token;
+  adminPlayerId = founder.playerId;
 });
 
 afterAll(async () => {
@@ -451,6 +454,46 @@ describe("the casino admin section", () => {
     // No settings rows are seeded, so every one of them is the coded default.
     expect(rows.map((row) => row.value)).toEqual(["10000", "10000000", "30"]);
     expect(rows.map((row) => row.source)).toEqual(["default", "default", "default"]);
+  });
+
+  it("calls a non-canonical numeric setting configured, and only a real fallback ignored", async () => {
+    // `source` exists to tell an admin whether the row they stored is actually
+    // in force. Both readers accept any digits-only string, so "010000" IS in
+    // force as 10000 — reporting it as ignored would be a false alarm about
+    // live configuration, which is worse than no column at all.
+    //
+    // Driven through `callPluginRoute` rather than `app.inject`: settings are
+    // read ONCE at boot (`settings/load.ts`), so a row inserted now would not
+    // reach the booted app. The helper takes the record directly, keyed the
+    // way the real ctx keys it (`<pluginId>.<key>`).
+    const result = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+      settings: {
+        "casino.min_bet": "010000",                 // non-canonical, accepted
+        "casino.max_bet": "10.00",                  // malformed, really ignored
+        "casino.session_expiry_minutes": "045",     // non-canonical, accepted
+      },
+    });
+    expect(result.status).toBe(200);
+    const rows = (result.body as { rows: { key: string; value: string; source: string }[] }).rows;
+    const by = (key: string) => rows.find((row) => row.key === key);
+
+    // In force as 10000: the value shown is canonical, the source is honest.
+    expect(by("min_bet")).toMatchObject({ value: "10000", source: "configured" });
+    expect(by("session_expiry_minutes")).toMatchObject({ value: "45", source: "configured" });
+    // The genuine fallback still reads as one, with the offending text so an
+    // admin can find the row.
+    expect(by("max_bet")).toMatchObject({ value: "10000000", source: "ignored (10.00)" });
+
+    // A value the reader rejects for being out of range, not for its shape:
+    // `readExpiryMinutes` requires > 0, so "0" falls back to 30.
+    const zero = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino/settings", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+      settings: { "casino.session_expiry_minutes": "0" },
+    });
+    const zeroRows = (zero.body as { rows: { key: string; value: string; source: string }[] }).rows;
+    expect(zeroRows.find((row) => row.key === "session_expiry_minutes"))
+      .toMatchObject({ value: "30", source: "ignored (0)" });
   });
 
   it("lists open hands, marking the stale ones", async () => {
