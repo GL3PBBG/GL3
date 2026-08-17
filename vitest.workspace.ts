@@ -75,6 +75,9 @@ const srcAliases = {
       "@gl3/plugin-casino": fileURLToPath(
         new URL("./packages/plugins/casino/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-blackjack": fileURLToPath(
+        new URL("./packages/plugins/blackjack/src/index.ts", import.meta.url),
+      ),
     },
   },
 };
@@ -220,6 +223,7 @@ export default defineWorkspace([
         "test/theft-resolve.test.ts",
         "test/property-type-registry.test.ts",
         "test/casino-registry.test.ts",
+        "test/blackjack-rules.test.ts",
       ],
     },
     ...srcAliases,
