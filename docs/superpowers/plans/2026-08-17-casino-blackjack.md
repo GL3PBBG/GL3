@@ -141,15 +141,26 @@ Add next to the other leaves in `leafOptions` (the array beginning at the `text`
     .strict(),
 ```
 
-- [ ] **Step 4: Add `cards` to the `ViewNode` type union**
+- [ ] **Step 4: Update the counts in the comments — and add NOTHING to the `ViewNode` union**
 
-In the `export type ViewNode =` block, add the member alongside the other non-nesting kinds:
+`ViewNode` is `z.infer<typeof Leaf> | { panel } | { list }`, and `Leaf` is a
+`discriminatedUnion` over `leafOptions`. Step 3 put `cards` in `leafOptions`, so
+the type union **already contains it by inference**. Do not add a hand-written
+`| { kind: "cards"; cards: string[] }` member: no other leaf kind has one — only
+`panel` and `list` are written by hand, because they recurse into `ViewNode[]`
+and cannot come from `Leaf` — and an explicit entry would contradict the comment
+directly above it.
 
-```ts
-  | { kind: "cards"; cards: string[] }
-```
+Update three stale counts instead:
 
-Then update the type-level comment above it — it currently reads "its nine non-nesting members"; it is now **ten**.
+- the type-level comment above `Leaf`: "its nine non-nesting members" → **ten**
+- the file header: "eleven node kinds" → **twelve**, and "Nine of the eleven are
+  leaves" → "Ten of the twelve"
+- the `discriminatedUnion` comment further down: "over all eleven kinds" →
+  **twelve**
+
+All three are the same drift, and fixing only some of them in the commit that
+causes it is how the stale ones survive.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
