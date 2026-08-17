@@ -1,5 +1,7 @@
+import { eq } from "drizzle-orm";
 import { PluginError, type PluginTx } from "@gl3/plugin-sdk";
 import { ownerAt, payOwner } from "@gl3/plugin-properties";
+import { casinoSessions } from "./schema.js";
 
 export interface House {
   /** Null in a town nobody owns: escrow is a sink and payout a faucet. */
@@ -58,4 +60,29 @@ export async function escrow(
   if (house.propertyId !== null) {
     await payOwner(tx, house.propertyId, amount, `casino.${gameId}.wager`);
   }
+}
+
+/**
+ * Pays the player and debits the house, then closes the session. The wager was
+ * escrowed at `play` (V2 blackjack.inc.php:297) so the net across a hand is
+ * correct without a second bookkeeping concept: a push returns the wager, a
+ * loss returns nothing and the house keeps it. V2 :406 is the debit. Caller
+ * (`act`, and Task 8's lazy forfeit) is responsible for persisting `state`
+ * and any `wager` raise beforehand — this only writes `status`/`settledAt`.
+ */
+export async function settleSession(
+  tx: PluginTx, sessionId: string, playerId: string, gameId: string,
+  house: House, payout: bigint,
+): Promise<void> {
+  if (payout > 0n) {
+    if (house.propertyId !== null) {
+      await payOwner(tx, house.propertyId, -payout, `casino.${gameId}.payout`);
+    }
+    await tx.economy.applyBalanceChange({
+      playerId, amount: payout, kind: "cash", reason: `casino.${gameId}.payout`,
+    });
+  }
+  await tx.db.update(casinoSessions)
+    .set({ status: "settled", settledAt: new Date() })
+    .where(eq(casinoSessions.id, sessionId));
 }
