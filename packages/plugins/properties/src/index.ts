@@ -7,7 +7,7 @@ import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { seizeOnKill } from "./seizure.js";
 
-export { ownerAt, payOwner, type PropertyOwnership } from "./api.js";
+export { ownerAt, payOwner, takeOverFrom, type PropertyOwnership } from "./api.js";
 export { propertiesTable } from "./schema.js";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,21 @@ const listRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
 
     return ctx.transaction(async (tx) => {
+      // The page is the town's property board, not the world's: only the
+      // location the caller is standing in is listed. A property the caller
+      // owns elsewhere is therefore NOT listed — its lever/transfer/drop/reset
+      // routes still work (they are not location-gated), but reaching them
+      // means travelling back. Deliberate.
+      const [stats] = await tx.db
+        .select({ locationId: playerStats.locationId })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      // `location_id` is nullable and a stats row can be missing; a player who
+      // is nowhere sees no board rather than an error — this is a read, and
+      // `buyRoute` already owns the 409 for acting without a location.
+      const here = stats?.locationId ?? null;
+      if (here === null) return { status: 200, body: { rows: [] } };
+
       const rows = await tx.db
         .select({
           id: propertiesTable.id,
@@ -47,7 +62,8 @@ const listRoute = route({
         })
         .from(propertiesTable)
         .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
-        .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
+        .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId))
+        .where(eq(propertiesTable.locationId, here));
 
       const realRows = rows.map((row) => {
         const decl = ctx.propertyTypes.get(row.pluginId);
@@ -76,10 +92,13 @@ const listRoute = route({
       // pair the query above did not already return, so every buyable
       // franchise is listed even before its first sale.
       const covered = new Set(rows.map((row) => `${row.locationId}:${row.pluginId}`));
-      const allLocations = await tx.db.select({ id: locations.id, name: locations.name }).from(locations);
+      const hereRows = await tx.db
+        .select({ id: locations.id, name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, here));
       const syntheticRows: (typeof realRows)[number][] = [];
       for (const decl of ctx.propertyTypes.list()) {
-        for (const loc of allLocations) {
+        for (const loc of hereRows) {
           if (covered.has(`${loc.id}:${decl.id}`)) continue;
           syntheticRows.push({
             // Composite, not a uuid — deliberately: nothing may treat this as
@@ -376,8 +395,20 @@ const transferRoute = route({
   },
 });
 
-/** V2's `method_drop`/`method_dropDo`: a DELETE with no refund. GL3 keeps the
- *  row and unowns it, so its lifetime P&L survives its owners. */
+/** Half the declared price, rounded DOWN, and 0n for a type that is no longer
+ *  installed — there is no declared price to halve, and a property row stores
+ *  no record of what its owner paid. Exported so the page's warning and the
+ *  route quote the same figure. */
+export function dropRefund(price: bigint | null): bigint {
+  return price === null ? 0n : price / 2n;
+}
+
+/** V2's `method_drop`/`method_dropDo` is a DELETE with NO refund; GL3 pays
+ *  half the declared price back, so a franchise is a partial sink rather than
+ *  a total loss. The row is kept and unowned rather than deleted, so its
+ *  lifetime P&L survives its owners. The page warns first (`Properties.tsx`),
+ *  but the refund is the server's figure — `dropRefund` above is the one
+ *  definition both quote. */
 const dropRoute = route({
   method: "POST",
   path: "/api/properties/:id/drop",
@@ -388,7 +419,7 @@ const dropRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    await ctx.transaction(async (tx) => {
+    const refund = await ctx.transaction(async (tx) => {
       const row = await loadOwnedRow(tx, params.id, player.id);
       await tx.db
         .update(propertiesTable)
@@ -399,15 +430,30 @@ const dropRoute = route({
         .select({ name: locations.name }).from(locations).where(eq(locations.id, row.locationId));
       const decl = ctx.propertyTypes.get(row.pluginId);
 
+      // Paid AFTER the row is unowned, inside the same transaction: the row is
+      // already locked by `loadOwnedRow`, so nothing can buy it back and be
+      // refunded twice. Rule 3 — one ledger row, bigint throughout.
+      const paid = dropRefund(decl?.price ?? null);
+      if (paid > 0n) {
+        await tx.economy.applyBalanceChange({
+          playerId: player.id, amount: paid, kind: "cash", reason: "properties.drop.refund",
+        });
+      }
+
       await tx.events.publish({
         name: "dropped",
         actorId: player.id,
         actorName: player.username,
         audience: { kind: "player", playerId: player.id },
-        payload: { typeName: decl?.name ?? row.pluginId, locationName: loc?.name ?? "" },
+        payload: {
+          typeName: decl?.name ?? row.pluginId,
+          locationName: loc?.name ?? "",
+          refund: paid.toString(),
+        },
       });
+      return paid;
     });
-    return { status: 204 };
+    return { status: 200, body: { refund: refund.toString() } };
   },
 });
 
@@ -679,8 +725,8 @@ const boughtEvent = {
 
 const droppedEvent = {
   name: "dropped",
-  payload: z.object({ typeName: z.string(), locationName: z.string() }),
-  describe: "{actorName} dropped the {typeName} in {locationName}",
+  payload: z.object({ typeName: z.string(), locationName: z.string(), refund: z.string() }),
+  describe: "{actorName} dropped the {typeName} in {locationName} for {refund} back",
   invalidates: ["properties", "me"],
 };
 

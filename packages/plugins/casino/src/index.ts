@@ -238,6 +238,32 @@ const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer 
  *  pays nothing, and `settleSession` reaches `payOwner` only for a payout. */
 const NO_HOUSE: House = { propertyId: null, ownerId: null, maxBet: 0n };
 
+/** What the winner is told when the table changes hands. Exported so the page
+ *  and the tests quote the one string rather than three copies of it. */
+export const HOUSE_SEIZED_MESSAGE =
+  "The owner did not have enough cash to pay the bet, you took ownership of the casino.";
+
+/**
+ * Both sides of a bankruptcy takeover, told by NOTIFICATION rather than by a
+ * plugin event: casino publishes no event per hand (one per blackjack hand
+ * floods the feed) and a takeover is still a hand. `tx.notify` also reaches
+ * the OLD owner, who is not the actor and would never see a player-audience
+ * event.
+ *
+ * Called after `settleSession` returned true, inside the same transaction, so
+ * a rollback takes the notification with the handover.
+ */
+async function notifyTakeover(
+  tx: PluginTx, house: House, winner: { id: string; username: string }, gameName: string,
+): Promise<void> {
+  await tx.notify(winner.id, HOUSE_SEIZED_MESSAGE);
+  if (house.ownerId === null) return;
+  await tx.notify(
+    house.ownerId,
+    `${winner.username} took over your ${gameName} table — you could not cover their winnings.`,
+  );
+}
+
 const PlayBodySchema = z.object({
   gameId: z.string().min(1).max(80),
   wager: NonNegativeIntegerString,
@@ -380,12 +406,13 @@ const playRoute = route({
       if (step.done) {
         // V2 blackjack.inc.php:406 is the payout debit.
         const payout = resolvePayout(game, step.state, wager);
-        await settleSession(tx, sessionId, player.id, body.gameId, house, payout);
+        const seized = await settleSession(tx, sessionId, player.id, body.gameId, house, payout);
+        if (seized) await notifyTakeover(tx, house, player, game.name);
         return {
           status: 200,
           body: {
             sessionId, view: step.view, done: true,
-            wager: wager.toString(), payout: payout.toString(),
+            wager: wager.toString(), payout: payout.toString(), houseSeized: seized,
           },
         };
       }
@@ -524,12 +551,13 @@ const actRoute = route({
 
       if (step.done) {
         const payout = resolvePayout(game, step.state, wager);
-        await settleSession(tx, pre.id, player.id, pre.gameId, house, payout);
+        const seized = await settleSession(tx, pre.id, player.id, pre.gameId, house, payout);
+        if (seized) await notifyTakeover(tx, house, player, game.name);
         return {
           status: 200,
           body: {
             sessionId: pre.id, view: step.view, done: true,
-            wager: wager.toString(), payout: payout.toString(),
+            wager: wager.toString(), payout: payout.toString(), houseSeized: seized,
           },
         };
       }

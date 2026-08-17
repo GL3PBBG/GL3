@@ -52,6 +52,53 @@ export async function ownerAt(
 }
 
 /**
+ * Hand `propertyId` to `newOwnerId`, but ONLY if `expectedOwnerId` still owns
+ * it. Answers whether the handover happened.
+ *
+ * The bankruptcy takeover: a consumer that could not collect what the owner
+ * owes (casino's `settleSession`, where `payOwner`'s clamp short-paid a
+ * winner) takes the franchise instead of the money. It is a properties concern
+ * rather than the consumer's because the ownership column is this plugin's,
+ * and every guard that makes the move safe lives here.
+ *
+ * REFUSES three cases, each by answering `false` rather than throwing — a hand
+ * that has already paid out must not roll back because the table changed
+ * hands:
+ *  - the row is gone, or is unowned. "The unowned house cannot go bankrupt":
+ *    it is a faucet with no cash to run out of, so there is nothing to seize.
+ *  - somebody other than `expectedOwnerId` owns it now (a transfer, or
+ *    `seizeOnKill`, landed between the consumer's read and this call). The
+ *    new owner was never the one who failed to pay.
+ *  - `expectedOwnerId === newOwnerId`: nobody takes their own table over.
+ *
+ * `cost` is zeroed with the move, exactly as `transfer` and `drop` do — a
+ * lever is the owner's setting and does not survive the owner.
+ *
+ * LOCK ORDER (rule 6). Takes the property row `FOR UPDATE` and nothing else.
+ * The caller MUST already hold both players in ONE sorted `tx.locks.player`
+ * call (casino does: `[player, owner]`), because the balance movement that
+ * discovered the shortfall touched both.
+ */
+export async function takeOverFrom(
+  tx: PluginTx, propertyId: string, expectedOwnerId: string, newOwnerId: string,
+): Promise<boolean> {
+  if (expectedOwnerId === newOwnerId) return false;
+
+  const [row] = await tx.db
+    .select({ ownerPlayerId: propertiesTable.ownerPlayerId })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId))
+    .for("update");
+  if (row === undefined || row.ownerPlayerId !== expectedOwnerId) return false;
+
+  await tx.db
+    .update(propertiesTable)
+    .set({ ownerPlayerId: newOwnerId, cost: 0n })
+    .where(eq(propertiesTable.id, propertyId));
+  return true;
+}
+
+/**
  * Credit (`amount > 0`) or debit (`amount < 0`) the property's owner and move
  * `profit` by the amount actually moved. Returns that amount — a debit is
  * clamped to the owner's cash, so `profit` never claims a loss the ledger did

@@ -27,15 +27,33 @@ function isValidLever(raw: string): boolean {
   return /^\d+$/.test(raw);
 }
 
+/**
+ * Half the declared price, floored — the same figure the server pays back
+ * (`dropRefund` in the properties plugin). `""` price means the declaring
+ * plugin is not installed, so there is no price to halve and the refund is
+ * nothing; the warning still has to say so, which is why this answers "0"
+ * rather than refusing.
+ */
+export function dropRefundOf(price: string): string {
+  if (!/^\d+$/.test(price)) return "0";
+  return (BigInt(price) / 2n).toString();
+}
+
 function OwnedControls({
-  propertyId, leverLabel, lever, profit,
-}: { propertyId: string; leverLabel: string; lever: string; profit: string }): JSX.Element {
+  propertyId, leverLabel, lever, profit, price,
+}: {
+  propertyId: string; leverLabel: string; lever: string; profit: string; price: string;
+}): JSX.Element {
   const setLever = useSetLever(propertyId);
   const transfer = useTransferProperty(propertyId);
   const drop = useDropProperty(propertyId);
   const reset = useResetProperty(propertyId);
   const [leverValue, setLeverValue] = useState(lever);
   const [username, setUsername] = useState("");
+  // Dropping is irreversible and pays back only half, so the first click asks
+  // rather than acts. Two-step in the row, not `window.confirm` — nothing else
+  // in this app opens a native dialog.
+  const [confirmingDrop, setConfirmingDrop] = useState(false);
   const validLever = isValidLever(leverValue);
   const validUsername = username.length >= 1;
 
@@ -72,9 +90,25 @@ function OwnedControls({
       >
         Transfer
       </button>
-      <button type="button" disabled={drop.isPending} onClick={() => drop.mutate()}>
-        Drop
-      </button>
+      {confirmingDrop ? (
+        <>
+          <span className={styles.meta}>
+            Drop it for good? You get back <Money value={dropRefundOf(price)} /> — half its price.
+          </span>
+          <button
+            type="button"
+            disabled={drop.isPending}
+            onClick={() => drop.mutate(undefined, { onSettled: () => { setConfirmingDrop(false); } })}
+          >
+            Confirm drop
+          </button>
+          <button type="button" onClick={() => { setConfirmingDrop(false); }}>Cancel</button>
+        </>
+      ) : (
+        <button type="button" disabled={drop.isPending} onClick={() => { setConfirmingDrop(true); }}>
+          Drop
+        </button>
+      )}
       <button type="button" disabled={reset.isPending} onClick={() => reset.mutate()}>
         Reset
       </button>
@@ -95,7 +129,11 @@ export function Properties(): JSX.Element {
 
   return (
     <Panel title="Properties">
-      <h3 className={styles.meta}>World properties</h3>
+      {/* The server lists only the caller's current location, so every row
+          carries the same town name — take it from the first row. */}
+      <h3 className={styles.meta}>
+        {rows[0]?.locationName ? `Properties in ${rows[0].locationName}` : "Properties here"}
+      </h3>
       {rows.length === 0 ? (
         <p className={styles.meta}>No properties available.</p>
       ) : (
@@ -129,6 +167,7 @@ export function Properties(): JSX.Element {
                     leverLabel={action.leverLabel}
                     lever={action.lever}
                     profit={action.profit}
+                    price={row.price}
                   />
                 ) : null}
                 <ErrorText error={buy.isError && buyingThisRow ? buy.error : undefined} />

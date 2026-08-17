@@ -149,21 +149,31 @@ describe("properties routes", () => {
   // unreachable from the UI on a fresh install. Placed here, before the
   // first buy below, specifically so no real property row exists yet: this
   // is the "table ships empty" case the synthesis exists for.
-  it("synthesizes a buyable row for every declared type at every location with no real row", async () => {
+  it("synthesizes a buyable row for every declared type at the caller's own location only", async () => {
     const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
     expect(res.statusCode).toBe(200);
     const rows = res.json<{ rows: { pluginId: string; locationId: string; ownerName: string; price: string }[] }>().rows;
 
-    // bullets is the only declared type in this boot; three locations were
-    // seeded in beforeAll — one synthetic row per (bullets, location) pair.
+    // bullets is the only declared type in this boot, and three locations were
+    // seeded in beforeAll — but the list is the current town's board, so only
+    // the (bullets, here) pair is synthesized, not one per location.
     const bulletsRows = rows.filter((r) => r.pluginId === "bullets");
-    expect(bulletsRows.map((r) => r.locationId).sort()).toEqual(
-      [locationId, otherLocationId, freshLocationId].sort(),
-    );
+    expect(bulletsRows.map((r) => r.locationId)).toEqual([locationId]);
     for (const row of bulletsRows) {
       expect(row.ownerName).toBe("—");
       expect(row.price).toBe("100000000");
     }
+  });
+
+  // The bug this replaced: listRoute selected every row in the table and
+  // synthesized one per (type × EVERY location), so the page was a world
+  // board. Red against the pre-fix handler, which returned all three towns.
+  it("lists no row for a location the caller is not in", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json<{ rows: { locationId: string }[] }>().rows;
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.locationId === locationId)).toBe(true);
   });
 
   it("creates the row on first purchase and charges the declared price", async () => {
@@ -281,13 +291,17 @@ describe("properties routes", () => {
     expect(res.json<{ error: string }>().error).toBe("player_not_found");
   });
 
-  it("drops a property with no refund", async () => {
+  // V2's drop is a DELETE with no refund. GL3 pays half the declared price
+  // back instead, so a franchise is a partial sink rather than a total loss —
+  // the price here is 100_000_000n, so the refund is 50_000_000n exactly.
+  it("drops a property and refunds half its declared price", async () => {
     const before = await cashOf(otherPlayerId);
     const res = await app.inject({
       method: "POST", url: `/api/properties/${propertyId}/drop`, headers: otherPlayerHeaders,
     });
-    expect(res.statusCode).toBe(204);
-    expect(await cashOf(otherPlayerId)).toBe(before); // no refund: V2 DELETEs
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ refund: string }>().refund).toBe("50000000");
+    expect(await cashOf(otherPlayerId)).toBe(before + 50_000_000n);
     const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
     expect(row!.ownerPlayerId).toBeNull();
     expect(row!.cost).toBe(0n);
