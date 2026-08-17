@@ -606,6 +606,59 @@ describe("the casino admin section", () => {
     expect(await expiryRow("525600")).toMatchObject({ value: "525600", source: "configured" });
   });
 
+  it("keeps the Open-hands stale column computing under an absurd expiry setting", async () => {
+    // THE FOURTH CALL SITE. `adminSessionsRoute` builds its cutoff from
+    // `readExpiryMinutes` too, and before the clamp a ~309+ digit row made
+    // `new Date(Date.now() - Infinity * 60_000)` an Invalid Date, which
+    // compares false against everything — so the cutoff was not a date at all.
+    //
+    // WHAT THIS CANNOT PROVE, measured rather than assumed. The clamp does not
+    // change this column's OUTPUT for any row a real system holds: an Invalid
+    // cutoff answers "no" for every hand, and a valid cutoff a century back
+    // answers "no" for every hand too, because nothing is a century old. Only
+    // a `created_at` before ~1926 separates them, and this stack cannot store
+    // one — postgres.js returns an Invalid Date for a pre-1950 `timestamptz`
+    // here, since Postgres renders those with a sub-minute LMT offset
+    // (`1900-06-01 00:19:32+00:19:32`) that its parser rejects. So this test is
+    // green-only by construction; reverting the clamp does not turn it red.
+    // See the task report.
+    //
+    // WHAT IT DOES PIN: the column is computed from the setting rather than
+    // hardwired, and an absurd expiry means "nothing is stale" — which is the
+    // correct reading — instead of a 500 or a blind answer.
+    const punter = await register();
+    const locationId = await seedLocation();
+    await placePlayer(punter.playerId, locationId, 1_000_000n);
+    await db.insert(casinoSessions).values({
+      id: uuidv7(),
+      playerId: punter.playerId,
+      gameId: "blackjack",
+      locationId,
+      propertyId: null,
+      wager: 111_000n,
+      state: {},
+      status: "open",
+      seed: "stale-column",
+      createdAt: new Date(Date.now() - 90 * 60_000),
+    });
+
+    const staleOf = async (expiry: string): Promise<string | undefined> => {
+      const res = await callPluginRoute(casinoPlugin, "GET", "/api/admin/casino", {
+        db, redis, leaderboardPrefix: "casino-lobby-test", playerId: adminPlayerId,
+        settings: { "casino.session_expiry_minutes": expiry },
+      });
+      expect(res.status, `expiry: ${expiry.slice(0, 12)}`).toBe(200);
+      return (res.body as { rows: { player: string; stale: string }[] }).rows
+        .find((row) => row.player === punter.username)?.stale;
+    };
+
+    // The SAME 90-minute-old hand, read under two settings. Same row, same
+    // route: only the setting differs, so the column demonstrably comes from
+    // the reader rather than from a constant.
+    expect(await staleOf("30")).toBe("yes");
+    expect(await staleOf("9".repeat(400))).toBe("no");
+  });
+
   it("lists open hands, marking the stale ones", async () => {
     const punter = await register();
     const locationId = await seedLocation();
