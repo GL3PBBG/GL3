@@ -23,7 +23,7 @@ export const adminPage: PageSchema = {
       ] },
       { kind: "form", action: "POST /api/admin/properties/update", submitLabel: "Update property", fields: [
         { name: "id", label: "Property", type: "select",
-          optionsSource: "GET /api/admin/properties", valueKey: "id", labelKey: "locationName" },
+          optionsSource: "GET /api/admin/properties", valueKey: "id", labelKey: "label" },
         { name: "pluginId", label: "Type (optional)", type: "select",
           optionsSource: "GET /api/admin/properties/types", valueKey: "pluginId", labelKey: "name", allowEmpty: true },
         { name: "cost", label: "Lever", type: "money" },

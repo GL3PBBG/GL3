@@ -33,6 +33,7 @@ let closeServer: () => Promise<void>;
 
 let playerId: string;
 let playerHeaders: { authorization: string };
+let playerUsername: string;
 let startingCash: bigint;
 
 let otherPlayerId: string;
@@ -88,6 +89,7 @@ beforeAll(async () => {
   const owner = await register();
   playerId = owner.playerId;
   playerHeaders = { authorization: `Bearer ${owner.token}` };
+  playerUsername = owner.username;
 
   const other = await register();
   otherPlayerId = other.playerId;
@@ -140,6 +142,30 @@ describe("properties routes", () => {
     expect(res.json<{ error: string }>().error).toBe("wrong_location");
   });
 
+  // Fix 2 of the final review pass: the row is created lazily on first
+  // purchase (buyRoute's own doc comment), but listRoute used to select
+  // `from(propertiesTable)` and return only rows that already exist — so a
+  // franchise nobody had bought yet had no list entry and no Buy button,
+  // unreachable from the UI on a fresh install. Placed here, before the
+  // first buy below, specifically so no real property row exists yet: this
+  // is the "table ships empty" case the synthesis exists for.
+  it("synthesizes a buyable row for every declared type at every location with no real row", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json<{ rows: { pluginId: string; locationId: string; ownerName: string; price: string }[] }>().rows;
+
+    // bullets is the only declared type in this boot; three locations were
+    // seeded in beforeAll — one synthetic row per (bullets, location) pair.
+    const bulletsRows = rows.filter((r) => r.pluginId === "bullets");
+    expect(bulletsRows.map((r) => r.locationId).sort()).toEqual(
+      [locationId, otherLocationId, freshLocationId].sort(),
+    );
+    for (const row of bulletsRows) {
+      expect(row.ownerName).toBe("—");
+      expect(row.price).toBe("100000000");
+    }
+  });
+
   it("creates the row on first purchase and charges the declared price", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/properties/buy", headers: playerHeaders,
@@ -149,6 +175,20 @@ describe("properties routes", () => {
     ({ propertyId } = res.json<{ propertyId: string }>());
     expect(propertyId).toBeTruthy();
     expect(await cashOf(playerId)).toBe(startingCash - 100_000_000n);
+  });
+
+  // The assertion that actually matters: once a real row exists for a
+  // (location, type) pair, the synthesis in listRoute must not ALSO emit a
+  // synthetic row alongside it — this fails if the `covered` dedupe key
+  // (`${locationId}:${pluginId}`) does not match the real row's own
+  // location/plugin, e.g. from a typo or a stale key shape.
+  it("lists the now-owned property exactly once, not duplicated by the synthesis", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json<{ rows: { pluginId: string; locationId: string; ownerName: string }[] }>().rows;
+    const matches = rows.filter((r) => r.pluginId === "bullets" && r.locationId === locationId);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.ownerName).toBe(playerUsername);
   });
 
   it("refuses a second buy of the same type in the same town", async () => {
