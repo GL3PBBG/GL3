@@ -43,20 +43,21 @@ describe("checkWager", () => {
 });
 
 describe("handActions", () => {
-  it("offers Double only on a freshly dealt, unplayed hand", () => {
-    expect(handActions("dealt", 0)).toEqual(["hit", "stand", "double"]);
+  it("offers Double on an unplayed hand", () => {
+    expect(handActions(0)).toEqual(["hit", "stand", "double"]);
   });
 
   it("withdraws Double once the hand has been acted on", () => {
-    // blackjack's `act` throws a plain Error (a 500, not a clean refusal) on a
-    // double past the opening two cards.
-    expect(handActions("dealt", 1)).toEqual(["hit", "stand"]);
+    // blackjack accepts a double only on the opening two cards.
+    expect(handActions(1)).toEqual(["hit", "stand"]);
   });
 
-  it("withdraws Double on a hand resumed from the lobby", () => {
+  it("still offers Double on a hand resumed from the lobby", () => {
     // The card count is not knowable from an opaque ViewNode, so a resumed
-    // hand is treated as already in progress.
-    expect(handActions("resumed", 0)).toEqual(["hit", "stand"]);
+    // hand may or may not be doubleable — the server now answers a clean 400
+    // when it is not, which is why this is no longer withheld. A resumed hand
+    // enters with no acts recorded, exactly like a dealt one.
+    expect(handActions(0)).toEqual(["hit", "stand", "double"]);
   });
 });
 
@@ -72,7 +73,6 @@ describe("the hand on screen", () => {
     done: false,
     payout: null,
     expiresAt: null,
-    source: "dealt",
     actsTaken: 0,
   };
 
@@ -81,7 +81,6 @@ describe("the hand on screen", () => {
       { sessionId: SESSION, view, done: false, wager: "25000" }, "Blackjack",
     );
     expect(hand.stake).toBe("25000");
-    expect(hand.source).toBe("dealt");
     expect(hand.payout).toBeNull();
   });
 
@@ -107,13 +106,13 @@ describe("the hand on screen", () => {
   it("counts the act, which is what withdraws Double", () => {
     const hit = advanceHand(opened, { sessionId: SESSION, view, done: false, wager: "25000" });
     expect(hit.actsTaken).toBe(1);
-    expect(handActions(hit.source, hit.actsTaken)).toEqual(["hit", "stand"]);
+    expect(handActions(hit.actsTaken)).toEqual(["hit", "stand"]);
   });
 
-  it("carries `source` across a step — it is a fact about the hand, not the step", () => {
-    const resumed: LiveHand = { ...opened, source: "resumed" };
-    expect(advanceHand(resumed, { sessionId: SESSION, view, done: false, wager: "25000" }).source)
-      .toBe("resumed");
+  it("carries `expiresAt` across a step — it is a fact about the hand, not the step", () => {
+    const resumed: LiveHand = { ...opened, expiresAt: "2026-08-17T15:12:03.114Z" };
+    expect(advanceHand(resumed, { sessionId: SESSION, view, done: false, wager: "25000" }).expiresAt)
+      .toBe("2026-08-17T15:12:03.114Z");
   });
 });
 

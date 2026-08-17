@@ -43,20 +43,20 @@ export type HandAction = "hit" | "stand" | "double";
 /**
  * Which controls a hand offers.
  *
- * Hit and Stand are always available on an open hand. Double is not: it raises
- * the wager, and blackjack accepts it only on the opening two cards — after
- * which `GameDef.act` throws a plain `Error`, which is a 500 rather than a
- * clean refusal. The hub's `view` is game-agnostic (it is an opaque `ViewNode`
- * the page walks but does not interpret), so the page cannot read a card count
- * out of it to decide.
+ * Hit and Stand are always available on an open hand. Double raises the wager,
+ * and blackjack accepts it only on the opening two cards — so the page
+ * withdraws it once it has seen an act on this hand.
  *
- * So Double is offered on exactly the state where the opening two cards are
- * certain: a hand THIS page dealt and has not yet acted on. A hand resumed from
- * the lobby after a reload offers Hit and Stand only — conservative, because
- * the alternative is a button that can 500.
+ * It does NOT withdraw it on a hand resumed after a reload, though the page
+ * cannot know how many cards that hand holds: the hub's `view` is an opaque
+ * `ViewNode` it walks but does not interpret. This page used to treat every
+ * resumed hand as already in progress, because an illegal double reached
+ * `GameDef.act`'s plain `throw` and came back a 500. It now comes back a clean
+ * 400 the page shows like any other refusal, so the conservative branch cost a
+ * legal Double on every resumed hand and bought nothing.
  */
-export function handActions(source: "dealt" | "resumed", actsTaken: number): readonly HandAction[] {
-  return source === "dealt" && actsTaken === 0 ? ["hit", "stand", "double"] : ["hit", "stand"];
+export function handActions(actsTaken: number): readonly HandAction[] {
+  return actsTaken === 0 ? ["hit", "stand", "double"] : ["hit", "stand"];
 }
 
 const ACTION_LABELS: Readonly<Record<HandAction, string>> = {
@@ -82,7 +82,6 @@ export interface LiveHand {
   readonly done: boolean;
   readonly payout: string | null;
   readonly expiresAt: string | null;
-  readonly source: "dealt" | "resumed";
   readonly actsTaken: number;
 }
 
@@ -95,7 +94,6 @@ function resumedHand(session: CasinoSessionView): LiveHand {
     done: false,
     payout: null,
     expiresAt: session.expiresAt,
-    source: "resumed",
     actsTaken: 0,
   };
 }
@@ -111,7 +109,6 @@ export function dealtHand(step: CasinoStepResponse, gameName: string): LiveHand 
     done: step.done,
     payout: step.payout ?? null,
     expiresAt: null,
-    source: "dealt",
     actsTaken: 0,
   };
 }
@@ -121,8 +118,8 @@ export function dealtHand(step: CasinoStepResponse, gameName: string): LiveHand 
  * doubled hand show the doubled figure rather than the one it opened with —
  * the number a blackjack player watches hardest.
  *
- * `source` and `expiresAt` are carried over: whether the page dealt this hand
- * is a fact about the hand, not about the step, and `handActions` reads it.
+ * `expiresAt` is carried over: when the hand times out is a fact about the
+ * hand, not about the step.
  */
 export function advanceHand(current: LiveHand, step: CasinoStepResponse): LiveHand {
   return {
@@ -265,7 +262,7 @@ export function Casino(): JSX.Element {
           </>
         ) : (
           <div className={styles.actions}>
-            {handActions(active.source, active.actsTaken).map((action) => (
+            {handActions(active.actsTaken).map((action) => (
               <button
                 key={action}
                 type="button"
