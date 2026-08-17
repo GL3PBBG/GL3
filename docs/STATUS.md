@@ -1909,6 +1909,34 @@ weapon's rhythm a property of the weapon rather than of luck.
   confidently wrong at the edges.
 - Not done, deliberately: `/combat` still shows no cooldown ahead of a shot.
 
+**The merge gate, and the two things it took to get an honest number.** The
+branch was cut from `8dfb995` and sat **47 commits behind** by the time it was
+ready — the whole casino cluster landed on `main` in between. Gating the branch
+as it stood would have graded code nobody was going to ship, so `main` was
+merged *into* the branch first (`35c8ba7`; conflicts in `package-lock.json`,
+where the branch carried stale `plugin-sdk 0.1.1` / `shared 0.1.5` echoes
+against `main`'s `0.1.3` / `0.1.6`, and in this file, where both sides appended
+a section at the same line). `vitest.workspace.ts` auto-merged and kept both
+sides' `include` entries, which is the one auto-merge worth re-reading by hand —
+a lost line there is silent (see the ninth registration site in `CLAUDE.md`).
+
+A bare `npm run verify` on `35c8ba7` then **exited 0**: `Test Files 196 passed
+(196)`, `Tests 1526 passed (1526)`, `Type Errors no errors`, no unhandled
+rejections. The only `(0 test)` entries are `@gl3/plugin-sdk`'s two
+`.test-d.ts` typecheck-only files, which have no runtime cases by construction —
+so no void files and no cross-talk. The counts are higher than the branch's own
+~183 files / ~1400 tests precisely because the merge pulled `main`'s casino
+tests in, which is the point of gating the merge rather than the branch.
+
+The run *before* it exited 1 with **36 failures across 25 files, every one of
+them `@gl3/migrate`**, and none of them real: `MYSQL_ADMIN_URL` was not exported
+alongside `DATABASE_URL` and `REDIS_URL`, so `requireEnv`
+(`apps/migrate/test/helpers/fixtures.ts:19`) threw in each file's fixture setup.
+`CLAUDE.md` already warned that this "reads like 36 real failures"; it is now on
+record that it reads that way even to someone who has read the warning. The
+tell is the shape — a whole project failing as a block, at setup, with one
+identical message. Merged to `main` as `72a84be`.
+
 ### Installing a plugin without forking core
 
 The optional-plugin import map used to be a hand-written literal in
