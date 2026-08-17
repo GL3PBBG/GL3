@@ -1693,8 +1693,17 @@ weapon's rhythm a property of the weapon rather than of luck.
   downstream. `effects.ts` is the hand-kept verbatim copy pair, so the field
   went into **both** `combat` and `inventory`; `test/effects-parity.test.ts`
   enforces that.
-- Not done, deliberately: the player-facing `/inventory` and `/shop` stat lines
-  still show damage only, and `/combat` still shows no cooldown ahead of a shot.
+- The player-facing `/inventory` and `/shop` weapon lines read
+  `10–20 damage · 0.5 dps`, through one shared pure `weaponStatLine`
+  (`apps/web/src/lib/effects.ts`) — shared so the two pages cannot drift, and
+  pure because neither web project has a DOM to render a component in, so a
+  helper is the only part of a stat line a test can reach. A weapon with no dps
+  omits the clause rather than showing a zero. The pages show the **dps**, not
+  the derived wait: the server clamps that wait against
+  `combat.cooldown_max_seconds` and falls back to `combat.cooldown_seconds`,
+  neither of which the client can see, so a recomputed figure would be
+  confidently wrong at the edges.
+- Not done, deliberately: `/combat` still shows no cooldown ahead of a shot.
 
 ### Installing a plugin without forking core
 
