@@ -52,13 +52,15 @@ const GET_SOURCE_RE = /^GET \/(?![/\\])[^\s\\]*$/;
 export const MAX_VIEW_DEPTH = 16;
 export const MAX_VIEW_NODES = 512;
 
-// Every array-of-objects field the ten-kind vocabulary has: `panel.children`
+// Every array-of-objects field the twelve-kind vocabulary has: `panel.children`
 // and `list.items` nest actual view nodes; `keyValue.rows` and `form.fields`
 // nest plain leaf objects, not `ViewNode`s, but each one is still a parsed
 // object the bound exists to cap — a form is not exempt from MAX_VIEW_NODES
 // just because its fields aren't independently renderable. `text`, `money`,
 // `error`, `link`, `button` and `cooldownButton` carry no array field and are
-// correctly left out.
+// correctly left out. `cards` is left out deliberately rather than by omission:
+// its array holds card CODES, not parsed objects, so counting them would spend
+// the node budget on strings the recursion never descends into.
 function childrenOf(node: unknown): readonly unknown[] {
   if (typeof node !== "object" || node === null) return [];
   if ("children" in node && Array.isArray(node.children)) return node.children;
@@ -178,6 +180,20 @@ const leafOptions = [
        */
       source: z.string().regex(GET_SOURCE_RE, "table source must be `GET /absolute/path`"),
       columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
+    })
+    .strict(),
+  // A hand of playing cards. Values are @letele/playing-cards component names:
+  // suit initial (H/D/C/S) + rank (a, 2-10, j, q, k), plus J1/J2 jokers and
+  // B1/B2 backs. Kept identical to the SDK's copy for the reason the `money`
+  // leaf above gives — the two diverging is how a value passes boot and then
+  // fails the browser, which is exactly what happened here: the leaf shipped in
+  // the SDK and not in this file, so any wire payload carrying a `cards` node
+  // (a manifest-declared page, or the casino lobby's resume view) failed the
+  // client-side parse of the WHOLE payload with an invalid-discriminator issue.
+  z
+    .object({
+      kind: z.literal("cards"),
+      cards: z.array(z.string().regex(/^([HDCS](a|[2-9]|10|j|q|k)|J[12]|B[12])$/, "card must be a playing-card code")),
     })
     .strict(),
 ] as const;
