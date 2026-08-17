@@ -37,6 +37,18 @@ export const WeaponEffectsSchema = z.object({
    * must survive the round trip — do not collapse it to the default.
    */
   backfireChance: z.number().int().min(0).max(100).optional(),
+  /**
+   * Damage per second the weapon may sustain, and the second float here after
+   * `critMultiplier`. Combat divides the weapon's average damage by it to get
+   * the attack cooldown (`cooldown.ts`), so 10 damage at 1 dps is a 10-second
+   * wait and at 0.5 dps a 20-second one.
+   *
+   * Optional for the same reason `accuracy` and `backfireChance` are: no
+   * migrated V2 item carries one, and those keep the flat
+   * `combat.cooldown_seconds` instead. Positive, not just non-negative — zero
+   * is a division by zero, and an absent field already means "unpaced".
+   */
+  dps: z.number().positive().optional(),
 }).refine((e) => e.damageMax >= e.damageMin, {
   message: "damageMax must be >= damageMin",
 });

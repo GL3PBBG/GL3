@@ -240,10 +240,17 @@ const WeaponStatFields = {
   accuracy: blankable(z.coerce.number().int().min(0).max(100)),
   bulletsPerShot: blankable(z.coerce.number().int().positive()),
   critChance: blankable(z.coerce.number().int().min(0).max(100)),
-  /** The only float in the vocabulary — hence the `decimal` form field type. */
+  /** One of two floats in the vocabulary — hence the `decimal` form field type. */
   critMultiplier: blankable(z.coerce.number().min(1)),
   armorPierce: blankable(z.coerce.number().int().nonnegative()),
   minRankExp: blankable(z.coerce.number().int().nonnegative()),
+  /**
+   * The other float, and the one that paces the attack cooldown: combat waits
+   * the weapon's average damage divided by this. Positive, so a 400 here is
+   * where `dps: 0` dies rather than as a division by zero downstream. Blank
+   * leaves it absent, which keeps the flat `combat.cooldown_seconds`.
+   */
+  dps: blankable(z.coerce.number().positive()),
 } as const;
 
 const WeaponStatsShape = {
@@ -324,6 +331,7 @@ function effectsFor(body: ItemStatsBody): unknown {
           ...(body.critMultiplier !== undefined && { critMultiplier: body.critMultiplier }),
           ...(body.armorPierce !== undefined && { armorPierce: body.armorPierce }),
           ...(body.minRankExp !== undefined && { minRankExp: body.minRankExp }),
+          ...(body.dps !== undefined && { dps: body.dps }),
         });
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
@@ -364,7 +372,7 @@ const ShopStockBodySchema = z.object({
 function statCells(itemType: string, effects: unknown): Record<string, string> {
   const blank = {
     damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
-    critMultiplier: "", armorPierce: "", minRankExp: "", armor: "", heal: "",
+    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", armor: "", heal: "",
   };
   const parsed = readEffects(itemType, effects);
   const known = itemType === ITEM_TYPE_WEAPON
@@ -391,6 +399,9 @@ function statCells(itemType: string, effects: unknown): Record<string, string> {
         critMultiplier: String(w.critMultiplier),
         armorPierce: String(w.armorPierce),
         minRankExp: String(w.minRankExp),
+        // Em dash, like `accuracy`: absent is not zero. An unpaced weapon
+        // keeps the flat cooldown, and showing "0" would read as instant.
+        dps: w.dps === undefined ? "—" : String(w.dps),
       };
     }
     case ITEM_TYPE_ARMOR:
@@ -562,6 +573,10 @@ const WEAPON_STAT_FORM_FIELDS = [
   { name: "critMultiplier", label: "Crit multiplier (blank = 1)", type: "decimal" },
   { name: "armorPierce", label: "Armor pierce (blank = 0)", type: "number" },
   { name: "minRankExp", label: "Min rank exp (blank = 0)", type: "number" },
+  // `decimal` for the same reason `critMultiplier` is: a `number` input takes
+  // the default step="1" and refuses to submit 0.5 — the exact value a
+  // half-rate weapon needs.
+  { name: "dps", label: "Damage/sec (blank = flat cooldown)", type: "decimal" },
 ] as const satisfies readonly { name: string; label: string; type: "number" | "decimal" }[];
 
 const adminPage: PageSchema = {
@@ -583,6 +598,7 @@ const adminPage: PageSchema = {
             { key: "critMultiplier", label: "Crit ×" },
             { key: "armorPierce", label: "Pierce" },
             { key: "minRankExp", label: "Min rank exp" },
+            { key: "dps", label: "DPS" },
             { key: "armor", label: "Armor" },
             { key: "heal", label: "Heal" },
           ] },

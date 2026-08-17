@@ -420,6 +420,72 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     expect(second.headers["retry-after"]).toBeDefined();
   });
 
+  it("paces the cooldown by the equipped weapon's dps", async () => {
+    // 10 damage at 0.5 dps is a 20-second wait, against a flat default of 60.
+    // The gap between the two is what makes this test able to fail.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 10, damageMax: 10, dps: 0.5 });
+
+    expect((await attack(targetId)).statusCode).toBe(200);
+
+    const second = await attack(targetId);
+    expect(second.statusCode).toBe(429);
+    const remaining = Number(second.headers["retry-after"]);
+    expect(remaining).toBeGreaterThan(15);
+    expect(remaining).toBeLessThanOrEqual(20);
+  });
+
+  it("keeps the flat cooldown for a weapon that declares no dps", async () => {
+    // Every migrated V2 item is in this case — `itemEffects` has no dps
+    // column — so this is the assertion that the live game still paces as it
+    // did before the field existed.
+    await makeAttackable();
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 10, damageMax: 10 });
+
+    expect((await attack(targetId)).statusCode).toBe(200);
+
+    const second = await attack(targetId);
+    expect(second.statusCode).toBe(429);
+    expect(Number(second.headers["retry-after"])).toBeGreaterThan(50);
+  });
+
+  it("paces an unarmed attack by combat.unarmed.dps", async () => {
+    // Bare keys through the SDK's prefix, same seam as the unarmed profile
+    // test below: 4 damage at 0.5 dps is 8 seconds, and a double-prefixed
+    // read would silently give the flat 60 instead.
+    await makeAttackable();
+    await db
+      .update(playerStats)
+      .set({ weaponItemId: null })
+      .where(eq(playerStats.playerId, attackerId));
+    await db.insert(settings).values([
+      { key: "combat.unarmed.accuracy", value: "100" },
+      { key: "combat.unarmed.damage_min", value: "4" },
+      { key: "combat.unarmed.damage_max", value: "4" },
+      { key: "combat.unarmed.dps", value: "0.5" },
+    ]);
+    // Settings snapshot at boot, so the rows must predate the server.
+    const { app: freshApp, close } = await bootTestServer();
+    try {
+      const shoot = () =>
+        freshApp.inject({
+          method: "POST",
+          url: `/api/combat/attack/${targetId}`,
+          headers: { authorization: `Bearer ${attackerToken}` },
+        });
+
+      expect((await shoot()).statusCode).toBe(200);
+
+      const second = await shoot();
+      expect(second.statusCode).toBe(429);
+      const remaining = Number(second.headers["retry-after"]);
+      expect(remaining).toBeGreaterThan(3);
+      expect(remaining).toBeLessThanOrEqual(8);
+    } finally {
+      await close();
+    }
+  });
+
   it("burns the cooldown even when the attack is illegal", async () => {
     await makeAttackable();
     await equipWeapon(attackerId, { accuracy: 100, damageMin: 1, damageMax: 1 });
