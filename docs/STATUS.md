@@ -1,9 +1,14 @@
 # GL3 project status
 
-Last updated: 2026-08-16, **rounds complete** — a seasonal scoring window,
-core rather than a plugin, shipped after the four migrated-but-unread-table
-clusters (properties was the last of those).
-Branch: `feat/rounds`.
+Last updated: 2026-08-17, **properties as franchises complete** — `plugin_id`
+goes live, income becomes consumer-paid (`bullets` the first consumer), and a
+live M4 defect (`PR_owner` → `PR_user`) is fixed, shipped after **rounds**, a
+seasonal scoring window, core rather than a plugin, which itself shipped
+after the four migrated-but-unread-table clusters (properties' income-accrual
+model was the last of those, now superseded by this cluster).
+Branch: `feat/properties-franchise`. Final verification for this branch was
+**scoped**, not a green full run — see the properties-franchise section below
+before assuming the whole tree is proven.
 
 ---
 
@@ -16,19 +21,29 @@ Branch: `feat/rounds`.
 | **M2 Core loop parity** | ✅ complete | `sum(ledger) == balance` gate passing |
 | **M3 Social** | ✅ complete | Both SPEC §6 checkmarks proven end to end |
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
-| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped. **Rounds** (seasonal scoring window, lazy rollover under an advisory lock, points payout, core rather than a plugin) has since shipped on top of that — see the section below |
+| **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped. **Rounds** (seasonal scoring window, lazy rollover under an advisory lock, points payout, core rather than a plugin) has since shipped on top of that. **Properties as franchises** (`plugin_id` live, `(location_id, plugin_id)` key, consumer-paid income replacing the accrual clock, `bullets` as first consumer, seizure-on-death disowns rather than transfers) has since shipped on top of that — see the sections below |
 
-**Suite: 177 files / 1370 tests**, `npm run verify` exit 0. (M4 added the 30 files /
-58 tests of the `@gl3/migrate` project; the pre-M4 tree ran 111 / 968. Money
-ranks, backfire and weapon condition added 5 files / 70 tests; car theft added
-8 files / 60 tests; properties added 7 files / 55 tests (52 at first ship,
-plus 3 from the final-review fix pass: N1's admin-create-default-rate test
-and N13's two income-cap tests); rounds added 10 files / 92 tests plus 9 more
-inside existing files — see the sections below. This file has recorded a
-measured-vs-summed drift before (1272 vs. a 1271 sum at the properties
-milestone); 177/1370 here is the number `npm run verify`'s own summary line
-reported on a clean run at commit `9b47d61`, not a sum reconstructed from
-per-cluster deltas.)
+**Suite: 181 files / 1377 tests** as of `feat/properties-franchise` — up from
+177/1370 on `main` (net +4 files / +7 tests: properties-as-franchises added 6
+test files / 27 tests and removed 2 / 17 with the accrual model, plus small
+net changes inside existing files — see that section for the itemised
+breakdown). **This total is not backed by a green full run.** The last bare
+`npm run verify` reported it and exited 1 (2 files / 2 tests failed); both
+failures were fixed on the branch and reconfirmed green by scoped runs whose
+module graph provably reaches them, at the user's explicit direction, not by
+a second full run. Treat 181/1377 as the last full run's own count, not as
+proof the whole tree is currently green — see the properties-franchise
+section for the failures, the fixes, and the exact scoped-run commands and
+results. (M4 added the 30 files / 58 tests of the `@gl3/migrate` project; the
+pre-M4 tree ran 111 / 968. Money ranks, backfire and weapon condition added 5
+files / 70 tests; car theft added 8 files / 60 tests; properties added 7
+files / 55 tests (52 at first ship, plus 3 from the final-review fix pass:
+N1's admin-create-default-rate test and N13's two income-cap tests); rounds
+added 10 files / 92 tests plus 9 more inside existing files. This file has
+recorded a measured-vs-summed drift before (1272 vs. a 1271 sum at the
+properties milestone); 177/1370 was the number `npm run verify`'s own summary
+line reported on a clean run at commit `9b47d61`, the `main` commit this
+branch started from, not a sum reconstructed from per-cluster deltas.)
 
 The **item admin pass** on top of that added one file and 26 tests. It closes
 three flaws in the inventory admin, all downstream of `ItemBodySchema` being
@@ -1494,6 +1509,139 @@ including the two-concurrent-creates overlap proof), and the web
 tree total: **177 files / 1370 tests**, up from 167/1269 — the other nine
 tests are edits inside existing files (`leaderboard`, `event-copy`,
 `invalidation`, `admin-ids-hidden`'s floor raised to 10 sections).
+
+### Properties as franchises — `plugin_id` goes live, income becomes consumer-paid
+
+Spec: `docs/superpowers/specs/2026-08-16-properties-franchise-design.md`
+(supersedes, in part, `2026-08-15-properties-design.md` above). Plan:
+`docs/superpowers/plans/2026-08-17-properties-franchise.md`. Branch
+`feat/properties-franchise`. Not a port: the V2 source was read after the
+income-accrual cluster shipped and turned out to describe a different
+mechanic, so the spec and the tests remain the only specification of this
+cluster's behaviour.
+
+**Phase 0 — a live M4 defect, independent of the rest.** The migrator read
+`PR_owner`; the real V2 column is `PR_user` (`0` = unowned, `-1` = "closed").
+Against a real V2 database the migrator died with `Unknown column 'PR_owner'`
+— hidden until now because the test fixture had been reconstructed from the
+same wrong `SPEC.md` line. `apps/migrate/src/migrators/properties.ts`,
+`SPEC.md:75` and `:165`, and the fixture DDL are all corrected.
+
+**Phase 1 — `plugin_id` becomes a declared, validated thing.** A new manifest
+field, `providesProperties: PropertyTypeDecl[]` (`id`, `name`, `price`,
+`leverLabel`), collected by the loader into a registry exposed on **every**
+plugin's ctx as `ctx.propertyTypes` — not only the properties plugin's own;
+the spec was amended in place to say so, since the registry is the same
+loader-derived data `GET /api/plugins` already serves publicly. The table's
+key moves from `unique(location_id)` to `unique(location_id, plugin_id)`
+(plugin migration `0004_location_plugin_unique`), so a casino and a bullet
+factory now coexist in one town. Admin edits `plugin_id` as a select over the
+registry instead of free text.
+
+**Phase 2 — income comes from the consumer, not a clock.** `rate` and
+`last_claimed_at` are dropped along with the `claim` and `sell` routes —
+there is no accrual any more. `cost` is reinterpreted from purchase price to
+**the owner's lever**: `0` means "unset, consumer uses its own default"
+(existing values are zeroed on migration, since a purchase price would be
+nonsense as a lever). `@gl3/plugin-properties` exports `ownerAt` and
+`payOwner` for any consumer plugin to depend on, the same
+declare-a-dependency shape `bounties` already uses on `combat`. Five player
+routes replace the old three: `buy` (by `pluginId` + `locationId`), `lever`,
+`transfer`, `drop`, `reset`. `bullets` becomes the first consumer — a new
+dependency on `@gl3/plugin-properties`, **the second plugin→plugin
+dependency edge in the codebase after `bounties`→`combat`** — reading the
+owner's lever as price-per-bullet (falling back to the location's own price
+when unset) and paying the owner half of every sale via `payOwner`.
+
+**Two deliberate divergences from V2, both flagged for review rather than
+silently matched to spec:**
+
+- **Seizure on death disowns rather than transferring to the shooter.** V2's
+  `propertyManagement.hooks.php` hands every property the victim owned,
+  game-wide, straight to the shooter. GL3 does not: the shooter already takes
+  the kill's payout, and a franchise on top of that compounds a winner's
+  lead. Instead every property the victim owned becomes unowned — back on
+  the market at the declared price for anyone, seized in the investigation.
+  It also does not publish a plugin event: `properties` subscribes to
+  `combat.killResolved`, and `runFilterChain` (SDK) passes the **applying**
+  plugin's ctx to a subscriber, not the subscriber's own — a `tx.events.
+  publish` inside this subscriber would go out labelled `toEnvelope("combat",
+  …)`, an event combat never declared and no plugin-event invalidation could
+  match. The subscriber calls `tx.notify` instead, which always publishes the
+  core `notification.created` event. Cost: `notification.created` doesn't
+  invalidate the properties list, so a seized player's page only refreshes on
+  their next visit — accepted as a reasonable trade-off rather than growing a
+  new core `GameEvent` variant for one notification. The manifest declares
+  exactly three events — `bought`, `dropped`, `transferred` — and no
+  `seized`.
+- **`drop` has no refund**, matching V2's plain `DELETE`. A property is a
+  one-way money sink: pay `price`, earn from the consumer's gameplay, never
+  get the principal back.
+
+**Package versions.** `@gl3/plugin-sdk` took its **first bump ever**,
+`0.1.0` → `0.1.1`, for `providesProperties` and `ctx.propertyTypes`.
+`@gl3/shared` went `0.1.4` → `0.1.5`: `PropertyRowSchema` and
+`PropertyListResponseSchema` change shape (`accrued`/`rate` out,
+`lever`/`price`/`typeName` in) — breaking in shape, but shipped as a patch
+under the same `0.x`-additive reasoning as every prior bump, since no
+external consumer of either symbol exists yet. **Both have since been
+published**, with the user's approval, following this branch's commit — the
+registry now serves `@gl3/shared` `0.1.1` through `0.1.5` and
+`@gl3/plugin-sdk` `0.1.0` and `0.1.1`.
+
+**Test files.** Six new: `properties-consumer-lock-order` (1, the second
+player↔player lock-order regression after combat's own — proves a consumer
+that calls `payOwner`, e.g. bullets buying from an owned factory, locks
+buyer and owner in one sorted `tx.locks.player` call rather than two),
+`bullets-property` (5), `properties-pay-owner` (7), `properties-seizure` (5),
+SDK `property-types` (6), and server-unit `property-type-registry` (3) — 27
+tests. Two deleted with the accrual model: `properties-settings` (7) and
+`properties-resolve` (10). Existing files' net test-count changes:
+`properties-lock-order` +1 (3→4, now covering `transfer`'s ABBA rather than
+`claim`/`sell`), `properties-routes` −5 (18→13, fewer routes), `properties-
+events` −1 (4→3, one event's `describe` changed and `income` — never a real
+event — left with the accrual model), `admin-properties` +2 (9→11). Net:
+**+4 files / +7 tests**, taking the tree from 177/1370 to **181 files / 1377
+tests** — the total the last full `npm run verify` actually reported.
+
+**Verification — read this before trusting a green claim for this branch.**
+The first bare full `npm run verify` after all ten implementation tasks
+landed came back **exit 1**: 2 files / 2 tests failed out of 181/1377.
+Neither was a drift-guard count (`schema.test.ts` held at 36 FKs / 29
+indexes, exactly as predicted — every migration on this branch is a
+*plugin* migration, and that census counts only core-created objects in
+`public`). Both were real branch defects invisible to any task's own scoped
+run:
+
+1. `test/economy-invariant.test.ts` calls `bulletsPlugin`'s routes directly
+   via `callPluginRoute` (no `bootTestServer`) and migrates only
+   `[inventoryPlugin, combatPlugin, detectivesPlugin]`. Making `bullets` a
+   `properties` consumer meant every `/api/bullets/buy` call now reads
+   `p_properties_properties` unconditionally through `ownerAt` — a table this
+   file never migrated, so it 42P01'd. Fixed by adding `propertiesPlugin` to
+   its migration list, with a comment recording why; `bullets.test.ts`
+   already needed the identical fix during Task 9 and was not itself broken.
+2. `test/plugin-manifest-endpoint.test.ts` hardcodes the full expected
+   `events` payload `bootTestServer()`'s `CORE_PLUGINS` merge produces. It
+   was never updated for Task 5's `bought` describe-string change or Task 7's
+   new `dropped`/`transferred` events — a hand-maintained census with no
+   type-level tie to the manifests it asserts against, so it drifts silently
+   and only a full run (needs Postgres/Redis; no scoped run selects it)
+   catches the gap. Fixed to the current truth, with a comment recording why
+   it drifted and confirming there is deliberately no `seized` event.
+
+Both fixes were then verified **scoped, not by a second full run** — at the
+user's explicit direction, after the full run was killed mid-flight to avoid
+a second multi-minute pass for a two-file change: `npx vitest run --project
+@gl3/server test/economy-invariant.test.ts test/plugin-manifest-endpoint.
+test.ts` (exit 0, 2 files / 8 tests passed) and `npm run verify:related`
+(exit 0, 130 files / 1138 tests passed, typecheck clean). **There is
+therefore no single green full-suite run for this branch** — the 181/1377
+total above is the last full run's file/test count, not its exit code, and
+the two fixes are proven correct by targeted runs whose module graph
+provably reaches them, not by re-confirming the whole tree at once. Anyone
+resuming this branch should treat a fresh bare `npm run verify` as still
+owed before merge, not as a formality.
 
 ### Installing a plugin without forking core
 
