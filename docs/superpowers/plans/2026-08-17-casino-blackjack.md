@@ -250,9 +250,15 @@ describe("card component map", () => {
 The last test is the one that earns its place: it fails if Task 1's regex and
 this map ever drift apart, in either direction.
 
-- [ ] **Step 3: Register the test file**
+- [ ] **Step 3: No test-file registration needed here — confirm and move on**
 
-Add `apps/web/test/cards.test.ts` to the `@gl3/web` project's `include` in `vitest.workspace.ts`. Without this the file never runs and `npx vitest run <path>` exits 1 with "No test files found".
+The `@gl3/web` project **globs** (`include: ["test/**/*.test.ts"]`,
+`vitest.workspace.ts:181`), as does `@gl3/plugin-sdk` (`:159`). The
+per-file registration rule in the Global Constraints applies only to the four
+`@gl3/server*` projects, which enumerate explicitly (`:189`, `:215`, `:228`,
+`:250`). **Do not add an explicit entry beside the glob** — it contradicts the
+file's convention for this project. Confirm the glob is still in place and
+proceed.
 
 - [ ] **Step 4: Run it to verify it fails**
 
@@ -355,7 +361,7 @@ Expected: PASS on both, and exit 0 on the build — which is what confirms the T
 ```bash
 git add apps/web/src/components/cards.ts apps/web/src/components/PlayingCard.tsx \
         apps/web/src/plugins/PageRenderer.tsx apps/web/package.json \
-        apps/web/test/cards.test.ts vitest.workspace.ts package-lock.json
+        apps/web/test/cards.test.ts package-lock.json
 git commit -m "feat(web): render the cards view node"
 ```
 
