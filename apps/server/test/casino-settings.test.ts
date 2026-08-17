@@ -78,6 +78,24 @@ describe("readExpiryMinutes", () => {
       .toBe(MAX_SESSION_EXPIRY_MINUTES);
   });
 
+  it("yields a cutoff that still marks an old hand stale", () => {
+    // `adminSessionsRoute`'s Open-hands `stale` column, evaluated in memory.
+    // The expression is copied from the route: a cutoff built by subtracting
+    // the reader's minutes from now, then `createdAt < cutoff`.
+    //
+    // Unclamped, the reader answers `Infinity`, the cutoff is an Invalid Date,
+    // and `<` against an Invalid Date is FALSE for every row — so the column
+    // read "no" for everything and went blind exactly when an admin would
+    // reach for it. The DB-backed sibling in `casino-lobby.test.ts` cannot show
+    // that: no route, admin surface or migration lets a caller set
+    // `created_at`, so no old row can be got into the table. The comparison
+    // needs no table.
+    const minutes = readExpiryMinutes(from({ session_expiry_minutes: "9".repeat(400) }));
+    const cutoff = new Date(Date.now() - minutes * 60_000);
+    const ancientHand = new Date("1900-01-01T00:00:00Z");
+    expect(ancientHand < cutoff).toBe(true);
+  });
+
   it("answers a value every date arithmetic path can survive", () => {
     // The property that actually matters, asserted rather than argued: for the
     // worst input, `createdAt + minutes` is still a real date in the future.
