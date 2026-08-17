@@ -176,7 +176,15 @@ Expected: PASS, 4 tests.
 npx tsc --build --force packages/plugin-sdk/tsconfig.json
 ```
 
-Expected: exit 0. If `apps/web`'s `PageRenderer` switch is exhaustive over `ViewNode`, it will now fail with TS2366 — that is expected and Task 2 fixes it. Do not widen the switch here.
+Expected: exit 0, with **nothing in `apps/web` failing**.
+
+Do not expect a TS2366 exhaustiveness error here. `apps/web` does **not** switch
+over `ViewNode`: `apps/web/src/plugins/render.ts:18-28` declares a separate,
+hand-maintained `RenderInstruction` union, and `renderNode(node: unknown, …)`
+narrows DTO nodes by string `isNode(v, kind)` checks. Adding a kind to the SDK
+therefore breaks no build at all — an unhandled kind falls through `renderNode`
+and is **silently dropped**, which is the failure mode this file's own header
+warns about. Task 2 is what closes it, and no compiler error will remind anyone.
 
 - [ ] **Step 7: Commit**
 
@@ -191,8 +199,18 @@ git commit -m "feat(sdk): cards view node"
 
 **Files:**
 - Create: `apps/web/src/components/cards.ts`, `apps/web/src/components/PlayingCard.tsx`
-- Modify: `apps/web/src/plugins/PageRenderer.tsx`, `apps/web/package.json`
-- Test: `apps/web/test/cards.test.ts` (create)
+- Modify: `apps/web/src/plugins/render.ts`, `apps/web/src/plugins/PageRenderer.tsx`, `apps/web/package.json`
+- Test: `apps/web/test/cards.test.ts` (create), `apps/web/test/plugins-render.test.ts` (extend)
+
+**`render.ts` is the load-bearing edit.** `RenderInstruction` (`render.ts:18-28`)
+is a hand-maintained union that does not derive from `ViewNode`, and
+`renderNode` narrows by string `isNode(v, kind)` checks. Without a `cards`
+member and a matching `renderNode` branch, a plugin-sent `cards` node is
+silently dropped and **no compiler error and no existing test says so** — the
+`@gl3/web` suite has no guard asserting every SDK leaf kind has a branch. Add
+the branch, and extend `plugins-render.test.ts` to prove a `cards` node
+round-trips through `renderNode` with its codes intact. The renderer's switch
+variable is named `inst`, not `node`.
 
 **Interfaces:**
 - Consumes: the `cards` node from Task 1.
@@ -204,12 +222,47 @@ git commit -m "feat(sdk): cards view node"
 
 ```bash
 npm install @letele/playing-cards --workspace @gl3/web
-node -e "const d=require('@letele/playing-cards'); console.log(typeof d.Sq, Object.keys(d).length)"
+printf 'import * as deck from "@letele/playing-cards";\nconsole.log(typeof deck.Sq, Object.keys(deck).length);\n' > /tmp/probe.mjs
+npx vite-node /tmp/probe.mjs
 ```
 
-Expected: `function 55` (52 cards + 2 jokers + backs; the exact count may differ — a `function` for `Sq` and a count near 54 is the pass condition).
+Expected: `function 56`.
 
-**If this fails**, stop and report. The fallback is vendoring the SVGs, which the CC0-1.0 licence permits outright; do not proceed on a broken dependency.
+**Probe with `vite-node`, not bare `node`.** This package has no `main` and no
+`exports` — only `"module": "dist/index.esm.js"`, a bundler-only convention that
+Node's own resolver ignores. `node -e "require('@letele/playing-cards')"` fails
+with MODULE_NOT_FOUND *by design* and is a false negative. `apps/web` is
+Vite-only and `vite-node` backs both the build and vitest's module loading, so
+it is the resolver that actually matters here.
+
+**It ships no type declarations, and this is the part that blocks.** The
+manifest says `"types": "lib/index.d.ts"` while `"files"` is `["dist"]`, so
+`lib/` was never published: `dist/` holds one file and the tarball contains no
+`.d.ts` at all. `apps/web` is `strict: true`, so the import fails **TS7016**;
+`skipLibCheck` does not help (it skips checking declarations, not missing ones),
+and casting around it violates the repo's conventions. Create
+`apps/web/src/types/playing-cards.d.ts` — under `src/`, because the tsconfig
+sets `rootDir: "./src"` — declaring all 56 exports explicitly:
+
+```ts
+declare module "@letele/playing-cards" {
+  import type { ComponentType, CSSProperties } from "react";
+  export const Ha: ComponentType<{ style?: CSSProperties }>;
+  // ... one line per export, all 56
+}
+```
+
+Enumerate them; do **not** use an index signature or a map default export.
+Either would let a typo'd card code compile, which is the failure this task
+exists to prevent. The explicit list is what makes `tsc` verify that every name
+`cards.ts` references is real.
+
+**A runtime probe alone is not the gate.** Verify the library both *loads* and
+*typechecks* — the load passed here and the types were what blocked.
+
+**If the library genuinely cannot be made to work**, stop and report. The
+fallback is vendoring the SVGs, which CC0-1.0 permits outright; that is a
+controller decision, not the implementer's.
 
 - [ ] **Step 2: Write the failing test — as pure logic, not a rendered component**
 
