@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { PluginError, type PluginTx } from "@gl3/plugin-sdk";
 import { ownerAt, payOwner } from "@gl3/plugin-properties";
+import type { GameDef } from "./games.js";
 import { casinoSessions } from "./schema.js";
 
 export interface House {
@@ -31,18 +32,90 @@ export async function resolveHouse(
 }
 
 /**
+ * THE MOST A HAND CAN EVER RETURN: `wager × maxPayoutMultiplier`, in bigint.
+ *
+ * Two callers, and they are the two halves of one idea — `assertHouseCanCover`
+ * asks whether the house could pay it, `resolvePayout` refuses to pay more
+ * than it. Splitting the arithmetic out is what keeps those two answers the
+ * same figure.
+ *
+ * `multiplier` is a `GameDef` field, so it is a number a third party chose. A
+ * non-finite or negative one used to reach `BigInt(Math.round(...))` and throw
+ * a RangeError, which `routes.ts` re-throws as an unhandled 500 with a stack
+ * trace; it is refused here instead. 500 rather than 4xx because nothing the
+ * caller sent is at fault — the installed game is misdeclared.
+ */
+export function exposureOf(wager: bigint, multiplier: number): bigint {
+  if (!Number.isFinite(multiplier) || multiplier < 0) {
+    throw new PluginError("invalid_game_multiplier", 500);
+  }
+  // Scale by 10 and divide to stay in bigint — never convert to float, money
+  // is bigint end to end.
+  return (wager * BigInt(Math.round(multiplier * 10))) / 10n;
+}
+
+/**
  * `payOwner` CLAMPS a debit to the owner's cash. Without this check a player
  * who wins more than the house holds is silently short-paid, with no error
  * anywhere and a ledger that still balances. Re-run whenever the wager grows
  * (Task 7's `wagerDelta`), which is why this is a standalone function rather
  * than inlined into `play`.
+ *
+ * The exposure is computed BEFORE the unowned-house early return, so a
+ * misdeclared multiplier is refused in a town nobody owns too — an unowned
+ * house is a faucet, which is exactly where an unbounded figure costs most.
  */
 export function assertHouseCanCover(wager: bigint, multiplier: number, ownerCash: bigint | null): void {
+  const exposure = exposureOf(wager, multiplier);
   if (ownerCash === null) return; // unowned house is a faucet — nothing to exhaust
-  // multiplier is a float (2.5); scale by 10 and divide to stay in bigint —
-  // never convert to float, money is bigint end to end.
-  const exposure = (wager * BigInt(Math.round(multiplier * 10))) / 10n;
   if (exposure > ownerCash) throw new PluginError("house_cannot_cover", 409);
+}
+
+/**
+ * Runs one of a game's four pure handlers and turns anything it throws into a
+ * clean refusal.
+ *
+ * `start`/`act`/`settle`/`view` are third-party code called inside a route
+ * handler, and `routes.ts:88-95` re-throws whatever is not a `PluginError` —
+ * so blackjack's own `throw new Error("can only double on the first two
+ * cards")` answered 500 with a stack trace where the repo's rule is that an
+ * unvalidated boundary must return a clean 4xx. 400 because the common case is
+ * a move the game does not allow; the game's own message rides along as
+ * `detail` so a page can show something better than a code.
+ */
+export function guardGame<T>(gameId: string, step: string, fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    // A game that speaks the hub's own error type keeps its status and code.
+    if (error instanceof PluginError) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PluginError("game_error", 400, { game: gameId, step, detail });
+  }
+}
+
+/**
+ * What the hand pays, BOUNDED. The single place `game.settle` is ever called.
+ *
+ * Spec §3 claims a game "cannot get money wrong, because it never touches
+ * money". That holds only if the hub bounds the figure it is handed: the
+ * player's leg is credited in full through `applyBalanceChange` while the
+ * house's leg goes through `payOwner`, which clamps to the owner's cash — so
+ * a `settle` returning more than it declared MINTS the difference, and in an
+ * unowned town it is a pure faucet with no counterparty at all. A negative
+ * figure is worse: it would debit the winner a second time.
+ *
+ * Clamping rather than refusing an over-large payout is deliberate — the
+ * player has already staked the wager, and a hand that cannot pay out at all
+ * because the game misbehaved would take their money and give nothing. The
+ * cap is the figure the house was checked against at `play`, so the clamp can
+ * never exceed what `assertHouseCanCover` already proved payable.
+ */
+export function resolvePayout(game: GameDef, state: unknown, wager: bigint): bigint {
+  const payout = guardGame(game.id, "settle", () => game.settle(state, wager));
+  if (payout < 0n) throw new PluginError("invalid_payout", 500);
+  const cap = exposureOf(wager, game.maxPayoutMultiplier);
+  return payout > cap ? cap : payout;
 }
 
 /**

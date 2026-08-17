@@ -2,10 +2,14 @@ import { randomBytes } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, InsufficientFundsError, PluginError, route, type PluginCtx } from "@gl3/plugin-sdk";
-import { payOwner } from "@gl3/plugin-properties";
-import { assertHouseCanCover, escrow, resolveHouse, settleSession, type House } from "./engine.js";
-import { buildRegistry, games } from "./games.js";
+import {
+  definePlugin, InsufficientFundsError, PluginError, route,
+  type PluginCtx, type PluginTx, type ViewNode,
+} from "@gl3/plugin-sdk";
+import {
+  assertHouseCanCover, escrow, guardGame, resolveHouse, resolvePayout, settleSession, type House,
+} from "./engine.js";
+import { buildRegistry, games, type GameDef } from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { casinoSessions, locations, players, playerStats } from "./schema.js";
@@ -25,9 +29,71 @@ export {
 export { adminPage } from "./pages.js";
 
 /** When a hand opened at `createdAt` stops being resumable. Shared by the
- *  lobby (which hides an expired hand) and `play` (which forfeits it). */
+ *  lobby (which hides an expired hand), `play` (which forfeits it) and `act`
+ *  (which refuses it). */
 function expiresAt(createdAt: Date, expiryMinutes: number): Date {
   return new Date(createdAt.getTime() + expiryMinutes * 60_000);
+}
+
+/**
+ * Step two of the lock order, identical in `play` and `act` (spec §5): BOTH
+ * players in ONE sorted, deduped call, after `tx.locks.location` and before
+ * the session row.
+ *
+ * One function rather than the same three lines twice, because this is the
+ * line that makes owner-plays-at-own-table safe against a second player at
+ * the same table — locking the player alone and letting `payOwner` take the
+ * owner in its own later statement is the ABBA cycle
+ * `properties/src/api.ts:51-58` documents and
+ * `properties-consumer-lock-order.test.ts` proves.
+ */
+async function lockBothPlayers(tx: PluginTx, playerId: string, ownerId: string | null): Promise<void> {
+  await tx.locks.player(ownerId === null || ownerId === playerId ? [playerId] : [playerId, ownerId]);
+}
+
+/**
+ * The game's own action schema over the `z.unknown()` envelope `act` accepts.
+ *
+ * `ActBodySchema` can only validate the envelope — the hub cannot know a
+ * game's action shape up front (spec §4.2) — so this is the second half of
+ * the boundary, and a `ZodError` escaping it is a 500 where the repo's rule
+ * says a bad body is a clean 400.
+ */
+function parseAction(game: GameDef, raw: unknown): unknown {
+  const parsed = game.action.safeParse(raw);
+  if (!parsed.success) throw new PluginError("invalid_action", 400);
+  return parsed.data;
+}
+
+/**
+ * The lobby's resume view, or `null`.
+ *
+ * `null` for a game that declares no `view` (spec §3: it resumes viewless
+ * rather than failing to install) AND for one whose `view` throws — a hand
+ * that cannot draw itself must not take down the lobby's whole response,
+ * including every other game's row and the player's own town. This is the one
+ * of the four game handlers that degrades instead of refusing, because it is
+ * the only one called for a hand the caller did not just act on.
+ */
+function safeView(game: GameDef, state: unknown): ViewNode | null {
+  if (game.view === undefined) return null;
+  try {
+    return game.view(state);
+  } catch {
+    return null;
+  }
+}
+
+/** The house owner's cash, or `null` in an unowned town — the figure
+ *  `assertHouseCanCover` measures the hand's exposure against. Read under the
+ *  player lock `lockBothPlayers` has already taken. */
+async function readOwnerCash(tx: PluginTx, ownerId: string | null): Promise<bigint | null> {
+  if (ownerId === null) return null;
+  const [ownerStats] = await tx.db
+    .select({ cash: playerStats.cash })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, ownerId));
+  return ownerStats?.cash ?? 0n;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,10 +212,10 @@ const lobbyRoute = route({
             gameId: live.gameId,
             gameName: liveGame?.name ?? live.gameId,
             wager: live.wager.toString(),
-            // `null` when the game is no longer installed, or installed but
-            // declares no `view` — the hand is still resumable through `act`,
-            // it just cannot be drawn.
-            view: liveGame?.view?.(fromStorableState(live.state)) ?? null,
+            // `null` when the game is no longer installed, when it declares
+            // no `view`, or when its `view` throws — the hand is still
+            // resumable through `act`, it just cannot be drawn.
+            view: liveGame === undefined ? null : safeView(liveGame, fromStorableState(live.state)),
             expiresAt: expiresAt(live.createdAt, expiryMinutes).toISOString(),
           },
         },
@@ -236,13 +302,7 @@ const playRoute = route({
       if (wager < minBet) throw new PluginError("wager_below_min", 400);
       if (wager > house.maxBet) throw new PluginError("wager_above_max", 400);
 
-      // ONE sorted, deduped call for both players — what makes owner-plays-
-      // at-own-table safe against a second player at the same table.
-      await tx.locks.player(
-        house.ownerId === null || house.ownerId === player.id
-          ? [player.id]
-          : [player.id, house.ownerId],
-      );
+      await lockBothPlayers(tx, player.id, house.ownerId);
 
       // THE LAZY FORFEIT (spec §4.4), and the authoritative one-open-hand
       // check. Third and last step of the lock order: the session row FOR
@@ -279,17 +339,9 @@ const playRoute = route({
         await settleSession(tx, live.id, player.id, live.gameId, NO_HOUSE, 0n);
       }
 
-      let ownerCash: bigint | null = null;
-      if (house.ownerId !== null) {
-        const [ownerStats] = await tx.db
-          .select({ cash: playerStats.cash })
-          .from(playerStats)
-          .where(eq(playerStats.playerId, house.ownerId));
-        ownerCash = ownerStats?.cash ?? 0n;
-      }
       // Without this, `payOwner`'s clamp would silently short-pay a winner
       // whose payout exceeds what the house holds (engine.ts's doc comment).
-      assertHouseCanCover(wager, game.maxPayoutMultiplier, ownerCash);
+      assertHouseCanCover(wager, game.maxPayoutMultiplier, await readOwnerCash(tx, house.ownerId));
 
       try {
         await escrow(tx, house, player.id, wager, body.gameId);
@@ -300,45 +352,17 @@ const playRoute = route({
 
       // The seed comes from node:crypto, never Math.random (SPEC §7).
       const seed = randomBytes(16).toString("hex");
-      const step = game.start({ wager, seed });
+      const step = guardGame(body.gameId, "start", () => game.start({ wager, seed }));
       const sessionId = uuidv7();
 
-      if (step.done) {
-        // A one-shot game (or blackjack dealing a natural) settles inside
-        // `play` and never opens a session — this row is written straight to
-        // `settled`. V2 blackjack.inc.php:406 is the payout debit.
-        const payout = game.settle(step.state, wager);
-        if (payout > 0n) {
-          if (house.propertyId !== null) {
-            // Return value DISCARDED — see `escrow`/`settleSession` in
-            // `engine.ts` for why (a house seized mid-hand answers 0n).
-            await payOwner(tx, house.propertyId, -payout, `casino.${body.gameId}.payout`);
-          }
-          await tx.economy.applyBalanceChange({
-            playerId: player.id, amount: payout, kind: "cash", reason: `casino.${body.gameId}.payout`,
-          });
-        }
-        await tx.db.insert(casinoSessions).values({
-          id: sessionId,
-          playerId: player.id,
-          gameId: body.gameId,
-          locationId,
-          propertyId: house.propertyId,
-          wager,
-          state: toStorableState(step.state),
-          status: "settled",
-          seed,
-          settledAt: new Date(),
-        });
-        return {
-          status: 200,
-          body: {
-            sessionId, view: step.view, done: true,
-            wager: wager.toString(), payout: payout.toString(),
-          },
-        };
-      }
-
+      // ONE insert for both branches. A one-shot game (or blackjack dealing a
+      // natural) settles inside `play` and never reaches the lobby, but its
+      // row is written first and closed by `settleSession` rather than being
+      // written straight to `settled` with the money moved by hand: that
+      // hand-rolled copy of the payout leg was a second place the bounds in
+      // `resolvePayout` would have had to be added, and the first place they
+      // would have been forgotten. The intermediate `open` status lives
+      // entirely inside this transaction.
       await tx.db.insert(casinoSessions).values({
         id: sessionId,
         playerId: player.id,
@@ -350,6 +374,20 @@ const playRoute = route({
         status: "open",
         seed,
       });
+
+      if (step.done) {
+        // V2 blackjack.inc.php:406 is the payout debit.
+        const payout = resolvePayout(game, step.state, wager);
+        await settleSession(tx, sessionId, player.id, body.gameId, house, payout);
+        return {
+          status: 200,
+          body: {
+            sessionId, view: step.view, done: true,
+            wager: wager.toString(), payout: payout.toString(),
+          },
+        };
+      }
+
       // `wager` here is NOT the information gap `act`'s is — the caller sent
       // this figure and `play` never changes it. It is on both routes so that
       // the two share one response shape and the field can be REQUIRED rather
@@ -419,11 +457,7 @@ const actRoute = route({
 
       const house = await resolveHouse(tx, pre.gameId, pre.locationId, readMaxBet(ctx.settings));
 
-      await tx.locks.player(
-        house.ownerId === null || house.ownerId === player.id
-          ? [player.id]
-          : [player.id, house.ownerId],
-      );
+      await lockBothPlayers(tx, player.id, house.ownerId);
 
       const [session] = await tx.db
         .select()
@@ -433,27 +467,29 @@ const actRoute = route({
       if (session === undefined) throw new PluginError("no_session", 404);
       if (session.status !== "open") throw new PluginError("session_closed", 409);
 
-      const action = game.action.parse(body.action);
+      // The game's OWN schema, and a failure here is the caller's fault, not
+      // the server's: `body.action` is an unvalidated `z.unknown()` envelope
+      // (the hub cannot know a game's action shape up front), so an
+      // unparseable action reaching a raw `ZodError` answered 500 where the
+      // repo's rule is a clean 400.
+      const action = parseAction(game, body.action);
       const state = fromStorableState(session.state);
-      const step = game.act(state, action);
+      const step = guardGame(pre.gameId, "act", () => game.act(state, action));
 
       let wager = session.wager;
       if (step.wagerDelta !== undefined && step.wagerDelta !== 0n) {
+        // A NEGATIVE delta would turn `escrow` into a credit to the player and
+        // drive the stored wager below zero — a game raising the stake by a
+        // negative amount is misdeclared, not merely unlucky. 500, like the
+        // other two `GameDef` bounds: nothing the caller sent is at fault.
+        if (step.wagerDelta < 0n) throw new PluginError("invalid_wager_delta", 500);
         const newWager = wager + step.wagerDelta;
 
-        let ownerCash: bigint | null = null;
-        if (house.ownerId !== null) {
-          const [ownerStats] = await tx.db
-            .select({ cash: playerStats.cash })
-            .from(playerStats)
-            .where(eq(playerStats.playerId, house.ownerId));
-          ownerCash = ownerStats?.cash ?? 0n;
-        }
         // Re-run BEFORE taking the extra money — a raised wager raises the
         // house's exposure, and `payOwner`'s clamp would otherwise silently
         // short-pay a winner (engine.ts's doc comment). Throwing here rolls
         // the whole transaction back: the session stays open and unchanged.
-        assertHouseCanCover(newWager, game.maxPayoutMultiplier, ownerCash);
+        assertHouseCanCover(newWager, game.maxPayoutMultiplier, await readOwnerCash(tx, house.ownerId));
 
         try {
           await escrow(tx, house, player.id, step.wagerDelta, pre.gameId);
@@ -469,7 +505,7 @@ const actRoute = route({
         .where(eq(casinoSessions.id, pre.id));
 
       if (step.done) {
-        const payout = game.settle(step.state, wager);
+        const payout = resolvePayout(game, step.state, wager);
         await settleSession(tx, pre.id, player.id, pre.gameId, house, payout);
         return {
           status: 200,

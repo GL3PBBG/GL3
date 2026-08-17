@@ -420,6 +420,87 @@ describe("POST /api/casino/act", () => {
     expect(res.json<{ error: string }>().error).toBe("session_closed");
   });
 
+  it("pays a winner in an UNOWNED town — the faucet leg, with no house to debit", async () => {
+    // Spec §4.3 specifies both legs of an unowned town and §10 asked for both;
+    // every other test here seeds a house, so `settleSession` had never once
+    // run with `propertyId === null` and a payout to make.
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+
+    const wager = 10_000n;
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+
+    // Both 19: `stand` settles as a push with no draw, so the payout is exact
+    // without depending on a shoe.
+    const { sessionId } = await seedSession({
+      playerId, locationId, propertyId: null, wager,
+      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
+    });
+
+    const cashBefore = await cashOf(playerId);
+    const ledgerBefore = await ledgerSumOf(playerId);
+
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(200);
+    expect(BigInt(res.json<{ payout: string }>().payout)).toBe(wager);
+
+    // The money comes from nowhere — that is what a faucet is — but it is
+    // still a ledger row, so sum(ledger) == balance holds (rule 3).
+    expect(await cashOf(playerId)).toBe(cashBefore + wager);
+    expect((await ledgerSumOf(playerId)) - ledgerBefore).toBe(wager);
+
+    const row = await sessionRow(sessionId);
+    expect(row?.status).toBe("settled");
+    expect(row?.propertyId).toBeNull();
+  });
+
+  it("an action the game's own schema rejects is a clean 400, not a 500", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    await seedSession({
+      playerId, locationId, propertyId: null, wager: 10_000n,
+      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
+    });
+
+    // "fold" is not in blackjack's `z.enum(["hit","stand","double"])`. The
+    // envelope schema cannot catch it — the hub does not know a game's action
+    // shape — so this is the boundary the plugin's own schema guards.
+    const res = await act(token, "fold");
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toBe("invalid_action");
+
+    // Refused, not applied: the hand is untouched.
+    const [row] = await db.select().from(casinoSessions).where(eq(casinoSessions.playerId, playerId));
+    expect(row?.status).toBe("open");
+  });
+
+  it("a move the game refuses by throwing is a clean 400, not a 500", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    // Three cards, so blackjack's `act` throws "can only double on the first
+    // two cards". A game's own `Error` is not a `PluginError`, and
+    // `routes.ts` re-throws anything else.
+    await seedSession({
+      playerId, locationId, propertyId: null, wager: 10_000n,
+      player: ["H4", "H5", "H2"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
+    });
+
+    const cashBefore = await cashOf(playerId);
+    const res = await act(token, "double");
+    expect(res.statusCode).toBe(400);
+    const body = res.json<{ error: string; detail?: string; step?: string }>();
+    expect(body.error).toBe("game_error");
+    // The game's own words survive, so a page can say more than a code.
+    expect(body.detail).toMatch(/double/i);
+    expect(body.step).toBe("act");
+
+    expect(await cashOf(playerId)).toBe(cashBefore);
+  });
+
   it("acting on another player's session: 404", async () => {
     const { playerId: ownerA } = await register();
     const { token: tokenB } = await register(); // B never played
