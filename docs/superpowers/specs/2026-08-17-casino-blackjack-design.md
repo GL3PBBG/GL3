@@ -253,7 +253,9 @@ one-active-heist-per-player. It stops a player holding two hands open, and it
 is what makes the escrow accounting single-threaded per player.
 
 `property_id` is frozen at `play` on purpose: a house sold mid-hand must not
-move the payout to a new owner who never took the wager.
+move the payout to a new owner who never took the wager. `act` resolves the
+house by that stored id (`frozenHouse`), never by re-running `ownerAt` — see
+§4.3 for exactly what that guards and what it does not.
 
 These are plugin migrations, so `apps/server/test/schema.test.ts` — which
 counts FKs and indexes created by *core* migrations — is unaffected. Asserted
@@ -295,9 +297,28 @@ a single `play` and never writes an open session row at all.
 7. `game.start({ wager, seed })`. If `done`, settle now; else insert the
    session row.
 
-`act` re-reads the session `FOR UPDATE`, calls `game.act`, applies any
-`wagerDelta` (debit player, credit house, update `wager`, **re-run step 5**
-against the new wager), and settles when `done`.
+`act` re-reads the session `FOR UPDATE`, refuses a hand past its expiry (409
+`session_expired` — the lobby hides such a hand and `play` forfeits it, so all
+three routes agree; the forfeit stays in `play`, because settling a hand inside
+the call that refuses to act on it would take the wager on a refusal), calls
+`game.act`, applies any `wagerDelta` (debit player, credit house, update
+`wager`, **re-run step 5** against the new wager), and settles when `done`.
+
+**The frozen house, precisely.** `act` resolves the house from the session's
+own `property_id` rather than by re-running `ownerAt` for the town. What that
+guards: a hand dealt in an unowned town whose table is bought mid-hand (the
+brand-new owner would otherwise be debited a payout for a wager that sank), and
+a table dropped and re-bought under a new row. What it does **not** guard: a
+`transfer`, which moves `owner_player_id` on the *same* row, so a frozen id
+still pays whoever holds that row when the hand settles — the freeze pins the
+row, not the person. A transfer therefore hands the open position over with the
+table, wager and all. That is a real limit of the mechanism and is recorded
+rather than papered over; closing it would mean freezing the owner id too, and
+then paying a player who may no longer own the table at all.
+
+A frozen row that has since been dropped, or disowned by `seizeOnKill`, reads
+as no house: the hand degrades to the unowned-town sink/faucet this section
+already defines, which is also what `payOwner` would have produced.
 
 **Settle** calls `game.settle(state, wager)` for the total returned to the
 player, then `payOwner(tx, propertyId, -payout, "casino.<gameId>.payout")` and

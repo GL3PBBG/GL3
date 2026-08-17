@@ -64,6 +64,7 @@ const MESSAGES: Record<string, string> = {
   round_overlap: "Another round already covers that period.",
   same_gang: "You can't shoot your own gang.",
   session_closed: "That hand is already over.",
+  session_expired: "That hand timed out — deal a new one.",
   session_open: "Finish the hand you're playing first.",
   target_elsewhere: "That player is elsewhere.",
   target_hospitalised: "That player is in hospital.",

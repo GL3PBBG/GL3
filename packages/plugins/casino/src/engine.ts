@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { PluginError, type PluginTx } from "@gl3/plugin-sdk";
-import { ownerAt, payOwner } from "@gl3/plugin-properties";
+import { ownerAt, payOwner, propertiesTable } from "@gl3/plugin-properties";
 import type { GameDef } from "./games.js";
 import { casinoSessions } from "./schema.js";
 
@@ -28,6 +28,48 @@ export async function resolveHouse(
     // `null` lever means the owner has set none — use our own default, which
     // is bullets' fallback shape.
     maxBet: owner.lever ?? fallbackMaxBet,
+  };
+}
+
+/**
+ * The house a hand in progress settles against: the property row `play`
+ * stamped on the session, looked up BY ID.
+ *
+ * Spec §4.1 freezes `property_id` for the hand and §4.3 says why — "a house
+ * sold mid-hand must not move the payout to a new owner who never took the
+ * wager". `act` re-resolving through `resolveHouse` broke that: a town
+ * unowned at `play` sank the wager, and a table bought while the hand was
+ * live saw its brand-new owner debited the payout.
+ *
+ * WHAT THE FREEZE DOES NOT GUARD (spec §4.3 says this too, now): properties'
+ * `transfer` moves `owner_player_id` on the SAME row, so a frozen id still
+ * pays whoever owns that row at settle. The freeze pins the ROW, which closes
+ * drop-and-rebuy and unowned-then-bought; a transfer of the same table hands
+ * the position, wager and all, to the new owner.
+ *
+ * A row that is gone or unowned answers as no house at all — the unowned-town
+ * sink/faucet the spec already defines — rather than as a property id
+ * `payOwner` would re-read only to skip.
+ *
+ * Unlocked, like `resolveHouse`: the caller holds `tx.locks.location` for the
+ * session's town, which excludes every properties mutator (all are
+ * locations-first), and `payOwner` re-reads FOR UPDATE itself.
+ */
+export async function frozenHouse(
+  tx: PluginTx, propertyId: string | null, fallbackMaxBet: bigint,
+): Promise<House> {
+  const noHouse: House = { propertyId: null, ownerId: null, maxBet: fallbackMaxBet };
+  if (propertyId === null) return noHouse;
+  const [row] = await tx.db
+    .select({ ownerPlayerId: propertiesTable.ownerPlayerId, cost: propertiesTable.cost })
+    .from(propertiesTable)
+    .where(eq(propertiesTable.id, propertyId));
+  if (row === undefined || row.ownerPlayerId === null) return noHouse;
+  return {
+    propertyId,
+    ownerId: row.ownerPlayerId,
+    // `ownerAt`'s reading of the lever: 0n means the owner has set none.
+    maxBet: row.cost > 0n ? row.cost : fallbackMaxBet,
   };
 }
 
