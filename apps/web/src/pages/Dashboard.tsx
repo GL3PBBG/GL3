@@ -15,6 +15,7 @@ export function Dashboard(): JSX.Element {
   // Above the early return: hooks cannot be called conditionally.
   const jailSeconds = useSentenceCountdown(
     "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+    jail.dataUpdatedAt,
   );
 
   if (!me.data) return <Loading />;

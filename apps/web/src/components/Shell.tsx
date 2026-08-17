@@ -60,6 +60,7 @@ export function Shell(): JSX.Element {
   // watches most — it has to tick between anchors like /jail does.
   const jailSeconds = useSentenceCountdown(
     "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
+    jail.dataUpdatedAt,
   );
 
   // `order` is the only thing that field is for, so the nav is the one place it

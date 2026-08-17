@@ -40,9 +40,16 @@ export function useCountdowns() {
     return seconds;
   }, [deadlines, now]);
 
-  /** Re-anchor an id to a fresh server snapshot (ignores 0 / free). */
-  const seed = useCallback((id: string, seconds: number) => {
-    setDeadlines((prev) => seedDeadline(prev, id, seconds, Date.now()));
+  /**
+   * Re-anchor an id to a server snapshot (ignores 0 / free).
+   *
+   * `asOfMs` is when that snapshot was read — pass a query's `dataUpdatedAt`.
+   * Omitting it treats the snapshot as current, which is only true for a value
+   * that just arrived; a cached one served on remount is older than that.
+   */
+  const seed = useCallback((id: string, seconds: number, asOfMs?: number) => {
+    const now = Date.now();
+    setDeadlines((prev) => seedDeadline(prev, id, seconds, now, asOfMs ?? now));
   }, []);
 
   /** Start a fresh countdown for an id (e.g. when its crime is committed). */

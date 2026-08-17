@@ -58,6 +58,29 @@ describe("seedDeadline", () => {
   });
 });
 
+describe("seedDeadline with an aged snapshot", () => {
+  it("anchors to when the snapshot was taken, not to now", () => {
+    // The bug: leaving /crimes unmounts the countdown, and returning re-seeds
+    // from react-query's *cached* response — a 30s snapshot captured 25s ago.
+    // Anchored at Date.now() it read as a fresh 30s cooldown until the refetch
+    // landed; anchored at its own age it reads the 5s that really remain.
+    expect(seedDeadline({}, "crime", 30, T0 + 25_000, T0)).toEqual({ crime: T0 + 30_000 });
+    expect(secondsLeft(T0 + 30_000, T0 + 25_000)).toBe(5);
+  });
+
+  it("ignores a cached snapshot that has already run out", () => {
+    // Same guard as `seconds <= 0`: a snapshot whose cooldown expired while the
+    // page was elsewhere must not overwrite an optimistic timer started since.
+    const running = { crime: T0 + 300_000 };
+    expect(seedDeadline(running, "crime", 30, T0 + 40_000, T0)).toBe(running);
+    expect(seedDeadline({}, "crime", 30, T0 + 40_000, T0)).toEqual({});
+  });
+
+  it("defaults the anchor to now, so a live snapshot behaves as before", () => {
+    expect(seedDeadline({}, "crime", 30, T0)).toEqual({ crime: T0 + 30_000 });
+  });
+});
+
 describe("pruneExpired", () => {
   it("drops deadlines that have passed", () => {
     expect(pruneExpired({ crime: T0 - 1, jail: T0 + 5_000 }, T0)).toEqual({ jail: T0 + 5_000 });
