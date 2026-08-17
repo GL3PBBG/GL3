@@ -183,11 +183,26 @@ export interface GameDef<S = unknown> {
   act(state: S, action: unknown): GameStep<S>;
   /** Total returned to the player. 0 = loss, wager = push, 2×wager = win. */
   settle(state: S, wager: bigint): bigint;
+  /**
+   * Re-render an in-progress hand from stored state, without advancing it.
+   * OPTIONAL: a game that omits it resumes viewless (the lobby answers
+   * `view: null`) rather than failing to install.
+   */
+  view?(state: S): ViewNode;
 }
 ```
 
-**The three handlers are pure.** No database, no ctx, no clock, no randomness,
-no io. Two things follow, and both are the point of this design:
+`view` was added while implementing §4.2's lobby (amended in place, the
+`ctx.propertyTypes` precedent). It is not a fourth idea — it is the one this
+block was missing: §4.2 requires the lobby to return "the open session's view",
+and nothing else could produce one. A `ViewNode` was otherwise reachable only
+inside a `GameStep`; `state` is opaque game-owned jsonb the hub cannot
+interpret; `act` cannot peek because every action mutates; and the hub must not
+import a game to render it. Without `view`, a player who reloads `/casino`
+mid-hand cannot be shown their own cards.
+
+**The handlers are pure**, `view` included. No database, no ctx, no clock, no
+randomness, no io. Two things follow, and both are the point of this design:
 
 - A game plugin **cannot get money wrong, because it never touches money.** It
   returns a payout figure; the hub decides whether the house can pay it and
