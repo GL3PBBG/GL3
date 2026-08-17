@@ -16,6 +16,7 @@ import bankPlugin from "@gl3/plugin-bank";
 import bulletsPlugin from "@gl3/plugin-bullets";
 import combatPlugin from "@gl3/plugin-combat";
 import inventoryPlugin from "@gl3/plugin-inventory";
+import propertiesPlugin from "@gl3/plugin-properties";
 import travelPlugin from "@gl3/plugin-travel";
 import { PluginError } from "@gl3/plugin-sdk";
 import { applyBalanceChange, InsufficientFundsError } from "../src/economy/ledger.js";
@@ -61,8 +62,12 @@ beforeAll(async () => {
   // joined the list when core relinquished `combat_log` and
   // `detective_searches` in 0007_relinquish_plugin_tables: the sweep's `kill`
   // op writes a p_combat_log row on every fatal shot, and its `hire` op writes
-  // a p_detectives_searches row.
-  await runPluginMigrations(db, [inventoryPlugin, combatPlugin, detectivesPlugin]);
+  // a p_detectives_searches row. properties joined when bullets became its
+  // first consumer (feat/properties-franchise): every /api/bullets/buy call
+  // now reads p_properties_properties via ownerAt, unconditionally, whether
+  // or not the location's franchise is owned — so the sweep's bullets op
+  // 42P01s without this migrated, exactly as bullets.test.ts already needed.
+  await runPluginMigrations(db, [inventoryPlugin, combatPlugin, detectivesPlugin, propertiesPlugin]);
 
   // One item, stocked in every location, cheap and effectively unlimited so
   // the sweep's shopBuy op mostly succeeds rather than mostly 409ing.
