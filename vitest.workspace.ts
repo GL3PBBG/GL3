@@ -276,6 +276,7 @@ export default defineWorkspace([
         "test/bullets-property.test.ts",
         "test/bullets.test.ts",
         "test/casino-boot.test.ts",
+        "test/casino-play.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",
