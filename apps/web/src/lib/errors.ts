@@ -18,6 +18,7 @@ const MESSAGES: Record<string, string> = {
   boss_must_transfer_first: "A boss must hand the gang over before leaving.",
   cannot_kick_boss: "You can't kick the boss.",
   cooldown: "You just fired — wait a moment.",
+  cost_above_max: "That price is above the maximum bullet cost.",
   crime_not_found: "That crime no longer exists.",
   email_taken: "That email is already registered.",
   forbidden: "You don't have permission to do that.",
@@ -31,6 +32,10 @@ const MESSAGES: Record<string, string> = {
   insufficient_funds: "You don't have enough money.",
   insufficient_gang_funds: "The gang doesn't have enough money.",
   insufficient_stock: "Not enough in stock.",
+  lever_above_cap: "That price is above the limit the admin set.",
+  min_above_max: "The hourly minimum can't be above the maximum.",
+  quantity_above_max: "That's more than you can buy at once.",
+  stock_above_max: "That stock is above the maximum.",
   invalid_action: "That isn't a move in this game.",
   invalid_credentials: "Wrong username or password.",
   invalid_game_multiplier: "That game is misconfigured — the table is closed.",
@@ -110,6 +115,9 @@ export function describeError(error: unknown): string {
   }
   if (error.code === "insufficient_stock" && error.available !== undefined) {
     return `Only ${error.available} left in stock here.`;
+  }
+  if (error.code === "quantity_above_max" && error.maxBuy !== undefined) {
+    return `You can buy at most ${error.maxBuy} bullets at a time.`;
   }
   return base;
 }

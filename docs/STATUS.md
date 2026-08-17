@@ -1937,6 +1937,88 @@ record that it reads that way even to someone who has read the warning. The
 tell is the shape — a whole project failing as a block, at setup, with one
 identical message. Merged to `main` as `72a84be`.
 
+### Bullets restock, admin options and the two caps
+
+Design: `docs/superpowers/specs/2026-08-17-bullets-restock-design.md`.
+
+`locations.bullet_stock` had three writers — the buy decrement, the admin
+absolute-set, and the one-time V2 import — and no restock of any kind, so every
+town drained monotonically to zero and stayed there. V2's `bullets.inc.php`
+restocked hourly and that had never been ported.
+
+- **`restockIfDue` ports `restock()` verbatim.** One global cursor
+  (`bullets.last_restock`) floored to the hour, `hours = floor((thisHour −
+  cursor)/3600)` clamped to **12**, an *independent* draw per location
+  (`sum of randomInt(min, max+1)` over `hours`, defaults 2250/2750), and V2's
+  40000 ceiling. `LEAST()` folds in V2's second statement, which also caps a
+  row that was already over the max.
+- **Lazy, under `pg_advisory_xact_lock(7461003)`, no cron** — 7461001 is the
+  first-admin claim, 7461002 is rounds. Double-checked: the unlocked pre-read
+  makes the common case (nothing due) one indexed row read and no lock; the
+  re-read under the lock is what makes N racing shop views produce one restock
+  and N−1 no-ops.
+- **The trigger is a new `GET /api/bullets/shop`, and it had to be a read.**
+  A core plugin cannot declare BullMQ jobs (`buildApp` throws), and hanging the
+  restock off the *purchase* deadlocks the mechanic: `Bullets.tsx` disables the
+  buy button at zero stock, so the buy that would refill the town can never be
+  made. Hooking it into travel's `GET /api/locations` was rejected — wrong
+  owner, and it would fire on travel page views.
+- **RULE 6, and a new edge in the lock graph.** The restock is the first thing
+  in the game to touch every location row in one transaction. It takes them
+  `ORDER BY id ... FOR UPDATE`, ascending — the order `lockLocationsForUpdate`
+  sorts into and travel already uses. Regression:
+  `apps/server/test/bullets-restock-lock-order.test.ts`, whose adversary is
+  hand-written raw SQL rather than the real travel route (the corollary: a test
+  whose participants share a helper proves only the case that was already
+  safe), **demonstrated red** against a `desc` variant — the shop 500s on
+  `select "id" from "locations" order by ... desc for update`.
+- **The shop route also fixes a live display bug.** The page rendered
+  `locations.bullet_cost` while the buy route charged the franchise owner's
+  lever, so an owned town showed a price it would not honour. `unitCost` is now
+  the figure the purchase will actually cost.
+- **Two caps, from V2's `method_options`.** `max_buy` refuses a purchase before
+  the transaction opens (`quantity_above_max`). `max_cost` is enforced twice:
+  rejected when the owner sets the lever (`lever_above_cap`) and clamped again
+  when the price is charged, because the cap can be lowered after a higher
+  lever was already accepted. Unset means unlimited for both — V2 passes no
+  default there, and zero would mean "free" and "no purchase ever allowed".
+- **The lever rejection is the fourth live filter subscription, and it cannot
+  use `ctx.settings`.** `properties` gained a `properties.leverSet` point
+  applied before its write; `bullets` subscribes. `runFilterChain` threads the
+  *applying* plugin's ctx into every subscriber, so `ctx.settings.get("max_cost")`
+  there resolves `properties.max_cost` — the same mislabelling trap already on
+  record for `tx.events.publish` in a `combat.killResolved` subscriber. The
+  subscriber therefore reads the `settings` row in its own transaction. Fixing
+  the class properly (a ctx built for the *subscribing* plugin) was considered
+  and left alone: it changes every existing subscriber's semantics.
+- **Tunables stay a boot snapshot; the cursor cannot.** `loadSettings` reads
+  once at boot and `ctx.settings.get` is synchronous over that record, so an
+  options edit takes effect on the next restart — consistent with the nine
+  other settings consumers, and the panel says so out loud. The cursor moves on
+  every restock and is read and written through `tx.db`, making `settings` the
+  plugin's third core-table mirror and GL3's first runtime settings *writer*.
+- **Admin gained an Options panel and kept the stock form.** Travel's town
+  admin edits only name/cost/cooldown, so bullets' section is still the only
+  editor of `bullet_cost` anywhere. The direct stock setter stays as an ops
+  override (a deviation from V2, where stock came from `restock()` alone),
+  validated against `max_stock` and `max_cost`.
+- **Migration parity needed a rename map.** `migrateSettings` copied `S_key`
+  verbatim, so a migrated game would have landed flat keys
+  (`bulletsStockMinPerHour`) that `ctx.settings.get` can never find — every
+  operator's tuning silently reverting to defaults. Six keys are renamed into
+  the `bullets.` namespace; the rename is a pure function of the key, so
+  re-running still maps to the same row.
+- **`@gl3/shared` → `0.1.7`** for `BulletShopResponseSchema` (additive).
+  `@gl3/plugin-sdk` unchanged; both plugin packages are `private: true`.
+  **Published to `npm.gl3.dev`**, with the user's approval, following this
+  branch's commit — the registry now serves `@gl3/shared` `0.1.1` through
+  `0.1.7`, `latest` pointing at `0.1.7`.
+- Gate: bare `npm run verify`, exit code read from the process — **201 files /
+  1568 tests, exit 0**, no unhandled rejections. Two hardcoded fixture counts
+  failed first (`migrators/settings.test.ts` and `orchestrator.test.ts`, both
+  `toHaveLength(3)` over the settings table) and neither was reachable from any
+  scoped run — the same lesson the rounds cluster recorded.
+
 ### Installing a plugin without forking core
 
 The optional-plugin import map used to be a hand-written literal in

@@ -37,7 +37,9 @@ describe("runMigration", () => {
       expect(await db.select().from(notifications)).toHaveLength(1);
       expect(await db.select().from(bounties)).toHaveLength(1);
       expect(await db.select().from(detectiveSearches)).toHaveLength(1);
-      expect(await db.select().from(settings)).toHaveLength(3);
+      // 3 verbatim + the 6 bullet keys the fixture carries, which migrateSettings
+      // renames into the `bullets.` namespace rather than dropping or duplicating.
+      expect(await db.select().from(settings)).toHaveLength(9);
       expect((await db.select().from(idMap)).length).toBeGreaterThan(20); // every migrated row got a mapping
 
       await pool.end();
