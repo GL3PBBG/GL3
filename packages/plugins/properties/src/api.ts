@@ -23,6 +23,18 @@ export interface PropertyOwnership {
  * Read-only and unlocked: a consumer calls this to decide whether to pay
  * anyone at all. `payOwner` re-reads the row FOR UPDATE, so a concurrent
  * transfer between the two calls cannot pay the wrong player.
+ *
+ * That guarantee has exactly one hole, and it is deliberate: `seizeOnKill`
+ * (`seizure.ts:32-41`) sets `owner_player_id = NULL` on kill without taking
+ * ANY lock — no `tx.locks.location`, no `tx.locks.player` — which is what
+ * keeps it out of every lock-order cycle in this plugin (see the comment at
+ * `seizure.ts:34-35`). So "every properties mutator is locations-first,
+ * therefore holding the location lock pins the owner" is false for this one
+ * subscriber: a consumer holding `tx.locks.location(L)` can still see the
+ * owner it read here vanish before `payOwner`'s locked re-read, in which
+ * case `payOwner` returns 0n (see its TOCTOU note). Do not "fix" this by
+ * adding a lock to `seizeOnKill` — that would reintroduce a cycle it was
+ * written specifically to avoid.
  */
 export async function ownerAt(
   tx: PluginTx, pluginId: string, locationId: string,
@@ -47,6 +59,24 @@ export async function ownerAt(
  *
  * V2's `Property::updateProfit()` plus the balance write its callers do by
  * hand; folded together here so a consumer cannot move one without the other.
+ *
+ * SILENT SHORT-PAY. The clamp is silent: nothing throws, `sum(ledger) ==
+ * balance` still holds, and a caller that ignores the return value (as
+ * `bullets` does — its one call site, `bullets/src/index.ts:175`, only ever
+ * credits, so it never hits this branch) gets no signal that the owner could
+ * not cover the debit. Any consumer whose payout can exceed its intake in a
+ * single interaction MUST check affordability before committing to it, not
+ * discover the shortfall here — e.g. an up-front exposure check refusing the
+ * interaction when `stake × maxPayoutMultiplier > ownerCash`, re-checked on
+ * anything that can raise the stake mid-interaction. `bullets` needs no such
+ * guard: a sale can never pay out more than it takes in.
+ *
+ * THE 0n RETURN IS THREE-WAY AMBIGUOUS. It means "unowned", "`amount` was
+ * 0n", and "the owner changed between the unlocked pre-read and the locked
+ * re-read, so this call skipped the payout" (see TOCTOU below) — a caller
+ * cannot tell these apart from the return value alone. The third case is
+ * usually a same-property transfer racing this call, but `seizeOnKill` (see
+ * `ownerAt`'s doc comment above) can also cause it outside any transfer.
  *
  * LOCK ORDER (rule 6). This is order-CONFORMING on its own, not merely
  * order-dependent on the caller: an unlocked pre-read of `owner_player_id`
