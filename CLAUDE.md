@@ -137,8 +137,9 @@ game-wide rather than transferring them to the shooter (the shooter already
 takes the kill's payout); it notifies via `tx.notify` rather than a plugin
 event, because a `combat.killResolved` filter subscriber runs under the
 *applying* plugin's ctx, so a `tx.events.publish` there would be mislabelled
-as combat's. `drop` has no refund, matching V2's DELETE — a property is a
-one-way money sink. `@gl3/shared` took an additive patch bump to `0.1.5`
+as combat's. `drop` shipped with no refund, matching V2's DELETE; it now pays
+back **half** the declared price and the page confirms first (see the
+property-board note below). `@gl3/shared` took an additive patch bump to `0.1.5`
 (`PropertyRowSchema`/`PropertyListResponseSchema` change shape); `@gl3/plugin-
 sdk` took its first-ever bump, `0.1.1`, for `providesProperties` and
 `ctx.propertyTypes`.
@@ -187,6 +188,20 @@ plugin's ctx (the events mislabelling trap, now on record for settings too).
 `migrateSettings` gained a rename map for V2's six flat bullet keys.
 `@gl3/shared` → `0.1.7`, published — the registry now serves `0.1.1`
 through `0.1.7`.
+**The property board, the drop refund and the bankruptcy takeover** have since
+landed on top of those two clusters: `GET /api/properties` lists only the town
+the caller is standing in (both the real rows and the synthesised buyable
+ones), so a property owned elsewhere is not listed at all — its
+lever/transfer/drop/reset routes are not location-gated and still work;
+`drop` answers `200 { refund }` paying `price / 2n` back, with a two-step
+confirm in the page rather than `window.confirm`; and a casino payout the
+house cannot cover now hands the TABLE to the winner via
+`takeOverFrom` (`@gl3/plugin-properties`), which refuses unless a
+`FOR UPDATE` re-read proves the expected owner still holds the row — an
+unowned house is a faucet and cannot go bankrupt, and nobody seizes their own
+table. It sits in casino's `settleSession`, so every future game inherits it.
+`@gl3/shared` → `0.1.8` for the optional `houseSeized` step field, **published**
+to `npm.gl3.dev` (which now serves `0.1.1` through `0.1.8`).
 **M4 (migration CLI) is complete** — `apps/migrate`, all 33 plan tasks, both SPEC
 §6 acceptance criteria proven (a three-run idempotency test over all 26 target
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id

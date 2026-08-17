@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { PluginError, type PluginTx } from "@gl3/plugin-sdk";
-import { ownerAt, payOwner, propertiesTable } from "@gl3/plugin-properties";
+import { ownerAt, payOwner, propertiesTable, takeOverFrom } from "@gl3/plugin-properties";
 import type { GameDef } from "./games.js";
 import { casinoSessions } from "./schema.js";
 
@@ -207,15 +207,26 @@ export async function escrow(
 export async function settleSession(
   tx: PluginTx, sessionId: string, playerId: string, gameId: string,
   house: House, payout: bigint,
-): Promise<void> {
+): Promise<boolean> {
+  let seized = false;
   if (payout > 0n) {
     if (house.propertyId !== null) {
-      // Return value DISCARDED for the same reason as `escrow`'s above: a
-      // house seized by `seizeOnKill` between `ownerAt` and this call answers
-      // 0n, and the payout becomes a faucet rather than a debit to a player
-      // whose row this transaction never locked. The player is paid either
-      // way — a seizure mid-hand must not cost the winner their money.
-      await payOwner(tx, house.propertyId, -payout, `casino.${gameId}.payout`);
+      // The return value is READ now, unlike `escrow`'s: it is the only place
+      // a short-pay is visible. `payOwner` clamps a debit to the owner's cash,
+      // so `moved` is `-payout` when the house covered the hand and something
+      // smaller (0n included) when it did not.
+      const moved = await payOwner(tx, house.propertyId, -payout, `casino.${gameId}.payout`);
+      const shortfall = payout + moved; // `moved` is <= 0n
+      if (shortfall > 0n && house.ownerId !== null) {
+        // THE BANKRUPTCY TAKEOVER. The house could not pay what the hand won,
+        // so the winner takes the table. `takeOverFrom` refuses if the row is
+        // gone or unowned (an unowned house is a faucet — it cannot go
+        // bankrupt, and 0n from `payOwner` means exactly that when a
+        // `seizeOnKill` landed mid-hand), if somebody else owns it now, or if
+        // the winner is the owner. In every one of those cases the payout
+        // below still happens: the player is paid either way.
+        seized = await takeOverFrom(tx, house.propertyId, house.ownerId, playerId);
+      }
     }
     await tx.economy.applyBalanceChange({
       playerId, amount: payout, kind: "cash", reason: `casino.${gameId}.payout`,
@@ -224,4 +235,5 @@ export async function settleSession(
   await tx.db.update(casinoSessions)
     .set({ status: "settled", settledAt: new Date() })
     .where(eq(casinoSessions.id, sessionId));
+  return seized;
 }

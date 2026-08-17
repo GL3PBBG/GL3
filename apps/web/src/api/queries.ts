@@ -858,10 +858,13 @@ export function useTransferProperty(propertyId: string) {
 }
 
 /** Drops the property with no refund; the row survives, unowned. */
+/** Answers the refund actually paid — half the declared price, the server's
+ *  figure. The page warns with the same number before it calls this. */
 export function useDropProperty(propertyId: string) {
   const queryClient = useQueryClient();
-  return useMutation<void, Error, void>({
-    mutationFn: async () => api<void>(`/api/properties/${propertyId}/drop`, { method: "POST" }),
+  return useMutation<{ refund: string }, Error, void>({
+    mutationFn: async () =>
+      api<{ refund: string }>(`/api/properties/${propertyId}/drop`, { method: "POST" }),
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
   });
 }

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { locations, playerStats, transactions } from "../src/db/schema/index.js";
+import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -584,5 +584,97 @@ describe("POST /api/casino/act", () => {
 
     const res = await act(tokenB, "stand");
     expect(res.statusCode).toBe(404);
+  });
+
+  // The bankruptcy takeover. `assertHouseCanCover` refuses a hand the house
+  // cannot pay AT `play` AND on every raise, but the owner's cash can fall
+  // between those checks and the settle (they spend it elsewhere, or a bounty
+  // lands), and `payOwner` then CLAMPS the debit — the winner used to be paid
+  // in full out of a faucet and the owner kept the table. Now they lose it.
+  it("bankrupts the house: the winner takes ownership of the table", async () => {
+    const { token, playerId } = await register();
+    const { playerId: ownerId } = await register();
+    const locationId = await seedLocation();
+    const propertyId = await seedHouse(locationId, ownerId, 500n);
+    const wager = 10_000n;
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+    // The owner holds LESS than the 20_000n this hand is about to pay out —
+    // the state `assertHouseCanCover` cannot rule out, because it ran before
+    // the owner's cash moved.
+    await placePlayer(ownerId, locationId, 5_000n);
+
+    const cashBefore = await cashOf(playerId);
+
+    // Player stands on 5, dealer draws D9 onto 16 and busts: pays 2x.
+    await seedSession({
+      playerId, locationId, propertyId, wager,
+      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
+    });
+
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ done: boolean; payout: string; houseSeized: boolean }>();
+    expect(body.done).toBe(true);
+    expect(BigInt(body.payout)).toBe(wager * 2n);
+    expect(body.houseSeized).toBe(true);
+
+    // The winner is paid IN FULL — the takeover is on top of the money, not
+    // instead of it.
+    expect(await cashOf(playerId)).toBe(cashBefore + wager * 2n);
+    // The house paid every cent it had, and the clamp took it to zero.
+    expect(await cashOf(ownerId)).toBe(0n);
+
+    const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
+    expect(row?.ownerPlayerId).toBe(playerId);
+    // The lever does not survive its owner — `transfer` and `drop` zero it too.
+    expect(row?.cost).toBe(0n);
+
+    // Both sides are told, by notification: casino publishes no event per hand.
+    const notes = await db.select().from(notifications).where(eq(notifications.playerId, ownerId));
+    expect(notes.some((n) => n.body.includes("took over your"))).toBe(true);
+    const winnerNotes = await db.select().from(notifications).where(eq(notifications.playerId, playerId));
+    expect(winnerNotes.some((n) => n.body.includes("you took ownership of the casino"))).toBe(true);
+  });
+
+  it("never seizes an UNOWNED house — a faucet cannot go bankrupt", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    const wager = 10_000n;
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+
+    await seedSession({
+      playerId, locationId, propertyId: null, wager,
+      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
+    });
+
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ payout: string; houseSeized: boolean }>();
+    expect(BigInt(body.payout)).toBe(wager * 2n);
+    expect(body.houseSeized).toBe(false);
+  });
+
+  it("an owner who bankrupts their own table does not seize it from themselves", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    const propertyId = await seedHouse(locationId, playerId, 500n);
+    const wager = 10_000n;
+    // One player, both roles: the payout debits and credits the same person,
+    // so the clamp can bite while nobody else is involved at all.
+    await placePlayer(playerId, locationId, 5_000n);
+
+    await seedSession({
+      playerId, locationId, propertyId, wager,
+      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
+    });
+
+    const res = await act(token, "stand");
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ houseSeized: boolean }>().houseSeized).toBe(false);
+
+    const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
+    expect(row?.ownerPlayerId).toBe(playerId);
+    // The lever is untouched: nothing changed hands.
+    expect(row?.cost).toBe(500n);
   });
 });

@@ -148,7 +148,7 @@ describe("GET /api/plugins", () => {
         }, {
           pluginId: "properties",
           name: "dropped",
-          describe: "{actorName} dropped the {typeName} in {locationName}",
+          describe: "{actorName} dropped the {typeName} in {locationName} for {refund} back",
           invalidates: ["properties", "me"],
         }, {
           pluginId: "properties",

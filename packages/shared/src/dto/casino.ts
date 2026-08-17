@@ -71,5 +71,11 @@ export const CasinoStepResponseSchema = z.object({
   done: z.boolean(),
   wager: MoneySchema,
   payout: MoneySchema.optional(),
+  /**
+   * True when this hand's payout bankrupted the house and the table changed
+   * hands to the caller. Optional, not required: only a settling step (`done`)
+   * ever carries it, and an in-play step has no answer to give yet.
+   */
+  houseSeized: z.boolean().optional(),
 });
 export type CasinoStepResponse = z.infer<typeof CasinoStepResponseSchema>;

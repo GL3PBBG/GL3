@@ -1573,9 +1573,10 @@ silently matched to spec:**
   new core `GameEvent` variant for one notification. The manifest declares
   exactly three events — `bought`, `dropped`, `transferred` — and no
   `seized`.
-- **`drop` has no refund**, matching V2's plain `DELETE`. A property is a
-  one-way money sink: pay `price`, earn from the consumer's gameplay, never
-  get the principal back.
+- **`drop` refunded nothing** as this cluster shipped, matching V2's plain
+  `DELETE`. That has since changed — see "Property board, drop refund and the
+  bankruptcy takeover" below: it now pays back half the declared price and the
+  page confirms first.
 
 **Package versions.** `@gl3/plugin-sdk` took its **first bump ever**,
 `0.1.0` → `0.1.1`, for `providesProperties` and `ctx.propertyTypes`.
@@ -2103,6 +2104,58 @@ range resolving. `npm view @gl3/shared versions` now returns
 above. `@gl3/plugin-sdk` stays at `0.1.0`: its own `src` is untouched and its
 `"@gl3/shared": "^0.1.0"` dependency picks the new patch up by itself — the
 same shape as the `0.1.1` release.
+
+### Property board, drop refund and the bankruptcy takeover
+
+Three player-facing corrections on top of the properties and casino clusters,
+all from live play rather than from the plans:
+
+- **`GET /api/properties` is the CURRENT TOWN's board, not the world's.** It
+  read every row in the table and synthesised one buyable row per (declared
+  type × *every* location), so a three-town game listed three of everything.
+  It now reads `player_stats.location_id` first and filters both halves —
+  real rows and synthetics — to that one location. A player who is nowhere
+  (null `location_id`, or no stats row) gets an empty list rather than a 409:
+  this is a read, and `buyRoute` already owns the 409 for acting without a
+  location. **A property owned in another town is therefore not listed** —
+  deliberate, chosen over "current town plus my properties anywhere". Its
+  `lever`/`transfer`/`drop`/`reset` routes still work (none is gated on the
+  caller's location), so nothing is unreachable by an API client; reaching it
+  from the UI means travelling back. Tests: the synthesis test now expects
+  exactly one location, plus a new "lists no row for a location the caller is
+  not in".
+- **`drop` refunds half.** `dropRefund(price) = price / 2n`, floored, and `0n`
+  for a type whose plugin is no longer installed (there is no declared price
+  to halve, and a property row stores no record of what its owner paid). The
+  route answers `200 { refund }` where it used to answer `204`, the `dropped`
+  event payload carries `refund`, and the web page confirms first — a two-step
+  in the row ("Drop it for good? You get back X — half its price."), not
+  `window.confirm`, since nothing else in this app opens a native dialog. The
+  page's `dropRefundOf` and the server's `dropRefund` are the same arithmetic
+  in two places on purpose: `apps/web` depends on `@gl3/shared`, never on a
+  plugin package.
+- **The bankruptcy takeover.** `assertHouseCanCover` refuses a hand the house
+  cannot pay at `play` and on every raise, but the owner's cash can fall
+  between that check and the settle, and `payOwner` then CLAMPS the debit —
+  the winner was paid in full out of a faucet and the owner kept the table.
+  Now `settleSession` READS `payOwner`'s return (`escrow` still discards its
+  own, for the reason its comment gives), and on a shortfall calls the new
+  `takeOverFrom` exported by `@gl3/plugin-properties`, which moves
+  `owner_player_id` to the winner and zeroes `cost` — but only under a
+  `FOR UPDATE` re-read proving the *expected* owner still holds the row. It
+  answers `false`, never throws, for the row being gone or unowned ("an
+  unowned house cannot go bankrupt" — it is a faucet with no cash to run
+  out of), for somebody else owning it now, and for the winner being the
+  owner. The player is paid in full in every one of those cases: the takeover
+  is on top of the money, not instead of it. Both sides are told by
+  `tx.notify` — casino publishes no event per hand — and the step response
+  carries `houseSeized`, so the page can show the sentence
+  `HOUSE_SEIZED_MESSAGE`. It is hub-level, not blackjack-level: every future
+  casino game inherits it because the hub owns every ledger row.
+  `@gl3/shared` → `0.1.8` for the optional `houseSeized` field (additive
+  patch), **published** — the registry now serves `0.1.1` through `0.1.8`. Tests: three new cases in
+  `casino-act.test.ts` (takeover, unowned house, owner-at-own-table), each
+  shown red against a stubbed `takeOverFrom`.
 
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at
