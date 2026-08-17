@@ -8,10 +8,10 @@ import {
 import { z } from "zod";
 
 /**
- * The view vocabulary is eleven node kinds and grows only when a plugin-contributed
+ * The view vocabulary is twelve node kinds and grows only when a plugin-contributed
  * page needs data the static vocabulary cannot carry, as `table` did for admin
  * lists. A core page that needs more than this gets a bespoke React override.
- * Nine of the eleven are leaves; `panel` and `list` nest and so live on
+ * Ten of the twelve are leaves; `panel` and `list` nest and so live on
  * `ViewNodeSchema` below.
  *
  * Every node is `.strict()`. A typo'd prop on a node would otherwise be
@@ -126,13 +126,25 @@ const leafOptions = [
       columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
     })
     .strict(),
+  // A hand of playing cards. Values are @letele/playing-cards component names:
+  // suit initial (H/D/C/S) + rank (a, 2-10, j, q, k), plus J1/J2 jokers and
+  // B1/B2 backs. Constrained at authoring time rather than at render, for the
+  // reason this file's header gives: an unmapped code is silently dropped by
+  // the renderer, which is the failure mode hardest to spot from the page.
+  z
+    .object({
+      kind: z.literal("cards"),
+      cards: z.array(z.string().regex(/^([HDCS](a|[2-9]|10|j|q|k)|J[12]|B[12])$/, "card must be a playing-card code")),
+    })
+    .strict(),
 ] as const;
 
-/** Type-level only: `ViewNode` infers its nine non-nesting members from here. */
+/** Type-level only: `ViewNode` infers its ten non-nesting members from here. */
 const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
   | z.infer<typeof Leaf>
+  | { kind: "cards"; cards: string[] }
   | { kind: "panel"; title: string; children: ViewNode[] }
   | { kind: "list"; items: ViewNode[] };
 
