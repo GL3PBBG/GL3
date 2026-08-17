@@ -208,6 +208,7 @@ export default defineWorkspace([
       include: [
         "test/combat-resolve.test.ts",
         "test/combat-condition.test.ts",
+        "test/combat-cooldown.test.ts",
         "test/combat-settings.test.ts",
         "test/effects-parity.test.ts",
         "test/config.test.ts",

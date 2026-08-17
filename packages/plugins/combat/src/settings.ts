@@ -1,5 +1,8 @@
 export interface CombatSettings {
+  /** The cooldown a weapon declaring no `dps` gets. See `cooldown.ts`. */
   cooldownSeconds: number;
+  /** Ceiling on a dps-derived cooldown, so a tiny dps cannot lock a player out. */
+  cooldownMaxSeconds: number;
   hospitalSeconds: number;
   newbieExpThreshold: bigint;
   defaultWeaponAccuracy: number;
@@ -8,6 +11,8 @@ export interface CombatSettings {
     damageMin: number;
     damageMax: number;
     bulletsPerShot: number;
+    /** Absent by default: fists keep the flat cooldown until an admin sets one. */
+    dps?: number | undefined;
   };
   condition: {
     wearPerShot: number;
@@ -48,6 +53,20 @@ function num(get: (key: string) => string | null, key: string, fallback: number)
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
+/**
+ * An optional POSITIVE float. Unlike `num` it does not floor — a floored 0.5
+ * dps is 0, which reads as "no dps" and silently un-paces the weapon — and
+ * unlike every other reader it has no fallback value: absent means absent, and
+ * `cooldownSecondsFor` answers with the flat cooldown for that case. Zero and
+ * negatives are absent too, since both make `damage / dps` meaningless.
+ */
+function rate(get: (key: string) => string | null, key: string): number | undefined {
+  const raw = get(key);
+  if (blank(raw)) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function big(get: (key: string) => string | null, key: string, fallback: bigint): bigint {
   const raw = get(key);
   if (blank(raw)) return fallback;
@@ -77,6 +96,9 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
   const damageMin = num(get, "unarmed.damage_min", 1);
   return {
     cooldownSeconds: Math.max(1, num(get, "cooldown_seconds", 60)),
+    // Floored at 1 for the same Redis reason: it is itself handed to SET EX
+    // whenever a dps-derived wait exceeds it.
+    cooldownMaxSeconds: Math.max(1, num(get, "cooldown_max_seconds", 3600)),
     hospitalSeconds: Math.max(1, num(get, "hospital_seconds", 600)),
     newbieExpThreshold: big(get, "newbie_exp_threshold", 100n),
     defaultWeaponAccuracy: Math.min(100, num(get, "default_weapon_accuracy", 50)),
@@ -93,6 +115,7 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
       // 500ing every shot in the game.
       damageMax: Math.max(damageMin, num(get, "unarmed.damage_max", 5)),
       bulletsPerShot: Math.max(1, num(get, "unarmed.bullets_per_shot", 1)),
+      dps: rate(get, "unarmed.dps"),
     },
     condition: {
       wearPerShot: num(get, "condition.wear_per_shot", 1),
