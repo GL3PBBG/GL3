@@ -413,13 +413,37 @@ gets real cards.
 | size | 557 KB unpacked (52 SVG components) |
 | React peer dep | **not declared** — only `@babel/runtime` |
 
-Two consequences for the implementation. The README's `import * as deck` idiom
-defeats tree-shaking entirely, so the renderer builds an **explicit** code →
-component map behind a lazy import rather than star-importing. And the absent
-React peer dependency must be verified against React 18 in the first task,
-before anything is built on it — a 0.1.0 package abandoned for three years is a
+Two consequences for the implementation. The renderer builds an **explicit**
+code → component map rather than the README's dynamic `deck[code]` lookup, so
+that a code which is not a real export fails `tsc` instead of compiling to
+`undefined`. And the absent React peer dependency must be verified before
+anything is built on it — a 0.1.0 package abandoned for three years is a
 reasonable bet for public-domain SVG assets and a poor one for anything with
 behaviour, which is why only the assets are relied on.
+
+**Corrected during implementation.** This section originally justified the
+explicit map by *tree-shaking*, and that was wrong: the map names all 56
+exports, so no unused export survives for a dead-code pass to strip and the
+whole deck lands in the bundle either way — measured at **860.86 kB (266 kB
+gzip)**, over Vite's 500 kB warning threshold. Typo safety is the map's real
+and only benefit. Shrinking the bundle needs a different mechanism (a lazy
+import of the map, or vendoring only the cards actually used) and is left as
+follow-up rather than folded into this cluster.
+
+Two further facts, found only by building against the package and worth
+recording because both were invisible from its npm page:
+
+- **It ships no type declarations.** The manifest names
+  `"types": "lib/index.d.ts"` while `"files"` is `["dist"]`, so `lib/` was never
+  published. `apps/web` is `strict`, so the import fails TS7016 and
+  `skipLibCheck` does not help. An ambient declaration enumerating all 56
+  exports is required, and is what makes the typo safety above real.
+- **It is not resolvable by Node**, declaring only `"module"` with no `main` or
+  `exports`. Vite bundles it fine, but Vitest hardcodes `resolve.mainFields: []`
+  for every project's SSR resolution by design, so the test run cannot load it
+  until `mainFields` is restored for that one project. Probing with bare `node`
+  — or even with `vite-node` — gives an answer that does not predict the test
+  run.
 
 **`/casino`** is hand-written at `apps/web/src/pages/Casino.tsx`, like every
 other gameplay page (Combat, Properties, OrganizedCrime). It renders the lobby,
