@@ -25,13 +25,17 @@ export function readMaxBet(s: SettingsReader): bigint { return readBigint(s, "ma
  * `index.ts` decides a hand is still live, so a false there means EVERY open
  * hand reads as expired: the lobby hides it and the next `play` forfeits it on
  * sight, costing the player their hand and the wager escrowed in it. A live
- * gameplay defect reachable from one settings row.
+ * gameplay defect reachable from one settings row. The same Invalid Date also
+ * blinded the admin Open-hands list's `stale` column — the diagnostic an admin
+ * would reach for to find this very misconfiguration — which is a third reason
+ * to clamp in the reader rather than at one call site.
  *
  * 100 years is picked so the clamp can never cost a legitimate configuration —
- * a hand that expires in a century does not expire — while leaving
- * `createdAt + minutes` five orders of magnitude inside the ±8.64e15 ms a
- * `Date` can represent, so no plausible `created_at` can push it out of range.
- * Clamping here rather than in `expiresAt` fixes both call sites at once.
+ * a hand that expires in a century does not expire — while keeping the span it
+ * adds, 52_596_000 × 60_000 = 3.15576e12 ms, a factor of **2738** inside the
+ * ±8.64e15 ms a `Date` can represent, so no plausible `created_at` can push
+ * `createdAt + minutes` out of range. Clamping here rather than in `expiresAt`
+ * covers all four call sites at once.
  */
 export const MAX_SESSION_EXPIRY_MINUTES = 52_596_000; // 100 × 365.25 × 24 × 60
 
