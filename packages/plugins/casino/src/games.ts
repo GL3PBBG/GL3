@@ -38,6 +38,20 @@ export interface GameDef<S = unknown> {
   act(state: S, action: unknown): GameStep<S>;
   /** Total returned to the player. 0 = loss, wager = push, 2×wager = win. */
   settle(state: S, wager: bigint): bigint;
+  /**
+   * Re-render an in-progress hand from its stored state, without advancing it.
+   * Pure, like the other three.
+   *
+   * The lobby (`GET /api/casino`) needs this and nothing else can supply it: a
+   * `ViewNode` is otherwise produced only as part of a `GameStep`, `state` is
+   * opaque game-owned jsonb the hub cannot interpret, and `act` cannot be used
+   * to peek because every action mutates. Without it a player who reloads the
+   * page mid-hand cannot be shown their own cards.
+   *
+   * OPTIONAL, so a game that does not implement it still compiles and simply
+   * resumes viewless rather than failing to install.
+   */
+  view?(state: S): ViewNode;
 }
 
 export const games = filterPoint<GameDef[]>("casino.games");
