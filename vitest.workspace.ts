@@ -180,7 +180,20 @@ export default defineWorkspace([
       root: "./apps/web",
       include: ["test/**/*.test.ts"],
     },
-    ...srcAliases,
+    resolve: {
+      alias: srcAliases.resolve.alias,
+      // Vitest hardcodes `resolve.mainFields: []` for every project's SSR
+      // module resolution (its own "vitest:project" plugin, deliberately —
+      // "by default Vite resolves `module` field, which not always a native
+      // ESM module"). That default is correct in general but makes
+      // @letele/playing-cards@0.1.0 unresolvable here: it ships ONLY a
+      // "module" field (no "main", no "exports"), so with mainFields: []
+      // Node's own entry-point fallback runs and finds nothing. Restoring
+      // "module" for this one project — not the whole workspace — lets
+      // Vite's bundler-aware resolver find it the same way `vite build`
+      // already does for the production bundle.
+      mainFields: ["module", "main"],
+    },
   },
   {
     test: {
