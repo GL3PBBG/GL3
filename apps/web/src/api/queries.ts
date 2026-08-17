@@ -793,39 +793,63 @@ export function useProperties() {
   });
 }
 
+/** Buys `pluginId`'s franchise slot at `locationId` — not scoped to an
+ *  existing row, since an unowned type may not have one yet (the row is
+ *  created lazily on first purchase). */
 export function useBuyProperty() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (propertyId: string) =>
-      api(`/api/properties/${propertyId}/buy`, { method: "POST" }),
+  return useMutation<{ propertyId: string }, Error, { pluginId: string; locationId: string }>({
+    mutationFn: async (input) =>
+      z.object({ propertyId: z.string() }).parse(
+        await api("/api/properties/buy", { method: "POST", body: JSON.stringify(input) }),
+      ),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: keys.properties() });
+      // The buyer's cash moved.
       void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
   });
 }
 
-export function useSellProperty() {
+/** Sets the owner's local lever (e.g. bullets' price-per-bullet). No cash of
+ *  the caller's own moves, so only the row itself needs refreshing. */
+export function useSetLever(propertyId: string) {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (propertyId: string) =>
-      api(`/api/properties/${propertyId}/sell`, { method: "POST" }),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.properties() });
-      void queryClient.invalidateQueries({ queryKey: keys.me() });
-    },
+  return useMutation<void, Error, string>({
+    mutationFn: async (value) =>
+      api<void>(`/api/properties/${propertyId}/lever`, {
+        method: "POST", body: JSON.stringify({ value }),
+      }),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
   });
 }
 
-export function useClaimProperty() {
+export function useTransferProperty(propertyId: string) {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (propertyId: string) =>
-      api(`/api/properties/${propertyId}/claim`, { method: "POST" }),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.properties() });
-      void queryClient.invalidateQueries({ queryKey: keys.me() });
-    },
+  return useMutation<void, Error, string>({
+    mutationFn: async (username) =>
+      api<void>(`/api/properties/${propertyId}/transfer`, {
+        method: "POST", body: JSON.stringify({ username }),
+      }),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
+  });
+}
+
+/** Drops the property with no refund; the row survives, unowned. */
+export function useDropProperty(propertyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: async () => api<void>(`/api/properties/${propertyId}/drop`, { method: "POST" }),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
+  });
+}
+
+/** Zeroes the lifetime P&L. Moves no money. */
+export function useResetProperty(propertyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: async () => api<void>(`/api/properties/${propertyId}/reset`, { method: "POST" }),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.properties() }); },
   });
 }
 

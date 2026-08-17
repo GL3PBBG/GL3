@@ -1,38 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { rowAction } from "../src/pages/Properties.js";
-import type { PropertyRow } from "@gl3/shared";
 
-function makeRow(overrides: Partial<PropertyRow> = {}): PropertyRow {
-  return {
-    id: "test-id",
-    locationName: "Downtown",
-    pluginId: "test-plugin",
-    rate: "100",
-    ownerName: "—",
-    cost: "50000",
-    accrued: "0",
-    ...overrides,
-  };
-}
+const base = {
+  id: "p1", locationId: "l1", locationName: "Brooklyn", pluginId: "bullets",
+  typeName: "Bullet Factory", price: "100000000", leverLabel: "Price per bullet",
+  ownerName: "—", lever: "", profit: "",
+};
 
 describe("rowAction", () => {
-  it("returns buy when the property is unowned", () => {
-    const row = makeRow();
-    expect(rowAction(row, "alice")).toEqual({ kind: "buy" });
+  it("offers Buy on an unowned, installed type", () => {
+    expect(rowAction(base, "vito")).toEqual({ kind: "buy", price: "100000000" });
   });
 
-  it("returns owned with accrued when the viewer owns the property (Claim + Sell)", () => {
-    const row = makeRow({ ownerName: "alice", accrued: "1200" });
-    expect(rowAction(row, "alice")).toEqual({ kind: "owned", accrued: "1200" });
+  it("offers nothing on an unowned type whose plugin is not installed", () => {
+    expect(rowAction({ ...base, price: "" }, "vito")).toEqual({ kind: "none" });
   });
 
-  it("returns none when another player owns the property", () => {
-    const row = makeRow({ ownerName: "bob", accrued: "500" });
-    expect(rowAction(row, "alice")).toEqual({ kind: "none" });
+  it("offers the owner tools on your own row", () => {
+    expect(rowAction({ ...base, ownerName: "vito", lever: "500", profit: "-20" }, "vito"))
+      .toEqual({ kind: "owned", lever: "500", profit: "-20", leverLabel: "Price per bullet" });
   });
 
-  it("returns none when viewer is undefined even if ownerName matches", () => {
-    const row = makeRow({ ownerName: "alice", accrued: "300" });
-    expect(rowAction(row, undefined)).toEqual({ kind: "none" });
+  it("offers nothing on someone else's row", () => {
+    expect(rowAction({ ...base, ownerName: "sonny" }, "vito")).toEqual({ kind: "none" });
   });
 });
