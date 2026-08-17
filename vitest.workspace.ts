@@ -282,6 +282,7 @@ export default defineWorkspace([
         "test/casino-act.test.ts",
         "test/casino-lock-order.test.ts",
         "test/casino-lobby.test.ts",
+        "test/casino-rogue-game.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",
