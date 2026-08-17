@@ -131,7 +131,14 @@ export function guardGame<T>(gameId: string, step: string, fn: () => T): T {
   } catch (error) {
     // A game that speaks the hub's own error type keeps its status and code.
     if (error instanceof PluginError) throw error;
-    const detail = error instanceof Error ? error.message : String(error);
+    // Truncated because a third-party game controls both the content and the
+    // LENGTH of this string, and it rides a response to the player. 200 is far
+    // more than any real message needs and far less than a useful payload. The
+    // page renders the code rather than `detail` today, so this is a bound on
+    // a surface that is inert — the rule to keep is that `detail` is a game's
+    // own text and must never be rendered raw.
+    const raw = error instanceof Error ? error.message : String(error);
+    const detail = raw.slice(0, 200);
     throw new PluginError("game_error", 400, { game: gameId, step, detail });
   }
 }
