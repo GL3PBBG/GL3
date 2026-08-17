@@ -1,11 +1,16 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
+import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { adminPage as casinoAdminPage } from "@gl3/plugin-casino";
+import { on } from "@gl3/plugin-sdk";
+import casinoPlugin, { adminPage as casinoAdminPage, games, type GameDef } from "@gl3/plugin-casino";
+import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
+import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
+import { callPluginRoute } from "./helpers/plugin-route.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -21,6 +26,8 @@ import { bootTestServer } from "./helpers/server.js";
  * here re-proves that ordering — this file is about behaviour.
  */
 const { db, sql: conn } = testDb();
+/** Only the one `callPluginRoute` test needs this; the rest go over HTTP. */
+const redis = createRedis(loadConfig(process.env).redisUrl);
 
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
@@ -133,6 +140,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await closeServer?.();
+  redis.disconnect();
   await conn.end();
 });
 
@@ -210,6 +218,67 @@ describe("GET /api/casino", () => {
     // A view the player can actually be shown — cards, not an empty node.
     expect(JSON.stringify(session?.view)).toContain("\"cards\"");
     expect(new Date(session?.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("resumes viewless when the game declares no `view`", async () => {
+    // `GameDef.view` is OPTIONAL: a game that omits it must resume with
+    // `view: null` rather than an empty node or an error. Nothing exercises
+    // that branch by accident — blackjack, the only installed game, declares
+    // one — so it is driven here through `callPluginRoute` against a manifest
+    // whose filter contributes a viewless game.
+    //
+    // The fake game's id is "casino" because `buildRegistry` validates a
+    // `GameDef.id` against installed plugin ids, and `callPluginRoute` gives
+    // the ctx exactly `{ manifest.id }`. `start`/`act` throw: this hand is
+    // seeded straight into the table, so a call to either would mean the
+    // route reached code this test is not about.
+    const VIEWLESS: GameDef = {
+      id: "casino",
+      name: "Coin toss",
+      maxPayoutMultiplier: 2,
+      action: z.unknown(),
+      start() { throw new Error("VIEWLESS.start must not be reached"); },
+      act() { throw new Error("VIEWLESS.act must not be reached"); },
+      settle() { return 0n; },
+      // No `view` — the whole point.
+    };
+    const withViewlessGame = {
+      ...casinoPlugin,
+      filters: [on(games, (_ctx, list: GameDef[]) => [...list, VIEWLESS])],
+    };
+
+    const punter = await register();
+    const locationId = await seedLocation();
+    await placePlayer(punter.playerId, locationId, 1_000_000n);
+    const sessionId = uuidv7();
+    await db.insert(casinoSessions).values({
+      id: sessionId,
+      playerId: punter.playerId,
+      gameId: "casino",
+      locationId,
+      propertyId: null,
+      wager: 70_000n,
+      state: { heads: true },
+      status: "open",
+      seed: "coin",
+    });
+
+    const result = await callPluginRoute(withViewlessGame, "GET", "/api/casino", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: punter.playerId,
+    });
+    expect(result.status).toBe(200);
+    const body = result.body as LobbyBody;
+
+    expect(body.games).toEqual([{
+      gameId: "casino", name: "Coin toss", ownerName: null, maxBet: "10000000",
+    }]);
+    expect(body.session).not.toBeNull();
+    expect(body.session?.sessionId).toBe(sessionId);
+    expect(body.session?.gameName).toBe("Coin toss");
+    expect(body.session?.wager).toBe("70000");
+    // Null, not `{}` and not a throw. The hand is still resumable through
+    // `act`; it simply cannot be drawn.
+    expect(body.session?.view).toBeNull();
   });
 
   it("409s a player who is nowhere, the answer play gives", async () => {
