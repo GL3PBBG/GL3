@@ -59,6 +59,16 @@ export function handActions(actsTaken: number): readonly HandAction[] {
   return actsTaken === 0 ? ["hit", "stand", "double"] : ["hit", "stand"];
 }
 
+/**
+ * Shown when `houseSeized` comes back true. The casino plugin has its own copy
+ * of this sentence (`HOUSE_SEIZED_MESSAGE`) for the NOTIFICATION it writes;
+ * the two are separate channels on purpose — apps/web depends on `@gl3/shared`
+ * and not on any plugin package, so there is no import that could share one
+ * constant without giving the web bundle a plugin dependency.
+ */
+const HOUSE_SEIZED_MESSAGE =
+  "The owner did not have enough cash to pay the bet, you took ownership of the casino.";
+
 const ACTION_LABELS: Readonly<Record<HandAction, string>> = {
   hit: "Hit",
   stand: "Stand",
@@ -81,6 +91,9 @@ export interface LiveHand {
   readonly view: unknown;
   readonly done: boolean;
   readonly payout: string | null;
+  /** True when this hand's payout bankrupted the house and the table is now
+   *  the player's. Only a settled step can set it. */
+  readonly houseSeized: boolean;
   readonly expiresAt: string | null;
   readonly actsTaken: number;
 }
@@ -93,6 +106,7 @@ function resumedHand(session: CasinoSessionView): LiveHand {
     view: session.view,
     done: false,
     payout: null,
+    houseSeized: false,
     expiresAt: session.expiresAt,
     actsTaken: 0,
   };
@@ -108,6 +122,7 @@ export function dealtHand(step: CasinoStepResponse, gameName: string): LiveHand 
     view: step.view,
     done: step.done,
     payout: step.payout ?? null,
+    houseSeized: step.houseSeized ?? false,
     expiresAt: null,
     actsTaken: 0,
   };
@@ -128,6 +143,7 @@ export function advanceHand(current: LiveHand, step: CasinoStepResponse): LiveHa
     view: step.view,
     done: step.done,
     payout: step.payout ?? null,
+    houseSeized: step.houseSeized ?? false,
     actsTaken: current.actsTaken + 1,
   };
 }
@@ -251,6 +267,9 @@ export function Casino(): JSX.Element {
                 ? "The house takes it."
                 : <>Paid out <Money value={active.payout} /></>}
             </p>
+            {active.houseSeized ? (
+              <p className={styles.big}>{HOUSE_SEIZED_MESSAGE}</p>
+            ) : null}
             <div className={styles.actions}>
               <button
                 type="button"

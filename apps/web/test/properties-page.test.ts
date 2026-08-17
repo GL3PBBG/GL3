@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rowAction } from "../src/pages/Properties.js";
+import { dropRefundOf, rowAction } from "../src/pages/Properties.js";
 
 const base = {
   id: "p1", locationId: "l1", locationName: "Brooklyn", pluginId: "bullets",
@@ -23,5 +23,16 @@ describe("rowAction", () => {
 
   it("offers nothing on someone else's row", () => {
     expect(rowAction({ ...base, ownerName: "sonny" }, "vito")).toEqual({ kind: "none" });
+  });
+});
+
+describe("dropRefundOf", () => {
+  it("halves the declared price, flooring the odd cent", () => {
+    expect(dropRefundOf("100000000")).toBe("50000000");
+    expect(dropRefundOf("101")).toBe("50");
+  });
+
+  it("answers 0 for a type whose plugin is not installed (no declared price)", () => {
+    expect(dropRefundOf("")).toBe("0");
   });
 });
