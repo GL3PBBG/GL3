@@ -16,6 +16,7 @@ import combatPlugin from "@gl3/plugin-combat";
 import theftPlugin from "@gl3/plugin-theft";
 import propertiesPlugin from "@gl3/plugin-properties";
 import casinoPlugin from "@gl3/plugin-casino";
+import blackjackPlugin from "@gl3/plugin-blackjack";
 
 /**
  * Ported core modules — plugin-served, never optional. A static `import`
@@ -37,6 +38,7 @@ export const CORE_PLUGINS: readonly PluginManifest[] = [
   theftPlugin,
   propertiesPlugin,
   casinoPlugin,
+  blackjackPlugin,
 ];
 
 /**
