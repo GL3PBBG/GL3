@@ -147,14 +147,14 @@ sdk` took its first-ever bump, `0.1.1`, for `providesProperties` and
 tables, and a real-Fastify login by a migrated V2 player with lazy argon2id
 upgrade). 18 migrators, 8-phase pipeline, `id_map` UUIDv7 resolution, esbuild-
 bundled bin. MariaDB 10.11.14 is installed natively and hosts test fixtures only.
-Suite: **181 files / 1377 tests** as of `feat/properties-franchise`. That total
-is the last full `npm run verify`'s own summary line, but that run was **exit
-1** (2 files / 2 tests failed — a migration gap in
-`economy-invariant.test.ts` and a stale hardcoded events census in
-`plugin-manifest-endpoint.test.ts`, both fixed on the branch and reconfirmed
-green by the exact two scoped runs their fixes needed, not by a second full
-run — see `docs/STATUS.md`'s properties-franchise section for why). Note
-`apps/migrate`'s
+Suite: **181 files / 1380 tests** as of `feat/properties-franchise`, backed by
+a bare `npm run verify` on HEAD `e7ea8af` that **exited 0** with no unhandled
+rejections. An earlier full run on this branch was exit 1 (a migration gap in
+`economy-invariant.test.ts`, a stale hardcoded events census in
+`plugin-manifest-endpoint.test.ts`) and the one after it was *void* rather
+than failing — 1307 passed, zero failures, 22 files at `(0 test)` — because a
+concurrent session shared this machine's Postgres and Redis. See
+`docs/STATUS.md`'s properties-franchise section. Note `apps/migrate`'s
 25 test files need `MYSQL_ADMIN_URL` exported alongside `DATABASE_URL` and
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.

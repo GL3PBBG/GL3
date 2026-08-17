@@ -23,18 +23,17 @@ before assuming the whole tree is proven.
 | **M4 Migration CLI** | ✅ complete | `apps/migrate` — 18 migrators, 8-phase pipeline, idempotent via `id_map`; both SPEC §6 criteria proven (below) |
 | **M5 Plugin SDK** | 🚧 in progress | Foundation + web renderer shipped. The event-envelope blocker is resolved (`tx.events.publishCore`); nine of nine module ports shipped (`ranks`, `notifications`, `news`, `bank`, `bullets`, `travel`, `crimes`, `mail`, `gangs`) — the module-port track is complete. `profile`/`leaderboard`/`jail` are deliberate non-ports. **PvP combat** (`combat` + `inventory` plugins, core hospital), **item economy** (location shop, combat targets, four web pages), **bounties** (kill contracts, first live cross-plugin filter — `killResolved`), **detectives** (cross-location hunting, time-gated reveal, live-location tracking), **organized crime** (four-role heists, buy-in escrow, shared-fate seeded job), **admin + ABAC-lite authz** (role-module grants, first-user admin, loader admin tier, six plugin admin sections + core role management), the **sentence sweeper** (server-side jail/hospital release tick replacing 2s client polling), **money ranks + backfire + weapon condition** (first of four clusters activating migrated-but-unread V2 tables), and **car theft + garage + police chase** (the `theft` plugin, second cluster), and **properties** (location income, lazy accrual, the `properties` plugin, third cluster) have since shipped. **Rounds** (seasonal scoring window, lazy rollover under an advisory lock, points payout, core rather than a plugin) has since shipped on top of that. **Properties as franchises** (`plugin_id` live, `(location_id, plugin_id)` key, consumer-paid income replacing the accrual clock, `bullets` as first consumer, seizure-on-death disowns rather than transfers) has since shipped on top of that — see the sections below |
 
-**Suite: 181 files / 1377 tests** as of `feat/properties-franchise` — up from
-177/1370 on `main` (net +4 files / +7 tests: properties-as-franchises added 6
-test files / 27 tests and removed 2 / 17 with the accrual model, plus small
+**Suite: 181 files / 1380 tests** as of `feat/properties-franchise` — up from
+177/1370 on `main` (net +4 files / +10 tests: properties-as-franchises added 6
+test files / 30 tests and removed 2 / 17 with the accrual model, plus small
 net changes inside existing files — see that section for the itemised
-breakdown). **This total is not backed by a green full run.** The last bare
-`npm run verify` reported it and exited 1 (2 files / 2 tests failed); both
-failures were fixed on the branch and reconfirmed green by scoped runs whose
-module graph provably reaches them, at the user's explicit direction, not by
-a second full run. Treat 181/1377 as the last full run's own count, not as
-proof the whole tree is currently green — see the properties-franchise
-section for the failures, the fixes, and the exact scoped-run commands and
-results. (M4 added the 30 files / 58 tests of the `@gl3/migrate` project; the
+breakdown). **This total is backed by a green full run**: a bare
+`npm run verify` on HEAD `e7ea8af` exited 0 with `Test Files 181 passed (181)`
+and `Tests 1380 passed (1380)`, no unhandled rejections and no void files (the
+two `(0 test)` entries are `@gl3/plugin-sdk`'s `.test-d.ts` typecheck-only
+files). That run supersedes the earlier exit-1 run and the scoped
+reconfirmations that followed it; see the properties-franchise section for
+that history. (M4 added the 30 files / 58 tests of the `@gl3/migrate` project; the
 pre-M4 tree ran 111 / 968. Money ranks, backfire and weapon condition added 5
 files / 70 tests; car theft added 8 files / 60 tests; properties added 7
 files / 55 tests (52 at first ship, plus 3 from the final-review fix pass:
@@ -1600,9 +1599,13 @@ tests. Two deleted with the accrual model: `properties-settings` (7) and
 `properties-lock-order` +1 (3→4, now covering `transfer`'s ABBA rather than
 `claim`/`sell`), `properties-routes` −5 (18→13, fewer routes), `properties-
 events` −1 (4→3, one event's `describe` changed and `income` — never a real
-event — left with the accrual model), `admin-properties` +2 (9→11). Net:
-**+4 files / +7 tests**, taking the tree from 177/1370 to **181 files / 1377
-tests** — the total the last full `npm run verify` actually reported.
+event — left with the accrual model), `admin-properties` +2 (9→11). Net at that point:
+**+4 files / +7 tests**, taking the tree from 177/1370 to 181 files / 1377
+tests. The final review's fix wave (`4bf2fd7`) then added 3 more tests across
+`admin-properties`, `properties-lock-order` and `properties-routes`, giving
+the **181 files / 1380 tests** the green full run reports; `4bf2fd7` and the
+two doc commits after it are the only changes between the two runs, so the
++3 attributes there by elimination.
 
 **Verification — read this before trusting a green claim for this branch.**
 The first bare full `npm run verify` after all ten implementation tasks
@@ -1630,18 +1633,24 @@ run:
    catches the gap. Fixed to the current truth, with a comment recording why
    it drifted and confirming there is deliberately no `seized` event.
 
-Both fixes were then verified **scoped, not by a second full run** — at the
-user's explicit direction, after the full run was killed mid-flight to avoid
-a second multi-minute pass for a two-file change: `npx vitest run --project
-@gl3/server test/economy-invariant.test.ts test/plugin-manifest-endpoint.
-test.ts` (exit 0, 2 files / 8 tests passed) and `npm run verify:related`
-(exit 0, 130 files / 1138 tests passed, typecheck clean). **There is
-therefore no single green full-suite run for this branch** — the 181/1377
-total above is the last full run's file/test count, not its exit code, and
-the two fixes are proven correct by targeted runs whose module graph
-provably reaches them, not by re-confirming the whole tree at once. Anyone
-resuming this branch should treat a fresh bare `npm run verify` as still
-owed before merge, not as a formality.
+Both fixes were first verified **scoped** — at the user's explicit direction,
+after the full run was killed mid-flight to avoid a second multi-minute pass
+for a two-file change: `npx vitest run --project @gl3/server
+test/economy-invariant.test.ts test/plugin-manifest-endpoint.test.ts` (exit
+0, 2 files / 8 tests passed) and `npm run verify:related` (exit 0, 130 files
+/ 1138 tests passed, typecheck clean).
+
+**The owed full run has since been made, and it is green.** A bare
+`npm run verify` on HEAD `e7ea8af` exited 0: `Test Files 181 passed (181)`,
+`Tests 1380 passed (1380)`, no unhandled rejections, and no void files — the
+only two `(0 test)` entries are `@gl3/plugin-sdk`'s `.test-d.ts`
+typecheck-only files, which have no runtime cases by construction. This is
+the branch's single green full-suite run and it supersedes the exit-1 run and
+the scoped reconfirmations above. Note the run *before* it was void rather
+than failing (`Tests 1307 passed`, zero failures, 22 real test files at
+`(0 test)`, a long-running-hook warning) because a concurrent session was
+driving the same Postgres and Redis — isolation on this machine needs a
+separate *database*, not a separate worktree.
 
 ### Installing a plugin without forking core
 
