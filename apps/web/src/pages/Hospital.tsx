@@ -17,6 +17,7 @@ export function Hospital(): JSX.Element {
   // a sentence that expired minutes ago (see lib/countdown.ts).
   const hospitalSeconds = useSentenceCountdown(
     "hospital", hospital.data?.hospitalised === true ? hospital.data.remainingSeconds : undefined,
+    hospital.dataUpdatedAt,
   );
 
   if (hospital.isLoading) return <Loading what="hospital status" />;

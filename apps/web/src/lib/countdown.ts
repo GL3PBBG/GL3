@@ -47,17 +47,31 @@ const DRIFT_TOLERANCE_SECONDS = 2;
  * jail countdown got stuck. `seconds <= 0` is still ignored: a `GET /api/crimes`
  * issued before a commit lands reports a 0s cooldown, and adopting it would
  * re-enable the button straight into a 429.
+ *
+ * `asOfMs` is *when the snapshot was taken* — react-query's `dataUpdatedAt`,
+ * not `Date.now()`. A snapshot is a point-in-time reading and it ages in the
+ * query cache: leaving /crimes unmounts the countdown, and returning re-seeds
+ * from the cached response *before* the refetch lands. Anchoring that at "now"
+ * restarted a 30s cooldown at its full length every time the player changed
+ * page and came back — the server kept the real deadline, so it was visual
+ * only, but the button lied for a whole round trip (forever, with the network
+ * down). Anchoring at the reading's own timestamp makes a stale snapshot and a
+ * fresh one produce the same deadline.
  */
 export function seedDeadline(
-  deadlines: Deadlines, id: string, seconds: number, nowMs: number,
+  deadlines: Deadlines, id: string, seconds: number, nowMs: number, asOfMs: number = nowMs,
 ): Deadlines {
   if (seconds <= 0) return deadlines;
+  const deadline = asOfMs + seconds * 1000;
+  // The cached cooldown ran out while the page was elsewhere. Same reasoning as
+  // the `seconds <= 0` guard above: adopting it would unlock a button that an
+  // optimistic `start()` since the snapshot may legitimately be holding shut.
+  if (deadline <= nowMs) return deadlines;
   const current = deadlines[id];
-  if (current !== undefined
-    && Math.abs(secondsLeft(current, nowMs) - seconds) < DRIFT_TOLERANCE_SECONDS) {
+  if (current !== undefined && Math.abs(current - deadline) < DRIFT_TOLERANCE_SECONDS * 1000) {
     return deadlines;
   }
-  return { ...deadlines, [id]: nowMs + seconds * 1000 };
+  return { ...deadlines, [id]: deadline };
 }
 
 /**

@@ -26,11 +26,16 @@ export function Crimes(): JSX.Element {
   // ignores a 0, so the pre-commit snapshot still in flight can't unlock the
   // timer we started on commit, but a real disagreement wins — the server owns
   // the cooldown. Any row carries the value; take the largest to be safe.
+  //
+  // `dataUpdatedAt` is when that snapshot was read, and it matters because this
+  // effect also runs on remount against the *cached* response: navigating away
+  // and back re-seeded a stale reading as if it were fresh, restarting the
+  // cooldown at full length on screen until the refetch corrected it.
   useEffect(() => {
     const rows = crimes.data?.crimes ?? [];
     const snapshot = rows.reduce((max, crime) => Math.max(max, crime.cooldownRemaining), 0);
-    seed(COOLDOWN_ID, snapshot);
-  }, [crimes.data, seed]);
+    seed(COOLDOWN_ID, snapshot, crimes.dataUpdatedAt);
+  }, [crimes.data, crimes.dataUpdatedAt, seed]);
 
   if (crimes.isLoading) return <Loading what="crimes" />;
 

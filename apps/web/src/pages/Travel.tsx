@@ -19,10 +19,16 @@ export function Travel(): JSX.Element {
   const jailed = jail.data?.jailed === true;
   const cooldown = remaining[COOLDOWN_ID] ?? 0;
 
+  // Same shape as Crimes, including the anchor: `dataUpdatedAt` keeps a cached
+  // snapshot served on remount from restarting the cooldown at full length.
   useEffect(() => {
     const rows = locations.data?.locations ?? [];
-    seed(COOLDOWN_ID, rows.reduce((max, row) => Math.max(max, row.cooldownRemaining), 0));
-  }, [locations.data, seed]);
+    seed(
+      COOLDOWN_ID,
+      rows.reduce((max, row) => Math.max(max, row.cooldownRemaining), 0),
+      locations.dataUpdatedAt,
+    );
+  }, [locations.data, locations.dataUpdatedAt, seed]);
 
   if (locations.isLoading || !me.data) return <Loading what="locations" />;
   const cash = me.data.cash;
