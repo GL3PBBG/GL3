@@ -77,6 +77,7 @@ export function registerPluginRoutes(
             job: null,
             filters: collectFilters(manifests),
             propertyTypes: collectPropertyTypes(manifests),
+            installedPluginIds: new Set(manifests.map((m) => m.id)),
           });
 
           try {

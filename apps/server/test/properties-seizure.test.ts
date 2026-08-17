@@ -37,6 +37,7 @@ const opts = {
   job: null,
   filters: propertiesPlugin.filters,
   propertyTypes: new Map(),
+  installedPluginIds: new Set(["combat"]),
 };
 const ctx = createPluginCtx(deps(), opts);
 
