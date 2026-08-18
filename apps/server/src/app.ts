@@ -7,6 +7,8 @@ import type { StorageDriver } from "./assets/driver.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
+import { createMailDriver } from "./mail/driver.js";
+import type { MailDriver } from "./mail/driver.js";
 import { registerHospitalRoutes } from "./game/hospital/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
@@ -38,6 +40,8 @@ export interface AppDeps {
    * to whatever `config.assets` selects.
    */
   assetDriver?: StorageDriver;
+  /** Overridable so tests can assert on outbound mail without a real provider — see mail.test.ts. Defaults to `createMailDriver(config.mail)`. */
+  mail?: MailDriver;
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
@@ -67,7 +71,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   );
 
   app.get("/health", async () => ({ status: "ok" }));
-  registerAuthRoutes(app, config, deps.db, deps.redis, deps.rateLimitPrefix);
+  registerAuthRoutes(app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix);
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
