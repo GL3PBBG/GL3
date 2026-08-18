@@ -12,6 +12,7 @@ import { loadPlugins, type LoadedPlugins } from "../src/plugins/loader.js";
 import { loadSettings } from "../src/settings/load.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const config = loadConfig({ ...process.env, NODE_ENV: "test" });
@@ -49,13 +50,7 @@ beforeEach(async () => {
 });
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "correct horse battery" },
-  });
-  expect(res.statusCode).toBe(201);
-  const body = res.json();
-  return { token: body.token as string, playerId: body.playerId as string };
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 async function seedRound(

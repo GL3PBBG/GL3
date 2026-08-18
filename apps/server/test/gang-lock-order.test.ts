@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { gangInvites, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -45,6 +47,7 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let bossToken: string;
 let gangId: string;
@@ -53,17 +56,17 @@ let memberId: string;
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  bossToken = boss.json().token;
+  const boss = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  bossToken = boss.token;
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` }, payload: { name: "The Corleones" },
   });
   gangId = gang.json().id;
 
-  const member = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
-  ({ token: memberToken, playerId: memberId } = member.json());
+  const member = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
+  ({ token: memberToken, playerId: memberId } = member);
   await app.inject({
     method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` }, payload: { username: "Sonny" },
   });

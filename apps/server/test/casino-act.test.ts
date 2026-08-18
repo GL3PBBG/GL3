@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -30,21 +32,17 @@ import { bootTestServer } from "./helpers/server.js";
 const { db, sql: conn } = testDb();
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const username = `Dealer${regCounter}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Dealer${regCounter}`,
     remoteAddress: `10.61.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
 }
 
 async function seedLocation(): Promise<string> {
@@ -169,7 +167,7 @@ async function sessionRow(sessionId: string) {
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => {

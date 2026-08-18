@@ -1,13 +1,16 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { notifications } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
@@ -15,19 +18,10 @@ let otherToken: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Vito", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
-
-  const otherReg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Sonny", password: "hunter2hunter2" },
-  });
-  ({ token: otherToken } = otherReg.json());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
+  ({ token: otherToken } = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" }));
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });

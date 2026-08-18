@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { GangInviteListResponseSchema, ServerFrameSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import WebSocket from "ws";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -11,11 +12,13 @@ import { gangInvites, playerStats } from "../src/db/schema/index.js";
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
 let bossToken: string;
@@ -27,16 +30,14 @@ let inviteeId: string;
 beforeEach(async () => {
   await resetDb(db);
   if (!app) {
-    ({ app, close: closeServer } = await bootTestServer());
+    ({ app, close: closeServer, redis } = await bootTestServer());
     await app.listen({ port: 0, host: "127.0.0.1" });
     const { port } = app.server.address() as AddressInfo;
     baseUrl = `ws://127.0.0.1:${port}/ws`;
   }
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  ({ token: bossToken, playerId: bossId } = boss.json());
-  const invitee = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
-  ({ token: inviteeToken, playerId: inviteeId } = invitee.json());
+  ({ token: bossToken, playerId: bossId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
+  ({ token: inviteeToken, playerId: inviteeId } = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" }));
 
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` },
@@ -157,10 +158,10 @@ describe("POST /api/gangs/:gangId/invites", () => {
   });
 
   it("403s a member with no invite permission", async () => {
-    const other = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    const other = await registerVerifiedPlayer({ app, redis }, { username: "Clemenza" });
     // Clemenza isn't a member of the gang at all yet.
     const res = await app.inject({
-      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${other.json().token}` },
+      method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${other.token}` },
       payload: { username: "Sonny" },
     });
     expect(res.statusCode).toBe(403);
@@ -288,10 +289,10 @@ describe("POST /api/gangs/invites/:inviteId/accept", () => {
       payload: { username: "Sonny" },
     });
     const [invite] = await db.select().from(gangInvites).where(eq(gangInvites.invitedPlayerId, inviteeId));
-    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    const bystander = await registerVerifiedPlayer({ app, redis }, { username: "Clemenza" });
 
     const res = await app.inject({
-      method: "POST", url: `/api/gangs/invites/${invite!.id}/accept`, headers: { authorization: `Bearer ${bystander.json().token}` },
+      method: "POST", url: `/api/gangs/invites/${invite!.id}/accept`, headers: { authorization: `Bearer ${bystander.token}` },
     });
     expect(res.statusCode).toBe(404);
 
@@ -325,10 +326,10 @@ describe("POST /api/gangs/invites/:inviteId/decline", () => {
       payload: { username: "Sonny" },
     });
     const [invite] = await db.select().from(gangInvites).where(eq(gangInvites.invitedPlayerId, inviteeId));
-    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    const bystander = await registerVerifiedPlayer({ app, redis }, { username: "Clemenza" });
 
     const res = await app.inject({
-      method: "POST", url: `/api/gangs/invites/${invite!.id}/decline`, headers: { authorization: `Bearer ${bystander.json().token}` },
+      method: "POST", url: `/api/gangs/invites/${invite!.id}/decline`, headers: { authorization: `Bearer ${bystander.token}` },
     });
     expect(res.statusCode).toBe(404);
 
@@ -377,10 +378,10 @@ describe("GET /api/gangs/invites", () => {
 
   it("shows only the requester's own invites", async () => {
     await invite("Sonny");
-    const bystander = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    const bystander = await registerVerifiedPlayer({ app, redis }, { username: "Clemenza" });
 
     const theirs = await app.inject({
-      method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${bystander.json().token}` },
+      method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${bystander.token}` },
     });
     expect(GangInviteListResponseSchema.parse(theirs.json()).invites).toHaveLength(0);
 
@@ -407,8 +408,8 @@ describe("GET /api/gangs/invites", () => {
   it("empties once any invite is accepted, including other gangs' invites", async () => {
     await invite("Sonny");
 
-    const rival = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const rivalToken: string = rival.json().token;
+    const rival = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const rivalToken: string = rival.token;
     const rivalGang = await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${rivalToken}` }, payload: { name: "The Tattaglias" },
     });
@@ -443,14 +444,14 @@ describe("GET /api/gangs/invites", () => {
       method: "POST", url: `/api/gangs/invites/${corleone!.id}/accept`, headers: { authorization: `Bearer ${inviteeToken}` },
     });
 
-    const rival = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const rivalToken: string = rival.json().token;
+    const rival = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const rivalToken: string = rival.token;
     const rivalGang = await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${rivalToken}` }, payload: { name: "The Tattaglias" },
     });
     await db.insert(gangInvites).values({
       id: randomUUID(), gangId: rivalGang.json().id,
-      invitedPlayerId: inviteeId, invitedByPlayerId: rival.json().playerId,
+      invitedPlayerId: inviteeId, invitedByPlayerId: rival.playerId,
     });
 
     const res = await app.inject({ method: "GET", url: "/api/gangs/invites", headers: { authorization: `Bearer ${inviteeToken}` } });

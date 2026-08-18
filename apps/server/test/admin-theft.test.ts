@@ -1,25 +1,24 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { adminPage as theftAdminPage } from "@gl3/plugin-theft";
 import { theftCars, theftTiers } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let adminToken: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const founder = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Founder", password: "hunter2hunter2" },
-  });
-  adminToken = founder.json().token;
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  adminToken = (await registerVerifiedPlayer({ app, redis }, { username: "Founder" })).token;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -37,11 +36,8 @@ const ADMIN_ROUTES: { method: "GET" | "POST"; url: string }[] = [
 
 describe("theft admin", () => {
   it("403s a non-admin on every one of the six routes", async () => {
-    const pleb = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Pleb", password: "hunter2hunter2" },
-    });
-    const headers = { authorization: `Bearer ${pleb.json().token}` };
+    const pleb = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
+    const headers = { authorization: `Bearer ${pleb.token}` };
     for (const { method, url } of ADMIN_ROUTES) {
       const res = await app.inject({ method, url, headers, payload: method === "POST" ? {} : undefined });
       expect(res.statusCode, `${method} ${url}`).toBe(403);

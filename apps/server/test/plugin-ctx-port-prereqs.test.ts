@@ -10,8 +10,12 @@ import { loadConfig } from "../src/config.js";
 import * as schema from "../src/db/schema/index.js";
 import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { lockLocationsForUpdate } from "../src/economy/ledger.js";
+import { createRedis } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+
+const redis = createRedis(loadConfig(process.env).redisUrl);
 
 const { db, sql: conn } = testDb();
 
@@ -93,16 +97,10 @@ let regCounter = 0;
 /** Register a player and return { token, playerId } — inline, same as plugin-routes.test.ts. */
 async function register(target: FastifyInstance): Promise<{ token: string; playerId: string }> {
   regCounter++;
-  const reg = await target.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app: target, redis }, {
+    username: `PCPPUser${regCounter}`,
     remoteAddress: `10.21.${regCounter >> 8 & 0xff}.${regCounter & 0xff}`,
-    payload: {
-      username: `PCPPUser${regCounter}`,
-      password: "hunter2hunter2",
-    },
   });
-  return reg.json();
 }
 
 async function insertLocation(): Promise<string> {
@@ -118,6 +116,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeServer();
   await conn.end();
+  redis.disconnect();
 });
 
 describe("plugin ctx port prerequisites", () => {

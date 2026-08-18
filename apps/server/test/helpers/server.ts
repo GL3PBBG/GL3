@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { buildApp } from "../../src/app.js";
 import type { FilesystemDriver } from "../../src/assets/fs-driver.js";
 import { loadConfig } from "../../src/config.js";
@@ -20,6 +21,10 @@ export async function bootTestServer(
   close: () => Promise<void>;
   plugins: LoadedPlugins;
   assetDriver: FilesystemDriver;
+  /** The same Redis client the app itself uses — exposed so a test can read a
+   * key the app wrote (e.g. an `emailverify:*` verification code) without
+   * opening a second connection. See `registerVerifiedPlayer`. */
+  redis: Redis;
 }> {
   const config = loadConfig({ ...process.env, NODE_ENV: "test" });
   const { db, sql } = createDb(config.databaseUrl);
@@ -98,6 +103,7 @@ export async function bootTestServer(
     // Exposed so an asset test can read the stored bytes back out of the very
     // driver the server wrote them through.
     assetDriver,
+    redis,
     close: async () => {
       for (const w of loadedPlugins.workers) await w.close();
       for (const q of loadedPlugins.queues.values()) await q.close();

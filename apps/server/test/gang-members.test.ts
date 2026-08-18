@@ -1,14 +1,17 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { GangMemberListResponseSchema, GangPermissionSchema } from "@gl3/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { gangInvites, gangPermissions, gangs } from "../src/db/schema/index.js";
 import { GANG_PERMISSIONS } from "../src/game/gangs/permissions.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let bossToken: string;
 let bossId: string;
@@ -17,8 +20,7 @@ let memberToken: string;
 let memberId: string;
 
 async function joinGang(username: string): Promise<{ token: string; playerId: string }> {
-  const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username, password: "hunter2hunter2" } });
-  const { token, playerId } = reg.json();
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username });
   await app.inject({
     method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
     payload: { username },
@@ -30,10 +32,10 @@ async function joinGang(username: string): Promise<{ token: string; playerId: st
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  ({ token: bossToken, playerId: bossId } = boss.json());
+  const boss = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  ({ token: bossToken, playerId: bossId } = boss);
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` }, payload: { name: "The Corleones" },
   });
@@ -115,8 +117,9 @@ describe("GET /api/gangs/:gangId/members", () => {
   // gang_members row (its third layer). The roster must apply the same mask,
   // or it would advertise authority the server would refuse to honour.
   it("ignores a permission row belonging to someone who is not a member", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const outsiderId: string = outsider.json().playerId;
+    // Never authenticates as the outsider below, just needs a real player row.
+    const outsiderReg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2" } });
+    const outsiderId: string = outsiderReg.json().playerId;
     await db.insert(gangPermissions).values({ gangId, playerId: outsiderId, permission: "kick" });
 
     const res = await app.inject({
@@ -127,9 +130,9 @@ describe("GET /api/gangs/:gangId/members", () => {
   });
 
   it("403s a player who is not in the gang", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
+    const outsider = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
     const res = await app.inject({
-      method: "GET", url: `/api/gangs/${gangId}/members`, headers: { authorization: `Bearer ${outsider.json().token}` },
+      method: "GET", url: `/api/gangs/${gangId}/members`, headers: { authorization: `Bearer ${outsider.token}` },
     });
     expect(res.statusCode).toBe(403);
   });

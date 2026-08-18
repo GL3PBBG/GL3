@@ -9,6 +9,7 @@ import { callPluginRoute } from "./helpers/plugin-route.js";
 import { rebuildLeaderboards, recordScore, topN } from "../src/game/leaderboard/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -84,8 +85,7 @@ describe("GET /api/leaderboard/:kind", () => {
       db, redis, leaderboardPrefix: PREFIX, plugins: loadedPlugins,
     });
 
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Board${Date.now()}`, password: "hunter2hunter2" } });
-    const { token, playerId } = reg.json();
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: `Board${Date.now()}` });
     await db.update(playerStats).set({ cash: 1000n }).where(eq(playerStats.playerId, playerId));
 
     // Drives the bank plugin's route: this is what proves the ctx buffers a

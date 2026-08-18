@@ -16,6 +16,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { combatLog } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -69,12 +70,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 }
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  return res.json();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 /** 50 damage at accuracy 100 — fatal against a 1-hp victim, certain to land. */

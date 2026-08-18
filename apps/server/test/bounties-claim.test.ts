@@ -16,6 +16,7 @@ import { loadConfig } from "../src/config.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bounties } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -106,31 +107,27 @@ beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 
-  const attacker = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Rocco", password: "hunter2hunter2" },
-  });
-  ({ token: attackerToken, playerId: attackerId } = attacker.json());
+  ({ token: attackerToken, playerId: attackerId } = await registerVerifiedPlayer({ app, redis }, { username: "Rocco" }));
 
+  // target/backer/backer2 never authenticate below — only their playerId is used.
   const target = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Fredo", password: "hunter2hunter2" },
+    payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: targetId } = target.json());
 
   const backer = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Backer", password: "hunter2hunter2" },
+    payload: { username: "Backer", email: "backer@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: backerId } = backer.json());
 
   const backer2 = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Backer2", password: "hunter2hunter2" },
+    payload: { username: "Backer2", email: "backer2@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: backer2Id } = backer2.json());
 });

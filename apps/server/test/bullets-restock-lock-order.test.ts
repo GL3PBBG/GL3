@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
@@ -7,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -33,6 +35,7 @@ import { bootTestServer } from "./helpers/server.js";
  */
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let lowId: string;
@@ -59,7 +62,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
   // Two ids in a known order: the restock must take them low-then-high.
   const a = uuidv7();
@@ -70,13 +73,10 @@ beforeAll(async () => {
     { id: highId, name: "Highton", travelCost: 10n, travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 5n },
   ]);
 
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `RestockLock${Date.now()}`, password: "hunter2hunter2" },
-  });
-  token = reg.json<{ token: string; playerId: string }>().token;
+  const reg = await registerVerifiedPlayer({ app, redis }, { username: `RestockLock${Date.now()}` });
+  token = reg.token;
   await db.update(playerStats).set({ cash: 10_000n, locationId: highId })
-    .where(eq(playerStats.playerId, reg.json<{ playerId: string }>().playerId));
+    .where(eq(playerStats.playerId, reg.playerId));
 });
 
 afterAll(async () => {

@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { adminPage as propertiesAdminPage } from "@gl3/plugin-properties";
 import { locations as coreLocations } from "../src/db/schema/index.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 // The coexistence test below needs a SECOND declared property type — with only
@@ -26,18 +28,15 @@ const SECOND_TYPE = "blackjack";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let adminToken: string;
 let locationId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const founder = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Founder", password: "hunter2hunter2" },
-  });
-  adminToken = founder.json().token;
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  adminToken = (await registerVerifiedPlayer({ app, redis }, { username: "Founder" })).token;
 
   // Seed a location — resetDb truncates all tables including locations.
   locationId = uuidv7();
@@ -61,12 +60,8 @@ describe("properties admin", () => {
     // One pleb per route, distinct IP (N2): a shared IP risks a rate-limit
     // 429 instead of the 403 under test.
     for (let i = 0; i < ADMIN_ROUTES.length; i++) {
-      const pleb = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        remoteAddress: `10.99.1.${i + 1}`,
-        payload: { username: `Pleb${i}`, password: "hunter2hunter2" },
-      });
-      const headers = { authorization: `Bearer ${pleb.json().token}` };
+      const pleb = await registerVerifiedPlayer({ app, redis }, { username: `Pleb${i}`, remoteAddress: `10.99.1.${i + 1}` });
+      const headers = { authorization: `Bearer ${pleb.token}` };
       const { method, url } = ADMIN_ROUTES[i];
       const res = await app.inject({ method, url, headers, payload: method === "POST" ? {} : undefined });
       expect(res.statusCode, `${method} ${url}`).toBe(403);

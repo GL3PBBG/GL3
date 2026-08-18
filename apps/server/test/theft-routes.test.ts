@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { theftCars, theftGarage, theftTiers } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -20,6 +22,7 @@ import { bootTestServer } from "./helpers/server.js";
 const { db, sql: conn } = testDb();
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
@@ -33,14 +36,10 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Thief${regCounter}`,
     remoteAddress: `10.41.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Thief${regCounter}`, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json();
 }
 
 /** A location row, with every NOT NULL travel/bullets column filled in. */
@@ -82,7 +81,7 @@ const steal = (tierId: unknown, bearer = token) =>
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
   ({ token, playerId } = await register());
   auth = { authorization: `Bearer ${token}` };

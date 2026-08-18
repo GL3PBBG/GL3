@@ -9,6 +9,7 @@ import { locations, playerStats, transactions } from "../src/db/schema/index.js"
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -88,11 +89,7 @@ beforeAll(async () => {
     { id: cId, name: "Cooltown", travelCost: 10n, travelCooldownSeconds: 60, bulletStock: 100, bulletCost: 5n },
   ]);
 
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `LockOrder${Date.now()}`, password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: `LockOrder${Date.now()}` }));
   await db.update(playerStats).set({ cash: 10_000n, locationId: lId }).where(eq(playerStats.playerId, playerId));
 });
 

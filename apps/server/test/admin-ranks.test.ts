@@ -1,24 +1,23 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ranks } from "../src/db/schema/identity.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { uuidv7 } from "uuidv7";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let adminToken: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const founder = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Founder", password: "hunter2hunter2" },
-  });
-  adminToken = founder.json().token;
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  adminToken = (await registerVerifiedPlayer({ app, redis }, { username: "Founder" })).token;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -141,25 +140,19 @@ describe("ranks admin", () => {
   });
 
   it("403s a non-admin", async () => {
-    const p = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Pleb", password: "hunter2hunter2" },
-    });
+    const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
     const res = await app.inject({
       method: "GET", url: "/api/admin/ranks/list",
-      headers: { authorization: `Bearer ${p.json().token}` },
+      headers: { authorization: `Bearer ${p.token}` },
     });
     expect(res.statusCode).toBe(403);
   });
 
   it("403s a non-admin creating a rank", async () => {
-    const p = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Pleb2", password: "hunter2hunter2" },
-    });
+    const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb2" });
     const res = await app.inject({
       method: "POST", url: "/api/admin/ranks",
-      headers: { authorization: `Bearer ${p.json().token}` },
+      headers: { authorization: `Bearer ${p.token}` },
       payload: {
         name: "Sneak", expRequired: "0", cashReward: "0",
         bulletReward: 0, maxHealth: 100,
@@ -199,13 +192,10 @@ describe("money ranks admin", () => {
   });
 
   it("refuses a non-admin", async () => {
-    const p = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Pleb3", password: "hunter2hunter2" },
-    });
+    const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb3" });
     const res = await app.inject({
       method: "POST", url: "/api/admin/ranks/money",
-      headers: { authorization: `Bearer ${p.json().token}` },
+      headers: { authorization: `Bearer ${p.token}` },
       payload: { label: "X", threshold: "1" },
     });
     expect(res.statusCode).toBe(403);
