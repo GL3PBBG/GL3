@@ -225,11 +225,23 @@ That failure is **open, not cleared**: a bare 500 on `lockPlayersForUpdate`
 with no SQLSTATE, 5/5 green standalone and 3/3 green under eight-file
 contention, with no `40P01`, no `PostgresError` and no dropped connection in
 the log — so the cross-talk story that explains `properties-lock-order`'s
-round-19 failure does not explain this one. Two failures of that same shape
-are now on record. `plugins/routes.ts` logs the driver error's `cause`
-(SQLSTATE, detail, table) from this branch on, which is the datum both
-diagnoses lacked. Note the 3.5x speedup raises concurrency *density*, which is
-a plausible reason a latent contention bug surfaced when it did.
+round-19 failure does not explain this one. Three failures of that same shape
+are now on record: the two above, plus a third on 2026-08-18, on
+`feat/location-combat-modes`' merge-gate run (verify run 2 of 3) — same test
+(`casino-lock-order`'s ABBA case, `survives A-plays-at-B's-table racing
+B-plays-at-A's-table`), same shape (a bare 500 on `lockPlayersForUpdate`),
+5/5 green standalone immediately after, and green on the full-suite re-run.
+The intervening diff touched only travel admin semantics, a combat comment, a
+schema test and a CLI usage string — nothing near casino or the lock helpers.
+`plugins/routes.ts` logs the driver error's `cause` (SQLSTATE, detail, table)
+from this branch on, which is the datum both earlier diagnoses lacked — but
+the third occurrence still didn't capture it: `app.ts:46` sets `logger:
+config.nodeEnv !== "test"`, so the `request.log.error` cause-logging is a
+no-op under the test environment, the one place the flake occurs. Until that
+logging works under test (a silent-by-default pino that still prints error
+level, or a console fallback), the SQLSTATE datum keeps being dropped. Note
+the 3.5x speedup raises concurrency *density*, which is a plausible reason a
+latent contention bug surfaced when it did.
 **A concurrent session makes a run *void*, not failing** — the
 properties-franchise cluster saw `1307 passed, zero failures, 22 files at
 (0 test)` because another agent shared this machine's Postgres and Redis. Zero

@@ -2554,7 +2554,9 @@ exactly as already shipped) or `'underground'` (V2's rule, reintroduced).
   taken numbers out from under a draft before (see `0.1.12` above).
   `@gl3/plugin-sdk` needed no bump.
 
-Gate: bare `npm run verify`, **217 files / 1731 passed, 1 skipped, exit 0**.
+Gate: bare `npm run verify` on `362803a`, **217 files / 1733 passed, 1
+skipped, exit 0** (third run; run 2 hit the known casino-lock-order flake
+documented in CLAUDE.md, now on its third recorded occurrence).
 
 ## What M3 established that later work must not undo
 
