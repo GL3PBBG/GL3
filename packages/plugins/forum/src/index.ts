@@ -1,8 +1,11 @@
 import { count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { definePlugin, newId, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import {
+  definePlugin, hasPermission, newId, PluginError, route,
+  type PageSchema, type PluginTx,
+} from "@gl3/plugin-sdk";
 import { FORUM_MIGRATIONS } from "./migrations.js";
-import { forums, players, posts, topics } from "./schema.js";
+import { forums, players, posts, roleModuleAccess, topics } from "./schema.js";
 
 /** 20/page, both tiers (topics and posts) — V2 parity, restated per spec. */
 export const PAGE_SIZE = 20;
@@ -11,9 +14,45 @@ export const PAGE_SIZE = 20;
 const TOPIC_COOLDOWN_SECONDS = 60;
 const POST_COOLDOWN_SECONDS = 15;
 
+/** The ABAC module key that gates moderation — same string the admin section's
+ *  `auth: "admin"` loader tier checks (`hasPermission(grants, manifest.id)` in
+ *  `apps/server/src/plugins/routes.ts`), so a role granted "forum" clears both. */
+const MODULE_KEY = "forum";
+
 const ForumIdParamsSchema = z.object({ forumId: z.string().uuid() });
 const TopicIdParamsSchema = z.object({ topicId: z.string().uuid() });
+const PostIdParamsSchema = z.object({ postId: z.string().uuid() });
 const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+
+const LockBodySchema = z.object({ locked: z.boolean() }).strict();
+const TypeBodySchema = z.object({ type: z.enum(["normal", "sticky"]) }).strict();
+
+const AdminCreateForumBodySchema = z.object({
+  name: z.string().min(1).max(120),
+  sort: z.number().int(),
+}).strict();
+
+const AdminUpdateForumBodySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(120),
+  sort: z.number().int(),
+}).strict();
+
+/**
+ * Module keys granted by the player's role — `loadGrants`
+ * (`apps/server/src/plugins/routes.ts`) restated, since a plugin cannot
+ * import `apps/server` code and reaches `role_module_access` only through
+ * the mirrored schema `schema.ts` documents. `[]` when roleless, same as
+ * the original.
+ */
+async function loadForumGrants(tx: PluginTx, playerId: string): Promise<string[]> {
+  const rows = await tx.db
+    .select({ moduleKey: roleModuleAccess.moduleKey })
+    .from(players)
+    .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
+    .where(eq(players.id, playerId));
+  return rows.map((r) => r.moduleKey);
+}
 
 /**
  * `@gl3/shared` is off-limits to a plugin package, so `noNulByte` and the
@@ -316,10 +355,214 @@ const replyRoute = route({
   },
 });
 
+// --- Moderation: player-facing paths under /api/forum, gated IN-HANDLER by
+// the ABAC "forum" grant (`loadForumGrants` + `hasPermission`) rather than
+// the loader's `auth: "admin"` tier — a moderator is not necessarily an
+// admin, and these routes are reached by ordinary players who happen to hold
+// the grant, not through the admin section at all.
+
+const lockRoute = route({
+  method: "POST",
+  path: "/api/forum/topics/:topicId/lock",
+  params: TopicIdParamsSchema,
+  body: LockBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      if (!hasPermission(await loadForumGrants(tx, player.id), MODULE_KEY)) {
+        throw new PluginError("forbidden", 403);
+      }
+
+      const result = await tx.db
+        .update(topics)
+        .set({ status: body.locked ? "locked" : "open" })
+        .where(eq(topics.id, params.topicId))
+        .returning({ id: topics.id });
+      if (result.length === 0) throw new PluginError("topic_not_found", 404);
+
+      return { status: 204 };
+    });
+  },
+});
+
+const typeRoute = route({
+  method: "POST",
+  path: "/api/forum/topics/:topicId/type",
+  params: TopicIdParamsSchema,
+  body: TypeBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      if (!hasPermission(await loadForumGrants(tx, player.id), MODULE_KEY)) {
+        throw new PluginError("forbidden", 403);
+      }
+
+      const result = await tx.db
+        .update(topics)
+        .set({ type: body.type })
+        .where(eq(topics.id, params.topicId))
+        .returning({ id: topics.id });
+      if (result.length === 0) throw new PluginError("topic_not_found", 404);
+
+      return { status: 204 };
+    });
+  },
+});
+
+/**
+ * Deletes one post and decrements the parent topic's `post_count` — the
+ * stored counter `listTopicsRoute` renders as a badge would otherwise drift
+ * from the live table the moment a post is removed (`viewTopicRoute`'s own
+ * pagination recomputes its count live, so only the badge is at risk).
+ * `last_post_at` is left untouched: recomputing "most recent surviving post"
+ * needs its own query and no route here depends on it being exact.
+ */
+const deletePostRoute = route({
+  method: "DELETE",
+  path: "/api/forum/posts/:postId",
+  params: PostIdParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      if (!hasPermission(await loadForumGrants(tx, player.id), MODULE_KEY)) {
+        throw new PluginError("forbidden", 403);
+      }
+
+      const [post] = await tx.db.select().from(posts).where(eq(posts.id, params.postId));
+      if (post === undefined) throw new PluginError("post_not_found", 404);
+
+      await tx.db.delete(posts).where(eq(posts.id, post.id));
+      await tx.db
+        .update(topics)
+        .set({ postCount: sql`greatest(${topics.postCount} - 1, 0)` })
+        .where(eq(topics.id, post.topicId));
+
+      return { status: 204 };
+    });
+  },
+});
+
+/** Deletes a topic. Its posts cascade at the database level — `0002_topics`'s
+ *  `p_forum_posts.topic_id REFERENCES p_forum_topics(id) ON DELETE CASCADE`. */
+const deleteTopicRoute = route({
+  method: "DELETE",
+  path: "/api/forum/topics/:topicId",
+  params: TopicIdParamsSchema,
+  handler: async (ctx, { params }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      if (!hasPermission(await loadForumGrants(tx, player.id), MODULE_KEY)) {
+        throw new PluginError("forbidden", 403);
+      }
+
+      const result = await tx.db
+        .delete(topics)
+        .where(eq(topics.id, params.topicId))
+        .returning({ id: topics.id });
+      if (result.length === 0) throw new PluginError("topic_not_found", 404);
+
+      return { status: 204 };
+    });
+  },
+});
+
+// --- Admin: /api/admin/forum, loader-tier gated (`auth: "admin"` checks
+// `hasPermission(grants, "forum")` in `apps/server/src/plugins/routes.ts`
+// before the handler ever runs). The rename/re-sort route is a fixed path
+// with the target forum's id carried in the body rather than the URL,
+// matching `packages/plugins/travel/src/index.ts`'s
+// `/api/admin/travel/locations/update` — the declarative `adminPage`'s
+// `form.action` is a static `METHOD /path` string (`PageRenderer.tsx`'s
+// `action.split(" ")`), so it cannot carry a per-row `:forumId` segment; the
+// row is instead picked via a `select` field whose `valueKey` is the id.
+
+const adminListForumsRoute = route({
+  method: "GET",
+  path: "/api/admin/forum/forums",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select().from(forums).orderBy(forums.sort));
+    return {
+      status: 200,
+      body: { rows: rows.map((r) => ({ id: r.id, name: r.name, sort: r.sort })) },
+    };
+  },
+});
+
+const adminCreateForumRoute = route({
+  method: "POST",
+  path: "/api/admin/forum/forums",
+  auth: "admin",
+  body: AdminCreateForumBodySchema,
+  handler: async (ctx, { body }) => {
+    const id = newId();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(forums).values({ id, name: body.name, sort: body.sort });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminUpdateForumRoute = route({
+  method: "POST",
+  path: "/api/admin/forum/forums/update",
+  auth: "admin",
+  body: AdminUpdateForumBodySchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(forums)
+        .set({ name: body.name, sort: body.sort })
+        .where(eq(forums.id, body.id))
+        .returning({ id: forums.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("forum_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminPage: PageSchema = {
+  id: "forum-admin",
+  path: "/admin/forum",
+  view: {
+    kind: "panel", title: "Forums",
+    children: [
+      { kind: "table", source: "GET /api/admin/forum/forums", columns: [
+        { key: "name", label: "Name" },
+        { key: "sort", label: "Sort" },
+      ] },
+      { kind: "form", action: "POST /api/admin/forum/forums", submitLabel: "Add forum", fields: [
+        { name: "name", label: "Name", type: "text" },
+        { name: "sort", label: "Sort", type: "number" },
+      ] },
+      { kind: "form", action: "POST /api/admin/forum/forums/update", submitLabel: "Update forum", fields: [
+        { name: "id", label: "Forum", type: "select", optionsSource: "GET /api/admin/forum/forums", valueKey: "id", labelKey: "name" },
+        { name: "name", label: "Name", type: "text" },
+        { name: "sort", label: "Sort", type: "number" },
+      ] },
+    ],
+  },
+};
+
 export default definePlugin({
   id: "forum",
   version: "1.0.0",
   basePaths: ["/api/forum", "/api/admin/forum"],
   migrations: FORUM_MIGRATIONS,
-  routes: [listForumsRoute, listTopicsRoute, viewTopicRoute, createTopicRoute, replyRoute],
+  routes: [
+    listForumsRoute, listTopicsRoute, viewTopicRoute, createTopicRoute, replyRoute,
+    lockRoute, typeRoute, deletePostRoute, deleteTopicRoute,
+    adminListForumsRoute, adminCreateForumRoute, adminUpdateForumRoute,
+  ],
+  adminPages: [adminPage],
 });

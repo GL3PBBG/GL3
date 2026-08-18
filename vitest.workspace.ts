@@ -323,6 +323,7 @@ export default defineWorkspace([
         "test/facility-concurrency.test.ts",
         "test/facility-rosters.test.ts",
         "test/first-admin.test.ts",
+        "test/forum-mod.test.ts",
         "test/forum-write.test.ts",
         "test/forum.test.ts",
         "test/gang-bank.test.ts",
