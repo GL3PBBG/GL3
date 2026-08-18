@@ -152,6 +152,20 @@ export function useBust() {
   });
 }
 
+export function useEscape() {
+  const queryClient = useQueryClient();
+  return useMutation<BustResponse, Error, void>({
+    mutationFn: async () =>
+      BustResponseSchema.parse(await api("/api/jail/escape", { method: "POST" })),
+    onSuccess: () => {
+      // Success frees the caller; failure extends their sentence — either
+      // way the caller's own jail status changed.
+      void queryClient.invalidateQueries({ queryKey: keys.jail() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
 export function useLocations() {
   return useQuery<LocationListResponse>({
     queryKey: keys.locations(),
