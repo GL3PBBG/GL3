@@ -52,6 +52,7 @@ export function Travel(): JSX.Element {
                 <div className={styles.meta}>
                   <Money value={location.travelCost} /> · {location.travelCooldownSeconds}s cooldown ·
                   bullets <Money value={location.bulletCost} /> ({location.bulletStock} in stock)
+                  {location.combatMode === "underground" ? <> · underground</> : null}
                 </div>
               </div>
               {location.current ? (

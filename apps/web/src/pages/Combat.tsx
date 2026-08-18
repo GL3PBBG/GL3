@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { AttackResponse, TargetReason, WeaponConditionDto } from "@gl3/shared";
 import {
   useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe,
@@ -86,6 +87,7 @@ export function Combat(): JSX.Element {
   if (targets.error) return <ErrorText error={targets.error} />;
 
   const rows = targets.data?.targets ?? [];
+  const mode = targets.data?.mode ?? "open";
   const entries = log.data?.entries ?? [];
   const myId = me.data?.playerId;
   // The server rejects these anyway, but the cooldown is claimed before the
@@ -113,7 +115,13 @@ export function Combat(): JSX.Element {
         <div>
           <h3 className={styles.meta}>Here now</h3>
           {rows.length === 0 ? (
-            <p className={styles.meta}>Nobody else is in this city.</p>
+            mode === "underground" ? (
+              <p className={styles.meta}>
+                Nobody shows their face in this town. <Link to="/detectives">Hire a detective.</Link>
+              </p>
+            ) : (
+              <p className={styles.meta}>Nobody else is in this city.</p>
+            )
           ) : (
             <ul className={styles.rows}>
               {rows.map((target) => (
