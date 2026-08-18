@@ -1,15 +1,39 @@
 import { count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { definePlugin, newId, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { FORUM_MIGRATIONS } from "./migrations.js";
 import { forums, players, posts, topics } from "./schema.js";
 
 /** 20/page, both tiers (topics and posts) — V2 parity, restated per spec. */
 export const PAGE_SIZE = 20;
 
+/** V2 cooldowns: 60s between topics, 15s between posts, per player. */
+const TOPIC_COOLDOWN_SECONDS = 60;
+const POST_COOLDOWN_SECONDS = 15;
+
 const ForumIdParamsSchema = z.object({ forumId: z.string().uuid() });
 const TopicIdParamsSchema = z.object({ topicId: z.string().uuid() });
 const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+
+/**
+ * `@gl3/shared` is off-limits to a plugin package, so `noNulByte` and the
+ * `CreateTopicRequestSchema`/`CreatePostRequestSchema` bounds are restated
+ * here, matching `packages/shared/src/dto/forum.ts` exactly (the pattern
+ * `packages/plugins/mail/src/index.ts:26` documents). The NUL guard is
+ * load-bearing the same way: Postgres `text` rejects an embedded NUL
+ * outright (SQLSTATE 22021).
+ */
+const noNulByte = <T extends z.ZodString>(schema: T): z.ZodEffects<T, string, string> =>
+  schema.refine((value) => !value.includes("\u0000"), { message: "must not contain a NUL byte" });
+
+const CreateTopicBodySchema = z.object({
+  subject: noNulByte(z.string().min(6).max(120)),
+  body: noNulByte(z.string().min(6).max(10_000)),
+});
+
+const CreatePostBodySchema = z.object({
+  body: noNulByte(z.string().min(6).max(10_000)),
+});
 
 function pageCountOf(total: number): number {
   return Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -183,10 +207,119 @@ const viewTopicRoute = route({
   },
 });
 
+/**
+ * Creates a topic and its opening post in ONE transaction — a topic with no
+ * posts is not a state V2 ever produced. `post_count` starts at 1 and
+ * `last_post_at` equals `created_at`, both set explicitly rather than left to
+ * column defaults so the two rows agree even if the defaults ever drift.
+ *
+ * The cooldown is claimed BEFORE the transaction (CLAUDE.md rule 2 — the
+ * `ctx.cooldown.acquire` outcome, an atomic Redis `SET NX EX` under the hood,
+ * is the decision) and deliberately never released on a later 4xx: combat's
+ * shot cooldown documents why (releasing would itself be a check-then-act,
+ * and keeping it denies a free retry probe).
+ */
+const createTopicRoute = route({
+  method: "POST",
+  path: "/api/forum/:forumId/topics",
+  params: ForumIdParamsSchema,
+  body: CreateTopicBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const acquired = await ctx.cooldown.acquire("forum.topic", player.id, TOPIC_COOLDOWN_SECONDS);
+    if (!acquired) {
+      const retryAfter = await ctx.cooldown.peek("forum.topic", player.id);
+      throw new PluginError("on_cooldown", 429, { retryAfter: Math.max(retryAfter, 1) });
+    }
+
+    return ctx.transaction(async (tx) => {
+      const [forum] = await tx.db.select().from(forums).where(eq(forums.id, params.forumId));
+      if (forum === undefined) throw new PluginError("forum_not_found", 404);
+
+      const topicId = newId();
+      const now = new Date();
+      await tx.db.insert(topics).values({
+        id: topicId,
+        forumId: forum.id,
+        authorId: player.id,
+        subject: body.subject,
+        createdAt: now,
+        lastPostAt: now,
+        postCount: 1,
+      });
+      await tx.db.insert(posts).values({
+        id: newId(),
+        topicId,
+        authorId: player.id,
+        body: body.body,
+        createdAt: now,
+      });
+
+      return { status: 201, body: { topicId } };
+    });
+  },
+});
+
+/**
+ * Replies to a topic. `last_post_at`/`post_count` are advanced with a plain
+ * `UPDATE ... SET post_count = post_count + 1` — no explicit lock, because
+ * the UPDATE itself self-serializes concurrent replies to the same topic.
+ *
+ * Notifies the topic's author via `tx.notify`, which writes the notification
+ * row in the same transaction (the established semantics every other
+ * `tx.notify` caller relies on — `gangs`/`bounties`/`casino` all call it
+ * in-transaction, no post-commit step). Skipped entirely on a self-reply and
+ * when the topic has no author (a migrated V2 row can have `author_id NULL`).
+ */
+const replyRoute = route({
+  method: "POST",
+  path: "/api/forum/topics/:topicId/posts",
+  params: TopicIdParamsSchema,
+  body: CreatePostBodySchema,
+  handler: async (ctx, { params, body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const acquired = await ctx.cooldown.acquire("forum.post", player.id, POST_COOLDOWN_SECONDS);
+    if (!acquired) {
+      const retryAfter = await ctx.cooldown.peek("forum.post", player.id);
+      throw new PluginError("on_cooldown", 429, { retryAfter: Math.max(retryAfter, 1) });
+    }
+
+    return ctx.transaction(async (tx) => {
+      const [topic] = await tx.db.select().from(topics).where(eq(topics.id, params.topicId));
+      if (topic === undefined) throw new PluginError("topic_not_found", 404);
+      if (topic.status === "locked") throw new PluginError("topic_locked", 409);
+
+      const postId = newId();
+      const now = new Date();
+      await tx.db.insert(posts).values({
+        id: postId,
+        topicId: topic.id,
+        authorId: player.id,
+        body: body.body,
+        createdAt: now,
+      });
+      await tx.db
+        .update(topics)
+        .set({ lastPostAt: now, postCount: sql`${topics.postCount} + 1` })
+        .where(eq(topics.id, topic.id));
+
+      if (topic.authorId !== null && topic.authorId !== player.id) {
+        await tx.notify(topic.authorId, `New reply to "${topic.subject}".`);
+      }
+
+      return { status: 201, body: { postId } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "forum",
   version: "1.0.0",
   basePaths: ["/api/forum", "/api/admin/forum"],
   migrations: FORUM_MIGRATIONS,
-  routes: [listForumsRoute, listTopicsRoute, viewTopicRoute],
+  routes: [listForumsRoute, listTopicsRoute, viewTopicRoute, createTopicRoute, replyRoute],
 });
