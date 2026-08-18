@@ -151,6 +151,19 @@ INSERT INTO gameNews (GN_author, GN_title, GN_body, GN_time) VALUES
   (1, 'Season 1 begins', 'Good luck.', 1700000000),
   (NULL, 'System announcement', 'Automated post.', 1700000100); -- system news, no author
 
+-- Forum. F_id -1 is a gang forum (negative id convention) — deferred
+-- cluster-wide, so it and anything filed under it must be skipped, not
+-- migrated. T_type 3 sets both the sticky (1) and important (2) bits, which
+-- GL3's single priority tier collapses to "sticky". T_status 1 = locked.
+INSERT INTO forums (F_id, F_name, F_sort) VALUES
+  (1, 'General Discussion', 1),
+  (-1, 'The Family (gang forum)', 1);
+INSERT INTO topics (T_date, T_user, T_subject, T_forum, T_status, T_type) VALUES
+  (1700000700, 1, 'Read this first', 1, 1, 3); -- locked, sticky+important
+INSERT INTO posts (P_date, P_user, P_body, P_topic) VALUES
+  (1700000700, 1, 'Welcome. Read the rules.', 1),
+  (1700000800, 999, 'From a ghost.', 1); -- orphan: author 999 does not exist
+
 -- A genuinely custom module table's data — irrelevant to migration, present
 -- only so the preflight test (Task 9) has a real unknown table to detect.
 INSERT INTO blackjackHands (BJ_user, BJ_result) VALUES (1, 'win');

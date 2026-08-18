@@ -290,6 +290,40 @@ CREATE TABLE gameNews (
   PRIMARY KEY (GN_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- Forum (SPEC §1.2 line 81). No AUTO_INCREMENT on F_id: gang forums use
+-- negative ids assigned by convention, not by the sequence, and the fixture
+-- below inserts both signs explicitly.
+CREATE TABLE forums (
+  F_id INT(11) NOT NULL,
+  F_name VARCHAR(255) NOT NULL,
+  F_sort INT(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (F_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+-- T_type is a bitmask: 1 = sticky, 2 = important. Both bits can be set on one
+-- row (V2 let a topic be marked sticky and important independently); GL3 has
+-- one priority tier, so the migrator collapses either bit, or both, to
+-- "sticky". T_status: 0 = open, 1 = locked.
+CREATE TABLE topics (
+  T_id INT(11) NOT NULL AUTO_INCREMENT,
+  T_date INT(11) NOT NULL,
+  T_user INT(11) NOT NULL,
+  T_subject VARCHAR(255) NOT NULL,
+  T_forum INT(11) NOT NULL,
+  T_status INT(11) NOT NULL DEFAULT 0,
+  T_type INT(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (T_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+CREATE TABLE posts (
+  P_id INT(11) NOT NULL AUTO_INCREMENT,
+  P_date INT(11) NOT NULL,
+  P_user INT(11) NOT NULL,
+  P_body TEXT,
+  P_topic INT(11) NOT NULL,
+  PRIMARY KEY (P_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
 -- A genuine third-party/custom module table (e.g. a casino sub-module),
 -- present in a real dump but never core V2. Preflight (Task 9) must report
 -- this the same way it reports premiumMembership: "custom module table, not

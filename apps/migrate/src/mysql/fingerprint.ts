@@ -18,6 +18,7 @@ const KNOWN_TABLES = new Set([
   "gangs", "gangPermissions", "gangInvites", "gangLogs",
   "userInventory", "garage", "properties",
   "bounties", "detectives", "mail", "notifications", "gameNews",
+  "forums", "topics", "posts",
 ]);
 
 export interface FingerprintResult {
