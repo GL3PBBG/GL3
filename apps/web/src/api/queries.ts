@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   AdminSectionsResponseSchema,
-  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
+  AttackResponseSchema, AuthResponseSchema, BailResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
-  BulletShopResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
+  BulletShopResponseSchema, BustResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
   CasinoLobbyResponseSchema, CasinoStepResponseSchema,
+  CellBlockListResponseSchema,
   CheckinResponseSchema,
   CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
@@ -28,11 +29,13 @@ import {
   WardListResponseSchema,
   WeaponConditionDtoSchema,
   type AdminSectionsResponse,
-  type AttackResponse, type BankStatusResponse, type BountyListResponse,
+  type AttackResponse, type BailResponse, type BankStatusResponse, type BountyListResponse,
   type BulletShopResponse,
+  type BustResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse,
   type CasinoLobbyResponse, type CasinoStepResponse,
+  type CellBlockListResponse,
   type CheckinResponse,
   type CombatLogResponse,
   type CombatTargetListResponse, type CreateGangRequest,
@@ -105,6 +108,47 @@ export function useJail() {
     queryKey: keys.jail(),
     queryFn: async () => JailStatusSchema.parse(await api("/api/jail")),
     refetchInterval: (query) => jailRefetchInterval(query.state.data),
+  });
+}
+
+/** The other inmates in the caller's current town. No poll: the roster is
+ *  not a countdown the tab must keep honest, and each row carries
+ *  `remainingSeconds` for the local tick. */
+export function useCellBlock() {
+  return useQuery<CellBlockListResponse>({
+    queryKey: keys.jailLocal(),
+    queryFn: async () => CellBlockListResponseSchema.parse(await api("/api/jail/local")),
+  });
+}
+
+export function useBail() {
+  const queryClient = useQueryClient();
+  return useMutation<BailResponse, Error, string>({
+    mutationFn: async (playerId) =>
+      BailResponseSchema.parse(await api("/api/jail/bail", {
+        method: "POST", body: JSON.stringify({ playerId }),
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.jailLocal() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useBust() {
+  const queryClient = useQueryClient();
+  return useMutation<BustResponse, Error, string>({
+    mutationFn: async (playerId) =>
+      BustResponseSchema.parse(await api("/api/jail/bust", {
+        method: "POST", body: JSON.stringify({ playerId }),
+      })),
+    onSuccess: () => {
+      // A failed bust jails the CLICKER, so the caller's own jail status is
+      // part of this mutation's result — invalidate it too.
+      void queryClient.invalidateQueries({ queryKey: keys.jailLocal() });
+      void queryClient.invalidateQueries({ queryKey: keys.jail() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
   });
 }
 

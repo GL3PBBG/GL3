@@ -1,12 +1,18 @@
 import { Link } from "react-router-dom";
-import { useJail } from "../api/queries.js";
+import { useBail, useBust, useCellBlock, useJail, useMe } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
-import { Loading, Panel } from "../components/ui.js";
+import { canAfford } from "../lib/money.js";
+import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
 export function Jail(): JSX.Element {
   const jail = useJail();
+  const me = useMe();
+  const cellBlock = useCellBlock();
+  const bail = useBail();
+  const bust = useBust();
+
   // The socket re-anchors this on `player.released`; the slow safety poll
   // re-anchors it if the socket is down. The display ticks locally every 1s
   // between anchors, which is what stops a throttled or suspended tab showing
@@ -18,28 +24,57 @@ export function Jail(): JSX.Element {
 
   if (jail.isLoading) return <Loading what="jail status" />;
 
-  // The server's sentence sweeper is what frees a player now — GET /api/jail
-  // still calls releaseIfExpired as a backstop, so this page works even with
-  // the sweeper disabled (SWEEP_INTERVAL_MS=0).
-  if (jail.data?.jailed !== true) {
-    return (
-      <Panel title="Jail">
-        <p className={styles.ok} style={{ margin: 0 }}>You're free.</p>
-        <p className={styles.meta}>
-          <Link to="/crimes">Back to work</Link>
-        </p>
-      </Panel>
-    );
-  }
+  if (!jail.data) return <Loading what="jail status" />;
+
+  const status = jail.data;
+  const cash = me.data?.cash ?? "0";
 
   return (
-    <Panel title="Jail">
-      <p className={styles.big}>{formatDuration(jailSeconds)}</p>
-      <p className={styles.meta}>
-        Out at{" "}
-        {jail.data.until === null ? "any moment" : new Date(jail.data.until).toLocaleTimeString()}.
-        You'll be let out automatically.
-      </p>
-    </Panel>
+    <>
+      <Panel title="Jail">
+        {status.jailed ? (
+          <>
+            <p className={styles.big}>{formatDuration(jailSeconds)}</p>
+            <p className={styles.meta}>
+              Out at{" "}
+              {status.until === null ? "any moment" : new Date(status.until).toLocaleTimeString()}.
+              You'll be let out automatically.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className={styles.ok} style={{ margin: 0 }}>You're free.</p>
+            <p className={styles.meta}>
+              <Link to="/crimes">Back to work</Link>
+            </p>
+          </>
+        )}
+      </Panel>
+
+      <Panel title="In this cell block">
+        {cellBlock.data?.inmates.length === 0 ? (
+          <p className={styles.muted}>Nobody else is doing time in this town.</p>
+        ) : null}
+        {cellBlock.data?.inmates.map((inmate) => (
+          <div key={inmate.playerId} className={styles.row}>
+            <span>{inmate.username} ({inmate.rankName})</span>
+            <span>{formatDuration(inmate.remainingSeconds)}</span>
+            <button
+              type="button"
+              disabled={bail.isPending || !canAfford(cash, inmate.bailCost)}
+              onClick={() => bail.mutate(inmate.playerId)}
+            >
+              Bail <Money value={inmate.bailCost} />
+            </button>
+            <button type="button" disabled={bust.isPending} onClick={() => bust.mutate(inmate.playerId)}>
+              Bust out
+            </button>
+          </div>
+        ))}
+        <p className={styles.muted}>Busting is free, but a failed attempt puts you in the next cell.</p>
+        <ErrorText error={bail.error} />
+        <ErrorText error={bust.error} />
+      </Panel>
+    </>
   );
 }

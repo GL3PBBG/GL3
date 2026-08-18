@@ -52,6 +52,7 @@ export const keys = {
   weaponCondition: () => ["combat", "weapon"] as const,
   hospital: () => ["hospital"] as const,
   hospitalLocal: () => ["hospital", "local"] as const,
+  jailLocal: () => ["jail", "local"] as const,
   bounties: () => ["bounties"] as const,
   detectives: () => ["detectives"] as const,
   oc: () => ["oc"] as const,
