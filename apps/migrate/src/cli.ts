@@ -20,7 +20,7 @@ function dumpModeMessage(sqlDumpPath: string, pgUrl: string): string {
 
 const USAGE =
   "usage: gl3-migrate --mysql mysql://user:pass@host/v2db --pg postgres://user:pass@host/gl3db " +
-  "[--dry-run] [--report report.json]";
+  "[--dry-run] [--report report.json] [--town-combat-mode open|underground]";
 
 const KEY_TO_FLAG: Record<string, string> = {
   mysqlUrl: "--mysql",
@@ -28,6 +28,7 @@ const KEY_TO_FLAG: Record<string, string> = {
   reportPath: "--report",
   sqlDumpPath: "--sql-dump",
   dryRun: "--dry-run",
+  townCombatMode: "--town-combat-mode",
 };
 
 /** A raw `ZodError.message` is a JSON dump of every issue — unreadable as the
@@ -79,7 +80,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const { db, sql } = createDb(args.pgUrl);
   try {
-    await runMigration({ mysql: pool, db, report, dryRun: args.dryRun });
+    await runMigration({ mysql: pool, db, report, dryRun: args.dryRun, townCombatMode: args.townCombatMode });
   } finally {
     await pool.end();
     await sql.end();

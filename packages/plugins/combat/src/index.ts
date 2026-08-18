@@ -1,14 +1,15 @@
 import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
-import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { itemPriceAt } from "@gl3/plugin-inventory";
+import { activeReportTargetIds } from "@gl3/plugin-detectives";
 import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 import { cooldownSecondsFor } from "./cooldown.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
-import { combatLog, items, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
+import { combatLog, items, locations, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -275,6 +276,22 @@ const attackRoute = route({
       // One-way protection would let a newbie farm with impunity.
       if (attacker.exp < config.newbieExpThreshold || target.exp < config.newbieExpThreshold) {
         throw new PluginError("protected", 409);
+      }
+
+      // Underground towns are V2's rule: unshootable without a live detective
+      // report. AFTER same_gang/protected so town mode never leaks through
+      // error-ordering differences. Both reads are plain SELECTs — no lock,
+      // no new edge (spec §1 rule-6 audit). attacker.locationId is non-null
+      // here: target_elsewhere above already threw on null.
+      const [town] = await tx.db
+        .select({ combatMode: locations.combatMode })
+        .from(locations)
+        .where(eq(locations.id, attacker.locationId));
+      if (town?.combatMode === "underground") {
+        const reported = await activeReportTargetIds(tx, player.id, new Date());
+        if (!reported.has(params.targetId)) {
+          throw new PluginError("no_detective_report", 409);
+        }
       }
 
       // Read once, used three times: to scale backfire chance, to compute the
@@ -601,7 +618,25 @@ const targetsRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       if (!me) throw new PluginError("unauthorized", 401);
-      if (me.locationId === null) return { status: 200, body: { targets: [] } };
+      if (me.locationId === null) return { status: 200, body: { mode: "open" as const, targets: [] } };
+
+      const [town] = await tx.db
+        .select({ combatMode: locations.combatMode })
+        .from(locations)
+        .where(eq(locations.id, me.locationId));
+      const mode = town?.combatMode === "underground" ? "underground" as const : "open" as const;
+
+      // Underground: the report set becomes a SQL predicate BEFORE the
+      // LIMIT — a post-limit filter would hide a legally attackable reported
+      // player ranked below 50th by exp in a crowded town. Nothing bounds
+      // this set structurally, but it stays small in practice — reports cost
+      // cash to place and expire on their own — so the IN list is cheap.
+      let reportedIds: string[] | null = null;
+      if (mode === "underground") {
+        const reported = await activeReportTargetIds(tx, player.id, new Date());
+        if (reported.size === 0) return { status: 200, body: { mode, targets: [] } };
+        reportedIds = [...reported];
+      }
 
       const rows = await tx.db
         .select({
@@ -621,6 +656,7 @@ const targetsRoute = route({
         .where(and(
           eq(playerStats.locationId, me.locationId),
           ne(playerStats.playerId, player.id),
+          ...(reportedIds === null ? [] : [inArray(playerStats.playerId, reportedIds)]),
         ))
         .orderBy(desc(playerStats.exp))
         .limit(50);
@@ -633,6 +669,7 @@ const targetsRoute = route({
       return {
         status: 200,
         body: {
+          mode,
           targets: rows.map((row) => {
             // Evaluated in the same order attack's PER-TARGET checks run
             // (hospitalised/jailed here read the ROW's own sentence, same as

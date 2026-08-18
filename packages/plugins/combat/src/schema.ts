@@ -98,3 +98,9 @@ export const playerItems = pgTable("player_items", {
   itemId: uuid("item_id").notNull(),
   qty: integer("qty").notNull(),
 });
+
+/** Core-owned; only the mode column combat reads. */
+export const locations = pgTable("locations", {
+  id: uuid("id").primaryKey(),
+  combatMode: text("combat_mode").notNull(),
+});

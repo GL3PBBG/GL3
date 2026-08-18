@@ -2,9 +2,11 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { uuidv7 } from "uuidv7";
+import { activeReportTargetIds } from "@gl3/plugin-detectives";
+import type { PluginTx } from "@gl3/plugin-sdk";
 import { loadConfig } from "../src/config.js";
 import {
-  locations, playerStats, settings, transactions,
+  locations, playerStats, players, settings, transactions,
 } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -164,6 +166,40 @@ describe("POST /api/detectives — hire", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("stamps expires_at at hire and the tracker reports the same instant", async () => {
+    await db.update(playerStats).set({ cash: 10_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 1, hours: 1 });
+    expect(res.statusCode).toBe(201);
+    const { searchId } = res.json<{ searchId: string }>();
+
+    const [row] = await db.select().from(detectiveSearches)
+      .where(eq(detectiveSearches.id, searchId));
+    expect(row?.expiresAt).not.toBeNull();
+    expect(row?.expiresAt?.getTime()).toBeGreaterThan(row!.endsAt.getTime());
+
+    // Two read paths cannot diverge: the tracker's expiresAt IS the column.
+    const listRes = await list(hirerToken);
+    const mine = listRes.json<{ searches: { id: string; expiresAt: string }[] }>()
+      .searches.find((s) => s.id === searchId);
+    expect(mine?.expiresAt).toBe(row?.expiresAt?.toISOString());
+  });
+
+  it("computes a legacy NULL expires_at row's deadline from the expire setting", async () => {
+    await db.update(playerStats).set({ cash: 10_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 1, hours: 1 });
+    const { searchId } = res.json<{ searchId: string }>();
+    await db.update(detectiveSearches).set({ expiresAt: null })
+      .where(eq(detectiveSearches.id, searchId));
+
+    const listRes = await list(hirerToken);
+    const mine = listRes.json<{ searches: { id: string; endsAt: string; expiresAt: string }[] }>()
+      .searches.find((s) => s.id === searchId);
+    // Old behaviour preserved: ends_at + expire, not epoch/absent.
+    expect(new Date(mine!.expiresAt).getTime()).toBeGreaterThan(new Date(mine!.endsAt).getTime());
+  });
 });
 
 describe("GET /api/detectives — reveal gating and live tracking", () => {
@@ -309,5 +345,46 @@ describe("DELETE /api/detectives/:searchId — remove", () => {
   it("401s without auth", async () => {
     const res = await app.inject({ method: "DELETE", url: `/api/detectives/${uuidv7()}` });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("activeReportTargetIds", () => {
+  it("returns exactly the live successful reports", async () => {
+    const now = new Date();
+    const past = new Date(now.getTime() - 3_600_000);
+    const future = new Date(now.getTime() + 3_600_000);
+    const mk = (target: string, over: Partial<typeof detectiveSearches.$inferInsert> = {}) =>
+      db.insert(detectiveSearches).values({
+        id: uuidv7(), playerId: hirerId, targetPlayerId: target,
+        detectives: 1, endsAt: past, succeeded: true, expiresAt: future, ...over,
+      });
+
+    // `p_detectives_searches` FKs both player_id and target_player_id to
+    // `players` (migrations.ts), so these need real rows — inserted directly
+    // rather than through the rate-limited `/api/auth/register` route, which
+    // beforeEach's own two registrations have already spent part of the quota on.
+    const [active, pending, failed, expired, legacy, foreign] =
+      [uuidv7(), uuidv7(), uuidv7(), uuidv7(), uuidv7(), uuidv7()];
+    await db.insert(players).values(
+      [active, pending, failed, expired, legacy, foreign].map((id, i) => ({
+        id, username: `ReportSubject${i}`,
+      })),
+    );
+
+    await mk(active);
+    await mk(pending, { endsAt: future, succeeded: null });      // still running
+    await mk(failed, { succeeded: false });                      // roll lost
+    await mk(expired, { expiresAt: past });                      // window over
+    await mk(legacy, { expiresAt: null });                       // pre-upgrade row: counts as expired
+    await db.insert(detectiveSearches).values({                  // someone ELSE's report
+      id: uuidv7(), playerId: foreign, targetPlayerId: active,
+      detectives: 1, endsAt: past, succeeded: true, expiresAt: future,
+    });
+
+    const set = await db.transaction(async (txDb) =>
+      // Targeted cast: activeReportTargetIds only reads tx.db, and PluginTx's
+      // other members (economy, jail, ...) are irrelevant to a read-only helper.
+      activeReportTargetIds({ db: txDb } as PluginTx, hirerId, new Date()));
+    expect(set).toEqual(new Set([active]));
   });
 });

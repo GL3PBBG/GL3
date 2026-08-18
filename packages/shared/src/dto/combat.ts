@@ -11,6 +11,10 @@ export const TargetReasonSchema = z.enum([
 ]);
 export type TargetReason = z.infer<typeof TargetReasonSchema>;
 
+/** Per-town combat rule — mirrors core `locations.combat_mode`. */
+export const CombatModeSchema = z.enum(["open", "underground"]);
+export type CombatMode = z.infer<typeof CombatModeSchema>;
+
 export const CombatTargetSchema = z.object({
   playerId: z.string().uuid(),
   username: z.string(),
@@ -23,6 +27,8 @@ export const CombatTargetSchema = z.object({
 export type CombatTarget = z.infer<typeof CombatTargetSchema>;
 
 export const CombatTargetListResponseSchema = z.object({
+  /** `underground` towns list only players the caller holds an active detective report on. */
+  mode: CombatModeSchema,
   targets: z.array(CombatTargetSchema),
 });
 export type CombatTargetListResponse = z.infer<typeof CombatTargetListResponseSchema>;

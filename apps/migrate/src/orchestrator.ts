@@ -26,6 +26,7 @@ export interface RunMigrationOptions {
   db: Db;
   report: MigrationReport;
   dryRun: boolean;
+  townCombatMode?: "open" | "underground";
 }
 
 /**
@@ -38,13 +39,15 @@ export interface RunMigrationOptions {
  * always safe because every migrator is id_map-idempotent (Task 30 proves
  * this end to end).
  */
-export async function runMigration({ mysql: pool, db, report, dryRun }: RunMigrationOptions): Promise<void> {
+export async function runMigration(
+  { mysql: pool, db, report, dryRun, townCombatMode = "open" }: RunMigrationOptions,
+): Promise<void> {
   await runPhase(db, dryRun, (tx) => migrateRoles(pool, tx, report));
   await runPhase(db, dryRun, (tx) => migrateRounds(pool, tx, report));
 
   await runPhase(db, dryRun, async (tx) => {
     await migrateRanks(pool, tx, report);
-    await migrateLocations(pool, tx, report);
+    await migrateLocations(pool, tx, report, townCombatMode);
     await migrateCars(pool, tx, report);
     await migrateWeapons(pool, tx, report);
     await migrateItems(pool, tx, report);

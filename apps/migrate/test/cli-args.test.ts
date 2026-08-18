@@ -10,6 +10,7 @@ describe("parseCliArgs", () => {
       dryRun: false,
       reportPath: undefined,
       sqlDumpPath: undefined,
+      townCombatMode: "open",
     });
   });
 
@@ -35,5 +36,18 @@ describe("parseCliArgs", () => {
 
   it("throws when a flag is missing its value", () => {
     expect(() => parseCliArgs(["--pg"])).toThrow(/--pg requires a value/);
+  });
+
+  it("defaults town combat mode to open", () => {
+    expect(parseCliArgs(["--pg", "postgres://x"]).townCombatMode).toBe("open");
+  });
+
+  it("accepts --town-combat-mode underground", () => {
+    expect(parseCliArgs(["--pg", "postgres://x", "--town-combat-mode", "underground"]).townCombatMode)
+      .toBe("underground");
+  });
+
+  it("rejects a junk town combat mode", () => {
+    expect(() => parseCliArgs(["--pg", "postgres://x", "--town-combat-mode", "ghost"])).toThrow();
   });
 });

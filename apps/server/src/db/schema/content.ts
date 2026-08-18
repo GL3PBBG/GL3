@@ -31,6 +31,7 @@ export const locations = pgTable("locations", {
   travelCooldownSeconds: integer("travel_cooldown_seconds").notNull().default(0),
   bulletStock: integer("bullet_stock").notNull().default(0),
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull().default(sql`0`),
+  combatMode: text("combat_mode").notNull().default("open"),
 });
 
 export const weapons = pgTable("weapons", {

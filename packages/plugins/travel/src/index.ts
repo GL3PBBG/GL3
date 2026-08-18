@@ -23,9 +23,31 @@ const TownBodySchema = z.object({
   name: z.string().min(1).max(80),
   travelCost: AdminMoney,
   travelCooldownSeconds: z.coerce.number().int().nonnegative(),
+  // Validated in the handler, not by z.enum: the loader answers every zod
+  // failure with a generic `invalid_request`, and the spec pins this one to
+  // its own code. Optional rather than defaulted: the admin form's untouched
+  // <select> has no auto-selected option, so PageRenderer submits
+  // `combatMode: ""` for a field the operator never touched. A `.default`
+  // only fires on an ABSENT key, so that empty string would reach
+  // parseCombatMode and 400 the pre-existing add/update-town flows. "" and
+  // absent are treated identically by parseCombatMode below.
+  combatMode: z.string().optional(),
 }).strict();
 const TownUpdateSchema = TownBodySchema.extend({ id: z.string().uuid() }).strict();
 const TravelParamsSchema = z.object({ locationId: IdSchema });
+
+/**
+ * `undefined` covers both an absent key and the admin form's untouched-select
+ * `""` (see TownBodySchema above) — both mean "caller expressed no opinion",
+ * so both come back `undefined` rather than defaulting here. That lets
+ * adminUpdateRoute tell "no opinion" apart from "explicitly open" and leave
+ * the stored mode untouched.
+ */
+function parseCombatMode(raw: string | undefined): "open" | "underground" | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  if (raw !== "open" && raw !== "underground") throw new PluginError("invalid_combat_mode", 400);
+  return raw;
+}
 
 /** Max attempts before a caller who keeps moving gets a clean 409. */
 const MAX_ATTEMPTS = 3;
@@ -53,6 +75,7 @@ export interface LocationListing {
   readonly travelCooldownSeconds: number;
   readonly bulletCost: bigint;
   readonly bulletStock: number;
+  readonly combatMode: "open" | "underground";
 }
 
 /**
@@ -96,6 +119,7 @@ const listRoute = route({
         travelCooldownSeconds: l.travelCooldownSeconds,
         bulletCost: l.bulletCost,
         bulletStock: l.bulletStock,
+        combatMode: l.combatMode === "underground" ? "underground" as const : "open" as const,
       })),
     );
 
@@ -114,6 +138,7 @@ const listRoute = route({
           travelCooldownSeconds: l.travelCooldownSeconds,
           bulletCost: l.bulletCost.toString(),
           bulletStock: l.bulletStock,
+          combatMode: l.combatMode,
           current: l.id === currentLocationId,
           cooldownRemaining,
           ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
@@ -322,6 +347,7 @@ const adminListRoute = route({
           id: l.id, name: l.name,
           travelCost: l.travelCost.toString(),
           travelCooldownSeconds: String(l.travelCooldownSeconds),
+          combatMode: l.combatMode,
         })),
       },
     };
@@ -332,6 +358,7 @@ const adminCreateRoute = route({
   method: "POST", path: "/api/admin/travel/locations", auth: "admin",
   body: TownBodySchema,
   handler: async (ctx, { body }) => {
+    const combatMode = parseCombatMode(body.combatMode) ?? "open";
     const id = newId();
     await ctx.transaction(async (tx) => {
       await tx.db.insert(locations).values({
@@ -339,6 +366,7 @@ const adminCreateRoute = route({
         travelCost: BigInt(body.travelCost),
         travelCooldownSeconds: body.travelCooldownSeconds,
         bulletStock: 0, bulletCost: 0n,
+        combatMode,
       });
     });
     return { status: 201, body: { id } };
@@ -349,12 +377,17 @@ const adminUpdateRoute = route({
   method: "POST", path: "/api/admin/travel/locations/update", auth: "admin",
   body: TownUpdateSchema,
   handler: async (ctx, { body }) => {
+    // Computed before the transaction, same as create — but here `undefined`
+    // ("no opinion") is a real outcome, not defaulted, so the mode below is
+    // included in the update only when the caller actually asked for one.
+    const mode = parseCombatMode(body.combatMode);
     const updated = await ctx.transaction(async (tx) => {
       const result = await tx.db.update(locations)
         .set({
           name: body.name,
           travelCost: BigInt(body.travelCost),
           travelCooldownSeconds: body.travelCooldownSeconds,
+          ...(mode !== undefined ? { combatMode: mode } : {}),
         })
         .where(eq(locations.id, body.id))
         .returning({ id: locations.id });
@@ -363,6 +396,17 @@ const adminUpdateRoute = route({
     if (!updated) throw new PluginError("location_not_found", 404);
     return { status: 204 };
   },
+});
+
+const adminModesRoute = route({
+  method: "GET", path: "/api/admin/travel/combat-modes", auth: "admin",
+  handler: async () => ({
+    status: 200,
+    body: { rows: [
+      { id: "open", name: "Open" },
+      { id: "underground", name: "Underground" },
+    ] },
+  }),
 });
 
 const adminPage: PageSchema = {
@@ -375,17 +419,20 @@ const adminPage: PageSchema = {
         { key: "name", label: "Name" },
         { key: "travelCost", label: "Travel cost" },
         { key: "travelCooldownSeconds", label: "Cooldown (s)" },
+        { key: "combatMode", label: "Combat" },
       ] },
       { kind: "form", action: "POST /api/admin/travel/locations", submitLabel: "Add town", fields: [
         { name: "name", label: "Name", type: "text" },
         { name: "travelCost", label: "Travel cost", type: "money" },
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+        { name: "combatMode", label: "Combat mode", type: "select", optionsSource: "GET /api/admin/travel/combat-modes", valueKey: "id", labelKey: "name" },
       ] },
       { kind: "form", action: "POST /api/admin/travel/locations/update", submitLabel: "Update town", fields: [
         { name: "id", label: "Town", type: "select", optionsSource: "GET /api/admin/travel/locations", valueKey: "id", labelKey: "name" },
         { name: "name", label: "Name", type: "text" },
         { name: "travelCost", label: "Travel cost", type: "money" },
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+        { name: "combatMode", label: "Combat mode", type: "select", optionsSource: "GET /api/admin/travel/combat-modes", valueKey: "id", labelKey: "name" },
       ] },
     ],
   },
@@ -397,7 +444,7 @@ export default definePlugin({
   // First port claiming two base paths; plugins/validate.ts checks each route
   // path is contained in one of them and that no other plugin claims either.
   basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],
-  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute],
+  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminModesRoute],
   adminPages: [adminPage],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
