@@ -1,19 +1,27 @@
+import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { locations, playerStats, settings as settingsTable, transactions } from "../src/db/schema/index.js";
+import { loadConfig } from "../src/config.js";
+import { locations, notifications, playerStats, settings as settingsTable, transactions } from "../src/db/schema/index.js";
 import { applyBalanceChange } from "../src/economy/ledger.js";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const redisUrl = loadConfig(process.env).redisUrl;
+const redis = createRedis(redisUrl);
+const subscriber = createSubscriber(redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let townA: string;
 let townB: string;
 
-interface Player { token: string; playerId: string }
+interface Player { token: string; playerId: string; username: string }
 
 async function register(name: string): Promise<Player> {
   return registerOn(app, name);
@@ -31,7 +39,7 @@ async function registerOn(target: FastifyInstance, name: string): Promise<Player
     payload: { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`, password: "hunter2hunter2" },
   });
   const body = res.json();
-  return { token: body.token, playerId: body.playerId };
+  return { token: body.token, playerId: body.playerId, username: body.username };
 }
 
 async function place(p: Player, locationId: string | null, patch: Record<string, unknown> = {}): Promise<void> {
@@ -48,7 +56,12 @@ beforeEach(async () => {
     { id: townB, name: `Town B ${townB.slice(0, 8)}` },
   ]);
 });
-afterAll(async () => { await closeServer(); await conn.end(); });
+afterAll(async () => {
+  await closeServer();
+  await conn.end();
+  redis.disconnect();
+  subscriber.disconnect();
+});
 
 const auth = (p: Player) => ({ authorization: `Bearer ${p.token}` });
 
@@ -61,6 +74,13 @@ describe("POST /api/jail/bail", () => {
     await db.transaction((tx) => applyBalanceChange(tx, {
       playerId: payer.playerId, amount: 500_000n, kind: "cash", reason: "test.seed",
     }));
+    const [before] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
+
+    // Subscribed BEFORE the request, so the publish that follows commit can't
+    // race the subscription (CLAUDE.md rule 4: filter by the TARGET's own
+    // actorId — `game:events` is a single channel shared by every test file).
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const waiting = awaitOwnEvent(subscriber, inmate.playerId);
 
     const res = await app.inject({
       method: "POST", url: "/api/jail/bail", headers: auth(payer),
@@ -71,11 +91,24 @@ describe("POST /api/jail/bail", () => {
     const body = res.json();
     expect(body.freed).toBe(inmate.playerId);
 
+    const event: GameEvent = GameEventSchema.parse(await waiting);
+    expect(event).toMatchObject({ type: "player.released", actorId: inmate.playerId });
+
     const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
     expect(target?.jailedUntil).toBeNull();
+    expect(target?.cash).toBe(before?.cash);
+
+    const [payerRow] = await db.select().from(playerStats).where(eq(playerStats.playerId, payer.playerId));
+    expect(payerRow?.cash).toBe(500_000n - BigInt(body.paid));
 
     const ledger = await db.select().from(transactions).where(eq(transactions.playerId, payer.playerId));
     expect(ledger.filter((t) => t.reason === "jail.bail")).toHaveLength(1);
+    const sum = ledger.reduce((acc, t) => acc + (t.balanceKind === "cash" ? t.amount : 0n), 0n);
+    expect(sum).toBe(payerRow?.cash);
+
+    const notified = await db.select().from(notifications).where(eq(notifications.playerId, inmate.playerId));
+    expect(notified).toHaveLength(1);
+    expect(notified[0]?.body).toBe(`${payer.username} paid your bail.`);
   });
 
   it("409s an inmate in another town, a free player, and yourself", async () => {
@@ -146,6 +179,10 @@ describe("POST /api/jail/bust", () => {
       expect(target?.jailedUntil).toBeNull();
       const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
       expect(caller?.jailedUntil).toBeNull();
+
+      // Busting is free on both branches — a successful bust moves no money.
+      const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
+      expect(ledger).toHaveLength(0);
     } finally {
       await own.close();
     }
@@ -175,6 +212,10 @@ describe("POST /api/jail/bust", () => {
       const callerSeconds = Math.round(((caller?.jailedUntil?.getTime() ?? 0) - Date.now()) / 1000);
       expect(callerSeconds).toBeGreaterThan(110);
       expect(callerSeconds).toBeLessThanOrEqual(120);
+
+      // A failed bust is free too — the caller's own jail time is the whole cost.
+      const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
+      expect(ledger).toHaveLength(0);
     } finally {
       await own.close();
     }

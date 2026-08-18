@@ -52,6 +52,7 @@ export function Jail(): JSX.Element {
       </Panel>
 
       <Panel title="In this cell block">
+        {cellBlock.data === undefined ? <Loading what="the cell block" /> : null}
         {cellBlock.data?.inmates.length === 0 ? (
           <p className={styles.muted}>Nobody else is doing time in this town.</p>
         ) : null}
@@ -61,11 +62,13 @@ export function Jail(): JSX.Element {
             <span>{formatDuration(inmate.remainingSeconds)}</span>
             <button
               type="button"
+              // Prevents double-spend.
               disabled={bail.isPending || !canAfford(cash, inmate.bailCost)}
               onClick={() => bail.mutate(inmate.playerId)}
             >
               Bail <Money value={inmate.bailCost} />
             </button>
+            {/* Prevents double-spend. */}
             <button type="button" disabled={bust.isPending} onClick={() => bust.mutate(inmate.playerId)}>
               Bust out
             </button>

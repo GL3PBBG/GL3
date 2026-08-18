@@ -33,6 +33,14 @@ describe("facility settings parsers", () => {
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": raw })).toBe(300);
   });
 
+  it("rejects 0 for the two parsers a zero-length stay would exploit", () => {
+    // `parsePositiveInt` rejects <= 0, not just negatives — a zero
+    // `checkin_seconds_per_hp` or `bust_fail_jail_seconds` would otherwise
+    // write a sentence with a deadline already in the past.
+    expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "0" })).toBe(30);
+    expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "0" })).toBe(300);
+  });
+
   it("clamps an out-of-range bust percentage instead of falling back", () => {
     expect(bustSuccessPercent({ "jail.bust_success_percent": "250" })).toBe(100);
     expect(bustSuccessPercent({ "jail.bust_success_percent": "-5" })).toBe(0);

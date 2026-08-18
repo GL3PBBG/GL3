@@ -172,7 +172,7 @@ produces is already expressible:
 |---|---|---|
 | Bail / bust frees a target | `player.released` | target |
 | Paid discharge frees a patient | `player.discharged` | target |
-| Failed bust jails the caller | `player.jailed` (`reason: "bust_failed"`) | caller |
+| Failed bust jails the caller | `player.jailed` (`reason: "bust.failed"`) | caller |
 | "X paid your bail" | `notification.created` | target |
 
 All published **after commit** (rule 5), through `publishEvent`. The

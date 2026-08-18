@@ -2373,6 +2373,16 @@ act on them — and gives hospital its first **voluntary** door.
   release-another-player primitive stayed in core rather than becoming a
   second unrestricted lever on the plugin trust surface (`publishCore` is
   already one; see design §2).
+- **Gating is deliberately asymmetric.** A JAILED caller may bail others but
+  not bust them out (`bust` refuses with 409 `already_jailed`, checked against
+  the caller's own locked row); a HOSPITALISED caller may do all three
+  (discharge, discharge-player, bail/bust). None of the new routes is gated by
+  `accessInJail` / `accessInHospital` — that field exists only on **plugin**
+  routes (`pluginRoute.accessInJail`/`accessInHospital` in
+  `plugins/routes.ts`), and every route in this cluster is core, not plugin.
+  This matches the spec and is easy to re-derive wrong from the code alone.
+
+Gate: bare `npm run verify`, **214 files / 1676 passed, 1 skipped, exit 0**.
 
 ## What M3 established that later work must not undo
 

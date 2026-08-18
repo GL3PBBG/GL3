@@ -139,6 +139,11 @@ export function registerHospitalRoutes(
       if (missing <= 0) return { kind: "healthy" as const };
 
       const seconds = missing * checkinSecondsPerHp(settings);
+      // Defensive: `checkinSecondsPerHp` already rejects a zero setting, but a
+      // zero here must never reach `sendToHospital` regardless — that is the
+      // exact "admit then settle back to full" hole the `not_injured` 409
+      // above exists to prevent.
+      if (seconds <= 0) return { kind: "healthy" as const };
       const until = await sendToHospital(tx, playerId, seconds);
       return { kind: "admitted" as const, until, seconds, maxHealth };
     });
@@ -211,13 +216,14 @@ export function registerHospitalRoutes(
           .from(players).where(eq(players.id, playerId));
 
         const notificationId = uuidv7();
-        await insertNotification(tx, {
-          id: notificationId, playerId: targetId,
-          body: `${me?.username ?? "Someone"} paid for your discharge.`,
-        });
+        // Same string goes into the notification row and the event body below —
+        // a caller who reads the row moments after the toast must see the same
+        // fact, not "Someone" in one place and the payer's name in the other.
+        const body = `${me?.username ?? "Someone"} paid for your discharge.`;
+        await insertNotification(tx, { id: notificationId, playerId: targetId, body });
 
         return {
-          kind: "paid" as const, cash, cost, notificationId,
+          kind: "paid" as const, cash, cost, notificationId, body,
           targetName: target.username,
         };
       });
@@ -242,7 +248,7 @@ export function registerHospitalRoutes(
         actorId: targetId, actorName: result.targetName,
         audience: { kind: "player", playerId: targetId },
         notificationId: result.notificationId,
-        body: "Someone paid for your discharge.",
+        body: result.body,
       });
 
       return reply.send({

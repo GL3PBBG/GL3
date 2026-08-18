@@ -91,6 +91,7 @@ export function Hospital(): JSX.Element {
             <span>{formatDuration(patient.remainingSeconds)}</span>
             <button
               type="button"
+              // Prevents double-spend.
               disabled={dischargePlayer.isPending || !canAfford(cash, patient.dischargeCost)}
               onClick={() => dischargePlayer.mutate(patient.playerId)}
             >

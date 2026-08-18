@@ -57,6 +57,7 @@ export async function listSentencedAtLocation(
     playerId: row.playerId,
     username: row.username,
     rankName: row.rankName ?? UNRANKED,
+    // Non-null: the `gt(column, now)` predicate above already excludes null rows.
     until: (row.until as Date).toISOString(),
     remainingSeconds: Math.max(0, Math.ceil(((row.until as Date).getTime() - Date.now()) / 1000)),
   }));

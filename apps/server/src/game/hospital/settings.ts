@@ -17,10 +17,18 @@ export function parseNonNegativeBigint(raw: string | undefined, fallback: bigint
   }
 }
 
+/**
+ * Strictly positive: 0 falls back too, not just negatives. `hospital.
+ * checkin_seconds_per_hp = "0"` would otherwise write a stay whose deadline is
+ * already past, so the next `GET /api/hospital` settles it straight back to
+ * full — a free instant heal past the `not_injured` 409's whole point. Same
+ * hole for `jail.bust_fail_jail_seconds = "0"`, which would make a failed
+ * bust free.
+ */
 export function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
 
