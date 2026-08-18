@@ -287,6 +287,7 @@ export default defineWorkspace([
       root: "./apps/server",
       include: [
         "test/assets-routes.test.ts",
+        "test/auth-verify.test.ts",
         "test/auth.test.ts",
         "test/bank.test.ts",
         "test/bounties-claim.test.ts",
