@@ -54,3 +54,23 @@ export function backfireChanceFor(
   const multiplier = 1 + ((PRISTINE - condition) / PRISTINE) * wearFactor;
   return Math.min(100, Math.round(base * multiplier));
 }
+
+/**
+ * What the gunsmith charges to restore `restored` points: a full 0→100 repair
+ * costs `costMultiplier` × the weapon's shop price, prorated by points and
+ * rounded UP — flooring would fix a nearly-pristine cheap weapon for free.
+ * `price` is null for a weapon no shop anywhere lists (see inventory's
+ * `itemPriceAt`); that falls back to the flat `costPerPoint` rate, the
+ * pre-franchise formula, so an unpriced weapon is still repairable.
+ */
+export function repairCostFor(
+  price: bigint | null,
+  restored: number,
+  costMultiplier: number,
+  costPerPoint: bigint,
+): bigint {
+  if (price === null) return costPerPoint * BigInt(restored);
+  const points = BigInt(restored);
+  const span = BigInt(PRISTINE);
+  return (price * BigInt(costMultiplier) * points + span - 1n) / span;
+}

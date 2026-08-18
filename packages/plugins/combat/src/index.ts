@@ -2,7 +2,8 @@ import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@g
 import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
-import { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
+import { itemPriceAt } from "@gl3/plugin-inventory";
+import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 import { cooldownSecondsFor } from "./cooldown.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
@@ -16,7 +17,7 @@ import { type CombatSettings, readCombatSettings } from "./settings.js";
 // `@gl3/server:unit` project because it touches neither Postgres nor Redis).
 export { resolveShot, rollFor } from "./resolve.js";
 export type { Rolls, ShotOutcome, WeaponProfile } from "./resolve.js";
-export { backfireChanceFor, effectiveCondition, PRISTINE } from "./condition.js";
+export { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 export { cooldownSecondsFor } from "./cooldown.js";
 export type { CooldownBounds, CooldownProfile } from "./cooldown.js";
 export { readCombatSettings } from "./settings.js";
@@ -682,7 +683,7 @@ const weaponRoute = route({
 
     return ctx.transaction(async (tx) => {
       const [stats] = await tx.db
-        .select({ weaponItemId: playerStats.weaponItemId })
+        .select({ weaponItemId: playerStats.weaponItemId, locationId: playerStats.locationId })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       const itemId = stats?.weaponItemId ?? null;
@@ -708,6 +709,7 @@ const weaponRoute = route({
         ? parsed.data.backfireChance ?? config.backfire.baseChance
         : 0;
 
+      const price = await itemPriceAt(tx, itemId, stats?.locationId ?? null);
       return {
         status: 200,
         body: {
@@ -715,7 +717,9 @@ const weaponRoute = route({
           name: item?.name ?? null,
           condition,
           backfireChance: backfireChanceFor(base, condition, config.backfire.wearFactor),
-          repairCost: (config.repair.costPerPoint * BigInt(PRISTINE - condition)).toString(),
+          repairCost: repairCostFor(
+            price, PRISTINE - condition, config.repair.costMultiplier, config.repair.costPerPoint,
+          ).toString(),
         },
       };
     });
@@ -723,10 +727,13 @@ const weaponRoute = route({
 });
 
 /**
- * The gunsmith. Cost is `repair.cost_per_point` x points restored — a flat
- * rate rather than a fraction of item value, because `items` HAS no value
- * column: price lives in `p_inventory_shop_stock`, and reading it here would
- * be the first cross-plugin table read in the repo.
+ * The gunsmith. A full 0→100 repair costs `repair.cost_multiplier` × the
+ * weapon's shop price, prorated by points restored (`repairCostFor`). `items`
+ * has no value column — price lives in `p_inventory_shop_stock` — so the
+ * price comes through inventory's exported `itemPriceAt` (local listing
+ * first, else cheapest anywhere), the plugin→plugin helper shape properties'
+ * `ownerAt` established rather than a cross-plugin table read. A weapon no
+ * shop lists falls back to the flat `repair.cost_per_point` rate.
  *
  * No cooldown: cost is the limiter, and a cooldown would mean a Redis key,
  * which would mean rule 2's SET NX EX discipline for no gameplay gain.
@@ -766,23 +773,28 @@ const repairRoute = route({
       // zero would still write a ledger row.
       if (restored === 0) return { status: 204 };
 
-      const cost = config.repair.costPerPoint * BigInt(restored);
       const [stats] = await tx.db
-        .select({ cash: playerStats.cash })
+        .select({ cash: playerStats.cash, locationId: playerStats.locationId })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
+      const price = await itemPriceAt(tx, body.itemId, stats?.locationId ?? null);
+      const cost = repairCostFor(
+        price, restored, config.repair.costMultiplier, config.repair.costPerPoint,
+      );
       // Checked under the lock taken as this transaction's first statement,
       // so the balance cannot move between the check and the debit.
       if (stats === undefined || stats.cash < cost) {
         throw new PluginError("insufficient_funds", 409);
       }
 
-      await tx.economy.applyBalanceChange({
-        playerId: player.id,
-        amount: -cost,
-        kind: "cash",
-        reason: "combat.repair",
-      });
+      if (cost > 0n) {
+        await tx.economy.applyBalanceChange({
+          playerId: player.id,
+          amount: -cost,
+          kind: "cash",
+          reason: "combat.repair",
+        });
+      }
 
       await tx.db
         .insert(weaponCondition)
