@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useBail, useBust, useCellBlock, useJail, useMe } from "../api/queries.js";
+import { useBail, useBust, useCellBlock, useEscape, useJail, useMe } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { canAfford } from "../lib/money.js";
@@ -12,6 +12,7 @@ export function Jail(): JSX.Element {
   const cellBlock = useCellBlock();
   const bail = useBail();
   const bust = useBust();
+  const escape = useEscape();
 
   // The socket re-anchors this on `player.released`; the slow safety poll
   // re-anchors it if the socket is down. The display ticks locally every 1s
@@ -40,6 +41,14 @@ export function Jail(): JSX.Element {
               {status.until === null ? "any moment" : new Date(status.until).toLocaleTimeString()}.
               You'll be let out automatically.
             </p>
+            {/* Prevents a double roll. */}
+            <button type="button" disabled={escape.isPending} onClick={() => escape.mutate()}>
+              Escape
+            </button>
+            <p className={styles.muted}>
+              Escaping is free, but a failed attempt adds time to your sentence.
+            </p>
+            <ErrorText error={escape.error} />
           </>
         ) : (
           <>

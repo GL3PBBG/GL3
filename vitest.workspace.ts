@@ -328,6 +328,7 @@ export default defineWorkspace([
         "test/inventory.test.ts",
         "test/jail.test.ts",
         "test/jail-bail-bust.test.ts",
+        "test/jail-escape.test.ts",
         "test/leaderboard.test.ts",
         "test/location-combat-modes.test.ts",
         "test/mail.test.ts",

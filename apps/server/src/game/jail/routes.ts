@@ -12,7 +12,7 @@ import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { bustSucceeds } from "./bust.js";
 import { releaseIfExpired, sendToJail } from "./status.js";
-import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent } from "./settings.js";
+import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "./settings.js";
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 
@@ -226,6 +226,73 @@ export function registerJailRoutes(
       actorId: targetId, actorName: result.targetName,
       audience: { kind: "player", playerId: targetId },
       notificationId: result.notificationId, body: "Someone busted you out.",
+    });
+    return reply.send({ success: true, jailedUntil: null });
+  });
+
+  /**
+   * V2's self-targeted breakout (the template labels it "Escape"). Same roll
+   * and the same `jail.bust_success_percent` as bust, but failure EXTENDS the
+   * caller's existing sentence by `jail.escape_fail_extra_seconds` — V2 added
+   * 90s to the timer rather than restarting it, so `sendToJail` (which
+   * overwrites from now) is deliberately not used here. Free, no cooldown:
+   * the added time is the whole cost, same reasoning as bust. No
+   * notification either — the player did this to themselves and already
+   * holds the response, the hospital check-in precedent.
+   */
+  app.post("/api/jail/escape", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const result = await db.transaction(async (tx) => {
+      // First statement, before the row is read (NOTES.md rule 6).
+      await lockPlayersForUpdate(tx, [playerId]);
+
+      const [caller] = await tx.select({
+        jailedUntil: playerStats.jailedUntil, username: players.username,
+      })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .where(eq(playerStats.playerId, playerId));
+
+      const jailedUntil = caller?.jailedUntil ?? null;
+      if (jailedUntil === null || jailedUntil.getTime() <= Date.now()) {
+        return { kind: "free" as const };
+      }
+
+      const callerName = caller?.username ?? "unknown";
+      if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
+        const until = new Date(jailedUntil.getTime() + escapeFailExtraSeconds(settings) * 1000);
+        await tx.update(playerStats)
+          .set({ jailedUntil: until })
+          .where(eq(playerStats.playerId, playerId));
+        return { kind: "failed" as const, until, callerName };
+      }
+
+      await tx.update(playerStats)
+        .set({ jailedUntil: null })
+        .where(eq(playerStats.playerId, playerId));
+      return { kind: "escaped" as const, callerName };
+    });
+
+    if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
+
+    // After commit, never inside the transaction (NOTES.md rule 5).
+    const at = new Date().toISOString();
+    if (result.kind === "failed") {
+      await publishEvent(redis, {
+        id: uuidv7(), type: "player.jailed", at,
+        actorId: playerId, actorName: result.callerName,
+        audience: { kind: "player", playerId },
+        until: result.until.toISOString(), reason: "escape.failed",
+      });
+      return reply.send({ success: false, jailedUntil: result.until.toISOString() });
+    }
+
+    await publishEvent(redis, {
+      id: uuidv7(), type: "player.released", at,
+      actorId: playerId, actorName: result.callerName,
+      audience: { kind: "player", playerId },
     });
     return reply.send({ success: true, jailedUntil: null });
   });
