@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "../../db/client.js";
 import { playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
+import { listSentencedAtLocation } from "../roster.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "./status.js";
 import { checkinSecondsPerHp, dischargeCostPerSecond } from "./settings.js";
 
@@ -33,6 +34,21 @@ export function registerHospitalRoutes(
       remainingSeconds: status.remainingSeconds,
       // Money crosses the wire as a decimal string, never a JSON number.
       dischargeCost: (BigInt(status.remainingSeconds) * dischargeCostPerSecond(settings)).toString(),
+    });
+  });
+
+  /** Everyone else's live stay in the caller's own town. Never lists the caller. */
+  app.get("/api/hospital/local", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const rows = await listSentencedAtLocation(db, playerId, "hospital");
+    const rate = dischargeCostPerSecond(settings);
+    return reply.send({
+      patients: rows.map((row) => ({
+        ...row,
+        dischargeCost: (BigInt(row.remainingSeconds) * rate).toString(),
+      })),
     });
   });
 

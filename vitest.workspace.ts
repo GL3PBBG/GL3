@@ -316,6 +316,7 @@ export default defineWorkspace([
         "test/gang-membership.test.ts",
         "test/gang-transfer.test.ts",
         "test/gangs.test.ts",
+        "test/facility-rosters.test.ts",
         "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
         "test/hospital.test.ts",
