@@ -350,7 +350,10 @@ read there, since `p_detectives_searches` won't exist; the default `'open'`
 makes it opt-in, and admin-side validation that `detectives` is loaded is
 deliberately out of scope (travel's admin page has no view of the loader's
 plugin list). `@gl3/shared` → `0.1.13` (`mode` on the targets response,
-`combatMode` on the location DTO), additive, **not yet published**.
+`combatMode` on the location DTO), additive, **published** with the user's
+approval after a registry check — `npm.gl3.dev` now serves `0.1.1` through
+`0.1.13` (`0.1.12`, the hospital cluster's bump, had landed on the registry
+by another session in the meantime).
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

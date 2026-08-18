@@ -2548,10 +2548,11 @@ exactly as already shipped) or `'underground'` (V2's rule, reintroduced).
   shop-price differential between town modes shipped first, so the trade-off
   exists); no admin check that `detectives` is loaded.
 - **`@gl3/shared` → `0.1.13`**, additive (`CombatModeSchema`; `mode` on the
-  targets response; `combatMode` on the location DTO). **Not yet
-  published** — publishing needs the user's explicit approval and a
-  registry check first, the same as every prior bump; other sessions have
-  taken numbers out from under a draft before (see `0.1.12` above).
+  targets response; `combatMode` on the location DTO). **Published** with
+  the user's approval after the registry check the prior bumps mandated —
+  the registry served through `0.1.12` at publish time (the hospital
+  cluster's number had landed via another session), so `0.1.13` went out
+  clean and `npm.gl3.dev` now serves `0.1.1` through `0.1.13`.
   `@gl3/plugin-sdk` needed no bump.
 
 Gate: bare `npm run verify` on `362803a`, **217 files / 1733 passed, 1
