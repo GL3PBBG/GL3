@@ -319,6 +319,7 @@ export default defineWorkspace([
         "test/gateway-routing-error.test.ts",
         "test/health.test.ts",
         "test/hospital.test.ts",
+        "test/hospital-checkin.test.ts",
         "test/hospital-concurrency.test.ts",
         "test/inventory.test.ts",
         "test/jail.test.ts",
