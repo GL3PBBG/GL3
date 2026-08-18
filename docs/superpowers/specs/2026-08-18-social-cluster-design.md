@@ -21,7 +21,7 @@ Decisions made in review:
 | Verify UX | Link **and** typeable code — one token serves as both |
 | Sender | `EMAIL_FROM` default `noreply@gl3.dev`; `EMAIL_DRIVER=log\|resend` |
 | Password reset | Included (V2 `forgotPassword` port) |
-| Online list | Game-wide, V2's two windows (5 min / 1 hour), location column. **Underground hiding deferred** — the combat-modes branch is being built concurrently; when it lands, a follow-up hides the location of players standing in `combat_mode='underground'` towns |
+| Online list | Game-wide, V2's two windows (5 min / 1 hour), location column. Players standing in a `combat_mode='underground'` town show **no location** (initially deferred while the combat-modes branch was in flight; that branch merged to main before implementation started, so it ships in v1) |
 | Forum v1 | Public forums only. Gang forums (V2's negative-id hack) deferred to their own design. Mute deferred |
 | Architecture | Verify/reset/presence in **core** (env config, auth hook, players table — plugin-unreachable). Forum is a **plugin** owning its tables |
 
@@ -147,9 +147,10 @@ Response `{ onlineNow, lastHour }` (5-minute and 1-hour windows, disjoint),
 entries `{ playerId, username, locationName, lastActiveAt }`. New
 `dto/online.ts` in `@gl3/shared`.
 
-**Deferred**: when the combat-modes branch lands, `locationName` must be
-null for players standing in an `underground` town. Recorded as a follow-up,
-not built now — that flag's semantics belong to the concurrent branch.
+**Underground hiding**: the hydration query reads `locations.combat_mode`
+(merged to main in `0013`); a player standing in an `underground` town gets
+`locationName: null` — name and last-active still listed, town concealed.
+Same plain-SELECT read combat's targets route uses; no lock taken.
 
 Profile: `ProfileDto` gains optional `lastSeenAt` (additive), rendered on the
 profile pages — V2's profile showed last-online.
@@ -286,8 +287,6 @@ TDD throughout; every guard shown red first.
 
 ## 7. Deferred / follow-ups
 
-- Underground towns hidden on the online list (blocked on combat-modes
-  branch landing).
 - Gang forums (own design; migrator already reports what it skipped).
 - Forum mute.
 - WS-based presence precision (v1 is HTTP-request-driven).
