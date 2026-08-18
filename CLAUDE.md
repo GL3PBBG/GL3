@@ -299,6 +299,47 @@ the four places a new variant would touch needed changing.
 by another session's work by the time this one tried to publish — those two
 numbers belong to other clusters, not this one.
 
+**Location combat modes** have since shipped on `feat/location-combat-modes`:
+a per-town `locations.combat_mode` (`'open'` | `'underground'`, default
+`'open'` — core migration `0013`, no FK, no index) reintroduces V2's rule
+that residents of a town are invisible and unshootable without a live
+detective report, but scoped to whichever towns an admin flips rather than
+every town. This is combat's fifth plugin→plugin dependency edge
+(`@gl3/plugin-detectives`, after combat→inventory, bounties→combat,
+bullets→properties, bullets→travel): detectives gained a plugin migration
+(`0002_report_expiry`, a nullable `expires_at` stamped at hire as
+`ends_at + expire`-at-hire-time, since a combat-side reader cannot reach
+detectives' own settings namespace) and a read-only export,
+`activeReportTargetIds`, that combat calls under a plain SELECT — no lock
+taken, no row written. In an underground town, `POST /api/combat/attack/:id`
+409s `no_detective_report` unless the target is in that set, checked *after*
+the existing `same_gang`/`protected` checks so town mode never leaks through
+error-ordering differences; the cooldown still burns on the refusal, same as
+every other 4xx. `GET /api/combat/targets` filters to the caller's live
+report set **in SQL, before the `LIMIT 50`** — a post-limit filter would hide
+a legally attackable reported player outranked by 50+ bystanders, which is
+exactly what `test/location-combat-modes.test.ts` proves with 51 unreported
+stragglers ahead of one reported target. A report is not consumed on a
+shot — time expiry only, deliberately, because GL3 combat is multi-shot
+whittling and per-shot consumption would price a kill at `cost × shots`.
+Hospital and jail rosters stay visible in every mode (V2's own only in-town
+leak, kept as counterplay). `travel` exposes the flag on both the listing DTO
+and a new admin `select` (`GET /api/admin/travel/combat-modes` feeds its
+`optionsSource`; 400 `invalid_combat_mode` is handler-level, since the
+loader answers a zod-enum failure with the generic `invalid_request` before
+a plugin handler ever sees it), and `apps/migrate` gained
+`--town-combat-mode` to default every imported town to `underground` for
+operators who want V2 rules everywhere. No new `GameEvent` variant and no
+new lock-graph edge — every new read is a plain SELECT, recorded so nobody
+adds a lock-order test for an edge that doesn't exist. The operational
+constraint is real, not theoretical: flipping a town to `underground` on a
+deployment that never loaded `detectives` fails every attack and target-list
+read there, since `p_detectives_searches` won't exist; the default `'open'`
+makes it opt-in, and admin-side validation that `detectives` is loaded is
+deliberately out of scope (travel's admin page has no view of the loader's
+plugin list). `@gl3/shared` → `0.1.13` (`mode` on the targets response,
+`combatMode` on the location DTO), additive, **not yet published**.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime
