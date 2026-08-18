@@ -124,6 +124,7 @@ function ActiveRound({ round }: { round: RoundDto }): JSX.Element {
           <button
             key={value}
             type="button"
+            aria-pressed={value === kind}
             className={value === kind ? styles.tabActive : styles.tabIdle}
             onClick={() => { setKind(value); }}
           >
@@ -151,6 +152,7 @@ function HallOfFameEntry({ round }: { round: RoundDto }): JSX.Element {
           <button
             key={value}
             type="button"
+            aria-pressed={value === kind}
             className={value === kind ? styles.tabActive : styles.tabIdle}
             onClick={() => { setKind(value); }}
           >
