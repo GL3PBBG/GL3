@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { LoginRequestSchema, RegisterRequestSchema, VerifyRequestSchema } from "@gl3/shared";
+import { ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
@@ -11,8 +11,8 @@ import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/sch
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
-import { createSession, destroySession, readSession } from "./session.js";
-import { clearUnverified, consumeVerifyToken, isUnverified, issueVerifyToken, markUnverified } from "./verify.js";
+import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
+import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
 
 /** Gated players may still verify, sign out, or read their own profile. Query strings are stripped before the check. */
 const GATE_EXEMPT = ["/api/auth/verify", "/api/auth/logout", "/api/auth/me"];
@@ -227,6 +227,38 @@ export function registerAuthRoutes(
     const code = await issueVerifyToken(redis, playerId);
     await mail.send({ to: row.email, subject: "Verify your GL3 account",
       text: `Your verification code is ${code}\n\nOr click: ${config.mail.appBaseUrl}/verify?code=${code}` });
+    return reply.code(200).send({});
+  });
+
+  app.post("/api/auth/forgot", {
+    preHandler: tokenBucket(redis, { name: "forgot", limit: 5, windowSeconds: 3600 }, rateLimitPrefix),
+  }, async (request, reply) => {
+    const parsed = ForgotRequestSchema.safeParse(request.body);
+    // Every path answers 200 with the same body: the response must not reveal
+    // whether the email exists (account enumeration).
+    if (!parsed.success) return reply.code(200).send({});
+    const [row] = await db.select({ id: players.id, verifiedAt: players.emailVerifiedAt })
+      .from(players).where(eq(players.email, parsed.data.email));
+    if (row && row.verifiedAt !== null) {
+      const token = await issueResetToken(redis, row.id);
+      await mail.send({
+        to: parsed.data.email, subject: "Reset your GL3 password",
+        text: `Reset link: ${config.mail.appBaseUrl}/reset?token=${token}\n\nThe link expires in 1 hour. If you didn't ask for this, ignore it.`,
+      });
+    }
+    return reply.code(200).send({});
+  });
+
+  app.post("/api/auth/reset", {
+    preHandler: tokenBucket(redis, { name: "reset", limit: 10, windowSeconds: 900 }, rateLimitPrefix),
+  }, async (request, reply) => {
+    const parsed = ResetRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const playerId = await consumeResetToken(redis, parsed.data.token);
+    if (!playerId) return reply.code(400).send({ error: "invalid_token" });
+    const passwordHash = await hashPassword(parsed.data.password);
+    await db.update(players).set({ passwordHash, legacyPasswordSha256: null }).where(eq(players.id, playerId));
+    await destroyAllSessions(redis, playerId);
     return reply.code(200).send({});
   });
 
