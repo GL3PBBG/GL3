@@ -66,6 +66,15 @@ describe("core schema", () => {
 
   it("carries the combat mode flag on locations", async () => {
     expect(await columnType("locations", "combat_mode")).toBe("text");
+
+    const [check] = await db.execute<{ def: string }>(sql`
+      SELECT pg_get_constraintdef(c.oid) AS def
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE c.contype = 'c' AND t.relname = 'locations'
+    `);
+    expect(check?.def).toContain("open");
+    expect(check?.def).toContain("underground");
   });
 
   /**

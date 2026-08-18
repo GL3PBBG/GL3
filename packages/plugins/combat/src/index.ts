@@ -628,8 +628,9 @@ const targetsRoute = route({
 
       // Underground: the report set becomes a SQL predicate BEFORE the
       // LIMIT — a post-limit filter would hide a legally attackable reported
-      // player ranked below 50th by exp in a crowded town. The set is small
-      // (the tracker caps at 100 searches), so the IN list is cheap.
+      // player ranked below 50th by exp in a crowded town. Nothing bounds
+      // this set structurally, but it stays small in practice — reports cost
+      // cash to place and expire on their own — so the IN list is cheap.
       let reportedIds: string[] | null = null;
       if (mode === "underground") {
         const reported = await activeReportTargetIds(tx, player.id, new Date());
