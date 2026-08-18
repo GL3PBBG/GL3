@@ -35,7 +35,7 @@ export const bounties = pgTable("p_bounties_bounties", {
   claimedBy: uuid("claimed_by"),
 });
 
-/** Mirrors `packages/plugins/detectives/src/migrations.ts` `0001_searches`. */
+/** Mirrors `packages/plugins/detectives/src/migrations.ts` `0001_searches + 0002_report_expiry`. */
 export const detectiveSearches = pgTable("p_detectives_searches", {
   id: uuid("id").primaryKey(),
   playerId: uuid("player_id").notNull(),
@@ -44,6 +44,7 @@ export const detectiveSearches = pgTable("p_detectives_searches", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
   succeeded: boolean("succeeded"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
 });
 
 /** Mirrors `packages/plugins/combat/src/migrations.ts` `0001_combat_log`. */

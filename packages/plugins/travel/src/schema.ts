@@ -10,6 +10,10 @@ import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
  * `bullet_stock` and `bullet_cost` are listed because `GET /api/locations`
  * returns them (core's `game/travel/routes.ts` did), not because this plugin
  * writes them. It never does; `bullets` owns those columns.
+ *
+ * `combat_mode` is listed because travel both reads it (the board) and writes
+ * it (admin create/update) — the one column on this mirror this plugin owns
+ * end to end, though the table itself still belongs to core.
  */
 export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
@@ -24,4 +28,5 @@ export const locations = pgTable("locations", {
   travelCooldownSeconds: integer("travel_cooldown_seconds").notNull(),
   bulletStock: integer("bullet_stock").notNull(),
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull(),
+  combatMode: text("combat_mode").notNull(),
 });

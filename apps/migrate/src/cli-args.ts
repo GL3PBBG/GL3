@@ -6,6 +6,7 @@ const CliArgsSchema = z.object({
   dryRun: z.boolean().default(false),
   reportPath: z.string().min(1).optional(),
   sqlDumpPath: z.string().min(1).optional(),
+  townCombatMode: z.enum(["open", "underground"]).default("open"),
 });
 
 export type CliArgs = z.infer<typeof CliArgsSchema>;
@@ -15,12 +16,13 @@ const FLAG_TO_KEY: Record<string, keyof z.input<typeof CliArgsSchema>> = {
   pg: "pgUrl",
   report: "reportPath",
   "sql-dump": "sqlDumpPath",
+  "town-combat-mode": "townCombatMode",
 };
 
 /**
  * SPEC §4.1: `gl3-migrate --mysql mysql://... --pg postgres://... [--dry-run]
  * [--report report.json]`, plus `--sql-dump dump.sql`. No third-party argv
- * parser — the surface is five flags, one of them boolean; a hand-rolled
+ * parser — the surface is six flags, one of them boolean; a hand-rolled
  * loop keeps the dependency list tight per SPEC §4.1's "keep scope tight".
  */
 export function parseCliArgs(argv: string[]): CliArgs {

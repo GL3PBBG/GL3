@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IdSchema, MoneySchema } from "../primitives.js";
+import { CombatModeSchema } from "./combat.js";
 
 export const LocationDtoSchema = z.object({
   id: IdSchema,
@@ -12,6 +13,7 @@ export const LocationDtoSchema = z.object({
   cooldownRemaining: z.number().int().nonnegative(),
   /** Absent when no town image is bound — see `InventoryItemSchema.imageUrl`. */
   imageUrl: z.string().optional(),
+  combatMode: CombatModeSchema,
 });
 export type LocationDto = z.infer<typeof LocationDtoSchema>;
 

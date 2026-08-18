@@ -64,6 +64,19 @@ describe("core schema", () => {
     expect(await columnType("players", "legacy_v2_id")).toBe("integer");
   });
 
+  it("carries the combat mode flag on locations", async () => {
+    expect(await columnType("locations", "combat_mode")).toBe("text");
+
+    const [check] = await db.execute<{ def: string }>(sql`
+      SELECT pg_get_constraintdef(c.oid) AS def
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE c.contype = 'c' AND t.relname = 'locations'
+    `);
+    expect(check?.def).toContain("open");
+    expect(check?.def).toContain("underground");
+  });
+
   /**
    * Column DDL default was switched from a raw JS `0n` literal to `sql`0`` to work around a
    * drizzle-kit bug serializing BigInt defaults (see task-4-report.md, fix round 2). Only the

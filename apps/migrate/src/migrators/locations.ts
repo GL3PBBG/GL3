@@ -6,7 +6,10 @@ import type { Executor } from "../pg/types.js";
 
 interface LocationRow { L_id: number; L_name: string; L_cost: number; L_cooldown: number; L_bullets: number; L_bulletCost: number; }
 
-export async function migrateLocations(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateLocations(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  townCombatMode: "open" | "underground" = "open",
+): Promise<void> {
   const [rows] = await pool.query<(LocationRow & mysql.RowDataPacket)[]>(
     "SELECT L_id, L_name, L_cost, L_cooldown, L_bullets, L_bulletCost FROM locations",
   );
@@ -16,6 +19,7 @@ export async function migrateLocations(pool: mysql.Pool, exec: Executor, report:
     const values = {
       id: v3Id, name: row.L_name, travelCost: BigInt(row.L_cost),
       travelCooldownSeconds: row.L_cooldown, bulletStock: row.L_bullets, bulletCost: BigInt(row.L_bulletCost),
+      combatMode: townCombatMode,
     };
     await exec.insert(locations).values(values).onConflictDoUpdate({ target: locations.id, set: values });
     bumpTable(report, "locations", "written");

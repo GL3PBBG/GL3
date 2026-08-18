@@ -2444,6 +2444,120 @@ act on them — and gives hospital its first **voluntary** door.
 
 Gate: bare `npm run verify`, **214 files / 1676 passed, 1 skipped, exit 0**.
 
+### Location combat modes — V2-style underground towns, per town
+
+Shipped on `feat/location-combat-modes`. GL3 combat has shipped walk-up since
+PvP landed: `GET /api/combat/targets` lists everyone in the caller's town and
+an attack needs nothing but same-location, bullets and a cooldown. V2 was the
+opposite — nobody in town was visible or shootable without a paid, successful,
+unexpired detective report — and the detectives port (2026-08-12) reconciled
+the two by making detectives the cross-location hunting layer and leaving
+same-location combat free, uniformly, for every town. This cluster makes that
+a **per-town choice** instead of a global one: a location is `'open'` (combat
+exactly as already shipped) or `'underground'` (V2's rule, reintroduced).
+
+- **Core migration `0013_location_combat_mode.sql`** adds
+  `locations.combat_mode text NOT NULL DEFAULT 'open' CHECK (combat_mode IN
+  ('open', 'underground'))`. No FK, no index — the column is only ever read
+  off a row already fetched by PK, so `schema.test.ts`'s FK and index counts
+  are untouched; the file gained one assertion on the new column's type
+  instead. The default preserves shipped behaviour exactly: a fresh install
+  changes nothing until an admin flips a town.
+- **Combat gained a read-only dependency on detectives — the fifth
+  plugin→plugin edge**, after combat→inventory, bounties→combat,
+  bullets→properties and bullets→travel. The detectives spec (2026-08-12,
+  §0/§6) had explicitly decided against any combat coupling; this revises
+  that in one direction only. Detectives' worker, routes and events are
+  untouched — it still knows nothing about combat.
+- **Detectives plugin migration `0002_report_expiry`** adds a nullable
+  `p_detectives_searches.expires_at timestamptz`. Written at hire as
+  `ends_at + detectiveExpire` (the setting as read at hire time — a
+  settings snapshot). This has to be a column, not a read-time computation,
+  because the expire setting lives under detectives' own settings namespace
+  and `ctx.settings` prepends the *calling* plugin's id — a combat-side
+  reader cannot reach it. NULL `expires_at` (pre-upgrade rows only) is
+  treated as expired by the new helper (`expires_at > now` is false for
+  NULL, at no extra cost) and as `ends_at + detectiveExpire` by detectives'
+  own tracker route, which was switched to read the column for new rows so
+  the two read paths cannot diverge — pinned by a test in
+  `apps/server/test/detectives.test.ts`.
+- **`activeReportTargetIds(tx, hirerId, now)`**, exported from detectives'
+  manifest module: one SELECT (`player_id = hirerId AND succeeded = true AND
+  ends_at <= now AND expires_at > now`), read-only, no lock taken. Combat
+  calls it with a `Set` membership check rather than adding a second,
+  single-target helper.
+- **`POST /api/combat/attack/:targetId`**: after the existing checks through
+  `protected`, an underground town's `combat_mode` is read (plain SELECT)
+  and, if set, the caller's active-report set gates the shot — 409
+  `no_detective_report` unless the target is in it. Placed *after*
+  `same_gang`/`protected` deliberately, so the error a gangmate or a
+  protected newbie sees is identical in both town modes; town mode must
+  never leak through error-ordering differences. The cooldown is already
+  claimed before the transaction opens and stays burned on this 409, same as
+  every other 4xx combat already returns.
+- **`GET /api/combat/targets`** now returns `{ mode, targets }`. In an
+  underground town, the caller's report set feeds a `WHERE player_id IN
+  (...)` predicate on the target query **before the `LIMIT 50`, not applied
+  to the 50 rows afterwards** — a post-limit filter would hide a legally
+  attackable reported player who happens to rank below the 50th resident by
+  exp, which is exactly the never-spend-a-cooldown-to-learn-a-rule guarantee
+  the route exists for. `test/location-combat-modes.test.ts` proves this with
+  51 unreported bystanders outranking one reported target. An empty report
+  set skips the query and returns no rows; filtered players are absent, not
+  reasoned, matching how `target_elsewhere` already behaves. The route stays
+  advisory only — attack re-checks everything under the lock.
+- **Reports are not consumed on a shot — time expiry only, a deliberate
+  deviation from V2**, which expired a report on the first shot regardless of
+  outcome. V2's fights were one report, one usually-lethal volley; GL3 combat
+  is multi-shot whittling, so per-shot consumption would price a kill at
+  `cost × shots`. The expiry window is the licence instead, and it keeps
+  detectives' table write-free from a combat call.
+- **Hospital and jail rosters stay visible in every mode**, unchanged — V2's
+  own only in-town leak (getting hurt or jailed in a hideout town broadcasts
+  you), kept as counterplay rather than closed.
+- **`travel` changes**: `LocationListing` and the travel board gain
+  `combatMode`; subscribers to `travel.locationsListed` (bullets) are
+  unaffected since the interface only grew. The admin towns section gained
+  the field as a `select`, validated handler-level rather than through
+  `z.enum` — the loader answers a zod parse failure with the generic
+  `invalid_request` before a plugin handler ever runs, so the spec's 400
+  `invalid_combat_mode` needed its own check. A new
+  `GET /api/admin/travel/combat-modes` feeds that select's `optionsSource`.
+- **`apps/migrate` gained `--town-combat-mode`** (default `open`), threaded
+  cli-args → orchestrator → `migrateLocations`'s fourth parameter, for
+  operators whose players expect V2 rules everywhere on day one; per-town
+  flips happen in admin afterwards.
+- **Web**: `/combat`'s underground empty state ("Nobody shows their face in
+  this town. Hire a detective.") links `/detectives`; `/travel`'s board rows
+  carry an `· underground` tag so the strategic choice is visible before
+  paying the fare.
+- **No new `GameEvent` variant, no new lock-graph edge, and deliberately no
+  lock-order test.** Every new read this cluster adds — the location's
+  `combat_mode`, the report set — is a plain SELECT; no new INSERT reaches
+  either table with a lock-taking FK. A lock-order test here would prove only
+  the already-safe case (CLAUDE.md rule 6's corollary), so the audit is
+  recorded instead: nobody should add one for an edge that doesn't exist.
+- **Operational constraint, recorded rather than guarded against**: setting a
+  town to `underground` on a deployment that never loaded `detectives` fails
+  every attack and target-list read there — `p_detectives_searches` simply
+  isn't there. The default `'open'` makes this opt-in. Admin-side validation
+  that `detectives` is loaded stays out of scope: travel, which owns the
+  admin page, has no view of the loader's installed-plugin list.
+- **Deliberate non-changes**: rosters visible in all modes (above); a report
+  is never consumed by a shot (above); no third `ghost` mode (wants a
+  shop-price differential between town modes shipped first, so the trade-off
+  exists); no admin check that `detectives` is loaded.
+- **`@gl3/shared` → `0.1.13`**, additive (`CombatModeSchema`; `mode` on the
+  targets response; `combatMode` on the location DTO). **Not yet
+  published** — publishing needs the user's explicit approval and a
+  registry check first, the same as every prior bump; other sessions have
+  taken numbers out from under a draft before (see `0.1.12` above).
+  `@gl3/plugin-sdk` needed no bump.
+
+Gate: bare `npm run verify` on `362803a`, **217 files / 1733 passed, 1
+skipped, exit 0** (third run; run 2 hit the known casino-lock-order flake
+documented in CLAUDE.md, now on its third recorded occurrence).
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
