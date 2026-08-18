@@ -2157,6 +2157,101 @@ all from live play rather than from the plans:
   `casino-act.test.ts` (takeover, unowned house, owner-at-own-table), each
   shown red against a stubbed `takeOverFrom`.
 
+### Game art (assets) — shipped on `feat/asset-images`
+
+Images for everything, the first engine capability GL3 has that V2 never had.
+V2's `install/schema.sql` declares no image column on `cars`, `items`,
+`crimes`, `locations`, `weapons`, `ranks` or `properties`; the only picture in
+the game is `US_pic`, a path into the theme directory. So there is nothing to
+port and no migrator work — `player_stats.avatar_url` and `apps/migrate` are
+untouched, because player avatars are explicitly out of scope along with all
+other user-generated content (no moderation, no quotas, no takedown).
+
+Four decisions shaped it:
+
+- **Admin/creator art only.** Trusted uploads, so no abuse surface.
+- **Per-install art, plugin-declarable.** A plugin declares slots in its
+  manifest; adopting images costs a manifest line and NO migration.
+- **Filesystem driver for dev/test, S3 for production.** Two real backends
+  behind `StorageDriver`, not a mock.
+- **A slot registry, not an `asset_id` column per entity table.**
+
+The last one is the load-bearing one. Core migration `0012_assets` adds
+`assets` (the blob: `sha256` unique, mime, bytes, width, height) and
+`entity_assets` (`(scope, entity_id, slot) → asset_id`). **`entity_assets`
+carries no foreign key on `entity_id`, deliberately.** The alternative — an
+`asset_id` column on each entity table — would add an FK from every plugin
+table into a core table, and a foreign key is a lock (rule 6, two shipped
+deadlocks). This design adds exactly one FK, core-to-core, on a table no
+gameplay path locks. Drift guard: FKs 36 → 37 (cascade 23 → 24), non-PK
+indexes 29 → 30 (`assets_sha256_key`).
+
+The price of that omission is orphan rows, paid by `assets/sweep.ts`:
+`sweepUnreferencedAssets` collects assets nothing references (behind a
+one-hour grace period, so a sweep landing in the upload-then-bind gap cannot
+delete the image an admin is halfway through binding), and
+`sweepOrphanedCoreBindings` drops bindings whose entity is gone — **core scope
+only**, because core cannot enumerate a plugin's tables. A plugin that deletes
+an entity owns the binding that pointed at it; that limit is documented rather
+than papered over.
+
+Keys are content-addressed — the sha256 IS the storage key — which makes dedup
+free (the same art on two items is one object), makes
+`Cache-Control: immutable` correct by construction, and makes a re-upload of
+identical bytes return the existing row instead of a conflict.
+
+Uploads are a **core** route (`POST /api/admin/assets`), not a plugin route:
+plugin routes take a Zod-parsed JSON body, and pushing binary through that
+contract would drag multipart into the SDK for every plugin. Raw bytes arrive
+through per-type `addContentTypeParser` entries — which must be explicit,
+because `app.ts`'s catch-all `*` parser reads unclaimed types as a STRING and
+would corrupt every image silently. No `@fastify/multipart` and no `sharp`:
+`assets/image.ts` sniffs PNG/JPEG/WebP and reads dimensions from the header in
+pure TypeScript. Validation order is size → magic bytes → dimensions → hash,
+and the declared content-type is checked AGAINST the bytes, so a `.php` renamed
+`.png` is a 400. Write order is driver-then-database, so a crash leaks an
+object (which the sweeper collects) rather than leaving a row pointing at
+nothing.
+
+Binding is separate (`PUT /api/admin/assets/bind`) and its permission is
+`hasPermission(scope)`, **not** blanket admin: the `travel` grant sets town art
+and cannot touch item art. An undeclared slot is a 400 — with no FK on
+`entity_id`, that registry lookup is the only thing between a typo and a row
+nothing will ever read.
+
+SDK surface: `providesAssets: [{ slot, label }]` on the manifest (no `scope`
+field — the loader derives it from the plugin's own id, so two plugins cannot
+collide and none can declare another's slot), plus `ctx.assetSlots` and
+`ctx.assets.resolve(scope, ids, slot)` / `.mine(ids, slot)`. `resolve` is
+batched by construction: it takes an array and returns a Map, and there is
+deliberately no single-id accessor, because a per-row lookup in a `.map()` is
+an N+1 that stays invisible until a town has forty items in it. Cross-scope
+READS are allowed (inventory renders core-scope item art); writes are not.
+
+Three additive view-node changes, mirrored in both `plugin-sdk/pages.ts` and
+shared's `ViewNodeDtoSchema` (the parity test enforces the pair): the `image`
+leaf (`alt` required, not optional), `table.columns[].render: "image"`, and the
+`assetBinder` admin widget. `assetBinder` is its own node rather than a form
+with a file field because a form's `action` must sit under the declaring
+plugin's basePaths and binding is a core route; the renderer knows its target
+and does the two-step POST-then-PUT itself. The loader OVERWRITES its `scope`
+unconditionally, and boot rejects one on a player-facing page.
+
+Adopted in two places as proof: `theft` declares `car` and shows art in the
+garage table and its admin section; core's own art section (`admin/assets-page.ts`,
+granted by the `core` module key) binds `items`, `locations` and `ranks`, whose
+images the `inventory` and `shop` routes resolve cross-scope and the two
+hand-written pages render through `<GameImage>` — which owns the
+placeholder-on-404 and a fixed box, so a missing binding never reflows a list.
+
+`@gl3/shared` → `0.1.9` and `@gl3/plugin-sdk` → `0.1.4`, both additive patches.
+
+Gate: bare `npm run verify`, **207 files / 1637 passed, 1 skipped, exit 0**.
+The skip is the S3 half of `asset-driver-contract.test.ts` — the same cases run
+against the filesystem driver always and against a real endpoint when
+`S3_TEST_ENDPOINT` is exported, which is the honest mitigation for the suite
+never touching the production backend.
+
 The repo's own `.npmrc` maps only `@gl3-plugins`, deliberately not `@gl3`: the
 core packages resolve through the npm workspace here, and pointing the scope at
 the registry risks `npm ci` in the image preferring a registry fetch over the

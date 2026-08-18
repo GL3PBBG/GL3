@@ -1,8 +1,11 @@
 import type { PluginManifest, RouteResult } from "@gl3/plugin-sdk";
 import type { Redis } from "ioredis";
 import type { Db } from "../../src/db/client.js";
+import type { StorageDriver } from "../../src/assets/driver.js";
+import { collectAssetSlots } from "../../src/plugins/asset-slots.js";
 import { createPluginCtx } from "../../src/plugins/ctx.js";
 import { loadSnapshot } from "../../src/plugins/routes.js";
+import { testAssetDriver } from "./assets.js";
 
 export interface CallPluginRouteOptions {
   db: Db;
@@ -21,6 +24,8 @@ export interface CallPluginRouteOptions {
    * same way `bootTestServer` gets them from the `settings` table.
    */
   settings?: Record<string, string>;
+  /** Supply one to assert on stored bytes; otherwise a private temp root is made. */
+  assetDriver?: StorageDriver;
 }
 
 /**
@@ -58,6 +63,10 @@ export async function callPluginRoute(
     queues: new Map(),
     settings: opts.settings ?? {},
     leaderboardPrefix: opts.leaderboardPrefix,
+    // Per test file, never shared — the same isolation reason
+    // `leaderboardPrefix` above carries. A route that never touches
+    // `ctx.assets` pays one `mkdtemp` for it and nothing else.
+    assetDriver: opts.assetDriver ?? testAssetDriver(),
   };
 
   const player = await loadSnapshot(deps, opts.playerId);
@@ -68,6 +77,7 @@ export async function callPluginRoute(
     filters: manifest.filters,
     propertyTypes: new Map(),
     installedPluginIds: new Set([manifest.id]),
+    assetSlots: collectAssetSlots([manifest]),
   });
 
   // The route's OWN schemas, so a test cannot pass a body the real route

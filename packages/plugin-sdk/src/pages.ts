@@ -123,7 +123,16 @@ const leafOptions = [
        * live under the plugin's basePaths like any button/form action.
        */
       source: z.string().regex(GET_SOURCE_RE, "table source must be `GET /absolute/path`"),
-      columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
+      columns: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          // Default (absent) renders the cell as text. `image` treats the cell
+          // value as a URL and renders an `<img>` — additive, so every column
+          // written before this existed is unaffected.
+          render: z.literal("image").optional(),
+        }).strict(),
+      ).min(1),
     })
     .strict(),
   // A hand of playing cards. Values are @letele/playing-cards component names:
@@ -131,6 +140,49 @@ const leafOptions = [
   // B1/B2 backs. Constrained at authoring time rather than at render, for the
   // reason this file's header gives: an unmapped code is silently dropped by
   // the renderer, which is the failure mode hardest to spot from the page.
+  // Game art. Display only: binding art to an entity is an admin action and
+  // goes through `assetBinder` below, never through this.
+  z
+    .object({
+      kind: z.literal("image"),
+      url: z.string().min(1),
+      // Required, not optional. It is the one accessibility decision that costs
+      // nothing at authoring time and cannot be retrofitted across every
+      // installed plugin later.
+      alt: z.string().min(1),
+      size: z.enum(["sm", "md", "lg"]).optional(),
+    })
+    .strict(),
+  // The admin upload widget: pick an entity, choose a file, and the renderer
+  // does the two-step POST /api/admin/assets then PUT /api/admin/assets/bind.
+  //
+  // Its own node kind rather than a `form` with a file field, because a form's
+  // `action` must live under the declaring plugin's basePaths (the loader's
+  // containment pass) and binding is a CORE route. A node the renderer knows
+  // the target of costs less than an exception in that pass.
+  //
+  // `scope` is absent on purpose: the loader fills it from the declaring
+  // plugin's id, so a plugin cannot declare a widget that rebinds another
+  // plugin's art. Valid in `adminPages` only.
+  z
+    .object({
+      kind: z.literal("assetBinder"),
+      slot: z.string().min(1),
+      // GET-only for the same reason `table.source` is: the entity list renders
+      // on mount and must never mutate.
+      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`"),
+      /** Which field of a row to show in the picker. Its id is always `id`. */
+      entityLabelKey: z.string().min(1),
+      /**
+       * Never written by a plugin author. The loader OVERWRITES it with the
+       * declaring plugin's id on the way to the wire — unconditionally, so
+       * setting it here buys nothing and cannot be used to rebind another
+       * plugin's art. Optional only so the authoring type and the wire type can
+       * be the same shape.
+       */
+      scope: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("cards"),
@@ -139,7 +191,7 @@ const leafOptions = [
     .strict(),
 ] as const;
 
-/** Type-level only: `ViewNode` infers its ten non-nesting members from here. */
+/** Type-level only: `ViewNode` infers its twelve non-nesting members from here. */
 const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
@@ -152,7 +204,7 @@ export type ViewNode =
  * type annotation zod requires for `z.lazy` — inference cannot close the loop
  * on its own.
  *
- * One flat `discriminatedUnion` over all twelve kinds, rather than
+ * One flat `discriminatedUnion` over all fourteen kinds, rather than
  * `union([Leaf, panel, list])`. The two are equivalent in what they accept and
  * reject; they are not equivalent in what they report. `ZodUnion` aborts on
  * failure and emits a single `invalid_union` issue at the path of the

@@ -44,6 +44,40 @@ const PropertyTypeDeclSchema = z
   .strict();
 
 /**
+ * An image slot a plugin's entities can carry — one declaration per kind of
+ * thing, not per row. `theft` declaring `{ slot: "car", label: "Car image" }`
+ * means every row in its cars table may have art bound to it.
+ *
+ * There is deliberately no `scope` field. The loader derives it from the
+ * declaring plugin's id, so — unlike `PropertyTypeDecl`, whose `id` an author
+ * writes and `definePlugin` must check — it cannot be got wrong, two plugins
+ * cannot collide, and no plugin can declare a slot that binds another's art.
+ */
+export interface AssetSlotDecl {
+  /** Unique within the declaring plugin. Kebab-case, matches `PLUGIN_ID_PATTERN`. */
+  slot: string;
+  /** Shown to the admin next to the upload widget. */
+  label: string;
+}
+
+/**
+ * A declaration once the loader has stamped the scope on it. This is what
+ * `ctx.assetSlots` serves and what the admin binder validates against; plugin
+ * authors write `AssetSlotDecl` and never this.
+ */
+export interface AssetSlot extends AssetSlotDecl {
+  /** The declaring plugin's id, or `"core"` for core-owned tables. */
+  scope: string;
+}
+
+const AssetSlotDeclSchema = z
+  .object({
+    slot: z.string().regex(PLUGIN_ID_PATTERN, "asset slot must be lowercase kebab-case"),
+    label: z.string().min(1),
+  })
+  .strict();
+
+/**
  * What a plugin author writes. Every collection is optional here and required
  * on `PluginManifest`; normalising once in `definePlugin` is what stops every
  * downstream consumer from writing `?? []` under `exactOptionalPropertyTypes`.
@@ -62,6 +96,7 @@ export interface PluginManifestInput {
   jobs?: Record<string, unknown>;
   provides?: FilterPoint<unknown>[];
   providesProperties?: PropertyTypeDecl[];
+  providesAssets?: AssetSlotDecl[];
   filters?: FilterSubscription[];
 }
 
@@ -79,6 +114,7 @@ export interface PluginManifest {
   jobs: Record<string, unknown>;
   provides: FilterPoint<unknown>[];
   providesProperties: PropertyTypeDecl[];
+  providesAssets: AssetSlotDecl[];
   filters: FilterSubscription[];
 }
 
@@ -142,6 +178,7 @@ const InputSchema = z
     jobs: z.record(z.unknown()).optional(),
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
     providesProperties: z.array(PropertyTypeDeclSchema).optional(),
+    providesAssets: z.array(AssetSlotDeclSchema).optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
   .strict()
@@ -232,6 +269,7 @@ export function definePlugin(input: PluginManifestInput): PluginManifest {
     jobs: parsed.jobs ?? {},
     provides: parsed.provides ?? [],
     providesProperties: parsed.providesProperties ?? [],
+    providesAssets: parsed.providesAssets ?? [],
     filters: parsed.filters ?? [],
   };
 }

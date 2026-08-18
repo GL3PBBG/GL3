@@ -35,6 +35,7 @@ export const garagePage: PageSchema = {
     children: [
       { kind: "text", value: "Cars stay in the city you stole them in. Sell or repair them there." },
       { kind: "table", source: "GET /api/garage", columns: [
+        { key: "image", label: "", render: "image" },
         { key: "carName", label: "Car" },
         { key: "damage", label: "Damage" },
         { key: "locationName", label: "City" },
@@ -79,6 +80,9 @@ export const adminPage: PageSchema = {
           { name: "value", label: "Value", type: "money" },
           { name: "theftWeight", label: "Theft weight", type: "number" },
         ] },
+      ] },
+      { kind: "panel", title: "Car art", children: [
+        { kind: "assetBinder", slot: "car", entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name" },
       ] },
       { kind: "panel", title: "Tiers", children: [
         { kind: "table", source: "GET /api/admin/theft/tiers", columns: [

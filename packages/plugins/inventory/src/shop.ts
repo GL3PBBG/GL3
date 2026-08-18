@@ -43,6 +43,12 @@ export const shopListRoute = route({
         .innerJoin(items, eq(items.id, shopStock.itemId))
         .where(and(eq(shopStock.locationId, locationId), gt(shopStock.stock, 0)));
 
+      // Cross-scope read: `items` is a CORE table, so the art lives under the
+      // `core` scope even though this plugin is the one rendering it. Reading
+      // another scope's art is allowed; binding it is not, and needs the `core`
+      // grant through the admin route.
+      const art = await ctx.assets.resolve("core", rows.map((row) => row.itemId), "item");
+
       return {
         status: 200,
         body: {
@@ -57,6 +63,10 @@ export const shopListRoute = route({
             // Money crosses the wire as a decimal string, never a JSON number.
             price: row.price.toString(),
             stock: row.stock,
+            // Omitted rather than null when unbound: the DTO field is optional,
+            // and `exactOptionalPropertyTypes` makes the spread the honest way
+            // to say "this key may not be here".
+            ...(art.has(row.itemId) ? { imageUrl: art.get(row.itemId) as string } : {}),
           })),
         },
       };

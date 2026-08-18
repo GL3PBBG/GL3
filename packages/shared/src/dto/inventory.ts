@@ -14,6 +14,12 @@ export const InventoryItemSchema = z.object({
   itemType: z.string(),
   effects: z.unknown(),
   qty: z.number().int(),
+  /**
+   * Absent when no art is bound, which is the normal state of an item nobody
+   * has uploaded a picture for. Optional rather than nullable so a server that
+   * predates game art still parses.
+   */
+  imageUrl: z.string().optional(),
 });
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 
