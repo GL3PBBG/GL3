@@ -2,13 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   AdminSectionsResponseSchema,
-  AttackResponseSchema, AuthResponseSchema, BankStatusResponseSchema,
+  AttackResponseSchema, AuthResponseSchema, BailResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
-  BulletShopResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
+  BulletShopResponseSchema, BustResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
   CasinoLobbyResponseSchema, CasinoStepResponseSchema,
+  CellBlockListResponseSchema,
+  CheckinResponseSchema,
   CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
-  DetectiveListResponseSchema, DischargeResponseSchema, EquipResponseSchema, GangBankResponseSchema,
+  DetectiveListResponseSchema, DischargePlayerResponseSchema, DischargeResponseSchema,
+  EquipResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
   GangMemberListResponseSchema, HireDetectivesResponseSchema, HospitalStatusSchema,
   InventoryResponseSchema, JailStatusSchema,
@@ -23,17 +26,21 @@ import {
   RoundListResponseSchema, RoundStandingsResponseSchema,
   ShopListResponseSchema, TravelResponseSchema,
   UseItemResponseSchema,
+  WardListResponseSchema,
   WeaponConditionDtoSchema,
   type AdminSectionsResponse,
-  type AttackResponse, type BankStatusResponse, type BountyListResponse,
+  type AttackResponse, type BailResponse, type BankStatusResponse, type BountyListResponse,
   type BulletShopResponse,
+  type BustResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse,
   type CasinoLobbyResponse, type CasinoStepResponse,
+  type CellBlockListResponse,
+  type CheckinResponse,
   type CombatLogResponse,
   type CombatTargetListResponse, type CreateGangRequest,
   type CrimeListResponse,
-  type DetectiveListResponse, type DischargeResponse,
+  type DetectiveListResponse, type DischargePlayerResponse, type DischargeResponse,
   type EquipRequest, type EquipResponse,
   type GangBankResponse, type GangDto, type GangInviteListResponse,
   type GangLogListResponse, type GangMemberListResponse, type GangPermission,
@@ -49,6 +56,7 @@ import {
   type RoundListResponse, type RoundStandingsResponse,
   type ShopListResponse, type UpdateProfileRequest,
   type UseItemResponse,
+  type WardListResponse,
   type WeaponConditionDto,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
@@ -100,6 +108,47 @@ export function useJail() {
     queryKey: keys.jail(),
     queryFn: async () => JailStatusSchema.parse(await api("/api/jail")),
     refetchInterval: (query) => jailRefetchInterval(query.state.data),
+  });
+}
+
+/** The other inmates in the caller's current town. No poll: the roster is
+ *  not a countdown the tab must keep honest, and each row carries
+ *  `remainingSeconds` for the local tick. */
+export function useCellBlock() {
+  return useQuery<CellBlockListResponse>({
+    queryKey: keys.jailLocal(),
+    queryFn: async () => CellBlockListResponseSchema.parse(await api("/api/jail/local")),
+  });
+}
+
+export function useBail() {
+  const queryClient = useQueryClient();
+  return useMutation<BailResponse, Error, string>({
+    mutationFn: async (playerId) =>
+      BailResponseSchema.parse(await api("/api/jail/bail", {
+        method: "POST", body: JSON.stringify({ playerId }),
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.jailLocal() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useBust() {
+  const queryClient = useQueryClient();
+  return useMutation<BustResponse, Error, string>({
+    mutationFn: async (playerId) =>
+      BustResponseSchema.parse(await api("/api/jail/bust", {
+        method: "POST", body: JSON.stringify({ playerId }),
+      })),
+    onSuccess: () => {
+      // A failed bust jails the CLICKER, so the caller's own jail status is
+      // part of this mutation's result — invalidate it too.
+      void queryClient.invalidateQueries({ queryKey: keys.jailLocal() });
+      void queryClient.invalidateQueries({ queryKey: keys.jail() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
   });
 }
 
@@ -635,6 +684,45 @@ export function useDischarge() {
       DischargeResponseSchema.parse(await api("/api/hospital/discharge", { method: "POST" })),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.hospital() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+/** The other patients in the caller's current town. No poll: the roster is
+ *  not a countdown the tab must keep honest, and each row carries
+ *  `remainingSeconds` for the local tick. */
+export function useWard() {
+  return useQuery<WardListResponse>({
+    queryKey: keys.hospitalLocal(),
+    queryFn: async () => WardListResponseSchema.parse(await api("/api/hospital/local")),
+  });
+}
+
+export function useCheckin() {
+  const queryClient = useQueryClient();
+  return useMutation<CheckinResponse, Error, void>({
+    mutationFn: async () =>
+      CheckinResponseSchema.parse(await api("/api/hospital/checkin", { method: "POST" })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.hospital() });
+      void queryClient.invalidateQueries({ queryKey: keys.hospitalLocal() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+export function useDischargePlayer() {
+  const queryClient = useQueryClient();
+  return useMutation<DischargePlayerResponse, Error, string>({
+    mutationFn: async (playerId) =>
+      DischargePlayerResponseSchema.parse(
+        await api("/api/hospital/discharge-player", {
+          method: "POST", body: JSON.stringify({ playerId }),
+        }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.hospitalLocal() });
       void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
   });

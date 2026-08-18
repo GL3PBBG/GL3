@@ -71,8 +71,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
-  registerJailRoutes(app, deps.db, deps.redis, requireAuth);
-  registerHospitalRoutes(app, deps.db, loadedSettings, requireAuth);
+  registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+  registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerProfileRoutes(app, deps.db, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
