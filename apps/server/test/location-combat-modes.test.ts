@@ -185,3 +185,44 @@ describe("underground town attack gate", () => {
     expect(res.json<{ error: string }>().error).toBe("same_gang");
   });
 });
+
+describe("combat targets route", () => {
+  const targets = (token: string) =>
+    app.inject({ method: "GET", url: "/api/combat/targets",
+      headers: { authorization: `Bearer ${token}` } });
+
+  it("open town: body carries mode=open and lists everyone", async () => {
+    await makeAttackable("open", a.id, t.id);
+    const body = (await targets(a.token)).json<{ mode: string; targets: { playerId: string }[] }>();
+    expect(body.mode).toBe("open");
+    expect(body.targets.map((r) => r.playerId)).toContain(t.id);
+  });
+
+  it("underground: lists only reported players, absent not reasoned", async () => {
+    const bystander = await register();
+    await makeAttackable("underground", a.id, t.id, bystander.id);
+    await seedReport(a.id, t.id);
+    const body = (await targets(a.token)).json<{ mode: string; targets: { playerId: string }[] }>();
+    expect(body.mode).toBe("underground");
+    expect(body.targets.map((r) => r.playerId)).toEqual([t.id]);
+  });
+
+  it("underground with no reports: empty list, mode still underground", async () => {
+    await makeAttackable("underground", a.id, t.id);
+    const body = (await targets(a.token)).json<{ mode: string; targets: unknown[] }>();
+    expect(body.mode).toBe("underground");
+    expect(body.targets).toEqual([]);
+  });
+
+  it("underground: a reported player out-ranked by 50+ others still appears (SQL-side filter)", async () => {
+    // 51 bystanders with higher exp than the reported target would push the
+    // target past LIMIT 50 if the filter ran after the limit.
+    const bystanders = await Promise.all(Array.from({ length: 51 }, () => makeStranger()));
+    await makeAttackable("underground", a.id, t.id, ...bystanders.map((b) => b.id));
+    await db.update(playerStats).set({ exp: 1_000n })
+      .where(eq(playerStats.playerId, t.id));
+    await seedReport(a.id, t.id);
+    const body = (await targets(a.token)).json<{ targets: { playerId: string }[] }>();
+    expect(body.targets.map((r) => r.playerId)).toEqual([t.id]);
+  });
+});
