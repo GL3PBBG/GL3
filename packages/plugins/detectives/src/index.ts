@@ -4,6 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { DETECTIVES_MIGRATIONS } from "./migrations.js";
 import { detectiveSearches, locations, playerStats, players } from "./schema.js";
+export { activeReportTargetIds } from "./reports.js";
 
 /**
  * V2's detectives module, GL3-shaped: the cross-location hunting layer.
