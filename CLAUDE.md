@@ -279,6 +279,26 @@ the first cut hand-wrote three binders and shipped `location` and `rank` with
 nothing rendering them. `@gl3/shared` → `0.1.10`, `@gl3/plugin-sdk` → `0.1.5`,
 both published.
 
+**Hospital self-admission and local facility rosters** have since shipped on
+`feat/hospital-jail-social`: `POST /api/hospital/checkin` is the first
+voluntary route into hospital (free — the stay, sized off missing health, is
+the price), and both facilities gained a location-scoped roster
+(`GET /api/hospital/local`, `GET /api/jail/local`) plus three routes that act
+on another player at the caller's own town — paid discharge, bail and a
+free-to-attempt bust that jails the caller on failure instead of the target.
+This cluster adds **no migration and no new lock-graph edge**:
+`schema.test.ts`'s FK and index counts are unchanged, and all three
+two-player routes open with combat's own `lockPlayersForUpdate` over
+`[caller, target]`, reusing the player↔player pair combat already
+established rather than adding a fourth. It also adds no new `GameEvent`
+variant — every fact it produces reuses `player.released`,
+`player.discharged`, `player.jailed` and `notification.created` — so none of
+the four places a new variant would touch needed changing.
+`@gl3/shared` → `0.1.12`, additive, **not yet published**. It was drafted as
+`0.1.10`, but the registry had already been given both `0.1.10` and `0.1.11`
+by another session's work by the time this one tried to publish — those two
+numbers belong to other clusters, not this one.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime

@@ -18,3 +18,30 @@ export const DischargeResponseSchema = z.object({
   paid: MoneySchema,
 });
 export type DischargeResponse = z.infer<typeof DischargeResponseSchema>;
+
+/** One patient in the caller's current town. Mirrors `GET /api/hospital/local`. */
+export const HospitalPatientSchema = z.object({
+  playerId: z.string().uuid(),
+  username: z.string(),
+  rankName: z.string(),
+  until: z.string(),
+  remainingSeconds: z.number().int().nonnegative(),
+  /** What it would cost THE CALLER to pay this patient out. */
+  dischargeCost: MoneySchema,
+});
+export type HospitalPatient = z.infer<typeof HospitalPatientSchema>;
+
+export const WardListResponseSchema = z.object({ patients: z.array(HospitalPatientSchema) });
+export type WardListResponse = z.infer<typeof WardListResponseSchema>;
+
+/** `POST /api/hospital/checkin` answers with the same shape as `GET /api/hospital`. */
+export const CheckinResponseSchema = HospitalStatusSchema;
+export type CheckinResponse = z.infer<typeof CheckinResponseSchema>;
+
+/** `POST /api/hospital/discharge-player` — pays another patient out. */
+export const DischargePlayerResponseSchema = z.object({
+  freed: z.string().uuid(),
+  paid: MoneySchema,
+  cash: MoneySchema,
+});
+export type DischargePlayerResponse = z.infer<typeof DischargePlayerResponseSchema>;

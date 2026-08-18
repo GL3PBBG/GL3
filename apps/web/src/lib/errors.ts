@@ -12,7 +12,9 @@ import { ApiError } from "../api/client.js";
  */
 const MESSAGES: Record<string, string> = {
   already_full: "You're at full health.",
+  already_hospitalised: "You're already in hospital.",
   already_in_a_gang: "You're already in a gang.",
+  already_jailed: "You're in jail yourself.",
   already_there: "You're already in that city.",
   amount_must_be_positive: "Enter an amount greater than zero.",
   boss_must_transfer_first: "A boss must hand the gang over before leaving.",
@@ -37,6 +39,7 @@ const MESSAGES: Record<string, string> = {
   quantity_above_max: "That's more than you can buy at once.",
   stock_above_max: "That stock is above the maximum.",
   invalid_action: "That isn't a move in this game.",
+  invalid_body: "That request didn't make sense.",
   invalid_credentials: "Wrong username or password.",
   invalid_game_multiplier: "That game is misconfigured — the table is closed.",
   invalid_kind: "Unknown leaderboard.",
@@ -53,8 +56,10 @@ const MESSAGES: Record<string, string> = {
   no_session: "You don't have a hand in play.",
   no_such_game: "That game isn't dealt here.",
   not_hospitalised: "You're not in hospital.",
+  not_injured: "You're already at full health.",
   no_such_target: "No such player.",
   not_a_member: "You're not a member of that gang.",
+  not_jailed: "They're not in jail.",
   not_owned: "You don't own that item.",
   not_sold_here: "This location doesn't stock that.",
   notification_not_found: "That notification is gone.",
@@ -75,11 +80,13 @@ const MESSAGES: Record<string, string> = {
   target_hospitalised: "That player is in hospital.",
   target_jailed: "That player is in jail.",
   self_attack: "You can't shoot yourself.",
+  self_target: "That's you.",
   unauthorized: "Your session expired — log in again.",
   unknown_error: "Something went wrong.",
   username_taken: "That username is taken.",
   wager_above_max: "That's over the table limit.",
   wager_below_min: "That's under the minimum bet.",
+  wrong_location: "They're not in this town.",
   wrong_slot: "You can't equip that in that slot.",
 };
 

@@ -2318,6 +2318,132 @@ the registry risks `npm ci` in the image preferring a registry fetch over the
 workspace link. A *plugin author's* `.npmrc` does need
 `@gl3:registry=https://npm.gl3.dev`, which is what the SDK README documents.
 
+### Hospital self-admission and local facility rosters
+
+Shipped on `feat/hospital-jail-social`. V2's hospital and jail were each only
+ever a status one player checked on themselves; this cluster makes both a
+*place* — a caller sees who else is serving time in their own town and can
+act on them — and gives hospital its first **voluntary** door.
+
+- **`POST /api/hospital/checkin` is the first route that ever sends a player
+  to hospital by their own choice.** Every existing path in is involuntary
+  (a lost fight, a weapon backfire), so a player sitting at low health with
+  nothing else going for them had no way back to full except getting killed
+  first. Check-in is free — the stay is the price:
+  `seconds = (maxHealth − health) × hospital.checkin_seconds_per_hp`, written
+  through the existing `sendToHospital`. 409 `already_hospitalised` and 409
+  `not_injured` (at full health, a zero-length stay would otherwise be a way
+  to write `health = 0` and settle straight back out) bound it. It is
+  reachable while jailed, deliberately — the two sentences are independent,
+  neither shortens the other, matching how `discharge` already behaved — and
+  it publishes nothing itself, since the player did this to themselves and
+  already holds the response; the existing `player.discharged` still fires
+  when the stay ends on its own. A player can check in and then immediately
+  buy out through the pre-existing `discharge` route; that costs strictly
+  more than waiting and is intended, not a hole.
+- **Rosters are location-scoped reads that settle nothing.**
+  `listSentencedAtLocation` (`apps/server/src/game/roster.ts`) filters
+  `location_id = caller's` and `until > now()`, excludes the caller, and takes
+  no lock at all — it is a plain `SELECT`. An elapsed sentence is simply
+  filtered out by the `> now()` predicate rather than cleared; the sweeper and
+  the sentenced player's own next request are what actually settle it. This is
+  deliberate, not an oversight: calling `settleHospital` per row to keep the
+  list "clean" would mean a roster **read** taking write locks on strangers
+  the caller never interacted with, which is exactly the kind of surprise
+  lock the rest of this codebase goes out of its way to avoid. A caller
+  standing nowhere (`location_id IS NULL`, true of a fresh account before its
+  first travel) gets `[]`, not an error. `GET /api/hospital/local` and
+  `GET /api/jail/local` are thin wrappers that each price their own facility's
+  roster row (`dischargeCost`, `bailCost`) at the same per-second rate the
+  caller's own action would use.
+- **The three two-player routes — `discharge-player`, `bail`, `bust` — add no
+  new edge to the lock graph.** Each opens with exactly one sorted
+  `lockPlayersForUpdate(tx, [callerId, targetId])` as its first statement,
+  before either row is read. That is combat's helper and combat's ordering
+  verbatim, so the player↔player pair (rule 6) already existed in the graph;
+  this cluster is simply its second and third consumers after combat itself.
+  The lock is not decorative: `test/facility-concurrency.test.ts` fires two
+  concurrent bails (and two concurrent paid discharges) of the same target and
+  asserts exactly one 200, one 409 `not_jailed`/`not_hospitalised`, and
+  exactly one ledger row — then was shown red, once per route, with that
+  route's leading `lockPlayersForUpdate` call removed, reproducing the same
+  double-charge shape `test/hospital-concurrency.test.ts` already covers for
+  single-player `discharge` (two concurrent discharges both reading
+  "hospitalised" outside any lock, both charging — the ledger stays internally
+  consistent throughout, so `sum(ledger) == balance` never notices). Location
+  is checked against the locked rows, never locked itself — no route here
+  mutates a location row, and locking one would open a location→player edge
+  that every locations-first cluster (bullets, theft, properties, casino)
+  would then need ordering against for no gain. `bust`'s failure branch calls
+  `sendToJail(tx, callerId, …)`, which re-takes `lockPlayersForUpdate` on the
+  caller alone — already held by this transaction, so it is a no-op, the same
+  shape the crime worker relies on.
+- **No new `GameEvent` variant — deliberate, and it avoids all four places one
+  costs.** A new variant means touching `apps/web/lib/eventCopy.ts` and
+  `apps/web/ws/invalidation.ts` (both fail loudly, TS2366), the `CORPUS` drift
+  guard in `test/plugin-ctx-core-events.test.ts` (fails only under the
+  integration suite), and the hardcoded census in
+  `packages/shared/test/events.test.ts` (a *separate* list, in the
+  `@gl3/shared` project, so `npm run typecheck` alone would never catch a miss
+  there). Every fact this cluster produces was already expressible: bail and
+  a successful bust publish `player.released` to the freed target; paid
+  discharge publishes `player.discharged` to the healed patient; a failed
+  bust publishes `player.jailed` (`reason: "bust.failed"`) to the caller who
+  gets jailed by their own failure; and "someone paid you out" is a
+  `notification.created` row inserted inside the transaction via
+  `insertNotification`, whose event follows the commit with `actorId` set to
+  the **recipient**, the convention `plugins/ctx.ts` documents and
+  `awaitOwnEvent` depends on. All four publishes happen strictly after
+  commit (rule 5), never inside `db.transaction(...)`.
+- **Four settings**, admin-edited free text, parsed through the same
+  defensive fallback `dischargeCostPerSecond` already used — blank or
+  malformed falls back to the default rather than throwing on every request,
+  and a negative value is malformed:
+
+  | Key | Default | Meaning |
+  |---|---|---|
+  | `hospital.checkin_seconds_per_hp` | `30` | Stay length per missing HP |
+  | `jail.bail_cost_per_second` | `1000` | Cash per remaining second of sentence |
+  | `jail.bust_success_percent` | `25` | Clamped to 0–100, not defaulted — an admin who sets 0 or 100 meant it |
+  | `jail.bust_fail_jail_seconds` | `300` | The caller's own sentence on a failed bust |
+
+  `bust`'s roll goes through the repo's one RNG (`bustSucceeds(seed, percent)`
+  in `apps/server/src/game/jail/bust.ts`, pure and unit-tested over fixed
+  seeds including the 0/100 boundaries) seeded per request from `newSeed()`
+  and never accepted from the client — a client-chosen seed is a
+  client-chosen outcome. `registerJailRoutes` and `registerHospitalRoutes`
+  both gained a `settings` parameter for this; like every other settings
+  consumer, a change needs a server restart to take effect.
+- **No migration.** No new table, column or index — the roster query is
+  served by the existing `player_stats_location_idx` plus the partial
+  `player_stats_hospital_until_idx` / `player_stats_jailed_until_idx`, so
+  `apps/server/test/schema.test.ts`'s FK and index counts are untouched by
+  this branch, and `apps/migrate` needed no new migrator: V2 stores no state
+  here that is not already imported.
+- **`@gl3/shared` → `0.1.12`**, additive (the roster row schema, the check-in
+  response, the bail/bust response DTOs). This branch's DTO task originally
+  drafted `0.1.10`, but by the time it went to publish the registry already
+  served `0.1.10` *and* `0.1.11` — both taken by another session's work
+  landing concurrently, so neither number belongs to this cluster.
+  `0.1.12` was confirmed free (`npm view @gl3/shared versions --json
+  --registry https://npm.gl3.dev`) before landing on it. **Not yet
+  published** — publishing to `npm.gl3.dev` needs the user's explicit
+  approval, as every previous bump did; the registry still serves through
+  `0.1.11`. `@gl3/plugin-sdk` needed no bump — nothing on the manifest or the ctx changed, because the
+  release-another-player primitive stayed in core rather than becoming a
+  second unrestricted lever on the plugin trust surface (`publishCore` is
+  already one; see design §2).
+- **Gating is deliberately asymmetric.** A JAILED caller may bail others but
+  not bust them out (`bust` refuses with 409 `already_jailed`, checked against
+  the caller's own locked row); a HOSPITALISED caller may do all three
+  (discharge, discharge-player, bail/bust). None of the new routes is gated by
+  `accessInJail` / `accessInHospital` — that field exists only on **plugin**
+  routes (`pluginRoute.accessInJail`/`accessInHospital` in
+  `plugins/routes.ts`), and every route in this cluster is core, not plugin.
+  This matches the spec and is easy to re-derive wrong from the code alone.
+
+Gate: bare `npm run verify`, **214 files / 1676 passed, 1 skipped, exit 0**.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
