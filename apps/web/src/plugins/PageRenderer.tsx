@@ -313,7 +313,7 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
       <button type="button" disabled={busy || (!singleton && entityId === "")} onClick={() => { void clear(); }}>
         Remove image
       </button>
-      {status !== null ? <p className={styles.muted}>{status}</p> : null}
+      <p className={styles.muted} role="status">{status}</p>
       <ErrorText error={error} />
     </form>
   );

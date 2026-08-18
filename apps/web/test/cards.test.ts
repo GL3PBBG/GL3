@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARD_CODES, cardComponent } from "../src/components/cards.js";
+import { cardName } from "../src/components/PlayingCard.js";
 
 describe("card component map", () => {
   it("resolves every code the SDK schema admits", () => {
@@ -20,6 +21,21 @@ describe("card component map", () => {
     // (pages.ts says so of the money leaf, for the same reason).
     expect(cardComponent("ZZ")).toBeNull();
     expect(cardComponent("")).toBeNull();
+  });
+
+  it("names every code it can render", () => {
+    // The SVG art carries no text, so `cardName` is the whole accessible
+    // surface of a dealt hand. Every renderable code must produce a real name
+    // — "unknown card" for a code the map resolves means a blackjack hand a
+    // screen reader cannot read.
+    for (const code of CARD_CODES) expect(cardName(code)).not.toBe("unknown card");
+    expect(cardName("Ha")).toBe("ace of hearts");
+    expect(cardName("S10")).toBe("10 of spades");
+    expect(cardName("Dq")).toBe("queen of diamonds");
+    expect(cardName("Ck")).toBe("king of clubs");
+    expect(cardName("J1")).toBe("joker");
+    expect(cardName("B2")).toBe("face-down card");
+    expect(cardName("ZZ")).toBe("unknown card");
   });
 
   it("agrees with the SDK's own regex", async () => {

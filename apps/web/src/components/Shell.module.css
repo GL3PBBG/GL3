@@ -1,5 +1,29 @@
 .shell { max-width: 1180px; margin: 0 auto; padding: 1rem; }
 
+/* Offscreen until keyboard focus: the nav is ~25 links, and without this a
+   keyboard user tabs through every one of them on every page. */
+.skipLink {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  z-index: 101;
+  padding: 0.4rem 0.9rem;
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 4px;
+}
+.skipLink:focus { left: 0.5rem; top: 0.5rem; }
+
+/* Text for screen readers only — the badge shows a bare number; this names it. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .header {
   display: flex;
   align-items: baseline;
