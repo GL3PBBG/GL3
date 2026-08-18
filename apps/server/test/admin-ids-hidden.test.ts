@@ -45,9 +45,10 @@ describe("admin tables never display an id column", () => {
   it("covers every core admin page that has one", () => {
     // Guards the walker itself: a refactor that stopped finding adminPages
     // would make every assertion below vacuously pass. The floor equals
-    // reality on this branch: eight plugins declare adminPages, plus roles
-    // and rounds hand-written here, is 10.
-    expect(sections.length).toBeGreaterThanOrEqual(10);
+    // reality on this branch: nine plugins declare adminPages plus forum's
+    // new `forum-admin` section (task 14), ten total, plus roles and rounds
+    // hand-written here, is 12.
+    expect(sections.length).toBeGreaterThanOrEqual(12);
   });
 
   for (const section of sections) {

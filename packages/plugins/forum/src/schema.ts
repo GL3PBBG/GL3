@@ -1,9 +1,12 @@
-import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
- * `players` is a read/write mirror of a core-owned table — the pattern
- * `packages/plugins/bounties/src/schema.ts` documents. Core owns and
- * migrates `players`; only the touched column is listed.
+ * `players` and `role_module_access` are read/write mirrors of core-owned
+ * tables — the pattern `packages/plugins/bounties/src/schema.ts` documents,
+ * and the same pair `packages/plugins/news/src/schema.ts` already mirrors
+ * for this exact purpose (moderation's ABAC check, `loadGrants`' own query
+ * restated here since a plugin cannot import `apps/server` code). Core owns
+ * and migrates both; only the touched columns are listed.
  *
  * The three `p_forum_*` tables are NOT mirrors: this plugin owns and
  * migrates them (`migrations.ts`). Unlike `p_bounties_bounties`, they were
@@ -12,7 +15,13 @@ import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 export const players = pgTable("players", {
   id: uuid("id").primaryKey(),
   username: text("username").notNull(),
+  roleId: uuid("role_id"),
 });
+
+export const roleModuleAccess = pgTable("role_module_access", {
+  roleId: uuid("role_id").notNull(),
+  moduleKey: text("module_key").notNull(),
+}, (t) => ({ pk: primaryKey({ columns: [t.roleId, t.moduleKey] }) }));
 
 export const forums = pgTable("p_forum_forums", {
   id: uuid("id").primaryKey(),
