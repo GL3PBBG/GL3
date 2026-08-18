@@ -8,6 +8,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
+import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
@@ -49,6 +50,7 @@ export function registerAuthRoutes(
     const token = bearer(request);
     const playerId = token ? await readSession(redis, token) : null;
     if (!playerId) { await reply.code(401).send({ error: "unauthorized" }); return; }
+    await touchPresence(redis, db, playerId);
     const url = request.url.split("?")[0] ?? request.url;
     if (!GATE_EXEMPT.some((p) => url === p || url.startsWith(`${p}/`))) {
       if (await isUnverified(redis, playerId)) {
