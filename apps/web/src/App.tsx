@@ -7,6 +7,8 @@ import { Bank } from "./pages/Bank.js";
 import { Bounties } from "./pages/Bounties.js";
 import { Detectives } from "./pages/Detectives.js";
 import { Forgot } from "./pages/Forgot.js";
+import { Forum } from "./pages/Forum.js";
+import { ForumTopic } from "./pages/ForumTopic.js";
 import { Properties } from "./pages/Properties.js";
 import { Bullets } from "./pages/Bullets.js";
 import { Casino } from "./pages/Casino.js";
@@ -96,6 +98,9 @@ export function App(): JSX.Element {
               <Route path="gang" element={<Gang />} />
               <Route path="mail" element={<Mail />} />
               <Route path="mail/:threadId" element={<MailThread />} />
+              <Route path="forum" element={<Forum />} />
+              <Route path="forum/:forumId" element={<Forum />} />
+              <Route path="forum/topics/:topicId" element={<ForumTopic />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="news" element={<News />} />
               <Route path="online" element={<Online />} />
