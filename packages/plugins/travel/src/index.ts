@@ -1,5 +1,5 @@
 import {
-  definePlugin, InsufficientFundsError, newId, PluginError, route,
+  definePlugin, filterPoint, InsufficientFundsError, newId, PluginError, route,
   type PageSchema, type PlayerSnapshot, type PluginCtx, type RouteResult,
 } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
@@ -42,6 +42,28 @@ class LocationMovedRetry extends Error {
   }
 }
 
+/**
+ * A `locations` row as the travel board is about to show it, before per-caller
+ * decoration (`current`, `cooldownRemaining`, art) is stamped on.
+ */
+export interface LocationListing {
+  readonly id: string;
+  readonly name: string;
+  readonly travelCost: bigint;
+  readonly travelCooldownSeconds: number;
+  readonly bulletCost: bigint;
+  readonly bulletStock: number;
+}
+
+/**
+ * Runs over the listing `GET /api/locations` is about to return. Travel prices
+ * its own board from the raw `locations` row, but other plugins own parts of
+ * that economy — bullets subscribes here to replace `bulletCost` with the
+ * price its shop actually charges (franchise lever, `max_cost` clamp) so the
+ * board never quotes a number the shop would not honour.
+ */
+export const locationsListed = filterPoint<LocationListing[]>("travel.locationsListed");
+
 const listRoute = route({
   method: "GET",
   path: "/api/locations",
@@ -52,34 +74,52 @@ const listRoute = route({
 
     const cooldownRemaining = await ctx.cooldown.peek("travel", player.id);
 
-    return ctx.transaction(async (tx) => {
+    const { rows, currentLocationId } = await ctx.transaction(async (tx) => {
       const [stats] = await tx.db
         .select({ locationId: playerStats.locationId })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
-      const rows = await tx.db.select().from(locations);
-      // `locations` is a CORE table, so its art lives under the `core` scope
-      // even though travel is what renders it. One lookup for every town on the
-      // page, not one per row.
-      const art = await ctx.assets.resolve("core", rows.map((l) => l.id), "location");
-
       return {
-        status: 200,
-        body: {
-          locations: rows.map((l) => ({
-            id: l.id,
-            name: l.name,
-            travelCost: l.travelCost.toString(),
-            travelCooldownSeconds: l.travelCooldownSeconds,
-            bulletCost: l.bulletCost.toString(),
-            bulletStock: l.bulletStock,
-            current: l.id === stats?.locationId,
-            cooldownRemaining,
-            ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
-          })),
-        },
+        rows: await tx.db.select().from(locations),
+        currentLocationId: stats?.locationId ?? null,
       };
     });
+
+    // Filters run outside any transaction (spec: Filters) — a subscriber that
+    // needs the database opens its own read, as bullets' price quote does.
+    const listed = await ctx.filters.apply(
+      locationsListed,
+      rows.map((l) => ({
+        id: l.id,
+        name: l.name,
+        travelCost: l.travelCost,
+        travelCooldownSeconds: l.travelCooldownSeconds,
+        bulletCost: l.bulletCost,
+        bulletStock: l.bulletStock,
+      })),
+    );
+
+    // `locations` is a CORE table, so its art lives under the `core` scope
+    // even though travel is what renders it. One lookup for every town on the
+    // page, not one per row.
+    const art = await ctx.assets.resolve("core", listed.map((l) => l.id), "location");
+
+    return {
+      status: 200,
+      body: {
+        locations: listed.map((l) => ({
+          id: l.id,
+          name: l.name,
+          travelCost: l.travelCost.toString(),
+          travelCooldownSeconds: l.travelCooldownSeconds,
+          bulletCost: l.bulletCost.toString(),
+          bulletStock: l.bulletStock,
+          current: l.id === currentLocationId,
+          cooldownRemaining,
+          ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
+        })),
+      },
+    };
   },
 });
 
