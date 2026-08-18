@@ -131,7 +131,45 @@ describe("renderNode", () => {
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
       kind: "table", source: "GET /api/admin/travel/locations",
-      columns: [{ key: "id", label: "Id" }],
+      // `render` is normalised to a required value here, the same way
+      // `allowEmpty` is on a select field, so the renderer never has to
+      // re-derive the DTO's optionality at the point of drawing a cell.
+      columns: [{ key: "id", label: "Id", render: null }],
+    }]);
+  });
+
+  it("carries a column's image render mode through", () => {
+    const out = renderNode({
+      kind: "table", source: "GET /api/garage",
+      columns: [{ key: "image", label: "", render: "image" }, { key: "carName", label: "Car" }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "table", source: "GET /api/garage",
+      columns: [
+        { key: "image", label: "", render: "image" },
+        { key: "carName", label: "Car", render: null },
+      ],
+    }]);
+  });
+
+  it("maps an image node, defaulting an absent size rather than dropping it", () => {
+    expect(renderNode({ kind: "image", url: "/assets/abc", alt: "A car" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "md" }]);
+    expect(renderNode({ kind: "image", url: "/assets/abc", alt: "A car", size: "lg" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "lg" }]);
+  });
+
+  it("maps an assetBinder node, keeping the server-stamped scope", () => {
+    const out = renderNode({
+      kind: "assetBinder", slot: "car", scope: "theft",
+      entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name",
+    }, {});
+    // `scope` is filled in by the loader from the declaring plugin's id — the
+    // client never chooses it, which is what stops a page binding another
+    // plugin's art.
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "assetBinder", slot: "car", scope: "theft",
+      entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name",
     }]);
   });
 

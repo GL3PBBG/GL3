@@ -7,6 +7,7 @@ import { players, playerStats, roleModuleAccess } from "../db/schema/index.js";
 import { settleHospital } from "../game/hospital/status.js";
 import { releaseIfExpired } from "../game/jail/status.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
+import { collectAssetSlots } from "./asset-slots.js";
 import { collectPropertyTypes } from "./property-types.js";
 
 export function registerPluginRoutes(
@@ -78,6 +79,7 @@ export function registerPluginRoutes(
             filters: collectFilters(manifests),
             propertyTypes: collectPropertyTypes(manifests),
             installedPluginIds: new Set(manifests.map((m) => m.id)),
+            assetSlots: collectAssetSlots(manifests),
           });
 
           try {

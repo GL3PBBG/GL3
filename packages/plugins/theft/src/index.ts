@@ -278,6 +278,7 @@ const listGarageRoute = route({
           id: garage.id,
           damage: garage.damage,
           locationId: garage.locationId,
+          carId: garage.carId,
           carName: cars.name,
           carValue: cars.value,
           locationName: locations.name,
@@ -286,6 +287,10 @@ const listGarageRoute = route({
         .innerJoin(cars, eq(cars.id, garage.carId))
         .leftJoin(locations, eq(locations.id, garage.locationId))
         .where(eq(garage.playerId, player.id));
+
+      // ONE query for the whole page, not one per row: `resolve` takes an array
+      // precisely so a garage with twenty cars in it costs a single lookup.
+      const art = await ctx.assets.mine(owned.map((row) => row.carId), "car");
 
       return {
         status: 200,
@@ -296,6 +301,9 @@ const listGarageRoute = route({
             // admin side, kept here for the same reason.
             id: row.id,
             carName: row.carName,
+            // Absent from the map when no art is bound — the renderer's
+            // GameImage draws its placeholder for an empty string.
+            image: art.get(row.carId) ?? "",
             damage: String(row.damage),
             locationName: row.locationName ?? "Unknown",
             saleValue: saleValueOf(row.carValue, row.damage).toString(),
@@ -687,6 +695,10 @@ export default definePlugin({
     adminTierUpdateRoute,
   ],
   events: [resolvedEvent, soldEvent],
+  // One slot: every row in this plugin's cars table may carry art. The loader
+  // stamps the scope from this manifest's own id, so `theft:car` is the key and
+  // no other plugin can bind to it.
+  providesAssets: [{ slot: "car", label: "Car image" }],
   pages: [theftPage, garagePage],
   adminPages: [adminPage],
 });

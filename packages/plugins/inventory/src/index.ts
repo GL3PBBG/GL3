@@ -46,10 +46,18 @@ const listRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
 
+      // One lookup for the whole inventory, not one per row. `items` is a core
+      // table, hence the `core` scope rather than this plugin's own.
+      const art = await ctx.assets.resolve("core", owned.map((row) => row.itemId), "item");
+
       return {
         status: 200,
         body: {
-          items: owned.map((row) => ({ ...row, effects: readEffects(row.itemType, row.effects) })),
+          items: owned.map((row) => ({
+            ...row,
+            effects: readEffects(row.itemType, row.effects),
+            ...(art.has(row.itemId) ? { imageUrl: art.get(row.itemId) as string } : {}),
+          })),
           equipped: {
             weaponItemId: stats?.weaponItemId ?? null,
             armorItemId: stats?.armorItemId ?? null,
