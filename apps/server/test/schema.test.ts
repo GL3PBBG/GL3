@@ -64,6 +64,10 @@ describe("core schema", () => {
     expect(await columnType("players", "legacy_v2_id")).toBe("integer");
   });
 
+  it("carries the combat mode flag on locations", async () => {
+    expect(await columnType("locations", "combat_mode")).toBe("text");
+  });
+
   /**
    * Column DDL default was switched from a raw JS `0n` literal to `sql`0`` to work around a
    * drizzle-kit bug serializing BigInt defaults (see task-4-report.md, fix round 2). Only the
