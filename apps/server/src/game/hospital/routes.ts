@@ -4,28 +4,7 @@ import type { Db } from "../../db/client.js";
 import { playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
 import { checkHospital, maxHealthFor, settleHospital } from "./status.js";
-
-const DEFAULT_COST_PER_SECOND = 1000n;
-
-/**
- * A malformed setting falls back to the default rather than throwing on every
- * request. `settings` is admin-edited free text; a typo there must not take
- * the route down.
- */
-function costPerSecond(settings: Record<string, string>): bigint {
-  const raw = settings["hospital.discharge_cost_per_second"];
-  // `BigInt("")` and `BigInt("  ")` return 0n rather than throwing, so a
-  // blank value would otherwise slip past the try/catch below and make
-  // every discharge free. An admin clearing the form field must fall back
-  // to the default like any other malformed value, not to a cost of zero.
-  if (raw === undefined || raw.trim() === "") return DEFAULT_COST_PER_SECOND;
-  try {
-    const parsed = BigInt(raw);
-    return parsed >= 0n ? parsed : DEFAULT_COST_PER_SECOND;
-  } catch {
-    return DEFAULT_COST_PER_SECOND;
-  }
-}
+import { dischargeCostPerSecond } from "./settings.js";
 
 export function registerHospitalRoutes(
   app: FastifyInstance,
@@ -53,7 +32,7 @@ export function registerHospitalRoutes(
       until: status.until,
       remainingSeconds: status.remainingSeconds,
       // Money crosses the wire as a decimal string, never a JSON number.
-      dischargeCost: (BigInt(status.remainingSeconds) * costPerSecond(settings)).toString(),
+      dischargeCost: (BigInt(status.remainingSeconds) * dischargeCostPerSecond(settings)).toString(),
     });
   });
 
@@ -81,7 +60,7 @@ export function registerHospitalRoutes(
         const settled = await settleHospital(tx, playerId);
         if (!settled.hospitalised) return { kind: "free" as const };
 
-        const cost = BigInt(settled.remainingSeconds) * costPerSecond(settings);
+        const cost = BigInt(settled.remainingSeconds) * dischargeCostPerSecond(settings);
         const cash = await applyBalanceChange(tx, {
           playerId, amount: -cost, kind: "cash", reason: "hospital.discharge",
         });
