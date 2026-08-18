@@ -9,6 +9,8 @@ import { locations, playerStats, settings } from "./schema.js";
 import { readBulletSettings } from "./settings.js";
 import { restockIfDue } from "./restock.js";
 import { capLever } from "./lever-cap.js";
+import { effectiveCost } from "./pricing.js";
+import { quoteBulletPrices } from "./travel-quote.js";
 
 /**
  * Ported from `apps/server/src/game/bullets/routes.ts` and `service.ts`:
@@ -24,18 +26,6 @@ const BuyBulletsSchema = z.object({ quantity: z.number().int().positive() });
 export { readBulletSettings, type BulletSettings } from "./settings.js";
 import type { BulletSettings } from "./settings.js";
 export { restockIfDue, type RestockResult } from "./restock.js";
-
-/**
- * The price a purchase actually costs: the franchise owner's lever when a
- * factory is owned and the owner has set one, the location's admin price
- * otherwise, and never above the `max_cost` cap. V2's admin caps the owner
- * (`adminModule::method_options`); this is the read-side half of that, and the
- * lever route's filter subscriber below is the set-side half.
- */
-function effectiveCost(lever: bigint | null, locationCost: bigint, maxCost: bigint | null): bigint {
-  const base = lever ?? locationCost;
-  return maxCost !== null && base > maxCost ? maxCost : base;
-}
 
 // --- Admin schemas ---
 
@@ -416,7 +406,7 @@ export default definePlugin({
   // V2's maxBulletCost, enforced where the owner sets their price. The read
   // side clamps too (`effectiveCost`), because the cap can be lowered after a
   // lever was already accepted.
-  filters: [capLever],
+  filters: [capLever, quoteBulletPrices],
   // The building on the properties board — art per property TYPE, not per
   // town's copy of it.
   providesAssets: [{ slot: "property", label: "Bullet factory building", singleton: true }],
