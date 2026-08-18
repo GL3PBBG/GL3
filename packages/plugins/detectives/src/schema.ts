@@ -32,4 +32,5 @@ export const detectiveSearches = pgTable("p_detectives_searches", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
   succeeded: boolean("succeeded"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
 });

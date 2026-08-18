@@ -58,6 +58,7 @@ const hireRoute = route({
 
     const cost = readCost(ctx.settings) * BigInt(body.detectives) * BigInt(body.hours);
     const durationSeconds = readSeconds(ctx.settings, "duration", DEFAULT_DURATION_SECONDS);
+    const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
 
     const result = await ctx.transaction(async (tx) => {
       // Plain SELECT, no lock: the username -> id mapping is immutable.
@@ -87,6 +88,10 @@ const hireRoute = route({
       await tx.db.insert(detectiveSearches).values({
         id, playerId: player.id, targetPlayerId: target.id,
         detectives: body.detectives, endsAt,
+        // Snapshot at hire (read-at-boot posture): freezes this report's
+        // window against later retuning, and lets combat read the deadline
+        // without reaching into detectives' settings namespace.
+        expiresAt: new Date(endsAt.getTime() + expireSeconds * 1000),
       });
       return { id, cash };
     });
@@ -131,6 +136,7 @@ const listRoute = route({
           detectives: detectiveSearches.detectives,
           startedAt: detectiveSearches.startedAt,
           endsAt: detectiveSearches.endsAt,
+          expiresAt: detectiveSearches.expiresAt,
           succeeded: detectiveSearches.succeeded,
           targetLocationId: playerStats.locationId,
           targetLocationName: locations.name,
@@ -152,7 +158,8 @@ const listRoute = route({
           cost: unitCost.toString(),
           searches: rows.map((r) => {
             const ended = now >= r.endsAt.getTime();
-            const expiresAtMs = r.endsAt.getTime() + expireSeconds * 1000;
+            const expiresAtMs = r.expiresAt?.getTime()
+              ?? r.endsAt.getTime() + expireSeconds * 1000;
             // Time-gated reveal (spec §2): before ends_at the recorded roll
             // is never exposed. Past ends_at, NULL means the resolve job was
             // lost — the gamble reads as failed, never as pending forever.
