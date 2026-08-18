@@ -672,6 +672,8 @@ const adminPage: PageSchema = {
   },
 };
 
+export { itemPriceAt } from "./pricing.js";
+
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
