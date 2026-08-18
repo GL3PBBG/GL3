@@ -1,5 +1,5 @@
 import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
-import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { itemPriceAt } from "@gl3/plugin-inventory";
@@ -618,7 +618,24 @@ const targetsRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       if (!me) throw new PluginError("unauthorized", 401);
-      if (me.locationId === null) return { status: 200, body: { targets: [] } };
+      if (me.locationId === null) return { status: 200, body: { mode: "open" as const, targets: [] } };
+
+      const [town] = await tx.db
+        .select({ combatMode: locations.combatMode })
+        .from(locations)
+        .where(eq(locations.id, me.locationId));
+      const mode = town?.combatMode === "underground" ? "underground" as const : "open" as const;
+
+      // Underground: the report set becomes a SQL predicate BEFORE the
+      // LIMIT — a post-limit filter would hide a legally attackable reported
+      // player ranked below 50th by exp in a crowded town. The set is small
+      // (the tracker caps at 100 searches), so the IN list is cheap.
+      let reportedIds: string[] | null = null;
+      if (mode === "underground") {
+        const reported = await activeReportTargetIds(tx, player.id, new Date());
+        if (reported.size === 0) return { status: 200, body: { mode, targets: [] } };
+        reportedIds = [...reported];
+      }
 
       const rows = await tx.db
         .select({
@@ -638,6 +655,7 @@ const targetsRoute = route({
         .where(and(
           eq(playerStats.locationId, me.locationId),
           ne(playerStats.playerId, player.id),
+          ...(reportedIds === null ? [] : [inArray(playerStats.playerId, reportedIds)]),
         ))
         .orderBy(desc(playerStats.exp))
         .limit(50);
@@ -650,6 +668,7 @@ const targetsRoute = route({
       return {
         status: 200,
         body: {
+          mode,
           targets: rows.map((row) => {
             // Evaluated in the same order attack's PER-TARGET checks run
             // (hospitalised/jailed here read the ROW's own sentence, same as
