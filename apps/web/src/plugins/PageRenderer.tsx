@@ -1,13 +1,20 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, Suspense, lazy, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
-import { Hand } from "../components/PlayingCard.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
 import styles from "../pages/pages.module.css";
+
+// The 56-card SVG deck behind `Hand` is ~155 kB gzipped — over half the app's
+// transfer — and only a `cards` node ever draws it. This must stay the sole
+// static-import-free path to PlayingCard.js, or the deck lands back in the
+// entry chunk for every page.
+const Hand = lazy(() =>
+  import("../components/PlayingCard.js").then((m) => ({ default: m.Hand })),
+);
 
 /**
  * A run of instructions that share one `<Panel>`.
@@ -515,7 +522,22 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
           />
         );
       case "cards":
-        return <Hand key={index} codes={inst.cards} />;
+        // Fallback mirrors Hand's markup card-for-card so the deck chunk
+        // arriving does not shift the layout under a pending Hit button.
+        return (
+          <Suspense
+            key={index}
+            fallback={
+              <span className="hand" role="group" aria-busy="true" aria-label={`${inst.cards.length} cards`}>
+                {inst.cards.map((code, i) => (
+                  <span key={`${code}-${i}`} data-card className="card card--unknown" />
+                ))}
+              </span>
+            }
+          >
+            <Hand codes={inst.cards} />
+          </Suspense>
+        );
     }
   }
 
