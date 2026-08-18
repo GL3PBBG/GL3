@@ -49,3 +49,9 @@
 @media (max-width: 860px) {
   .body { grid-template-columns: 1fr; }
 }
+
+/* The page banner sits above the page's own content. No fixed height: an
+   unbound slot renders nothing at all and must not leave a gap. */
+.pageBanner:not(:empty) {
+  margin-bottom: 1rem;
+}

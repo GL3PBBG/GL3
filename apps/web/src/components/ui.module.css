@@ -48,3 +48,43 @@
     var(--line) 6px
   );
 }
+
+/* The thumbnail's click target. Strips the button chrome so the art itself is
+   the control — the cursor and the focus ring are what say it is clickable. */
+.gameImageButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+.gameImageButton:focus-visible {
+  outline: 2px solid var(--accent, #6af);
+  outline-offset: 2px;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.8);
+  cursor: zoom-out;
+}
+.lightboxImage {
+  /* Natural size, bounded by the viewport: art uploaded at 64px stays 64px
+     rather than being smeared across the screen, and a 2048px image still
+     fits. `image-rendering: pixelated` keeps small sprites crisp when the
+     browser does scale them up. */
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+  image-rendering: pixelated;
+}
+.lightboxClose {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}

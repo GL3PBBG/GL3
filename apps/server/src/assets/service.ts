@@ -1,3 +1,4 @@
+import { SINGLETON_ENTITY_ID } from "@gl3/plugin-sdk";
 import { and, eq, inArray, notExists, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "../db/client.js";
@@ -197,6 +198,20 @@ export async function resolveAssets(
     ));
   for (const row of rows) out.set(row.entityId, driver.urlFor(row.sha256));
   return out;
+}
+
+/**
+ * The one URL bound to a singleton slot, or null.
+ *
+ * A thin wrapper over `resolveAssets` rather than its own query: a singleton is
+ * an ordinary binding whose entity id happens to be a constant, and giving it a
+ * second query would be a second thing to keep correct.
+ */
+export async function resolveSingletonAsset(
+  db: DbOrTx, driver: StorageDriver, scope: string, slot: string,
+): Promise<string | null> {
+  const found = await resolveAssets(db, driver, scope, [SINGLETON_ENTITY_ID], slot);
+  return found.get(SINGLETON_ENTITY_ID) ?? null;
 }
 
 /**

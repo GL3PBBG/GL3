@@ -46,6 +46,18 @@ describe("collectAssetSlots", () => {
     expect(registry.get(slotKey("garageco", "car"))?.label).toBe("Also a car");
   });
 
+  it("carries `singleton` through to the registry", () => {
+    const plugin = definePlugin({
+      id: "casino", version: "1.0.0", basePaths: ["/api/casino"],
+      providesAssets: [{ slot: "floor", label: "Casino floor", singleton: true }],
+    });
+
+    // Rebuilding the declaration field by field here once dropped this flag,
+    // which made every plugin banner unbindable while the registry cheerfully
+    // reported the slot as per-entity.
+    expect(collectAssetSlots([plugin]).get(slotKey("casino", "floor"))?.singleton).toBe(true);
+  });
+
   it("rejects a plugin declaring the same slot twice", () => {
     const plugin = definePlugin({
       id: "dupes", version: "1.0.0", basePaths: ["/api/dupes"],

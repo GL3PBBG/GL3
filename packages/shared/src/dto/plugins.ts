@@ -185,6 +185,8 @@ const leafOptions = [
           label: z.string(),
           /** Absent renders text; `image` treats the cell value as a URL. */
           render: z.literal("image").optional(),
+          /** Thumbnail size for `render: "image"`. Defaults to `sm`. */
+          imageSize: z.enum(["sm", "md", "lg"]).optional(),
         }).strict(),
       ).min(1),
     })
@@ -203,10 +205,21 @@ const leafOptions = [
     .strict(),
   z
     .object({
+      kind: z.literal("slotImage"),
+      slot: z.string().min(1),
+      alt: z.string().min(1),
+      size: z.enum(["sm", "md", "lg"]).optional(),
+      /** Loader-stamped, like `assetBinder.scope` below. */
+      scope: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("assetBinder"),
       slot: z.string().min(1),
-      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`"),
-      entityLabelKey: z.string().min(1),
+      /** Both absent for a singleton slot: one image, nothing to pick. */
+      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`").optional(),
+      entityLabelKey: z.string().min(1).optional(),
       /**
        * Filled in by the loader from the declaring plugin's id before the node
        * reaches the wire — which is why it is required HERE and absent from the

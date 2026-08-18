@@ -2244,7 +2244,44 @@ images the `inventory` and `shop` routes resolve cross-scope and the two
 hand-written pages render through `<GameImage>` — which owns the
 placeholder-on-404 and a fixed box, so a missing binding never reflows a list.
 
-`@gl3/shared` → `0.1.9` and `@gl3/plugin-sdk` → `0.1.4`, both additive patches.
+**Follow-up (same branch), from a first look at the running game.** Three real
+gaps, all reported by the user and all confirmed:
+
+1. **`location` and `rank` were bindable with nothing rendering them.** The
+   admin section shipped upload widgets for art no route resolved, so binding a
+   town image wrote a row nothing read. Travel, ranks and crimes now resolve
+   their core-scope art and the pages draw it.
+2. **A thumbnail was a dead end.** `GameImage` is now clickable everywhere,
+   opening a lightbox at natural size (Escape / backdrop / button to close),
+   and `table.columns[].imageSize` lets a column ask for a bigger cell — the
+   garage uses `md` rather than the 32px default.
+3. **Most of the game has no rows to bind art to.** Jail, hospital, bank, the
+   casino floor: pages, not entities. Per-row art could not express them at
+   all, which was a hole in the design rather than a missing declaration.
+
+(3) is answered by **singleton slots**: `providesAssets: [{ …, singleton: true }]`
+binds against `SINGLETON_ENTITY_ID` (the nil UUID), so it reuses
+`entity_assets`, its permission check, its cascade and its sweep — only the
+admin widget (no picker) and the read (`ctx.assets.singleton`) differ. Because a
+page's view is STATIC data built at boot, it cannot carry a URL an admin
+uploaded afterwards, so a new `slotImage` node names its slot and the client
+resolves it through `GET /api/assets/slot/:scope/:slot`.
+
+Core declares 20 `page-*` singletons plus a per-row `crime` slot; the banners
+render from ONE place — a route→slot map in `Shell.tsx` — rather than a
+`<SlotImage>` inside nineteen page components, because a banner is chrome and
+per-page wiring is exactly what produced gap (1). The admin art section is now
+**built from the registry** (`buildAssetsPage`) instead of hand-written, so a
+slot that exists is a slot an admin can fill, and an installed plugin's banner
+gets a widget with no code change in core.
+
+One bug worth recording: `collectAssetSlots` rebuilt each declaration field by
+field and silently dropped `singleton`, so every plugin banner was unbindable
+while the registry reported the slot as per-entity. It is a spread now, with a
+regression test (`asset-slots.test.ts`).
+
+`@gl3/shared` → `0.1.10` and `@gl3/plugin-sdk` → `0.1.5`, both additive patches.
+Gate after the follow-up: 207 files / 1646 passed, 1 skipped, exit 0.
 
 Gate: bare `npm run verify`, **207 files / 1637 passed, 1 skipped, exit 0**.
 The skip is the S3 half of `asset-driver-contract.test.ts` — the same cases run

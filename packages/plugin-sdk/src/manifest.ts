@@ -58,6 +58,16 @@ export interface AssetSlotDecl {
   slot: string;
   /** Shown to the admin next to the upload widget. */
   label: string;
+  /**
+   * One image for the whole slot rather than one per row.
+   *
+   * Most art hangs off an entity — a car, an item, a town. Some does not: a
+   * jail, a hospital, a casino floor and a bank are PAGES, with no row to bind
+   * a picture to, and without this there is no way to give them one. A
+   * singleton binds against `SINGLETON_ENTITY_ID` so it needs no second table
+   * and no second code path; only the admin widget and the read differ.
+   */
+  singleton?: boolean | undefined;
 }
 
 /**
@@ -74,8 +84,20 @@ const AssetSlotDeclSchema = z
   .object({
     slot: z.string().regex(PLUGIN_ID_PATTERN, "asset slot must be lowercase kebab-case"),
     label: z.string().min(1),
+    singleton: z.boolean().optional(),
   })
   .strict();
+
+/**
+ * The `entity_id` a singleton slot binds against: the nil UUID, which no
+ * uuidv7 can ever collide with.
+ *
+ * Reusing `entity_assets` rather than adding a second table is the point. A
+ * singleton is the same row shape, the same permission check, the same sweep
+ * and the same cascade; only "which entity" is answered by a constant instead
+ * of by a picker.
+ */
+export const SINGLETON_ENTITY_ID = "00000000-0000-0000-0000-000000000000";
 
 /**
  * What a plugin author writes. Every collection is optional here and required
