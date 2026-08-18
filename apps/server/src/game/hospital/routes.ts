@@ -1,15 +1,23 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
+import { z } from "zod";
+import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
-import { playerStats } from "../../db/schema/index.js";
+import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
+import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "./status.js";
 import { checkinSecondsPerHp, dischargeCostPerSecond } from "./settings.js";
 
+const TargetBodySchema = z.object({ playerId: z.string().uuid() });
+
 export function registerHospitalRoutes(
   app: FastifyInstance,
   db: Db,
+  redis: Redis,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
 ): void {
@@ -146,5 +154,107 @@ export function registerHospitalRoutes(
       remainingSeconds: result.seconds,
       dischargeCost: (BigInt(result.seconds) * dischargeCostPerSecond(settings)).toString(),
     });
+  });
+
+  /**
+   * Pay a stranger out of the ward. Money moves from the CALLER; the target
+   * is healed and never debited.
+   */
+  app.post("/api/hospital/discharge-player", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const parsed = TargetBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_body" });
+    const targetId = parsed.data.playerId;
+    if (targetId === playerId) return reply.code(409).send({ error: "self_target" });
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // ONE sorted call over both players, FIRST statement, before either row
+        // is read (NOTES.md rule 6). Two separate calls, or a read before the
+        // lock, is the double-charge shape test/hospital-concurrency.test.ts
+        // exists for on the single-player discharge route above.
+        await lockPlayersForUpdate(tx, [playerId, targetId]);
+
+        const [caller] = await tx.select({ locationId: playerStats.locationId })
+          .from(playerStats).where(eq(playerStats.playerId, playerId));
+        const [target] = await tx.select({
+          locationId: playerStats.locationId,
+          hospitalUntil: playerStats.hospitalUntil,
+          username: players.username,
+        })
+          .from(playerStats)
+          .innerJoin(players, eq(players.id, playerStats.playerId))
+          .where(eq(playerStats.playerId, targetId));
+
+        if (!target) return { kind: "missing" as const };
+        if (target.locationId === null || target.locationId !== caller?.locationId) {
+          return { kind: "elsewhere" as const };
+        }
+
+        const remainingMs = (target.hospitalUntil?.getTime() ?? 0) - Date.now();
+        if (remainingMs <= 0) return { kind: "free" as const };
+        const remainingSeconds = Math.ceil(remainingMs / 1000);
+
+        const cost = BigInt(remainingSeconds) * dischargeCostPerSecond(settings);
+        const cash = await applyBalanceChange(tx, {
+          playerId, amount: -cost, kind: "cash", reason: "hospital.discharge",
+        });
+
+        const maxHealth = await maxHealthFor(tx, targetId);
+        await tx.update(playerStats)
+          .set({ hospitalUntil: null, health: maxHealth })
+          .where(eq(playerStats.playerId, targetId));
+
+        const [me] = await tx.select({ username: players.username })
+          .from(players).where(eq(players.id, playerId));
+
+        const notificationId = uuidv7();
+        await insertNotification(tx, {
+          id: notificationId, playerId: targetId,
+          body: `${me?.username ?? "Someone"} paid for your discharge.`,
+        });
+
+        return {
+          kind: "paid" as const, cash, cost, notificationId,
+          targetName: target.username,
+        };
+      });
+
+      if (result.kind === "missing") return reply.code(404).send({ error: "player_not_found" });
+      if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
+      if (result.kind === "free") return reply.code(409).send({ error: "not_hospitalised" });
+
+      // After commit, never inside the transaction (NOTES.md rule 5). Both
+      // events are addressed to the TARGET and carry the target as actor:
+      // `player.discharged` is what the web client's invalidation keys off,
+      // and `notification.created`'s actor is the recipient by convention
+      // (apps/server/src/plugins/ctx.ts).
+      const at = new Date().toISOString();
+      await publishEvent(redis, {
+        id: uuidv7(), type: "player.discharged", at,
+        actorId: targetId, actorName: result.targetName,
+        audience: { kind: "player", playerId: targetId },
+      });
+      await publishEvent(redis, {
+        id: uuidv7(), type: "notification.created", at,
+        actorId: targetId, actorName: result.targetName,
+        audience: { kind: "player", playerId: targetId },
+        notificationId: result.notificationId,
+        body: "Someone paid for your discharge.",
+      });
+
+      return reply.send({
+        freed: targetId,
+        paid: result.cost.toString(),
+        cash: result.cash.toString(),
+      });
+    } catch (error) {
+      if (error instanceof InsufficientFundsError) {
+        return reply.code(409).send({ error: "insufficient_funds" });
+      }
+      throw error;
+    }
   });
 }
