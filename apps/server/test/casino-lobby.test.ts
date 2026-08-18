@@ -13,6 +13,7 @@ import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -41,18 +42,12 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string; username: string }> {
   regCounter += 1;
-  const username = `Punter${regCounter}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Registration is rate-limited per IP and the app is booted once, so every
-    // registration in this file needs its own address.
+  // Registration is rate-limited per IP and the app is booted once, so every
+  // registration in this file needs its own address.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Punter${regCounter}`,
     remoteAddress: `10.63.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  const body = res.json<{ token: string; playerId: string }>();
-  return { ...body, username };
 }
 
 async function seedLocation(): Promise<string> {

@@ -6,6 +6,7 @@ import { players, playerStats, ranks, transactions } from "../src/db/schema/inde
 import { loadConfig } from "../src/config.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -96,8 +97,7 @@ describe("GET /api/ranks", () => {
       `plugin-ranks-test-${uuidv7()}-`,
     );
     const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Rank${Date.now()}`, password: "hunter2hunter2" } });
-    const { token } = reg.json();
+    const { token } = await registerVerifiedPlayer({ app, redis }, { username: `Rank${Date.now()}` });
 
     const res = await app.inject({ method: "GET", url: "/api/ranks", headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(200);

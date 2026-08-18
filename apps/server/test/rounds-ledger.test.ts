@@ -13,6 +13,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { loadSettings } from "../src/settings/load.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db } = testDb();
@@ -57,12 +58,7 @@ beforeEach(async () => { await resetDb(db); await seedSetting(); });
 interface RegisteredPlayer { id: string; token: string; }
 
 async function register(username: string): Promise<RegisteredPlayer> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  expect(res.statusCode).toBe(201);
-  const body = res.json() as { playerId: string; token: string };
+  const body = await registerVerifiedPlayer({ app, redis }, { username });
   return { id: body.playerId, token: body.token };
 }
 

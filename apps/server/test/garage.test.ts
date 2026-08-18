@@ -10,6 +10,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { theftCars, theftGarage } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -34,14 +35,10 @@ let regCounter = 0;
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username,
     remoteAddress: `10.43.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json();
 }
 
 /** A location row, with every NOT NULL travel/bullets column filled in. */

@@ -6,10 +6,11 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { items, locations, playerItems, playerStats, settings } from "../src/db/schema/index.js";
-import { createSubscriber } from "../src/redis.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { combatLog, weaponCondition } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -27,6 +28,11 @@ const { db, sql: conn } = testDb();
 const redisUrl = loadConfig(process.env).redisUrl;
 // Named `redis` (not `subscriber`) to match this file's own event test below.
 const redis = createSubscriber(redisUrl);
+// A SEPARATE, ordinary client for registerVerifiedPlayer's Redis reads —
+// `redis` above enters Redis's dedicated subscriber mode the moment any test
+// calls `redis.subscribe(...)`, after which no other command (GET, KEYS, ...)
+// can run on that same connection for the rest of this file's run.
+const cmdRedis = createRedis(redisUrl);
 let app: FastifyInstance;
 let closeServer: () => Promise<void>;
 let token: string;
@@ -101,17 +107,13 @@ beforeEach(async () => {
   if (app) await closeServer();
   ({ app, close: closeServer } = await bootTestServer());
 
-  const attackerRes = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Nico", password: "hunter2hunter2" },
-  });
-  ({ token, playerId: attacker } = attackerRes.json());
+  ({ token, playerId: attacker } = await registerVerifiedPlayer({ app, redis: cmdRedis }, { username: "Nico" }));
 
+  // Never authenticates as the target below, just needs a real player row.
   const targetRes = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Gio", password: "hunter2hunter2" },
+    payload: { username: "Gio", email: "gio@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: target } = targetRes.json());
 
@@ -126,6 +128,7 @@ afterAll(async () => {
   await closeServer();
   await conn.end();
   redis.disconnect();
+  cmdRedis.disconnect();
 });
 
 describe("POST /api/combat/attack/:targetId — backfire and weapon condition", () => {

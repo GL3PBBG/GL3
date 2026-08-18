@@ -3,8 +3,13 @@ import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { loadConfig } from "../src/config.js";
+import { createRedis } from "../src/redis.js";
 import { buildPluginsPayload } from "../src/plugins/manifest-endpoint.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+
+const redis = createRedis(loadConfig(process.env).redisUrl);
 
 const alpha = definePlugin({
   id: "alpha", version: "1.0.0", basePaths: ["/api/alpha"],
@@ -26,17 +31,11 @@ let regCounter = 0;
 /** Register a player and return { token } — inline because no shared factories file exists. */
 async function register(app: FastifyInstance): Promise<{ token: string }> {
   regCounter++;
-  const reg = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Distinct IP per registration to keep this file's rate-limit bucket private.
+  // Distinct IP per registration to keep this file's rate-limit bucket private.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `PMUser${regCounter}`,
     remoteAddress: `10.21.${regCounter >> 8 & 0xff}.${regCounter & 0xff}`,
-    payload: {
-      username: `PMUser${regCounter}`,
-      password: "hunter2hunter2",
-    },
   });
-  return reg.json();
 }
 
 describe("buildPluginsPayload", () => {

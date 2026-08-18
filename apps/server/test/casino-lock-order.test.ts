@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
@@ -8,6 +9,7 @@ import { loadConfig } from "../src/config.js";
 import { locations, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -62,6 +64,7 @@ import { bootTestServer } from "./helpers/server.js";
 const { db, sql: conn } = testDb();
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 /** Every wager in this file. 100,000 * blackjack's 2.5 = 250,000 exposure. */
@@ -73,16 +76,12 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Registration is rate-limited per IP and the app is booted once, so every
-    // registration in this file shares one bucket unless the address differs.
+  // Registration is rate-limited per IP and the app is booted once, so every
+  // registration in this file shares one bucket unless the address differs.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Croupier${regCounter}`,
     remoteAddress: `10.62.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Croupier${regCounter}`, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
 }
 
 async function seedLocation(): Promise<string> {
@@ -209,7 +208,7 @@ async function raceTwoPlays(
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => {

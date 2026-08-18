@@ -14,6 +14,7 @@ import {
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -127,20 +128,11 @@ beforeAll(async () => {
   await resetDb(db);
   ({ app, close: closeServer } = await bootTestServer());
 
-  const placer = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Placer", password: "hunter2hunter2" },
-  });
-  ({ token: placerToken, playerId: placerId } = placer.json());
+  ({ token: placerToken, playerId: placerId } = await registerVerifiedPlayer({ app, redis }, { username: "Placer" }));
 
-  const attacker = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Attacker", password: "hunter2hunter2" },
-  });
-  ({ token: attackerToken, playerId: attackerId } = attacker.json());
-  attackerName = attacker.json().username;
+  const attacker = await registerVerifiedPlayer({ app, redis }, { username: "Attacker" });
+  ({ token: attackerToken, playerId: attackerId } = attacker);
+  attackerName = attacker.username;
 });
 
 vitestAfterAll(async () => {

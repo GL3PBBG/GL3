@@ -1,4 +1,5 @@
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
@@ -10,6 +11,7 @@ import { loadConfig } from "../src/config.js";
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -34,6 +36,7 @@ const AWARD_POINTS: readonly bigint[] = [900n, 600n, 300n];
 const CALLERS = 8;
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 const ago = (ms: number): Date => new Date(Date.now() - ms);
@@ -47,13 +50,7 @@ function fire(opts: InjectOptions): Promise<LightMyRequestResponse> {
 }
 
 async function register(): Promise<{ token: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: `rollover_${Date.now() % 1_000_000}`, password: "correct horse battery" },
-  });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string }>();
+  return registerVerifiedPlayer({ app, redis }, { username: `rollover_${Date.now() % 1_000_000}` });
 }
 
 async function seedPlayer(username: string, exp: bigint): Promise<string> {
@@ -82,7 +79,7 @@ beforeAll(async () => {
     key: "rounds.payout_points",
     value: JSON.stringify(AWARD_POINTS.map((n) => n.toString())),
   });
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => {

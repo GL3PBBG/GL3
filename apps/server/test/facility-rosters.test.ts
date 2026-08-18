@@ -1,24 +1,22 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 interface Player { token: string; playerId: string }
 
 async function register(name: string): Promise<Player> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`, password: "hunter2hunter2" },
-  });
-  const body = res.json();
-  return { token: body.token, playerId: body.playerId };
+  return registerVerifiedPlayer({ app, redis }, { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}` });
 }
 
 let townA: string;
@@ -26,7 +24,7 @@ let townB: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
   townA = uuidv7();
   townB = uuidv7();
   await db.insert(locations).values([

@@ -1,13 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { items, playerItems, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
@@ -28,12 +31,8 @@ async function grant(playerId: string, itemId: string, qty: number): Promise<voi
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Sal", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Sal" }));
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -136,7 +135,7 @@ describe("GET /api/inventory", () => {
     // one fails if `playerId` is ever dropped from it.
     const other = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Tony", password: "hunter2hunter2" },
+      payload: { username: "Tony", email: "tony@example.test", password: "hunter2hunter2" },
     });
     const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
     await grant(other.json().playerId, pistol, 1);

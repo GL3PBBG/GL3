@@ -1,24 +1,23 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `Sick${Date.now()}`, password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: `Sick${Date.now()}` }));
 });
 afterAll(async () => { await closeServer(); await conn.end(); });
 

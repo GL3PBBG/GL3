@@ -13,6 +13,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -282,8 +283,7 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
       `plugin-travel-test-${uuidv7()}-`,
     );
     const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Travel${Date.now()}`, password: "hunter2hunter2" } });
-    const { token, playerId: registeredId } = reg.json();
+    const { token, playerId: registeredId } = await registerVerifiedPlayer({ app, redis }, { username: `Travel${Date.now()}` });
     const auth = { authorization: `Bearer ${token}` };
     // Registration starts a player at 0 cash — fund them directly so travel
     // fares below have something to spend.
@@ -349,8 +349,7 @@ describe("GET /api/locations and POST /api/travel/:locationId", () => {
       `plugin-travel-test-${uuidv7()}-`,
     );
     const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Travel404${Date.now()}`, password: "hunter2hunter2" } });
-    const { token } = reg.json();
+    const { token } = await registerVerifiedPlayer({ app, redis }, { username: `Travel404${Date.now()}` });
     const auth = { authorization: `Bearer ${token}` };
 
     const missing = await app.inject({ method: "POST", url: `/api/travel/${uuidv7()}`, headers: auth });

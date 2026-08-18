@@ -1,28 +1,26 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { players, roleModuleAccess, roles } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
 
 async function register(username: string) {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  expect(res.statusCode).toBe(201);
-  return res.json() as { playerId: string; token: string };
+  return registerVerifiedPlayer({ app, redis }, { username }) as Promise<{ playerId: string; token: string }>;
 }
 
 async function grantsOf(playerId: string): Promise<string[]> {
@@ -71,7 +69,7 @@ describe("first registered player becomes admin", () => {
       Array.from({ length: 4 }, (_, i) =>
         app.inject({
           method: "POST", url: "/api/auth/register",
-          payload: { username: `Racer${i}`, password: "hunter2hunter2" },
+          payload: { username: `Racer${i}`, email: `racer${i}@example.test`, password: "hunter2hunter2" },
         }),
       ),
     );

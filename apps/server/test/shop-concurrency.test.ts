@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -28,6 +30,7 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 let tokenA: string;
@@ -60,18 +63,13 @@ async function waitForLockWaiters(n: number): Promise<void> {
 
 /** Registers a player and returns their id plus a bearer token. */
 async function register(username: string): Promise<{ id: string; token: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "correct horse battery staple" },
-  });
-  const body = res.json<{ playerId: string; token: string }>();
+  const body = await registerVerifiedPlayer({ app, redis }, { username });
   return { id: body.playerId, token: body.token };
 }
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
   const a = await register(`buyerA_${randomUUID().slice(0, 8)}`);
   const b = await register(`buyerB_${randomUUID().slice(0, 8)}`);

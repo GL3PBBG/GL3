@@ -8,6 +8,7 @@ import { checkJail, releaseIfExpired } from "../src/game/jail/status.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -94,8 +95,7 @@ describe("GET /api/jail", () => {
     );
     const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
 
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Jail${Date.now()}`, password: "hunter2hunter2" } });
-    const { token } = reg.json();
+    const { token } = await registerVerifiedPlayer({ app, redis }, { username: `Jail${Date.now()}` });
     const auth = { authorization: `Bearer ${token}` };
 
     const free = await app.inject({ method: "GET", url: "/api/jail", headers: auth });

@@ -22,6 +22,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { combatLog } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -119,12 +120,7 @@ const attack = (id: string) =>
  */
 async function register(): Promise<{ id: string; token: string; username: string }> {
   const username = `p-${uuidv7().slice(-8)}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  const body = res.json<{ token: string; playerId: string; username: string }>();
+  const body = await registerVerifiedPlayer({ app, redis }, { username });
   return { id: body.playerId, token: body.token, username: body.username };
 }
 
@@ -157,19 +153,8 @@ beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 
-  const attacker = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Sal", password: "hunter2hunter2" },
-  });
-  ({ token: attackerToken, playerId: attackerId } = attacker.json());
-
-  const target = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Vito", password: "hunter2hunter2" },
-  });
-  ({ playerId: targetId } = target.json());
+  ({ token: attackerToken, playerId: attackerId } = await registerVerifiedPlayer({ app, redis }, { username: "Sal" }));
+  ({ playerId: targetId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
 });
 
 afterAll(async () => {
@@ -961,7 +946,10 @@ describe("GET /api/combat/log", () => {
     const stranger = await app.inject({
       method: "POST",
       url: "/api/auth/register",
-      payload: { username: "Luca", password: "hunter2hunter2" },
+      // Only playerId is used below — this player never authenticates, so
+      // there's no need to verify them, just to get past registration's now-
+      // required email.
+      payload: { username: "Luca", email: "luca@example.test", password: "hunter2hunter2" },
     });
     const strangerId: string = stranger.json().playerId;
     await db.insert(combatLog).values({
