@@ -93,13 +93,14 @@ export function registerJailRoutes(
           .from(players).where(eq(players.id, playerId));
 
         const notificationId = uuidv7();
-        await insertNotification(tx, {
-          id: notificationId, playerId: targetId,
-          body: `${me?.username ?? "Someone"} paid your bail.`,
-        });
+        // Same string goes into the notification row and the event body below —
+        // a caller who reads the row moments after the toast must see the same
+        // fact, not "Someone" in one place and the payer's name in the other.
+        const body = `${me?.username ?? "Someone"} paid your bail.`;
+        await insertNotification(tx, { id: notificationId, playerId: targetId, body });
 
         return {
-          kind: "paid" as const, cash, cost, notificationId,
+          kind: "paid" as const, cash, cost, notificationId, body,
           targetName: target.username,
         };
       });
@@ -121,7 +122,7 @@ export function registerJailRoutes(
         actorId: targetId, actorName: result.targetName,
         audience: { kind: "player", playerId: targetId },
         notificationId: result.notificationId,
-        body: "Someone paid your bail.",
+        body: result.body,
       });
 
       return reply.send({
@@ -210,7 +211,7 @@ export function registerJailRoutes(
         id: uuidv7(), type: "player.jailed", at,
         actorId: playerId, actorName: result.callerName,
         audience: { kind: "player", playerId },
-        until: result.until.toISOString(), reason: "bust_failed",
+        until: result.until.toISOString(), reason: "bust.failed",
       });
       return reply.send({ success: false, jailedUntil: result.until.toISOString() });
     }
