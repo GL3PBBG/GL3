@@ -1,4 +1,5 @@
 import { useNews } from "../api/queries.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -23,7 +24,10 @@ export function News(): JSX.Element {
           <article key={item.id}>
             <h3>{item.title}</h3>
             <p className={styles.meta}>
-              {item.authorName ?? "The management"} · <When iso={item.createdAt} />
+              {item.authorId !== null && item.authorName !== null
+                ? <PlayerLink playerId={item.authorId} username={item.authorName} />
+                : "The management"}
+              {" · "}<When iso={item.createdAt} />
             </p>
             <p className={styles.prose}>{item.body}</p>
           </article>

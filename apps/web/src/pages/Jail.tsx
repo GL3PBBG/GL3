@@ -3,6 +3,7 @@ import { useBail, useBust, useCellBlock, useJail, useMe } from "../api/queries.j
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { canAfford } from "../lib/money.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -58,7 +59,7 @@ export function Jail(): JSX.Element {
         ) : null}
         {cellBlock.data?.inmates.map((inmate) => (
           <div key={inmate.playerId} className={styles.row}>
-            <span>{inmate.username} ({inmate.rankName})</span>
+            <span><PlayerLink playerId={inmate.playerId} username={inmate.username} /> ({inmate.rankName})</span>
             <span>{formatDuration(inmate.remainingSeconds)}</span>
             <button
               type="button"

@@ -18,7 +18,7 @@ import {
   LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
   NewsListResponseSchema, NotificationListResponseSchema, OcCashResponseSchema,
-  OcCreateResponseSchema, OcStateResponseSchema, PlaceBountyResponseSchema,
+  OcCreateResponseSchema, OcStateResponseSchema, OnlineListResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
   PropertyListResponseSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
@@ -49,7 +49,7 @@ import {
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
   type NewsListResponse, type NotificationListResponse,
-  type OcCashResponse, type OcCreateResponse, type OcStateResponse,
+  type OcCashResponse, type OcCreateResponse, type OcStateResponse, type OnlineListResponse,
   type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
   type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
   type RepairResponse,
@@ -571,6 +571,17 @@ export function useNews() {
   return useQuery<NewsListResponse>({
     queryKey: keys.news(),
     queryFn: async () => NewsListResponseSchema.parse(await api("/api/news")),
+  });
+}
+
+/** Who's around: online now, plus active in the last hour. Polled rather than
+ *  pushed — presence has no `GameEvent` variant, so there is nothing for the
+ *  socket to invalidate this on. */
+export function useOnline() {
+  return useQuery<OnlineListResponse>({
+    queryKey: keys.online(),
+    queryFn: async () => OnlineListResponseSchema.parse(await api("/api/online")),
+    refetchInterval: 30_000,
   });
 }
 

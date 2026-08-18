@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import {
   GangPermissionSchema,
   type CreateGangRequest, type GangDto, type GangMemberDto, type GangPermission,
@@ -14,6 +13,7 @@ import { canAfford } from "../lib/money.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 
 const PERMISSIONS: readonly GangPermission[] = GangPermissionSchema.options;
 
@@ -314,7 +314,7 @@ function Roster({
           >
             <span className={styles.rowStack}>
               <span>
-                <Link className={styles.link} to={`/players/${member.playerId}`}>{member.username}</Link>
+                <PlayerLink playerId={member.playerId} username={member.username} />
                 {" · "}
                 <span className={styles.meta}>{member.role}</span>
               </span>
