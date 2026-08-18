@@ -19,6 +19,8 @@ export * from "./dto/mail.js";
 export * from "./dto/news.js";
 export * from "./dto/notifications.js";
 export * from "./dto/oc.js";
+export * from "./dto/online.js";
+export * from "./dto/forum.js";
 export * from "./dto/profile.js";
 export * from "./dto/plugins.js";
 export * from "./dto/properties.js";
