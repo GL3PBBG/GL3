@@ -3,8 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "../../db/client.js";
 import { playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
-import { checkHospital, maxHealthFor, settleHospital } from "./status.js";
-import { dischargeCostPerSecond } from "./settings.js";
+import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "./status.js";
+import { checkinSecondsPerHp, dischargeCostPerSecond } from "./settings.js";
 
 export function registerHospitalRoutes(
   app: FastifyInstance,
@@ -85,5 +85,50 @@ export function registerHospitalRoutes(
       }
       throw error;
     }
+  });
+
+  /**
+   * The voluntary door. Free — the stay itself is the price, because a
+   * hospitalised player is gated out of crimes, combat and travel for its
+   * whole length. Paying to leave early is the existing discharge route, so a
+   * player can check in and then buy out; that is intended, and it costs
+   * strictly more than waiting.
+   */
+  app.post("/api/hospital/checkin", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const result = await db.transaction(async (tx) => {
+      // First statement, before any read: the same check-then-act hazard the
+      // discharge route documents. Without it two concurrent check-ins both
+      // read "not hospitalised" and the second overwrites the first's
+      // deadline with one computed from health 0 — a maximal stay.
+      await lockPlayersForUpdate(tx, [playerId]);
+      const settled = await settleHospital(tx, playerId);
+      if (settled.hospitalised) return { kind: "already" as const };
+
+      const [row] = await tx.select({ health: playerStats.health })
+        .from(playerStats).where(eq(playerStats.playerId, playerId));
+      const health = row?.health ?? 0;
+      const maxHealth = await maxHealthFor(tx, playerId);
+      const missing = maxHealth - health;
+      if (missing <= 0) return { kind: "healthy" as const };
+
+      const seconds = missing * checkinSecondsPerHp(settings);
+      const until = await sendToHospital(tx, playerId, seconds);
+      return { kind: "admitted" as const, until, seconds, maxHealth };
+    });
+
+    if (result.kind === "already") return reply.code(409).send({ error: "already_hospitalised" });
+    if (result.kind === "healthy") return reply.code(409).send({ error: "not_injured" });
+
+    return reply.send({
+      health: 0,
+      maxHealth: result.maxHealth,
+      hospitalised: true,
+      until: result.until.toISOString(),
+      remainingSeconds: result.seconds,
+      dischargeCost: (BigInt(result.seconds) * dischargeCostPerSecond(settings)).toString(),
+    });
   });
 }
