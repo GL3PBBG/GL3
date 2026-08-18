@@ -2283,6 +2283,29 @@ regression test (`asset-slots.test.ts`).
 `@gl3/shared` → `0.1.10` and `@gl3/plugin-sdk` → `0.1.5`, both additive patches.
 Gate after the follow-up: 207 files / 1646 passed, 1 skipped, exit 0.
 
+**Second follow-up: the rest of the slots.** A per-row slot is bindable only if
+something can list the rows, and core cannot enumerate a plugin's table — so
+the first cut could only bind plugin row art from that plugin's own admin page,
+which `gangs` and `oc` do not have. `AssetSlotDecl` now carries its own
+`entitySource`/`entityLabelKey` (contained to the declaring plugin's
+`basePaths`, checked at boot, and refused on a singleton, which has no rows),
+so core's derived art section renders a picker for **every** slot in the game.
+Added: `theft:tier`, `gangs:logo` (with the plugin's first admin route),
+`oc:role-*` ×4, `blackjack:table`, and a `property` singleton on each property
+provider — art per property TYPE, since every casino in the game is one
+franchise. `@gl3/shared` → `0.1.11`, `@gl3/plugin-sdk` → `0.1.6`.
+
+**A process note worth more than the feature.** Three gate runs failed with
+32, 82 and 107 files red and ZERO assertion failures, all reporting
+`template database "gl3_tmpl_..." does not exist`. Nothing was wrong with the
+code: backgrounding a suite with `(… &)` and then starting another overlapped
+two runs, and a second run's `dropStaleTemplates` removed the template the
+first was still cloning from. It left 168 orphaned `gl3_test_*` clones behind.
+The fix was to kill the strays, drop the clones and run ONE suite. This is the
+third recorded instance of overlapping runs looking exactly like a regression —
+`pgrep -fa vitest` and a `pg_database` count before a gate run are cheaper than
+the diagnosis.
+
 Gate: bare `npm run verify`, **207 files / 1637 passed, 1 skipped, exit 0**.
 The skip is the S3 half of `asset-driver-contract.test.ts` — the same cases run
 against the filesystem driver always and against a real endpoint when

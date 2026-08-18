@@ -19,6 +19,8 @@ export const PropertyRowSchema = z.object({
   ownerName: z.string(),
   lever: z.string(),
   profit: z.string(),
+  /** The property TYPE's art, "" when the type has none bound. */
+  imageUrl: z.string(),
 });
 export type PropertyRow = z.infer<typeof PropertyRowSchema>;
 
