@@ -9,9 +9,37 @@ export const CORE_SCOPE = "core";
  * else's art. Core declares them once, under its own scope.
  */
 export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
+  // Per-row: one image for every row of a core-owned table.
   { scope: CORE_SCOPE, slot: "item", label: "Item image" },
   { scope: CORE_SCOPE, slot: "location", label: "Town image" },
   { scope: CORE_SCOPE, slot: "rank", label: "Rank badge" },
+  { scope: CORE_SCOPE, slot: "crime", label: "Crime image" },
+
+  // Singletons: one banner per page. These live under `core` rather than under
+  // the plugin that owns each feature because the PAGES are hand-written in
+  // `apps/web` — there is no manifest page to hang a `slotImage` on. A
+  // marketplace plugin that ships its own page declares its own singleton and
+  // puts a `slotImage` node in its view; both paths end at the same table.
+  { scope: CORE_SCOPE, slot: "page-crimes", label: "Crimes page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-jail", label: "Jail page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-hospital", label: "Hospital page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-bank", label: "Bank page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-casino", label: "Casino page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-combat", label: "Combat page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-bounties", label: "Bounties page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-detectives", label: "Detectives page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-oc", label: "Organized crime page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-properties", label: "Properties page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-garage", label: "Garage page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-theft", label: "Car theft page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-gang", label: "Gang page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-mail", label: "Mail page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-news", label: "News page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-shop", label: "Shop page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-bullets", label: "Bullet shop banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-travel", label: "Travel page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-ranks", label: "Ranks page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-leaderboards", label: "Leaderboards page banner", singleton: true },
 ];
 
 export function slotKey(scope: string, slot: string): string {
@@ -43,7 +71,7 @@ export function slotKey(scope: string, slot: string): string {
  * stamped by the first.
  */
 export function stampAssetBinderScope(view: ViewNode, scope: string): ViewNode {
-  if (view.kind === "assetBinder") return { ...view, scope };
+  if (view.kind === "assetBinder" || view.kind === "slotImage") return { ...view, scope };
   if (view.kind === "panel") {
     return { ...view, children: view.children.map((child) => stampAssetBinderScope(child, scope)) };
   }
@@ -53,7 +81,7 @@ export function stampAssetBinderScope(view: ViewNode, scope: string): ViewNode {
   return view;
 }
 
-/** True if the view contains an `assetBinder` anywhere. */
+/** True if the view contains an `assetBinder` anywhere. Player pages may not. */
 export function containsAssetBinder(view: ViewNode): boolean {
   if (view.kind === "assetBinder") return true;
   if (view.kind === "panel") return view.children.some(containsAssetBinder);
@@ -72,7 +100,10 @@ export function collectAssetSlots(manifests: readonly PluginManifest[]): Map<str
           `plugin validation failed — asset slot "${decl.slot}" is declared more than once by plugin "${manifest.id}"`,
         );
       }
-      registry.set(key, { scope: manifest.id, slot: decl.slot, label: decl.label });
+      // Spread, not a field-by-field copy: rebuilding the declaration by hand
+      // is what silently dropped `singleton` and made every plugin banner
+      // unbindable, with the registry reporting the slot as per-entity.
+      registry.set(key, { ...decl, scope: manifest.id });
     }
   }
   return registry;

@@ -41,6 +41,10 @@ const listRoute = route({
       const skills = await tx.db.select().from(playerCrimeSkill)
         .where(eq(playerCrimeSkill.playerId, player.id));
       const skillByCrime = new Map(skills.map((s) => [s.crimeId, s.chance]));
+      // `crimes` is a CORE table, so its art is core-scoped even though this
+      // plugin renders it — the same cross-scope read inventory, travel and
+      // ranks all make.
+      const art = await ctx.assets.resolve("core", rows.map((c) => c.id), "crime");
 
       return {
         status: 200,
@@ -54,6 +58,7 @@ const listRoute = route({
             maxPayout: crime.maxPayout.toString(),
             chance: skillByCrime.get(crime.id) ?? DEFAULT_CRIME_CHANCE,
             cooldownRemaining,
+            ...(art.has(crime.id) ? { imageUrl: art.get(crime.id) as string } : {}),
           })),
         },
       };

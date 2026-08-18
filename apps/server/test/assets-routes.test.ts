@@ -15,7 +15,10 @@ const artPlugin = definePlugin({
   id: "artcheck",
   version: "1.0.0",
   basePaths: ["/api/artcheck", "/api/admin/artcheck"],
-  providesAssets: [{ slot: "widget", label: "Widget image" }],
+  providesAssets: [
+    { slot: "widget", label: "Widget image" },
+    { slot: "banner", label: "Widget banner", singleton: true },
+  ],
 });
 
 const { db, sql: conn } = testDb();
@@ -228,6 +231,92 @@ describe("PUT /api/admin/assets/bind", () => {
     const res = await bind(admin.token, { scope: "core", entityId: "not-a-uuid", slot: "item", assetId: null });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("invalid_request");
+  });
+});
+
+describe("singleton slots", () => {
+  async function uploadedId(token: string): Promise<string> {
+    return (await upload(token, makePng(7, 7), "image/png")).json().assetId;
+  }
+
+  function bind(token: string, body: unknown) {
+    return app.inject({
+      method: "PUT", url: "/api/admin/assets/bind",
+      headers: { authorization: `Bearer ${token}` }, payload: body as never,
+    });
+  }
+
+  it("binds without an entityId and reads back through the slot route", async () => {
+    const { admin } = await adminAndPlayer();
+    const assetId = await uploadedId(admin.token);
+
+    // No `entityId` in the body at all: a singleton's entity is a server-side
+    // constant, so the client never names one.
+    const bound = await bind(admin.token, { scope: "artcheck", slot: "banner", assetId });
+    expect(bound.statusCode).toBe(200);
+
+    const read = await app.inject({
+      method: "GET", url: "/api/assets/slot/artcheck/banner",
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().url).toMatch(/^\/assets\/[0-9a-f]{64}$/);
+  });
+
+  it("answers a null url for a singleton slot with nothing bound", async () => {
+    const { admin } = await adminAndPlayer();
+
+    const read = await app.inject({
+      method: "GET", url: "/api/assets/slot/artcheck/banner",
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+
+    // Not a 404: the slot exists, it simply has no art yet, and that is the
+    // normal state of a fresh install rather than an error.
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toEqual({ url: null });
+  });
+
+  it("400s a per-entity slot bound with no entityId", async () => {
+    const { admin } = await adminAndPlayer();
+    const assetId = await uploadedId(admin.token);
+
+    // Without this check the row would bind against the nil UUID and silently
+    // become a singleton nothing reads.
+    const res = await bind(admin.token, { scope: "artcheck", slot: "widget", assetId });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("entity_required");
+  });
+
+  it("404s the slot route for a per-entity slot", async () => {
+    const { admin } = await adminAndPlayer();
+
+    const read = await app.inject({
+      method: "GET", url: "/api/assets/slot/artcheck/widget",
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+
+    expect(read.statusCode).toBe(404);
+  });
+
+  it("requires auth to read a slot image", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/assets/slot/artcheck/banner" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("unbinds a singleton", async () => {
+    const { admin } = await adminAndPlayer();
+    const assetId = await uploadedId(admin.token);
+    await bind(admin.token, { scope: "artcheck", slot: "banner", assetId });
+
+    await bind(admin.token, { scope: "artcheck", slot: "banner", assetId: null });
+
+    const read = await app.inject({
+      method: "GET", url: "/api/assets/slot/artcheck/banner",
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+    expect(read.json()).toEqual({ url: null });
   });
 });
 

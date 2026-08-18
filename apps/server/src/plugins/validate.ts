@@ -128,7 +128,8 @@ function viewActions(view: ViewNode): string[] {
         // listed here — containment is about a plugin claiming paths, and
         // `/api/admin/assets` belongs to core, not to whoever declared the
         // widget.
-        actions.push(node.entitySource);
+        // Absent on a singleton binder, which has no entity list to fetch.
+        if (node.entitySource !== undefined) actions.push(node.entitySource);
         break;
       case "panel":
         for (const child of node.children) pending.push(child);

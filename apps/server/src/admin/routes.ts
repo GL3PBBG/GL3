@@ -5,10 +5,10 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import { players, roleModuleAccess, rounds, roles } from "../db/schema/index.js";
-import { CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
+import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
-import { assetsPage } from "./assets-page.js";
+import { buildAssetsPage } from "./assets-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
 
@@ -123,14 +123,14 @@ export function registerAdminRoutes(
       });
     }
     if (hasPermission(grants, CORE_SCOPE)) {
+      // Built per request from the live registry, so a newly installed plugin's
+      // banner slot has a widget with no code change here. NOT stamped: each
+      // binder already carries the scope of the slot it came from, and stamping
+      // would rewrite every one of them to `core`.
+      const assetsPage = buildAssetsPage(collectAssetSlots(manifests).values());
       sections.push({
         pluginId: CORE_SCOPE,
-        pages: [{
-          pluginId: CORE_SCOPE, id: assetsPage.id, path: assetsPage.path,
-          // Stamped like a plugin's, with `core` — the scope the three
-          // core-owned slots are registered under.
-          view: stampAssetBinderScope(assetsPage.view, CORE_SCOPE),
-        }],
+        pages: [{ pluginId: CORE_SCOPE, id: assetsPage.id, path: assetsPage.path, view: assetsPage.view }],
       });
     }
     if (hasPermission(grants, "rounds")) {

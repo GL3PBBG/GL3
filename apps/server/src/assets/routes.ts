@@ -1,14 +1,15 @@
-import { hasPermission, type AssetSlot } from "@gl3/plugin-sdk";
+import { hasPermission, SINGLETON_ENTITY_ID, type AssetSlot } from "@gl3/plugin-sdk";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import { loadGrants } from "../plugins/routes.js";
 import { CORE_SCOPE, slotKey } from "../plugins/asset-slots.js";
-import { items, locations, ranks } from "../db/schema/index.js";
+import { crimes, items, locations, ranks } from "../db/schema/index.js";
 import type { StorageDriver } from "./driver.js";
 import { ACCEPTED_MIMES } from "./image.js";
 import {
-  AssetError, bindAsset, DEFAULT_MAX_BYTES, DEFAULT_MAX_DIMENSION, storeAsset, unbindAsset,
+  AssetError, bindAsset, DEFAULT_MAX_BYTES, DEFAULT_MAX_DIMENSION, resolveSingletonAsset,
+  storeAsset, unbindAsset,
 } from "./service.js";
 
 /**
@@ -20,14 +21,25 @@ const CORE_ENTITY_SOURCES = [
   ["items", items, items.name],
   ["locations", locations, locations.name],
   ["ranks", ranks, ranks.name],
+  ["crimes", crimes, crimes.name],
 ] as const;
+
+const SlotParamsSchema = z.object({
+  scope: z.string().min(1).max(64),
+  slot: z.string().min(1).max(64),
+}).strict();
 
 /** The content hash, and nothing else. */
 const KeyParamsSchema = z.object({ key: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 
 const BindBodySchema = z.object({
   scope: z.string().min(1),
-  entityId: z.string().uuid(),
+  /**
+   * Omitted for a singleton slot, whose entity is the nil UUID constant. A
+   * per-entity slot still requires it — the check is in the handler, where the
+   * registry says which kind of slot this is.
+   */
+  entityId: z.string().uuid().optional(),
   slot: z.string().min(1),
   /** Null unbinds. A slot with nothing in it is a normal state, not an error. */
   assetId: z.string().uuid().nullable(),
@@ -119,20 +131,28 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
     // An undeclared slot is a 400, not a silently orphaned row: `entity_assets`
     // has no foreign key to check it, so this registry lookup is the ONLY thing
     // standing between a typo and a binding nothing will ever read.
-    if (!deps.assetSlots.has(slotKey(body.data.scope, body.data.slot))) {
+    const declared = deps.assetSlots.get(slotKey(body.data.scope, body.data.slot));
+    if (declared === undefined) {
       return reply.code(400).send({ error: "unknown_slot" });
     }
+
+    // A singleton's entity is a constant, so the client sends none. A
+    // per-entity slot without one would otherwise bind against the nil UUID and
+    // silently become a singleton nothing reads.
+    const entityId = declared.singleton === true ? SINGLETON_ENTITY_ID : body.data.entityId;
+    if (entityId === undefined) return reply.code(400).send({ error: "entity_required" });
 
     // Scoped, not blanket: the `travel` grant sets town art and cannot touch
     // item art. `*` still passes, as it does everywhere else.
     const grants = await loadGrants(deps.db, playerId);
     if (!hasPermission(grants, body.data.scope)) return reply.code(403).send({ error: "forbidden" });
 
+    const target = { scope: body.data.scope, slot: body.data.slot, entityId };
     if (body.data.assetId === null) {
-      await unbindAsset(deps.db, body.data);
+      await unbindAsset(deps.db, target);
       return reply.send({ bound: false });
     }
-    await bindAsset(deps.db, { ...body.data, assetId: body.data.assetId });
+    await bindAsset(deps.db, { ...target, assetId: body.data.assetId });
     return reply.send({ bound: true });
   });
 
@@ -150,6 +170,26 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
       return reply.send({ rows });
     });
   }
+
+  /**
+   * The image bound to a singleton slot.
+   *
+   * The renderer needs this because a manifest page's view is STATIC data built
+   * at boot — it cannot carry a URL that depends on what an admin uploaded
+   * later. So a `slotImage` node names its slot and the client asks here.
+   *
+   * Authenticated but not admin-gated: this is art players are meant to see.
+   */
+  app.get("/api/assets/slot/:scope/:slot", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const params = SlotParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const declared = deps.assetSlots.get(slotKey(params.data.scope, params.data.slot));
+    if (declared === undefined || declared.singleton !== true) {
+      return reply.code(404).send({ error: "unknown_slot" });
+    }
+    const url = await resolveSingletonAsset(deps.db, deps.driver, params.data.scope, params.data.slot);
+    return reply.send({ url });
+  });
 
   /**
    * Serve, filesystem driver only — with `ASSET_DRIVER=s3` the browser fetches

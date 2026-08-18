@@ -1,5 +1,6 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
 import type { FastifyInstance } from "fastify";
+import { stampAssetBinderScope } from "./asset-slots.js";
 
 export interface MenuItem { pageId: string; path: string; label: string; order: number }
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
@@ -18,7 +19,14 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
 
   for (const manifest of manifests) {
     for (const page of manifest.pages) {
-      pages.push({ pluginId: manifest.id, id: page.id, path: page.path, view: page.view });
+      // Stamped, not copied: a `slotImage` on a player page needs the declaring
+      // plugin's id to know which scope's art to ask for, and the author never
+      // writes it. (`assetBinder` is admin-only and stamped in admin/routes.ts,
+      // but the same pass covers both.)
+      pages.push({
+        pluginId: manifest.id, id: page.id, path: page.path,
+        view: stampAssetBinderScope(page.view, manifest.id),
+      });
       if (page.menu !== undefined) {
         menu.push({ pageId: page.id, path: page.path, label: page.menu.label, order: page.menu.order });
       }

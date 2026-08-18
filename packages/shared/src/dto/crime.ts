@@ -12,6 +12,8 @@ export const CrimeDtoSchema = z.object({
   chance: z.string(),
   /** Seconds until this player may commit again; 0 when ready. */
   cooldownRemaining: z.number().int().nonnegative(),
+  /** Absent when no art is bound — see `InventoryItemSchema.imageUrl`. */
+  imageUrl: z.string().optional(),
 });
 export type CrimeDto = z.infer<typeof CrimeDtoSchema>;
 

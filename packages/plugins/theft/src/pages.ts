@@ -35,7 +35,7 @@ export const garagePage: PageSchema = {
     children: [
       { kind: "text", value: "Cars stay in the city you stole them in. Sell or repair them there." },
       { kind: "table", source: "GET /api/garage", columns: [
-        { key: "image", label: "", render: "image" },
+        { key: "image", label: "", render: "image", imageSize: "md" },
         { key: "carName", label: "Car" },
         { key: "damage", label: "Damage" },
         { key: "locationName", label: "City" },

@@ -25,8 +25,9 @@ export type RenderInstruction =
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
   | { kind: "form"; action: string; submitLabel: string; fields: FormField[] }
   | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
-  | { kind: "assetBinder"; scope: string; slot: string; entitySource: string; entityLabelKey: string }
-  | { kind: "table"; source: string; columns: { key: string; label: string; render: "image" | null }[] }
+  | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
+  | { kind: "assetBinder"; scope: string; slot: string; entitySource: string | null; entityLabelKey: string | null }
+  | { kind: "table"; source: string; columns: { key: string; label: string; render: "image" | null; imageSize: "sm" | "md" | "lg" }[] }
   | { kind: "cards"; cards: string[] }
   | { kind: "panelHeader"; title: string };
 
@@ -123,6 +124,15 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       size: isSize(node.size) ? node.size : "md",
     }];
   }
+  if (isNode(node, "slotImage")) {
+    return [{
+      kind: "slotImage",
+      scope: String(node.scope ?? ""),
+      slot: String(node.slot),
+      alt: String(node.alt),
+      size: isSize(node.size) ? node.size : "lg",
+    }];
+  }
   if (isNode(node, "assetBinder")) {
     return [{
       kind: "assetBinder",
@@ -131,8 +141,9 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       // went through that stamp, which the bind route then refuses.
       scope: String(node.scope ?? ""),
       slot: String(node.slot),
-      entitySource: String(node.entitySource),
-      entityLabelKey: String(node.entityLabelKey),
+      // Null for a singleton slot: one image, so no picker is rendered.
+      entitySource: node.entitySource === undefined ? null : String(node.entitySource),
+      entityLabelKey: node.entityLabelKey === undefined ? null : String(node.entityLabelKey),
     }];
   }
   if (isNode(node, "table")) {
@@ -140,6 +151,9 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       key: isRecord(c) ? String(c.key) : "",
       label: isRecord(c) ? String(c.label) : "",
       render: isRecord(c) && c.render === "image" ? ("image" as const) : null,
+      // Normalised to a required value, like `render` above and `allowEmpty`
+      // on a select field: the renderer never re-derives the DTO's optionality.
+      imageSize: isRecord(c) && isSize(c.imageSize) ? c.imageSize : "sm",
     }));
     return [{ kind: "table", source: String(node.source), columns }];
   }
