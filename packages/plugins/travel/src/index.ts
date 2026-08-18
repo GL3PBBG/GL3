@@ -25,13 +25,26 @@ const TownBodySchema = z.object({
   travelCooldownSeconds: z.coerce.number().int().nonnegative(),
   // Validated in the handler, not by z.enum: the loader answers every zod
   // failure with a generic `invalid_request`, and the spec pins this one to
-  // its own code. Defaulted so pre-existing clients that omit it keep working.
-  combatMode: z.string().default("open"),
+  // its own code. Optional rather than defaulted: the admin form's untouched
+  // <select> has no auto-selected option, so PageRenderer submits
+  // `combatMode: ""` for a field the operator never touched. A `.default`
+  // only fires on an ABSENT key, so that empty string would reach
+  // parseCombatMode and 400 the pre-existing add/update-town flows. "" and
+  // absent are treated identically by parseCombatMode below.
+  combatMode: z.string().optional(),
 }).strict();
 const TownUpdateSchema = TownBodySchema.extend({ id: z.string().uuid() }).strict();
 const TravelParamsSchema = z.object({ locationId: IdSchema });
 
-function parseCombatMode(raw: string): "open" | "underground" {
+/**
+ * `undefined` covers both an absent key and the admin form's untouched-select
+ * `""` (see TownBodySchema above) — both mean "caller expressed no opinion",
+ * so both come back `undefined` rather than defaulting here. That lets
+ * adminUpdateRoute tell "no opinion" apart from "explicitly open" and leave
+ * the stored mode untouched.
+ */
+function parseCombatMode(raw: string | undefined): "open" | "underground" | undefined {
+  if (raw === undefined || raw === "") return undefined;
   if (raw !== "open" && raw !== "underground") throw new PluginError("invalid_combat_mode", 400);
   return raw;
 }
@@ -345,7 +358,7 @@ const adminCreateRoute = route({
   method: "POST", path: "/api/admin/travel/locations", auth: "admin",
   body: TownBodySchema,
   handler: async (ctx, { body }) => {
-    const combatMode = parseCombatMode(body.combatMode);
+    const combatMode = parseCombatMode(body.combatMode) ?? "open";
     const id = newId();
     await ctx.transaction(async (tx) => {
       await tx.db.insert(locations).values({
@@ -364,14 +377,17 @@ const adminUpdateRoute = route({
   method: "POST", path: "/api/admin/travel/locations/update", auth: "admin",
   body: TownUpdateSchema,
   handler: async (ctx, { body }) => {
-    const combatMode = parseCombatMode(body.combatMode);
+    // Computed before the transaction, same as create — but here `undefined`
+    // ("no opinion") is a real outcome, not defaulted, so the mode below is
+    // included in the update only when the caller actually asked for one.
+    const mode = parseCombatMode(body.combatMode);
     const updated = await ctx.transaction(async (tx) => {
       const result = await tx.db.update(locations)
         .set({
           name: body.name,
           travelCost: BigInt(body.travelCost),
           travelCooldownSeconds: body.travelCooldownSeconds,
-          combatMode,
+          ...(mode !== undefined ? { combatMode: mode } : {}),
         })
         .where(eq(locations.id, body.id))
         .returning({ id: locations.id });

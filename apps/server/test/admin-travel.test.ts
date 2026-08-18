@@ -94,6 +94,42 @@ describe("travel admin", () => {
     expect(bad.json<{ error: string }>().error).toBe("invalid_combat_mode");
   });
 
+  it("treats an empty combatMode (the admin form's untouched select) as unset on create", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations", headers: auth(),
+      payload: { name: "Nowhere", travelCost: "0", travelCooldownSeconds: 0, combatMode: "" },
+    });
+    expect(create.statusCode).toBe(201);
+    const { id } = create.json<{ id: string }>();
+
+    const [row] = await db.select().from(locations).where(eq(locations.id, id));
+    expect(row?.combatMode).toBe("open");
+  });
+
+  it("preserves the stored combat mode when update omits combatMode or sends the empty-select value", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations", headers: auth(),
+      payload: { name: "Hideout", travelCost: "0", travelCooldownSeconds: 0, combatMode: "underground" },
+    });
+    const { id } = create.json<{ id: string }>();
+
+    const omitted = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations/update", headers: auth(),
+      payload: { id, name: "Hideout", travelCost: "0", travelCooldownSeconds: 0 },
+    });
+    expect(omitted.statusCode).toBe(204);
+    const [afterOmit] = await db.select().from(locations).where(eq(locations.id, id));
+    expect(afterOmit?.combatMode).toBe("underground");
+
+    const empty = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations/update", headers: auth(),
+      payload: { id, name: "Hideout", travelCost: "0", travelCooldownSeconds: 0, combatMode: "" },
+    });
+    expect(empty.statusCode).toBe(204);
+    const [afterEmpty] = await db.select().from(locations).where(eq(locations.id, id));
+    expect(afterEmpty?.combatMode).toBe("underground");
+  });
+
   it("403s a non-admin", async () => {
     const p = await app.inject({
       method: "POST", url: "/api/auth/register",
