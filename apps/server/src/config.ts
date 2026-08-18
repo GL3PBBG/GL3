@@ -20,7 +20,44 @@ const EnvSchema = z.object({
   ),
   /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
   PLUGIN_IDS: z.string().default(""),
+
+  /**
+   * Which object-storage backend serves game art. `fs` writes under
+   * `ASSET_FS_ROOT` and serves through this server's own `/assets/:key` route;
+   * `s3` writes to any S3-compatible bucket (Cloudflare R2, AWS) and serves
+   * from `ASSET_CDN_BASE`. Both are real backends — see `assets/driver.ts`.
+   */
+  ASSET_DRIVER: z.enum(["fs", "s3"]).default("fs"),
+  ASSET_FS_ROOT: z.string().default("var/assets"),
+  S3_ENDPOINT: z.string().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  /** R2 wants the literal `auto`; AWS wants a real region. */
+  S3_REGION: z.string().default("auto"),
+  /** Public base the browser fetches images from, e.g. `https://cdn.example.com`. */
+  ASSET_CDN_BASE: z.string().optional(),
+}).superRefine((env, ctx) => {
+  // Selecting `s3` with a field missing must fail HERE, at boot, rather than on
+  // the first upload an admin attempts — which would be days later, in
+  // production, with a 500 and no clue which of six variables was forgotten.
+  if (env.ASSET_DRIVER !== "s3") return;
+  for (const key of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "ASSET_CDN_BASE"] as const) {
+    if (!env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required when ASSET_DRIVER=s3`,
+      });
+    }
+  }
 });
+
+export interface AssetConfig {
+  driver: "fs" | "s3";
+  fsRoot: string;
+  s3: { endpoint: string; bucket: string; accessKeyId: string; secretAccessKey: string; region: string; cdnBase: string } | null;
+}
 
 export interface Config {
   databaseUrl: string;
@@ -31,6 +68,7 @@ export interface Config {
   nodeEnv: "development" | "test" | "production";
   pluginIds: string[];
   sweepIntervalMs: number;
+  assets: AssetConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -44,5 +82,23 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeEnv: parsed.NODE_ENV,
     pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
     sweepIntervalMs: parsed.SWEEP_INTERVAL_MS,
+    assets: {
+      driver: parsed.ASSET_DRIVER,
+      fsRoot: parsed.ASSET_FS_ROOT,
+      // Non-null exactly when the driver is `s3`: the superRefine above has
+      // already proven every field is present, so this narrows without `!`
+      // on each one and without a second round of validation.
+      s3: parsed.ASSET_DRIVER === "s3" && parsed.S3_ENDPOINT && parsed.S3_BUCKET
+        && parsed.S3_ACCESS_KEY_ID && parsed.S3_SECRET_ACCESS_KEY && parsed.ASSET_CDN_BASE
+        ? {
+          endpoint: parsed.S3_ENDPOINT,
+          bucket: parsed.S3_BUCKET,
+          accessKeyId: parsed.S3_ACCESS_KEY_ID,
+          secretAccessKey: parsed.S3_SECRET_ACCESS_KEY,
+          region: parsed.S3_REGION,
+          cdnBase: parsed.ASSET_CDN_BASE.replace(/\/+$/, ""),
+        }
+        : null,
+    },
   };
 }

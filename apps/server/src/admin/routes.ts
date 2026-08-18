@@ -5,8 +5,10 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import { players, roleModuleAccess, rounds, roles } from "../db/schema/index.js";
+import { CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
+import { assetsPage } from "./assets-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
 
@@ -73,6 +75,10 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
   return [
     { id: "*", name: WILDCARD_LABEL },
     { id: "roles", name: "roles" },
+    // Grants the core art section: item, town and rank images. Named `core`
+    // rather than `assets` because it IS the scope those slots are registered
+    // under, and a second name for one thing is how the two drift apart.
+    { id: CORE_SCOPE, name: "core (game art)" },
     { id: "rounds", name: "rounds" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
@@ -102,7 +108,11 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: manifest.id,
         pages: manifest.adminPages.map((p) => ({
-          pluginId: manifest.id, id: p.id, path: p.path, view: p.view,
+          // The view is rewritten, not copied: `stampAssetBinderScope` fills
+          // each upload widget's `scope` with this plugin's id so the widget
+          // can only ever bind this plugin's own art.
+          pluginId: manifest.id, id: p.id, path: p.path,
+          view: stampAssetBinderScope(p.view, manifest.id),
         })),
       });
     }
@@ -110,6 +120,17 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "roles",
         pages: [{ pluginId: "roles", id: rolesPage.id, path: rolesPage.path, view: rolesPage.view }],
+      });
+    }
+    if (hasPermission(grants, CORE_SCOPE)) {
+      sections.push({
+        pluginId: CORE_SCOPE,
+        pages: [{
+          pluginId: CORE_SCOPE, id: assetsPage.id, path: assetsPage.path,
+          // Stamped like a plugin's, with `core` — the scope the three
+          // core-owned slots are registered under.
+          view: stampAssetBinderScope(assetsPage.view, CORE_SCOPE),
+        }],
       });
     }
     if (hasPermission(grants, "rounds")) {

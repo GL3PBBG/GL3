@@ -2,7 +2,7 @@ import type { GameEvent } from "@gl3/shared";
 import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { FilterPoint } from "./filters.js";
-import type { PropertyTypeDecl } from "./manifest.js";
+import type { AssetSlot, PropertyTypeDecl } from "./manifest.js";
 
 /**
  * The transaction handle a plugin sees. `query` is omitted, so
@@ -243,6 +243,38 @@ export interface PluginCtx {
    * validation-gap risk).
    */
   readonly installedPluginIds: ReadonlySet<string>;
+  /**
+   * Every image slot declared by any installed plugin, plus core's own, from
+   * the loader's registry. `scope` is the declaring plugin's id (or `"core"`)
+   * and is derived, never author-supplied. Same read-only manifest-data shape
+   * as `propertyTypes`.
+   */
+  readonly assetSlots: {
+    get(scope: string, slot: string): AssetSlot | null;
+    list(): readonly AssetSlot[];
+  };
+  /**
+   * Image URLs for entities, keyed by entity id.
+   *
+   * Batched by construction: `resolve` takes an ARRAY and returns a Map, and
+   * there is deliberately no single-id accessor anywhere in this surface. A
+   * list page is the common case for art, and a per-row lookup inside a
+   * `.map()` is an N+1 that stays invisible until a town has forty items in it.
+   *
+   * An entity with no art bound is absent from the Map — not an error, just
+   * the normal state of a row nobody has uploaded art for yet. The renderer
+   * falls back to its placeholder.
+   *
+   * Reads only, and cross-scope reads are allowed on purpose: `combat` renders
+   * a weapon whose `items` rows are core-scope. Writes go through the admin
+   * bind route, which checks `hasPermission(scope)` — so reading another
+   * plugin's art is free and changing it is not.
+   */
+  readonly assets: {
+    resolve(scope: string, entityIds: readonly string[], slot: string): Promise<Map<string, string>>;
+    /** `resolve` with `scope` fixed to the calling plugin's own id. */
+    mine(entityIds: readonly string[], slot: string): Promise<Map<string, string>>;
+  };
   readonly log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;

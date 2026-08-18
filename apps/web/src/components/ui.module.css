@@ -23,3 +23,28 @@
   border: 1px solid var(--line);
   background: var(--bg);
 }
+
+/* Game art. The box is fixed at every state — loading, loaded and missing — so
+   a list of items cannot reflow as its images arrive one by one. */
+.gameImage {
+  display: inline-block;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  vertical-align: middle;
+}
+.gameImageSm { width: 32px; height: 32px; }
+.gameImageMd { width: 64px; height: 64px; }
+.gameImageLg { width: 128px; height: 128px; }
+.gameImagePlaceholder {
+  /* A quiet diagonal hatch rather than a broken-image glyph: "no art yet" is
+     the normal state of most rows and must not read as an error. */
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    var(--line) 5px,
+    var(--line) 6px
+  );
+}

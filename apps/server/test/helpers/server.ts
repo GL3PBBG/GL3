@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
+import type { FilesystemDriver } from "../../src/assets/fs-driver.js";
 import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
@@ -10,10 +11,16 @@ import { loadPlugins, type LoadedPlugins } from "../../src/plugins/loader.js";
 import { loadSettings } from "../../src/settings/load.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
 import { attachGateway } from "../../src/ws/gateway.js";
+import { testAssetDriver } from "./assets.js";
 
 export async function bootTestServer(
   options?: { plugins?: readonly PluginManifest[] },
-): Promise<{ app: FastifyInstance; close: () => Promise<void>; plugins: LoadedPlugins }> {
+): Promise<{
+  app: FastifyInstance;
+  close: () => Promise<void>;
+  plugins: LoadedPlugins;
+  assetDriver: FilesystemDriver;
+}> {
   const config = loadConfig({ ...process.env, NODE_ENV: "test" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
@@ -58,13 +65,21 @@ export async function bootTestServer(
   // prefix isolates plugin BullMQ queues (including the crimes plugin's)
   // from each other and from other test files' queues in the same shared
   // Redis.
+  // Per boot, never the process-wide ASSET_FS_ROOT: storage is the one shared
+  // resource the asset cluster adds, and the leaderboard/rate-limit prefixes
+  // above exist because every other shared resource here has already caused a
+  // cross-talk failure that read as a real regression.
+  const assetDriver = testAssetDriver();
+
   const loadedPlugins = await loadPlugins(
-    { db, redis, settings: loadedTestSettings, leaderboardPrefix },
+    { db, redis, settings: loadedTestSettings, leaderboardPrefix, assetDriver },
     withCorePlugins(options?.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
   );
 
-  const app = await buildApp(config, { db, redis, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins });
+  const app = await buildApp(config, {
+    db, redis, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins, assetDriver,
+  });
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.
@@ -80,6 +95,9 @@ export async function bootTestServer(
     // stop the live worker started above from racing it. Purely additive —
     // every other caller destructures `{ app, close }` and is unaffected.
     plugins: loadedPlugins,
+    // Exposed so an asset test can read the stored bytes back out of the very
+    // driver the server wrote them through.
+    assetDriver,
     close: async () => {
       for (const w of loadedPlugins.workers) await w.close();
       for (const q of loadedPlugins.queues.values()) await q.close();

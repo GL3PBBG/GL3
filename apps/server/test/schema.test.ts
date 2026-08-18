@@ -136,8 +136,15 @@ describe("core schema", () => {
     // 0011_round_entries adds round_entries and its two FKs, both cascade:
     // round_id -> rounds(id) and player_id -> players(id) — a round_entries
     // row has no meaning once either side is gone.
-    expect(totalForeignKeys).toBe(36);
-    expect(byRule["c"]).toBe(23); // ON DELETE CASCADE
+    // 0012_assets adds ONE cascade FK: entity_assets.asset_id -> assets(id).
+    // That it adds only one is the design, not an accident: entity_assets
+    // carries no FK on `entity_id`, so binding an image to a plugin's row adds
+    // no edge into any plugin table and cannot invert anyone's lock order.
+    // The orphan rows that FK would have prevented are the sweeper's job.
+    // `assets.uploaded_by` is likewise FK-free — provenance only, and a
+    // deleted admin must not cascade away the art they uploaded.
+    expect(totalForeignKeys).toBe(37);
+    expect(byRule["c"]).toBe(24); // ON DELETE CASCADE
     expect(byRule["n"]).toBe(13); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
@@ -181,7 +188,12 @@ describe("core schema", () => {
     // rounds(starts_at) WHERE finalized_at IS NULL. round_entries' own
     // composite (round_id, player_id) primary key is excluded by this
     // query's NOT EXISTS clause, so it does not add a third.
-    expect(Number(count)).toBe(29);
+    // 0012_assets adds one: assets_sha256_key, the unique index that makes the
+    // blob table content-addressed — a re-upload of identical bytes conflicts
+    // here and returns the existing row instead of storing a second copy.
+    // entity_assets' composite (scope, entity_id, slot) primary key is
+    // excluded by the same NOT EXISTS clause, so it does not add a second.
+    expect(Number(count)).toBe(30);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

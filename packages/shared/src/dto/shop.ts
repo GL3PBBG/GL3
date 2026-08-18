@@ -8,6 +8,8 @@ export const ShopItemSchema = z.object({
   effects: z.unknown(),
   price: MoneySchema,
   stock: z.number().int().nonnegative(),
+  /** Absent when no art is bound — see `InventoryItemSchema.imageUrl`. */
+  imageUrl: z.string().optional(),
 });
 export type ShopItem = z.infer<typeof ShopItemSchema>;
 

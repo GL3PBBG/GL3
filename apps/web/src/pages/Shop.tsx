@@ -6,6 +6,7 @@ import { numericEffect, weaponStatLine } from "../lib/effects.js";
 import { canAfford, multiplyMoney } from "../lib/money.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 function Stats({ item }: { item: ShopItem }) {
   if (item.itemType === "weapon") {
@@ -34,6 +35,7 @@ function Row({ item, cash }: { item: ShopItem; cash: string }) {
   return (
     <li className={styles.row}>
       <span>
+        <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
         <strong>{item.name}</strong> <Stats item={item} />
         <span className={styles.meta}> <Money value={item.price} /> each · {item.stock} in stock</span>
       </span>
