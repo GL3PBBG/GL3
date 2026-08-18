@@ -176,11 +176,12 @@ export default defineWorkspace([
     ...srcAliases,
   },
   {
-    // Pure client modules only — money/rank/error formatting and the
-    // event→cache-key map. No jsdom and no component rendering: everything
-    // here is a function of its arguments, which is why it needs neither a
-    // DOM nor a new dependency. Anything needing a rendered component belongs
-    // in the manual walkthrough until this project grows a DOM environment.
+    // Mostly pure client modules — money/rank/error formatting and the
+    // event→cache-key map — which run in node and need no DOM. A file that
+    // renders (hooks via @testing-library/react) opts into a DOM per file
+    // with a `// @vitest-environment happy-dom` docblock; see
+    // use-countdowns-ticker.test.ts. Full component walkthroughs remain
+    // manual.
     test: {
       name: "@gl3/web",
       root: "./apps/web",
@@ -379,6 +380,7 @@ export default defineWorkspace([
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",
         "test/theft-tiers.test.ts",
+        "test/travel-bullet-price.test.ts",
         "test/travel-lock-order.test.ts",
         "test/travel.test.ts",
         "test/ws.test.ts",

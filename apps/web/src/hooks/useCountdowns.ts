@@ -25,14 +25,21 @@ export function useCountdowns() {
   // drive the re-render.
   const [now, setNow] = useState(() => Date.now());
 
+  // The ticker runs only while something is counting. Shell mounts this hook
+  // for the whole session (via useSentenceCountdown), and an unconditional
+  // interval re-rendered the nav, HUD and feed every second forever; with no
+  // deadlines there is nothing on screen a tick could change. Expiry tears it
+  // down again: the last prune empties `deadlines` and the effect cleans up.
+  const hasDeadlines = Object.keys(deadlines).length > 0;
   useEffect(() => {
+    if (!hasDeadlines) return;
     const tick = window.setInterval(() => {
       const current = Date.now();
       setNow(current);
       setDeadlines((prev) => pruneExpired(prev, current));
     }, 1000);
     return () => window.clearInterval(tick);
-  }, []);
+  }, [hasDeadlines]);
 
   const remaining = useMemo(() => {
     const seconds: Record<string, number> = {};
@@ -49,12 +56,17 @@ export function useCountdowns() {
    */
   const seed = useCallback((id: string, seconds: number, asOfMs?: number) => {
     const now = Date.now();
+    // With the ticker stopped, `now` state goes stale; a countdown anchored
+    // against it would read minutes too long until the first tick corrects it.
+    setNow(now);
     setDeadlines((prev) => seedDeadline(prev, id, seconds, now, asOfMs ?? now));
   }, []);
 
   /** Start a fresh countdown for an id (e.g. when its crime is committed). */
   const start = useCallback((id: string, seconds: number) => {
-    setDeadlines((prev) => startDeadline(prev, id, seconds, Date.now()));
+    const now = Date.now();
+    setNow(now);
+    setDeadlines((prev) => startDeadline(prev, id, seconds, now));
   }, []);
 
   return { remaining, seed, start };
