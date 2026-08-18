@@ -3,12 +3,13 @@ import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { itemPriceAt } from "@gl3/plugin-inventory";
+import { activeReportTargetIds } from "@gl3/plugin-detectives";
 import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 import { cooldownSecondsFor } from "./cooldown.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
-import { combatLog, items, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
+import { combatLog, items, locations, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -275,6 +276,22 @@ const attackRoute = route({
       // One-way protection would let a newbie farm with impunity.
       if (attacker.exp < config.newbieExpThreshold || target.exp < config.newbieExpThreshold) {
         throw new PluginError("protected", 409);
+      }
+
+      // Underground towns are V2's rule: unshootable without a live detective
+      // report. AFTER same_gang/protected so town mode never leaks through
+      // error-ordering differences. Both reads are plain SELECTs — no lock,
+      // no new edge (spec §1 rule-6 audit). attacker.locationId is non-null
+      // here: target_elsewhere above already threw on null.
+      const [town] = await tx.db
+        .select({ combatMode: locations.combatMode })
+        .from(locations)
+        .where(eq(locations.id, attacker.locationId));
+      if (town?.combatMode === "underground") {
+        const reported = await activeReportTargetIds(tx, player.id, new Date());
+        if (!reported.has(params.targetId)) {
+          throw new PluginError("no_detective_report", 409);
+        }
       }
 
       // Read once, used three times: to scale backfire chance, to compute the

@@ -329,6 +329,7 @@ export default defineWorkspace([
         "test/jail.test.ts",
         "test/jail-bail-bust.test.ts",
         "test/leaderboard.test.ts",
+        "test/location-combat-modes.test.ts",
         "test/mail.test.ts",
         "test/money-ranks.test.ts",
         "test/news.test.ts",
