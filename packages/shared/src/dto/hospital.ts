@@ -37,3 +37,11 @@ export type WardListResponse = z.infer<typeof WardListResponseSchema>;
 /** `POST /api/hospital/checkin` answers with the same shape as `GET /api/hospital`. */
 export const CheckinResponseSchema = HospitalStatusSchema;
 export type CheckinResponse = z.infer<typeof CheckinResponseSchema>;
+
+/** `POST /api/hospital/discharge-player` — pays another patient out. */
+export const DischargePlayerResponseSchema = z.object({
+  freed: z.string().uuid(),
+  paid: MoneySchema,
+  cash: MoneySchema,
+});
+export type DischargePlayerResponse = z.infer<typeof DischargePlayerResponseSchema>;
