@@ -164,6 +164,40 @@ describe("POST /api/detectives — hire", () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it("stamps expires_at at hire and the tracker reports the same instant", async () => {
+    await db.update(playerStats).set({ cash: 10_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 1, hours: 1 });
+    expect(res.statusCode).toBe(201);
+    const { searchId } = res.json<{ searchId: string }>();
+
+    const [row] = await db.select().from(detectiveSearches)
+      .where(eq(detectiveSearches.id, searchId));
+    expect(row?.expiresAt).not.toBeNull();
+    expect(row?.expiresAt?.getTime()).toBeGreaterThan(row!.endsAt.getTime());
+
+    // Two read paths cannot diverge: the tracker's expiresAt IS the column.
+    const listRes = await list(hirerToken);
+    const mine = listRes.json<{ searches: { id: string; expiresAt: string }[] }>()
+      .searches.find((s) => s.id === searchId);
+    expect(mine?.expiresAt).toBe(row?.expiresAt?.toISOString());
+  });
+
+  it("computes a legacy NULL expires_at row's deadline from the expire setting", async () => {
+    await db.update(playerStats).set({ cash: 10_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 1, hours: 1 });
+    const { searchId } = res.json<{ searchId: string }>();
+    await db.update(detectiveSearches).set({ expiresAt: null })
+      .where(eq(detectiveSearches.id, searchId));
+
+    const listRes = await list(hirerToken);
+    const mine = listRes.json<{ searches: { id: string; endsAt: string; expiresAt: string }[] }>()
+      .searches.find((s) => s.id === searchId);
+    // Old behaviour preserved: ends_at + expire, not epoch/absent.
+    expect(new Date(mine!.expiresAt).getTime()).toBeGreaterThan(new Date(mine!.endsAt).getTime());
+  });
 });
 
 describe("GET /api/detectives — reveal gating and live tracking", () => {

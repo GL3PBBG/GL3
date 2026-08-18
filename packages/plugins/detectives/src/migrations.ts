@@ -25,4 +25,8 @@ export const DETECTIVES_MIGRATIONS: { name: string; sql: string }[] = [
       succeeded        boolean
     )`,
   },
+  {
+    name: "0002_report_expiry",
+    sql: `ALTER TABLE p_detectives_searches ADD COLUMN expires_at timestamptz`,
+  },
 ];
