@@ -72,3 +72,32 @@ export const garage = pgTable("p_theft_garage", {
   damage: integer("damage").notNull().default(0),
   locationId: uuid("location_id"),
 });
+
+/** Mirrors `packages/plugins/forum/src/migrations.ts` `0001_forums`. */
+export const forums = pgTable("p_forum_forums", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  sort: integer("sort").notNull().default(0),
+});
+
+/** Mirrors `packages/plugins/forum/src/migrations.ts` `0002_topics`. */
+export const forumTopics = pgTable("p_forum_topics", {
+  id: uuid("id").primaryKey(),
+  forumId: uuid("forum_id").notNull(),
+  authorId: uuid("author_id"),
+  subject: text("subject").notNull(),
+  status: text("status").notNull().default("open"),
+  type: text("type").notNull().default("normal"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastPostAt: timestamp("last_post_at", { withTimezone: true }).notNull().defaultNow(),
+  postCount: integer("post_count").notNull().default(0),
+});
+
+/** Mirrors `packages/plugins/forum/src/migrations.ts` `0004_posts`. */
+export const forumPosts = pgTable("p_forum_posts", {
+  id: uuid("id").primaryKey(),
+  topicId: uuid("topic_id").notNull(),
+  authorId: uuid("author_id"),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
