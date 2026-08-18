@@ -5,6 +5,7 @@ import {
 } from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
+import { SlotImage } from "../components/GameImage.js";
 
 const ROLES = ["mastermind", "driver", "gunman", "hacker"] as const;
 
@@ -96,6 +97,9 @@ export function OrganizedCrime(): JSX.Element {
               const member = slots?.get(role);
               return (
                 <li key={role} className={styles.row}>
+                  {/* One image per role, not per heist: the four roles are the
+                      feature's fixed content, a heist row is a live instance. */}
+                  <SlotImage scope="oc" slot={`role-${role}`} alt={role} size="md" />
                   <span>
                     <strong>{role}</strong>
                     {member ? (

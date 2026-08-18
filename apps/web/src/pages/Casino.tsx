@@ -8,6 +8,7 @@ import { PageRenderer } from "../plugins/PageRenderer.js";
 import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 import type { CasinoGame, CasinoSessionView, CasinoStepResponse } from "@gl3/shared";
+import { SlotImage } from "../components/GameImage.js";
 
 /**
  * Why the wager the player typed cannot be staked, in the server's own order.
@@ -159,6 +160,9 @@ function GameRow({ game, wager, cash, minBet, disabled, onPlay }: {
   const check = checkWager(wager, minBet, game.maxBet, cash);
   return (
     <li className={styles.row}>
+      {/* `scope` is the GAME's plugin id, so each game plugin ships its own
+          table art under the same `table` slot name. */}
+      <SlotImage scope={game.gameId} slot="table" alt={game.name} size="md" />
       <span className={styles.rowStack}>
         <span>{game.name}</span>
         <span className={styles.meta}>

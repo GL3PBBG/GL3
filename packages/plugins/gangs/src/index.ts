@@ -104,16 +104,22 @@ function isPgCode(error: unknown, code: string): boolean {
 const isUniqueViolation = (error: unknown): boolean => isPgCode(error, "23505");
 const isForeignKeyViolation = (error: unknown): boolean => isPgCode(error, "23503");
 
-async function loadGangDto(db: PluginDbTx, gangId: string): Promise<Record<string, unknown> | null> {
+async function loadGangDto(
+  db: PluginDbTx, gangId: string, art?: Map<string, string>,
+): Promise<Record<string, unknown> | null> {
   const [gang] = await db.select().from(gangs).where(eq(gangs.id, gangId));
   if (!gang) return null;
   const [memberCount] = await db.select({ n: count() }).from(gangMembers)
     .where(eq(gangMembers.gangId, gangId));
+  const logo = art?.get(gang.id);
   return {
     id: gang.id, name: gang.name, description: gang.description, info: gang.info,
     bank: gang.bank.toString(), cash: gang.cash.toString(), level: gang.level,
     bossPlayerId: gang.bossPlayerId, underbossPlayerId: gang.underbossPlayerId,
     memberCount: memberCount?.n ?? 0,
+    // Omitted rather than null when unbound: the DTO field is optional and
+    // `exactOptionalPropertyTypes` makes the spread the honest way to say so.
+    ...(logo === undefined ? {} : { imageUrl: logo }),
   };
 }
 
@@ -150,7 +156,8 @@ const getGangRoute = route({
   // PUT/DELETE permissions and both bank routes all answer 404 before 403 on
   // a nonexistent gang, which already makes existence observable.
   handler: async (ctx, { params }) => ctx.transaction(async (tx) => {
-    const dto = await loadGangDto(tx.db, params.gangId);
+    const art = await ctx.assets.mine([params.gangId], "logo");
+    const dto = await loadGangDto(tx.db, params.gangId, art);
     if (!dto) throw new PluginError("gang_not_found", 404);
     return { status: 200, body: dto };
   }),
@@ -809,10 +816,34 @@ const withdrawRoute = route({
   },
 });
 
+
+/**
+ * Every gang, for the admin art picker.
+ *
+ * `gangs` had no admin surface at all before this, which is why its logo slot
+ * needs one: a per-row slot is bindable only if something can list the rows,
+ * and core cannot enumerate a plugin's table on its behalf.
+ *
+ * `id` travels as the picker's `valueKey` and is never rendered — the rule
+ * `test/admin-ids-hidden.test.ts` enforces across every admin surface.
+ */
+const adminGangListRoute = route({
+  method: "GET", path: "/api/admin/gangs/list", auth: "admin",
+  handler: async (ctx) => {
+    return ctx.transaction(async (tx) => {
+      const rows = await tx.db
+        .select({ id: gangs.id, name: gangs.name })
+        .from(gangs)
+        .orderBy(gangs.name);
+      return { status: 200, body: { rows } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "gangs",
   version: "1.0.0",
-  basePaths: ["/api/gangs"],
+  basePaths: ["/api/gangs", "/api/admin/gangs"],
   routes: [
     // Reads
     getGangRoute, gangLogsRoute, gangMembersRoute, myInvitesRoute,
@@ -823,6 +854,14 @@ export default definePlugin({
     grantPermissionRoute, revokePermissionRoute,
     // Money
     depositRoute, withdrawRoute,
+    adminGangListRoute,
+  ],
+  // A gang's crest. Admin-bound rather than player-uploaded: the whole asset
+  // cluster is admin-only art, and letting members upload their own would be
+  // the UGC path — moderation, quotas, takedowns — that is deliberately out of
+  // scope.
+  providesAssets: [
+    { slot: "logo", label: "Gang logos", entitySource: "GET /api/admin/gangs/list", entityLabelKey: "name" },
   ],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87
   // asserts a no-arg boot answers GET /api/plugins with exactly

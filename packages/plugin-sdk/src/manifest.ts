@@ -68,6 +68,21 @@ export interface AssetSlotDecl {
    * and no second code path; only the admin widget and the read differ.
    */
   singleton?: boolean | undefined;
+  /**
+   * Where the admin art section fetches this slot's bindable rows from, as
+   * `"GET /absolute/path"` returning `{ rows: [{ id, … }] }`.
+   *
+   * Supplying it is what lets a PER-ROW slot be bound from core's central art
+   * section rather than from the plugin's own admin page — which matters
+   * because a plugin need not have one (`gangs` and `oc` do not), and without
+   * this its row art would be declarable and permanently unbindable.
+   *
+   * Must sit under the declaring plugin's own `basePaths`, like every other
+   * view action; the loader's containment pass checks it.
+   */
+  entitySource?: string | undefined;
+  /** Which field of a row the picker shows. The row's id is always `id`. */
+  entityLabelKey?: string | undefined;
 }
 
 /**
@@ -85,8 +100,21 @@ const AssetSlotDeclSchema = z
     slot: z.string().regex(PLUGIN_ID_PATTERN, "asset slot must be lowercase kebab-case"),
     label: z.string().min(1),
     singleton: z.boolean().optional(),
+    entitySource: z
+      .string()
+      .regex(/^GET \/[a-zA-Z0-9\-_/:]*$/, "entitySource must be `GET /absolute/path`")
+      .optional(),
+    entityLabelKey: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((decl) => decl.singleton !== true || decl.entitySource === undefined, {
+    message: "a singleton slot has no rows, so it must not declare an entitySource",
+    path: ["entitySource"],
+  })
+  .refine((decl) => decl.entitySource === undefined || decl.entityLabelKey !== undefined, {
+    message: "entitySource needs entityLabelKey, or the picker has nothing to show",
+    path: ["entityLabelKey"],
+  });
 
 /**
  * The `entity_id` a singleton slot binds against: the nil UUID, which no

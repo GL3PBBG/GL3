@@ -65,6 +65,15 @@ const listRoute = route({
         .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId))
         .where(eq(propertiesTable.locationId, here));
 
+      // One lookup per DECLARED TYPE, not per row: art belongs to the type, so
+      // a town with four casinos in it still costs one read per type. The list
+      // is the manifest registry, which is small and fixed at boot.
+      const typeArt = new Map<string, string>();
+      for (const decl of ctx.propertyTypes.list()) {
+        const url = await ctx.assets.singleton(decl.id, "property");
+        if (url !== null) typeArt.set(decl.id, url);
+      }
+
       const realRows = rows.map((row) => {
         const decl = ctx.propertyTypes.get(row.pluginId);
         const isOwner = row.ownerPlayerId === player.id;
@@ -82,6 +91,7 @@ const listRoute = route({
           // The lever and the P&L are the owner's business only.
           lever: isOwner ? row.cost.toString() : "",
           profit: isOwner ? row.profit.toString() : "",
+          imageUrl: typeArt.get(row.pluginId) ?? "",
         };
       });
 
@@ -115,6 +125,7 @@ const listRoute = route({
             ownerName: "—",
             lever: "",
             profit: "",
+            imageUrl: typeArt.get(decl.id) ?? "",
           });
         }
       }

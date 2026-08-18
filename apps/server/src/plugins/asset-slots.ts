@@ -10,10 +10,10 @@ export const CORE_SCOPE = "core";
  */
 export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   // Per-row: one image for every row of a core-owned table.
-  { scope: CORE_SCOPE, slot: "item", label: "Item image" },
-  { scope: CORE_SCOPE, slot: "location", label: "Town image" },
-  { scope: CORE_SCOPE, slot: "rank", label: "Rank badge" },
-  { scope: CORE_SCOPE, slot: "crime", label: "Crime image" },
+  { scope: CORE_SCOPE, slot: "item", label: "Items", entitySource: "GET /api/admin/assets/entities/items", entityLabelKey: "name" },
+  { scope: CORE_SCOPE, slot: "location", label: "Towns", entitySource: "GET /api/admin/assets/entities/locations", entityLabelKey: "name" },
+  { scope: CORE_SCOPE, slot: "rank", label: "Ranks", entitySource: "GET /api/admin/assets/entities/ranks", entityLabelKey: "name" },
+  { scope: CORE_SCOPE, slot: "crime", label: "Crimes", entitySource: "GET /api/admin/assets/entities/crimes", entityLabelKey: "name" },
 
   // Singletons: one banner per page. These live under `core` rather than under
   // the plugin that owns each feature because the PAGES are hand-written in

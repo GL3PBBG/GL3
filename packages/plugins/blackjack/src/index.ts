@@ -81,6 +81,16 @@ export default definePlugin({
   id: "blackjack",
   version: "1.0.0",
   basePaths: ["/api/blackjack"],
+  // The game's own art. It owns no tables and serves no routes — its state is
+  // opaque jsonb in the casino hub's session row — so a singleton is the only
+  // shape that fits, and the lobby is what renders it.
+  providesAssets: [
+    { slot: "table", label: "Blackjack table", singleton: true },
+    // The building on the properties board. A singleton because art belongs to
+    // the property TYPE, not to each town's copy of it — every casino in the
+    // game is the same franchise.
+    { slot: "property", label: "Casino building", singleton: true },
+  ],
   providesProperties: [{
     id: "blackjack",
     name: "Blackjack Table",

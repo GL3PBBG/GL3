@@ -21,6 +21,8 @@ export const GangDtoSchema = z.object({
   bossPlayerId: IdSchema,
   underbossPlayerId: IdSchema.nullable(),
   memberCount: z.number().int().nonnegative(),
+  /** Absent when no crest is bound — see `InventoryItemSchema.imageUrl`. */
+  imageUrl: z.string().optional(),
 });
 export type GangDto = z.infer<typeof GangDtoSchema>;
 
