@@ -7,10 +7,12 @@ import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
+import { newSeed } from "../rng.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
-import { releaseIfExpired } from "./status.js";
-import { bailCostPerSecond } from "./settings.js";
+import { bustSucceeds } from "./bust.js";
+import { releaseIfExpired, sendToJail } from "./status.js";
+import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent } from "./settings.js";
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 
@@ -133,5 +135,97 @@ export function registerJailRoutes(
       }
       throw error;
     }
+  });
+
+  /**
+   * Free to attempt. The failure branch — the caller doing the target's kind
+   * of time — is the whole cost, which is why there is no price and no
+   * cooldown. The seed is generated here and never accepted from the client:
+   * a client-chosen seed is a client-chosen outcome.
+   */
+  app.post("/api/jail/bust", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+
+    const parsed = TargetBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_body" });
+    const targetId = parsed.data.playerId;
+    if (targetId === playerId) return reply.code(409).send({ error: "self_target" });
+
+    const result = await db.transaction(async (tx) => {
+      // ONE sorted call over both players, FIRST statement, before either row
+      // is read (CLAUDE.md rule 6) — same shape as bail above.
+      await lockPlayersForUpdate(tx, [playerId, targetId]);
+
+      const [caller] = await tx.select({
+        locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
+        username: players.username,
+      })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .where(eq(playerStats.playerId, playerId));
+      if (caller && (caller.jailedUntil?.getTime() ?? 0) > Date.now()) {
+        return { kind: "caller_jailed" as const };
+      }
+
+      const [target] = await tx.select({
+        locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
+        username: players.username,
+      })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .where(eq(playerStats.playerId, targetId));
+
+      if (!target) return { kind: "missing" as const };
+      if (target.locationId === null || target.locationId !== caller?.locationId) {
+        return { kind: "elsewhere" as const };
+      }
+      if ((target.jailedUntil?.getTime() ?? 0) <= Date.now()) return { kind: "free" as const };
+
+      if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
+        const until = await sendToJail(tx, playerId, bustFailJailSeconds(settings));
+        return { kind: "failed" as const, until, callerName: caller?.username ?? "unknown" };
+      }
+
+      await tx.update(playerStats)
+        .set({ jailedUntil: null })
+        .where(eq(playerStats.playerId, targetId));
+
+      const notificationId = uuidv7();
+      await insertNotification(tx, {
+        id: notificationId, playerId: targetId, body: "Someone busted you out.",
+      });
+      return { kind: "busted" as const, notificationId, targetName: target.username };
+    });
+
+    if (result.kind === "missing") return reply.code(404).send({ error: "player_not_found" });
+    if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
+    if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
+    if (result.kind === "caller_jailed") return reply.code(409).send({ error: "already_jailed" });
+
+    // After commit, never inside the transaction (CLAUDE.md rule 5).
+    const at = new Date().toISOString();
+    if (result.kind === "failed") {
+      await publishEvent(redis, {
+        id: uuidv7(), type: "player.jailed", at,
+        actorId: playerId, actorName: result.callerName,
+        audience: { kind: "player", playerId },
+        until: result.until.toISOString(), reason: "bust_failed",
+      });
+      return reply.send({ success: false, jailedUntil: result.until.toISOString() });
+    }
+
+    await publishEvent(redis, {
+      id: uuidv7(), type: "player.released", at,
+      actorId: targetId, actorName: result.targetName,
+      audience: { kind: "player", playerId: targetId },
+    });
+    await publishEvent(redis, {
+      id: uuidv7(), type: "notification.created", at,
+      actorId: targetId, actorName: result.targetName,
+      audience: { kind: "player", playerId: targetId },
+      notificationId: result.notificationId, body: "Someone busted you out.",
+    });
+    return reply.send({ success: true, jailedUntil: null });
   });
 }
