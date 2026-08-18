@@ -213,6 +213,7 @@ export default defineWorkspace([
         "test/combat-settings.test.ts",
         "test/effects-parity.test.ts",
         "test/config.test.ts",
+        "test/mail-driver.test.ts",
         "test/facility-settings.test.ts",
         "test/password.test.ts",
         "test/admin-ids-hidden.test.ts",
