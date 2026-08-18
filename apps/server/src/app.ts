@@ -14,6 +14,7 @@ import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
+import { registerPresenceRoutes } from "./presence/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
@@ -78,7 +79,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
-  registerProfileRoutes(app, deps.db, requireAuth);
+  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, deps.rateLimitPrefix);
+  registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 

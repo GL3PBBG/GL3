@@ -57,7 +57,7 @@ describe("GET /api/players/:playerId/profile", () => {
     expect(Object.keys(body).sort()).toEqual(
       [
         "playerId", "username", "bio", "avatarUrl", "gangId", "gangName", "exp", "rankName",
-        "moneyRankLabel", "backfire", "createdAt",
+        "moneyRankLabel", "backfire", "createdAt", "lastSeenAt",
       ].sort(),
     );
   });

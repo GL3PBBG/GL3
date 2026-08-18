@@ -365,6 +365,7 @@ export default defineWorkspace([
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",
+        "test/online.test.ts",
         "test/presence.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
