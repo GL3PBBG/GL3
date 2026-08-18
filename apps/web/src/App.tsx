@@ -49,6 +49,18 @@ export function App(): JSX.Element {
   return (
     <BrowserRouter>
       <Routes>
+        {/*
+          Hoisted above the me.isSuccess branch, not inside either side of it:
+          a password-reset link is followed from an email client, and the
+          browser it opens in may well still hold a perfectly valid session
+          from before the player forgot their password — GET /api/auth/me
+          succeeds for ANY valid session regardless of verification state, so
+          "logged in" is not "mid-reset-flow". These two must be reachable no
+          matter which branch below is live, or a logged-in visitor's /reset
+          link falls through Shell's own catch-all to NotFound.
+        */}
+        <Route path="/forgot" element={<Forgot />} />
+        <Route path="/reset" element={<Reset />} />
         {me.isSuccess ? (
           <>
             {/*
@@ -103,15 +115,13 @@ export function App(): JSX.Element {
         ) : (
           <>
             {/*
-              No token (or an expired/invalid one — /me answered 401): forgot
-              and reset must stay reachable here since neither needs a session,
-              and login is both the explicit path and the catch-all so any
-              other URL a logged-out visitor lands on still shows something
-              useful rather than a blank router miss.
+              No token (or an expired/invalid one — /me answered 401). Login is
+              both the explicit path and the catch-all, so any other URL a
+              logged-out visitor lands on still shows something useful rather
+              than a blank router miss. /forgot and /reset are declared above,
+              not here — this branch no longer needs them.
             */}
             <Route path="/login" element={<Login />} />
-            <Route path="/forgot" element={<Forgot />} />
-            <Route path="/reset" element={<Reset />} />
             <Route path="*" element={<Login />} />
           </>
         )}
