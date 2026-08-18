@@ -99,6 +99,13 @@
       "when": 1787175600000,
       "tag": "0013_location_combat_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787262000000,
+      "tag": "0014_email_verified",
+      "breakpoints": true
     }
   ]
 }
