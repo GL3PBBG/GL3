@@ -186,6 +186,17 @@ describe("underground town attack gate", () => {
   });
 });
 
+describe("travel board", () => {
+  it("lists combatMode on the travel board", async () => {
+    await makeAttackable("underground", a.id);
+    const res = await app.inject({ method: "GET", url: "/api/locations",
+      headers: { authorization: `Bearer ${a.token}` } });
+    const town = res.json<{ locations: { combatMode?: string; current: boolean }[] }>()
+      .locations.find((l) => l.current);
+    expect(town?.combatMode).toBe("underground");
+  });
+});
+
 describe("combat targets route", () => {
   const targets = (token: string) =>
     app.inject({ method: "GET", url: "/api/combat/targets",

@@ -36,7 +36,7 @@ describe("travel admin", () => {
     const list = await app.inject({ method: "GET", url: "/api/admin/travel/locations", headers: auth() });
     expect(list.statusCode).toBe(200);
     expect(list.json().rows).toEqual([
-      { id, name: "Palermo", travelCost: "500", travelCooldownSeconds: "60" },
+      { id, name: "Palermo", travelCost: "500", travelCooldownSeconds: "60", combatMode: "open" },
     ]);
 
     const [row] = await db.select().from(locations).where(eq(locations.id, id));
@@ -73,6 +73,25 @@ describe("travel admin", () => {
       payload: { name: "X", travelCost: "-5", travelCooldownSeconds: 0 },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("admin round-trips combat_mode and refuses junk", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations", headers: auth(),
+      payload: { name: "Hideout", travelCost: "0", travelCooldownSeconds: 0, combatMode: "underground" },
+    });
+    expect(create.statusCode).toBe(201);
+    const { id } = create.json<{ id: string }>();
+
+    const [row] = await db.select().from(locations).where(eq(locations.id, id));
+    expect(row?.combatMode).toBe("underground");
+
+    const bad = await app.inject({
+      method: "POST", url: "/api/admin/travel/locations/update", headers: auth(),
+      payload: { id, name: "Hideout", travelCost: "0", travelCooldownSeconds: 0, combatMode: "ghost" },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json<{ error: string }>().error).toBe("invalid_combat_mode");
   });
 
   it("403s a non-admin", async () => {
