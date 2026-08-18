@@ -4,6 +4,14 @@
 
 **Goal:** Let a hurt player check themselves into hospital to heal for the price of time, and let anyone standing in a town see — and act on — the players in that town's hospital and jail.
 
+> **Post-implementation correction:** every `0.1.10` below is this plan's
+> original target for `@gl3/shared`. By the time the DTO task (Task 2) went
+> to publish, the registry already served both `0.1.10` and `0.1.11`, taken
+> by another session's work landing concurrently — neither number belongs to
+> this cluster. The version actually shipped is `0.1.12`; see
+> `docs/STATUS.md`'s "Hospital self-admission and local facility rosters"
+> section for the corrected record.
+
 **Architecture:** Everything lands in core (`apps/server/src/game/hospital/`, `apps/server/src/game/jail/`), because bail/bust/paid-discharge need a release-another-player primitive that would otherwise have to be exposed on the plugin SDK ctx. Six new routes, four new settings, no new database objects, and no new `GameEvent` variants — the facts are published through the existing `player.released` / `player.discharged` / `player.jailed` / `notification.created` events.
 
 **Tech Stack:** TypeScript (strict, ESM, `.js` import suffixes), Fastify, drizzle-orm on PostgreSQL, ioredis, Zod at every boundary, vitest against real Postgres + Redis, React + TanStack Query on the web.

@@ -4,6 +4,13 @@ Date: 2026-08-18
 Branch: `feat/hospital-jail-social`
 Status: approved, not yet implemented
 
+**Post-implementation correction:** §8 below specifies `@gl3/shared` →
+`0.1.10`. By the time this branch's DTO task went to publish, the registry
+already served both `0.1.10` and `0.1.11`, taken by another session's work
+landing concurrently — neither number belongs to this cluster. The version
+actually shipped is `0.1.12`; see `docs/STATUS.md`'s "Hospital self-admission
+and local facility rosters" section for the corrected record.
+
 ## 1. Why
 
 V2's hospital is two things GL3's is not. First, it is a *heal* — a player low
