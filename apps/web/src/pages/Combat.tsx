@@ -103,9 +103,11 @@ export function Combat(): JSX.Element {
 
       {weapon.data ? <WeaponPanel weapon={weapon.data} /> : null}
 
-      {attack.data ? (
-        <p className={styles.meta}><AttackResult data={attack.data} /></p>
-      ) : null}
+      {/* Always mounted so it is a live region BEFORE a result lands in it —
+          a region inserted together with its content is often not announced. */}
+      <p className={styles.meta} role="status">
+        {attack.data ? <AttackResult data={attack.data} /> : null}
+      </p>
 
       <div className={styles.stack}>
         <div>

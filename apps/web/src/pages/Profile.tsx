@@ -66,7 +66,9 @@ function EditProfile({ viewerId, profile }: { viewerId: string; profile: Profile
         </label>
         <div className={styles.actions}>
           <button type="button" disabled={update.isPending} onClick={submit}>Save</button>
-          {update.isSuccess && !update.isPending ? <span className={styles.ok}>Saved.</span> : null}
+          <span className={styles.ok} role="status">
+            {update.isSuccess && !update.isPending ? "Saved." : null}
+          </span>
         </div>
       </div>
       <p className={styles.meta}>Leaving the avatar blank keeps the current one — it can be replaced but not removed.</p>

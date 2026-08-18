@@ -86,7 +86,9 @@ export function OrganizedCrime(): JSX.Element {
       {/* Heist view */}
       {heist ? (
         <>
-          <h3 className={styles.meta}>Status: {heist.status}</h3>
+          {/* aria-live: the status flips open→executing→finished from a background
+              job, not from anything the player just pressed. */}
+          <h3 className={styles.meta} aria-live="polite">Status: {heist.status}</h3>
           {heist.status === "executing" ? (
             <p className={styles.meta}>Heist is executing...</p>
           ) : null}

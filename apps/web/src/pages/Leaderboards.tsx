@@ -32,6 +32,7 @@ export function Leaderboards(): JSX.Element {
           <button
             key={value}
             type="button"
+            aria-pressed={value === kind}
             className={value === kind ? styles.tabActive : styles.tabIdle}
             onClick={() => { setKind(value); }}
           >
@@ -44,6 +45,7 @@ export function Leaderboards(): JSX.Element {
           <button
             key={value}
             type="button"
+            aria-pressed={value === scope}
             className={value === scope ? styles.tabActive : styles.tabIdle}
             onClick={() => { setScope(value); }}
           >
