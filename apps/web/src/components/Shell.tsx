@@ -94,7 +94,9 @@ function PageBanner(): JSX.Element | null {
   if (banner === undefined) return null;
   return (
     <div className={styles.pageBanner}>
-      <SlotImage scope="core" slot={banner.slot} alt={banner.alt} size="lg" />
+      {/* Not zoomable: the banner already renders at natural size up to the
+          content width, and a zoom control on page chrome is noise. */}
+      <SlotImage scope="core" slot={banner.slot} alt={banner.alt} size="banner" zoomable={false} />
     </div>
   );
 }

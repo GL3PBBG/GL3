@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.js";
 import styles from "./ui.module.css";
 
-export type GameImageSize = "sm" | "md" | "lg";
+export type GameImageSize = "sm" | "md" | "lg" | "banner";
 
 const SIZE_CLASS: Record<GameImageSize, string> = {
   sm: styles.gameImageSm as string,
   md: styles.gameImageMd as string,
   lg: styles.gameImageLg as string,
+  banner: styles.gameImageBanner as string,
 };
 
 /**
@@ -101,17 +102,18 @@ export function useSlotImage(scope: string, slot: string): string | null {
 }
 
 /** `GameImage` for a singleton slot: looks the art up, then draws it. */
-export function SlotImage({ scope, slot, alt, size = "lg" }: {
+export function SlotImage({ scope, slot, alt, size = "lg", zoomable }: {
   scope: string;
   slot: string;
   alt: string;
   size?: GameImageSize;
+  zoomable?: boolean;
 }): JSX.Element | null {
   const url = useSlotImage(scope, slot);
   // Null, not a placeholder: a page banner nobody has uploaded should take up
   // no space at all, unlike a list row whose fixed box keeps the list aligned.
   if (url === null) return null;
-  return <GameImage url={url} alt={alt} size={size} />;
+  return <GameImage url={url} alt={alt} size={size} zoomable={zoomable ?? true} />;
 }
 
 /**

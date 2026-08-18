@@ -37,6 +37,15 @@
 .gameImageSm { width: 32px; height: 32px; }
 .gameImageMd { width: 64px; height: 64px; }
 .gameImageLg { width: 128px; height: 128px; }
+/* A banner is not a thumbnail: natural size, capped at the content width. The
+   box is NOT fixed here — a banner has no siblings to keep aligned, and there
+   is no one height that fits every uploaded aspect ratio. */
+.gameImageBanner {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
 .gameImagePlaceholder {
   /* A quiet diagonal hatch rather than a broken-image glyph: "no art yet" is
      the normal state of most rows and must not read as an error. */
