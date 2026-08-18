@@ -752,6 +752,16 @@ export default definePlugin({
   id: "oc",
   version: "1.0.0",
   basePaths: ["/api/oc"],
+  // One image per ROLE, not per heist: a heist row is a live instance a player
+  // created, while the four roles are the fixed content of the feature. They
+  // are singletons because a role is not a row — `ROLES` is a constant, so
+  // there is nothing to bind an entity id to.
+  providesAssets: [
+    { slot: "role-mastermind", label: "Mastermind", singleton: true },
+    { slot: "role-driver", label: "Driver", singleton: true },
+    { slot: "role-gunman", label: "Gunman", singleton: true },
+    { slot: "role-hacker", label: "Hacker", singleton: true },
+  ],
   routes: [createRoute, stateRoute, inviteRoute, declineRoute, acceptRoute, leaveRoute, cancelRoute, executeRoute],
   jobs: { resolve: resolveJob },
   migrations: OC_MIGRATIONS,

@@ -50,6 +50,7 @@ const tiersRoute = route({
 
     return ctx.transaction(async (tx) => {
       const tiers = await tx.db.select().from(theftTiers).orderBy(theftTiers.minCarValue);
+      const art = await ctx.assets.mine(tiers.map((t) => t.id), "tier");
       const rows = [];
       for (const tier of tiers) {
         const [counted] = await tx.db
@@ -65,6 +66,7 @@ const tiersRoute = route({
           maxCarValue: tier.maxCarValue.toString(),
           cars: String(counted?.n ?? 0),
           cooldownRemaining: String(cooldownRemaining),
+          image: art.get(tier.id) ?? "",
         });
       }
       return { status: 200, body: { rows } };
@@ -698,7 +700,12 @@ export default definePlugin({
   // One slot: every row in this plugin's cars table may carry art. The loader
   // stamps the scope from this manifest's own id, so `theft:car` is the key and
   // no other plugin can bind to it.
-  providesAssets: [{ slot: "car", label: "Car image" }],
+  // Both slots carry their own picker, so both are bound from core's central
+  // art section — this plugin's admin page no longer needs a panel for it.
+  providesAssets: [
+    { slot: "car", label: "Cars", entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name" },
+    { slot: "tier", label: "Theft tiers", entitySource: "GET /api/admin/theft/tiers", entityLabelKey: "name" },
+  ],
   pages: [theftPage, garagePage],
   adminPages: [adminPage],
 });

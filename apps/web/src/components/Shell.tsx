@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   useJail, useLocations, useLogout, useMail, useMe, useNotifications, usePlugins, useRanks,
 } from "../api/queries.js";
@@ -9,6 +9,7 @@ import { unreadCount } from "../lib/mail.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
 import { Amount, Money } from "./ui.js";
+import { SlotImage } from "./GameImage.js";
 import styles from "./Shell.module.css";
 
 const LINKS: ReadonlyArray<readonly [string, string]> = [
@@ -43,6 +44,57 @@ function Stat({ label, children }: { label: string; children: ReactNode }): JSX.
       <span className={styles.statLabel}>{label}</span>
       {children}
     </span>
+  );
+}
+
+
+/**
+ * Which singleton art slot each route's banner comes from.
+ *
+ * One map here rather than a `<SlotImage>` inside each of nineteen page
+ * components: a banner is chrome, it belongs to the layout, and every page
+ * would otherwise have to remember to draw one — which is exactly how the
+ * `location` and `rank` slots ended up bindable with nothing rendering them.
+ *
+ * A route with no entry simply has no banner. So does one whose slot has no
+ * art bound: `SlotImage` renders null rather than a placeholder, because empty
+ * space at the top of a page is better than a hatched grey box on every page of
+ * a fresh install.
+ */
+const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
+  "/crimes": { slot: "page-crimes", alt: "Crimes" },
+  "/jail": { slot: "page-jail", alt: "Jail" },
+  "/hospital": { slot: "page-hospital", alt: "Hospital" },
+  "/bank": { slot: "page-bank", alt: "Bank" },
+  "/casino": { slot: "page-casino", alt: "Casino" },
+  "/combat": { slot: "page-combat", alt: "Combat" },
+  "/bounties": { slot: "page-bounties", alt: "Bounties" },
+  "/detectives": { slot: "page-detectives", alt: "Detectives" },
+  "/oc": { slot: "page-oc", alt: "Organized crime" },
+  "/properties": { slot: "page-properties", alt: "Properties" },
+  "/garage": { slot: "page-garage", alt: "Garage" },
+  "/theft": { slot: "page-theft", alt: "Car theft" },
+  "/gang": { slot: "page-gang", alt: "Gang" },
+  "/mail": { slot: "page-mail", alt: "Mail" },
+  "/news": { slot: "page-news", alt: "News" },
+  "/shop": { slot: "page-shop", alt: "Shop" },
+  "/bullets": { slot: "page-bullets", alt: "Bullet shop" },
+  "/travel": { slot: "page-travel", alt: "Travel" },
+  "/ranks": { slot: "page-ranks", alt: "Ranks" },
+  "/leaderboards": { slot: "page-leaderboards", alt: "Leaderboards" },
+};
+
+function PageBanner(): JSX.Element | null {
+  const { pathname } = useLocation();
+  // Exact match on the first path segment, so `/mail/:threadId` shares the mail
+  // banner and an unknown route quietly gets none.
+  const key = `/${pathname.split("/")[1] ?? ""}`;
+  const banner = PAGE_BANNERS[key];
+  if (banner === undefined) return null;
+  return (
+    <div className={styles.pageBanner}>
+      <SlotImage scope="core" slot={banner.slot} alt={banner.alt} size="lg" />
+    </div>
   );
 }
 
@@ -158,6 +210,7 @@ export function Shell(): JSX.Element {
 
       <div className={styles.body}>
         <main className={styles.content}>
+          <PageBanner />
           <Outlet />
         </main>
         <EventFeed />

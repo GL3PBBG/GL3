@@ -10,6 +10,8 @@ export const LocationDtoSchema = z.object({
   bulletStock: z.number().int().nonnegative(),
   current: z.boolean(),
   cooldownRemaining: z.number().int().nonnegative(),
+  /** Absent when no town image is bound — see `InventoryItemSchema.imageUrl`. */
+  imageUrl: z.string().optional(),
 });
 export type LocationDto = z.infer<typeof LocationDtoSchema>;
 

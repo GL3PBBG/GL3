@@ -214,6 +214,9 @@ export default definePlugin({
             .where(eq(playerStats.playerId, playerId));
           const rows = await tx.db.select().from(ranks).orderBy(asc(ranks.expRequired));
           const money = await tx.db.select().from(moneyRanks).orderBy(asc(moneyRanks.threshold));
+          // `ranks` is a CORE table — same cross-scope read as travel's towns
+          // and inventory's items.
+          const art = await ctx.assets.resolve("core", rows.map((r) => r.id), "rank");
 
           return {
             status: 200,
@@ -226,6 +229,7 @@ export default definePlugin({
                 bulletReward: r.bulletReward,
                 maxHealth: r.maxHealth,
                 current: r.id === player?.rankId,
+                ...(art.has(r.id) ? { imageUrl: art.get(r.id) as string } : {}),
               })),
               moneyRanks: money.map((m) => ({
                 id: m.id, label: m.label, threshold: m.threshold.toString(),

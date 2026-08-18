@@ -128,7 +128,8 @@ function viewActions(view: ViewNode): string[] {
         // listed here — containment is about a plugin claiming paths, and
         // `/api/admin/assets` belongs to core, not to whoever declared the
         // widget.
-        actions.push(node.entitySource);
+        // Absent on a singleton binder, which has no entity list to fetch.
+        if (node.entitySource !== undefined) actions.push(node.entitySource);
         break;
       case "panel":
         for (const child of node.children) pending.push(child);
@@ -265,6 +266,20 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     // plugin touches — the route half of the same manifest has never allowed it.
     // Admin pages share the same namespace: their view actions are still
     // attributed to the plugin's basePaths.
+    // A slot's own entity source is a view action like any other: it is
+    // fetched on mount by the admin art section, and a plugin claiming a path
+    // outside its basePaths through this field would sidestep the very check
+    // the page-level pass exists for.
+    for (const decl of manifest.providesAssets) {
+      if (decl.entitySource === undefined) continue;
+      const path = actionPath(decl.entitySource);
+      if (hasDotSegment(path) || !containedIn(path, manifest.basePaths)) {
+        fail(
+          `plugin "${manifest.id}" asset slot "${decl.slot}" declares entitySource "${decl.entitySource}", outside ${scope}`,
+        );
+      }
+    }
+
     // An upload widget on a PLAYER page would render a file picker for anyone
     // logged in. The bind route behind it still checks `hasPermission(scope)`,
     // so nothing could actually be rebound — but the page would offer an action

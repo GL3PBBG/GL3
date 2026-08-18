@@ -46,6 +46,18 @@ describe("collectAssetSlots", () => {
     expect(registry.get(slotKey("garageco", "car"))?.label).toBe("Also a car");
   });
 
+  it("carries `singleton` through to the registry", () => {
+    const plugin = definePlugin({
+      id: "casino", version: "1.0.0", basePaths: ["/api/casino"],
+      providesAssets: [{ slot: "floor", label: "Casino floor", singleton: true }],
+    });
+
+    // Rebuilding the declaration field by field here once dropped this flag,
+    // which made every plugin banner unbindable while the registry cheerfully
+    // reported the slot as per-entity.
+    expect(collectAssetSlots([plugin]).get(slotKey("casino", "floor"))?.singleton).toBe(true);
+  });
+
   it("rejects a plugin declaring the same slot twice", () => {
     const plugin = definePlugin({
       id: "dupes", version: "1.0.0", basePaths: ["/api/dupes"],
@@ -93,6 +105,56 @@ describe("stampAssetBinderScope", () => {
     const view = { kind: "text", value: "nothing here" } as const;
     expect(stampAssetBinderScope(view, "theft")).toBe(view);
     expect(containsAssetBinder(view)).toBe(false);
+  });
+});
+
+describe("per-row slots with their own picker", () => {
+  it("carries entitySource and entityLabelKey into the registry", () => {
+    const plugin = definePlugin({
+      id: "gangs", version: "1.0.0", basePaths: ["/api/gangs", "/api/admin/gangs"],
+      providesAssets: [{
+        slot: "logo", label: "Gang logos",
+        entitySource: "GET /api/admin/gangs/list", entityLabelKey: "name",
+      }],
+    });
+
+    // This is what lets a plugin with NO admin page of its own still have
+    // bindable row art: core's central section renders the picker from these.
+    expect(collectAssetSlots([plugin]).get(slotKey("gangs", "logo"))).toMatchObject({
+      entitySource: "GET /api/admin/gangs/list", entityLabelKey: "name",
+    });
+  });
+
+  it("refuses an entitySource on a singleton, which has no rows to pick", () => {
+    expect(() => definePlugin({
+      id: "confused", version: "1.0.0", basePaths: ["/api/confused"],
+      providesAssets: [{
+        slot: "banner", label: "Banner", singleton: true,
+        entitySource: "GET /api/confused/things", entityLabelKey: "name",
+      }],
+    })).toThrow(/singleton slot has no rows/);
+  });
+
+  it("refuses an entitySource with no label key, which would render a blank picker", () => {
+    expect(() => definePlugin({
+      id: "halfway", version: "1.0.0", basePaths: ["/api/halfway"],
+      providesAssets: [{ slot: "thing", label: "Things", entitySource: "GET /api/halfway/things" }],
+    })).toThrow(/entityLabelKey/);
+  });
+
+  it("holds a slot's entitySource to the plugin's own basePaths", () => {
+    const plugin = definePlugin({
+      id: "reachy", version: "1.0.0", basePaths: ["/api/reachy"],
+      providesAssets: [{
+        slot: "thing", label: "Things",
+        // Another plugin's admin list. A slot's source is fetched on mount just
+        // like a table's, so it is contained the same way — otherwise this
+        // field would be a hole straight through the containment pass.
+        entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name",
+      }],
+    });
+
+    expect(() => validatePlugins([plugin])).toThrow(/outside/);
   });
 });
 
