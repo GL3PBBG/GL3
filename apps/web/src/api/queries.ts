@@ -191,14 +191,54 @@ export function useRoundStandings(roundId: string, kind: LeaderboardKind) {
 export function useAuth(mode: "login" | "register") {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { username: string; password: string }) => {
+    // `email` is required by RegisterRequestSchema and absent from
+    // LoginRequestSchema — sent conditionally rather than always, so a login
+    // never carries a stray field the server schema doesn't expect.
+    mutationFn: async (input: { username: string; password: string; email?: string }) => {
+      const requestBody = mode === "register"
+        ? { username: input.username, email: input.email, password: input.password }
+        : { username: input.username, password: input.password };
       const body = AuthResponseSchema.parse(
-        await api(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify(input) }),
+        await api(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify(requestBody) }),
       );
       tokenStore.set(body.token);
       return body;
     },
     onSuccess: () => { void queryClient.invalidateQueries(); },
+  });
+}
+
+/**
+ * `code` from the emailed link or pasted by hand. The response is `{}` on
+ * success — nothing in `MeResponseSchema` reflects verification state, so
+ * there is nothing meaningful to invalidate here.
+ */
+export function useVerify() {
+  return useMutation<void, Error, { code: string }>({
+    mutationFn: async (input) =>
+      api<void>("/api/auth/verify", { method: "POST", body: JSON.stringify(input) }),
+  });
+}
+
+export function useResendVerify() {
+  return useMutation<void, Error, void>({
+    mutationFn: async () => api<void>("/api/auth/verify/resend", { method: "POST" }),
+  });
+}
+
+/** Always 200 regardless of whether the address is registered — anti-
+ *  enumeration by design (see auth/routes.ts). */
+export function useForgot() {
+  return useMutation<void, Error, { email: string }>({
+    mutationFn: async (input) =>
+      api<void>("/api/auth/forgot", { method: "POST", body: JSON.stringify(input) }),
+  });
+}
+
+export function useReset() {
+  return useMutation<void, Error, { token: string; password: string }>({
+    mutationFn: async (input) =>
+      api<void>("/api/auth/reset", { method: "POST", body: JSON.stringify(input) }),
   });
 }
 
