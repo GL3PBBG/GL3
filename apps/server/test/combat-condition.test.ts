@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backfireChanceFor, effectiveCondition, PRISTINE } from "@gl3/plugin-combat";
+import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "@gl3/plugin-combat";
 
 const DAY = 86_400;
 const at = (iso: string): Date => new Date(iso);
@@ -75,5 +75,32 @@ describe("backfireChanceFor", () => {
 
   it("clamps at 100", () => {
     expect(backfireChanceFor(90, 0, 3)).toBe(100);
+  });
+});
+
+describe("repairCostFor", () => {
+  it("prices a full repair at multiplier x the weapon's price", () => {
+    expect(repairCostFor(100_000n, 100, 3, 1000n)).toBe(300_000n);
+  });
+
+  it("scales linearly with points restored", () => {
+    expect(repairCostFor(100_000n, 40, 3, 1000n)).toBe(120_000n);
+  });
+
+  it("rounds up rather than repairing tiny amounts for free", () => {
+    // 33 * 3 * 1 / 100 = 0.99 — ceil, never floor to zero.
+    expect(repairCostFor(33n, 1, 3, 1000n)).toBe(1n);
+  });
+
+  it("falls back to the flat per-point rate when the weapon has no price", () => {
+    expect(repairCostFor(null, 40, 3, 1000n)).toBe(40_000n);
+  });
+
+  it("is zero for a zero-priced weapon", () => {
+    expect(repairCostFor(0n, 40, 3, 1000n)).toBe(0n);
+  });
+
+  it("is zero when nothing is restored", () => {
+    expect(repairCostFor(100_000n, 0, 3, 1000n)).toBe(0n);
   });
 });

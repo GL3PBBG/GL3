@@ -1,5 +1,5 @@
 import { RepairResponseSchema, WeaponConditionDtoSchema } from "@gl3/shared";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -25,6 +25,23 @@ let player: string;
 let weaponId: string;
 let unownedWeaponId: string;
 let ownedArmorId: string;
+let homeLocationId: string;
+
+/** Lists the weapon in a town's shop; that price drives the repair formula. */
+async function stockWeapon(locationId: string, itemId: string, price: bigint): Promise<void> {
+  await db.execute(sql`
+    insert into p_inventory_shop_stock (location_id, item_id, price, stock)
+    values (${locationId}, ${itemId}, ${price.toString()}::bigint, 5)`);
+}
+
+async function otherLocation(): Promise<string> {
+  const id = uuidv7();
+  await db.insert(locations).values({
+    id, name: `loc-${id.slice(-8)}`, travelCost: 0n,
+    travelCooldownSeconds: 60, bulletStock: 0, bulletCost: 1n,
+  });
+  return id;
+}
 
 async function setSetting(key: string, value: string): Promise<void> {
   await db.insert(settings).values({ key, value });
@@ -56,6 +73,7 @@ beforeEach(async () => {
   ({ token, playerId: player } = registerRes.json());
 
   const locationId = uuidv7();
+  homeLocationId = locationId;
   await db.insert(locations).values({
     id: locationId,
     name: `loc-${locationId.slice(-8)}`,
@@ -112,6 +130,17 @@ describe("GET /api/combat/weapon", () => {
     expect(dto.repairCost).toBe("400");
   });
 
+  it("prices repair off the local shop listing: full repair costs 3x the weapon's price", async () => {
+    await stockWeapon(homeLocationId, weaponId, 20_000n);
+    await db.insert(weaponCondition).values({
+      playerId: player, itemId: weaponId, condition: 60, updatedAt: new Date(),
+    });
+
+    // 20_000 * 3 * 40 / 100
+    const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
+    expect(dto.repairCost).toBe("24000");
+  });
+
   it("reports fists as pristine, zero-chance and free", async () => {
     await db.update(playerStats).set({ weaponItemId: null }).where(eq(playerStats.playerId, player));
     const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
@@ -137,6 +166,45 @@ describe("POST /api/combat/repair", () => {
     const [row] = await db.select().from(weaponCondition)
       .where(and(eq(weaponCondition.playerId, player), eq(weaponCondition.itemId, weaponId)));
     expect(row?.condition).toBe(100);
+  });
+
+  it("charges 3x the local shop price scaled by points restored", async () => {
+    await stockWeapon(homeLocationId, weaponId, 20_000n);
+    await db.insert(weaponCondition).values({
+      playerId: player, itemId: weaponId, condition: 60, updatedAt: new Date(),
+    });
+    const before = (await statsOf(player)).cash;
+
+    const res = await post(token, "/api/combat/repair", { itemId: weaponId });
+    expect(res.statusCode).toBe(200);
+    expect(RepairResponseSchema.parse(res.json())).toEqual({ condition: 100, cost: "24000" });
+    expect((await statsOf(player)).cash).toBe(before - 24_000n);
+  });
+
+  it("uses the cheapest listing anywhere when the weapon is not sold locally", async () => {
+    await stockWeapon(await otherLocation(), weaponId, 50_000n);
+    await stockWeapon(await otherLocation(), weaponId, 30_000n);
+    await db.insert(weaponCondition).values({
+      playerId: player, itemId: weaponId, condition: 60, updatedAt: new Date(),
+    });
+
+    // 30_000 * 3 * 40 / 100
+    const res = await post(token, "/api/combat/repair", { itemId: weaponId });
+    expect(res.statusCode).toBe(200);
+    expect(RepairResponseSchema.parse(res.json())).toEqual({ condition: 100, cost: "36000" });
+  });
+
+  it("prefers the local price even when another town sells it cheaper", async () => {
+    await stockWeapon(homeLocationId, weaponId, 40_000n);
+    await stockWeapon(await otherLocation(), weaponId, 10_000n);
+    await db.insert(weaponCondition).values({
+      playerId: player, itemId: weaponId, condition: 60, updatedAt: new Date(),
+    });
+
+    // 40_000 * 3 * 40 / 100
+    const res = await post(token, "/api/combat/repair", { itemId: weaponId });
+    expect(res.statusCode).toBe(200);
+    expect(RepairResponseSchema.parse(res.json())).toEqual({ condition: 100, cost: "48000" });
   });
 
   it("writes exactly one ledger row for the repair", async () => {

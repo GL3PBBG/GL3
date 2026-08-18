@@ -24,7 +24,10 @@ export interface CombatSettings {
     wearFactor: number;
   };
   repair: {
+    /** Fallback rate for a weapon with no shop listing anywhere. */
     costPerPoint: bigint;
+    /** Full 0→100 repair costs this many times the weapon's shop price. */
+    costMultiplier: number;
   };
 }
 
@@ -130,6 +133,7 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
     },
     repair: {
       costPerPoint: big(get, "repair.cost_per_point", 1000n),
+      costMultiplier: num(get, "repair.cost_multiplier", 3),
     },
   };
 }
