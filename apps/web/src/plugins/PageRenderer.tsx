@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { GameImage } from "../components/GameImage.js";
 import { Hand } from "../components/PlayingCard.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
@@ -65,7 +66,7 @@ function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup
  */
 function TableBlock({ source, columns, refetchSignal }: {
   source: string;
-  columns: readonly { readonly key: string; readonly label: string }[];
+  columns: readonly { readonly key: string; readonly label: string; readonly render: "image" | null }[];
   refetchSignal: number;
 }): JSX.Element {
   const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
@@ -109,7 +110,16 @@ function TableBlock({ source, columns, refetchSignal }: {
       <tbody>
         {rows.map((row, rowIndex) => (
           <tr key={rowIndex}>
-            {columns.map((col) => <td key={col.key}>{row[col.key] ?? ""}</td>)}
+            {columns.map((col) => (
+              <td key={col.key}>
+                {col.render === "image"
+                  // The cell value is a URL the server resolved; `GameImage`
+                  // owns the missing-art case, which for a table means most
+                  // rows on a fresh install.
+                  ? <GameImage url={row[col.key] ?? null} alt={col.label} size="sm" />
+                  : row[col.key] ?? ""}
+              </td>
+            ))}
           </tr>
         ))}
       </tbody>
@@ -176,6 +186,124 @@ function SelectField({ field, value, onChange, refetchSignal }: {
         <option key={opt.value} value={opt.value}>{opt.label}</option>
       ))}
     </select>
+  );
+}
+
+/**
+ * The admin upload widget: pick an entity, pick a file, and the two requests
+ * that binding art actually takes happen here rather than in the plugin.
+ *
+ * Two requests, not one, and the split is the design: `POST /api/admin/assets`
+ * takes RAW IMAGE BYTES (a plugin route's Zod-parsed JSON body could not carry
+ * them), and `PUT /api/admin/assets/bind` is ordinary JSON. Both are core
+ * routes — which is exactly why this is its own node kind rather than a `form`,
+ * since a form's action must live under the declaring plugin's own basePaths.
+ *
+ * `scope` is never chosen here. The server stamped it from the declaring
+ * plugin's id, so this widget can only ever bind that plugin's art.
+ */
+function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSignal }: {
+  scope: string;
+  slot: string;
+  entitySource: string;
+  entityLabelKey: string;
+  refetchSignal: number;
+}): JSX.Element {
+  const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
+  const [entityId, setEntityId] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const path = entitySource.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    let cancelled = false;
+    void api<unknown>(path)
+      .then((body) => {
+        if (cancelled) return;
+        setRows(TableRowsResponseSchema.parse(body).rows);
+      })
+      .catch((caught: unknown) => { if (!cancelled) setError(caught); });
+    return () => { cancelled = true; };
+  }, [path, refetchSignal]);
+
+  async function submit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (file === null || entityId === "") return;
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      // The raw bytes, with the file's own type as the content-type. The server
+      // reads the magic bytes and refuses the upload if the two disagree, so a
+      // mislabelled file fails here rather than being stored.
+      const bytes = await file.arrayBuffer();
+      const uploaded = await api<{ assetId: string }>("/api/admin/assets", {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: bytes,
+      });
+      await api<{ bound: boolean }>("/api/admin/assets/bind", {
+        method: "PUT",
+        body: JSON.stringify({ scope, entityId, slot, assetId: uploaded.assetId }),
+      });
+      setStatus("Image bound.");
+      setFile(null);
+    } catch (caught: unknown) {
+      setError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear(): Promise<void> {
+    if (entityId === "") return;
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await api<{ bound: boolean }>("/api/admin/assets/bind", {
+        method: "PUT",
+        body: JSON.stringify({ scope, entityId, slot, assetId: null }),
+      });
+      setStatus("Image removed.");
+    } catch (caught: unknown) {
+      setError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className={styles.form} onSubmit={(event) => { void submit(event); }}>
+      <label>
+        Entity
+        <select value={entityId} onChange={(event) => { setEntityId(event.target.value); }}>
+          <option value="">Select…</option>
+          {rows.map((row) => (
+            <option key={row["id"] ?? ""} value={row["id"] ?? ""}>
+              {row[entityLabelKey] ?? row["id"] ?? ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Image
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(event) => { setFile(event.target.files?.[0] ?? null); }}
+        />
+      </label>
+      <button type="submit" disabled={busy || file === null || entityId === ""}>Upload &amp; bind</button>
+      <button type="button" disabled={busy || entityId === ""} onClick={() => { void clear(); }}>
+        Remove image
+      </button>
+      {status !== null ? <p className={styles.muted}>{status}</p> : null}
+      <ErrorText error={error} />
+    </form>
   );
 }
 
@@ -356,6 +484,19 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             key={index}
             source={inst.source}
             columns={inst.columns}
+            refetchSignal={refetchSignal}
+          />
+        );
+      case "image":
+        return <GameImage key={index} url={inst.url} alt={inst.alt} size={inst.size} />;
+      case "assetBinder":
+        return (
+          <AssetBinderBlock
+            key={index}
+            scope={inst.scope}
+            slot={inst.slot}
+            entitySource={inst.entitySource}
+            entityLabelKey={inst.entityLabelKey}
             refetchSignal={refetchSignal}
           />
         );

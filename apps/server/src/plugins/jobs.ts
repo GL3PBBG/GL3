@@ -4,6 +4,7 @@ import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import { createRng } from "../game/rng.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
+import { collectAssetSlots } from "./asset-slots.js";
 import { collectPropertyTypes } from "./property-types.js";
 
 /**
@@ -78,6 +79,10 @@ export async function runPluginJob(
     // Same narrowing as propertyTypes above: a job sees only its own plugin's
     // id today. No job calls buildRegistry yet.
     installedPluginIds: new Set([manifest.id]),
+    // Core's own slots plus this plugin's, matching the narrowing above: a job
+    // resolving art for a core table (`items`) is the realistic case, another
+    // plugin's is not.
+    assetSlots: collectAssetSlots([manifest]),
   });
 
   try {

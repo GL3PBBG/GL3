@@ -3,6 +3,7 @@ import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
 import { numericEffect, weaponStatLine } from "../lib/effects.js";
 import styles from "./pages.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 /**
  * The three item types this page renders specially. Anything else is listed
@@ -115,6 +116,7 @@ export function Inventory(): JSX.Element {
               {weapons.map((item) => (
                 <li key={item.itemId} className={styles.row}>
                   <span>
+                    <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
                   <button
@@ -137,6 +139,7 @@ export function Inventory(): JSX.Element {
               {armors.map((item) => (
                 <li key={item.itemId} className={styles.row}>
                   <span>
+                    <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
                   <button
@@ -160,6 +163,7 @@ export function Inventory(): JSX.Element {
               {consumables.map((item) => (
                 <li key={item.itemId} className={styles.row}>
                   <span>
+                    <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
                   <button
@@ -182,6 +186,7 @@ export function Inventory(): JSX.Element {
               {others.map((item) => (
                 <li key={item.itemId} className={styles.row}>
                   <span>
+                    <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} />
                   </span>
                 </li>

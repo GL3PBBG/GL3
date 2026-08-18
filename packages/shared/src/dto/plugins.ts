@@ -179,7 +179,41 @@ const leafOptions = [
        * live under the plugin's basePaths like any button/form action.
        */
       source: z.string().regex(GET_SOURCE_RE, "table source must be `GET /absolute/path`"),
-      columns: z.array(z.object({ key: z.string(), label: z.string() }).strict()).min(1),
+      columns: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          /** Absent renders text; `image` treats the cell value as a URL. */
+          render: z.literal("image").optional(),
+        }).strict(),
+      ).min(1),
+    })
+    .strict(),
+  // Game art, and the admin widget that binds it. Kept identical to the SDK's
+  // copy for the reason the `cards` leaf below records the hard way: a leaf in
+  // one file and not the other passes boot and then fails the browser, taking
+  // the WHOLE plugin payload down with it.
+  z
+    .object({
+      kind: z.literal("image"),
+      url: z.string().min(1),
+      alt: z.string().min(1),
+      size: z.enum(["sm", "md", "lg"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("assetBinder"),
+      slot: z.string().min(1),
+      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`"),
+      entityLabelKey: z.string().min(1),
+      /**
+       * Filled in by the loader from the declaring plugin's id before the node
+       * reaches the wire — which is why it is required HERE and absent from the
+       * SDK's authoring schema. A plugin cannot bind another plugin's art
+       * because it never writes this field.
+       */
+      scope: z.string().min(1),
     })
     .strict(),
   // A hand of playing cards. Values are @letele/playing-cards component names:

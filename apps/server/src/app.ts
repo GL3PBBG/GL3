@@ -1,6 +1,9 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
+import { registerAssetRoutes } from "./assets/routes.js";
+import { createStorageDriver } from "./assets/factory.js";
+import type { StorageDriver } from "./assets/driver.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
@@ -10,6 +13,7 @@ import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
+import { collectAssetSlots } from "./plugins/asset-slots.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
@@ -27,10 +31,18 @@ export interface AppDeps {
   rateLimitPrefix?: string;
   /** Loaded plugin system: validated manifests + queues + payload (from `loadPlugins`). */
   plugins?: LoadedPlugins;
+  /**
+   * Overridable so a test can point storage at its own temp directory rather
+   * than the process-wide `ASSET_FS_ROOT` — the same reason
+   * `leaderboardPrefix` and `rateLimitPrefix` above are overridable. Defaults
+   * to whatever `config.assets` selects.
+   */
+  assetDriver?: StorageDriver;
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const loadedSettings = await loadSettings(deps.db);
+  const assetDriver = deps.assetDriver ?? createStorageDriver(config.assets);
   const app = Fastify({ logger: config.nodeEnv !== "test" });
   await app.register(cors, { origin: config.corsOrigins, credentials: true });
 
@@ -99,7 +111,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
         );
       }
     }
-    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: loadedSettings, leaderboardPrefix }, CORE_PLUGINS);
+    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: loadedSettings, leaderboardPrefix, assetDriver }, CORE_PLUGINS);
     ownsLoadedPlugins = true;
   }
 
@@ -109,6 +121,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     queues: loaded.queues,
     settings: loadedSettings,
     leaderboardPrefix,
+    assetDriver,
   });
 
   // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`
@@ -124,6 +137,15 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   registerPluginsEndpoint(app, loaded.payload);
   registerAdminRoutes(app, deps.db, loaded.manifests);
+  // After the plugins are loaded: the bind route validates a slot against the
+  // registry those manifests produce, so registering earlier would give it an
+  // empty one and reject every real binding.
+  registerAssetRoutes(app, {
+    db: deps.db,
+    driver: assetDriver,
+    settings: loadedSettings,
+    assetSlots: collectAssetSlots(loaded.manifests),
+  });
 
   return app;
 }

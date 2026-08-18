@@ -24,7 +24,9 @@ export type RenderInstruction =
   | { kind: "cooldownButton"; label: string; action: string; cooldownAction: string }
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
   | { kind: "form"; action: string; submitLabel: string; fields: FormField[] }
-  | { kind: "table"; source: string; columns: { key: string; label: string }[] }
+  | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
+  | { kind: "assetBinder"; scope: string; slot: string; entitySource: string; entityLabelKey: string }
+  | { kind: "table"; source: string; columns: { key: string; label: string; render: "image" | null }[] }
   | { kind: "cards"; cards: string[] }
   | { kind: "panelHeader"; title: string };
 
@@ -53,6 +55,10 @@ function childArray(v: unknown): readonly unknown[] {
  * hides nothing, so a hypothetical unknown type degrades to a visible plain
  * input instead of a field the player cannot see or fill.
  */
+function isSize(v: unknown): v is "sm" | "md" | "lg" {
+  return v === "sm" || v === "md" || v === "lg";
+}
+
 function isFieldType(v: unknown): v is "text" | "number" | "decimal" | "money" | "password" {
   return v === "text" || v === "number" || v === "decimal" || v === "money" || v === "password";
 }
@@ -107,10 +113,33 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
   if (isNode(node, "cards")) {
     return [{ kind: "cards", cards: childArray(node.cards).map(String) }];
   }
+  if (isNode(node, "image")) {
+    return [{
+      kind: "image",
+      url: String(node.url),
+      alt: String(node.alt),
+      // Normalised to a required value here so the renderer never re-derives
+      // the DTO's optionality, the same way `allowEmpty` is above.
+      size: isSize(node.size) ? node.size : "md",
+    }];
+  }
+  if (isNode(node, "assetBinder")) {
+    return [{
+      kind: "assetBinder",
+      // Server-filled: the loader stamps the declaring plugin's id before this
+      // reaches the wire. An empty string here would mean a node that never
+      // went through that stamp, which the bind route then refuses.
+      scope: String(node.scope ?? ""),
+      slot: String(node.slot),
+      entitySource: String(node.entitySource),
+      entityLabelKey: String(node.entityLabelKey),
+    }];
+  }
   if (isNode(node, "table")) {
     const columns = childArray(node.columns).map((c) => ({
       key: isRecord(c) ? String(c.key) : "",
       label: isRecord(c) ? String(c.label) : "",
+      render: isRecord(c) && c.render === "image" ? ("image" as const) : null,
     }));
     return [{ kind: "table", source: String(node.source), columns }];
   }

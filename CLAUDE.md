@@ -242,6 +242,33 @@ Note `apps/migrate`'s
 `REDIS_URL` (see `.env.example`); without it they fail as a block on a missing
 env var, which reads like 36 real failures.
 
+**Game art** has since shipped on `feat/asset-images`, the first capability
+GL3 has that V2 never had: V2's schema carries no image column on any content
+table, so there was nothing to port and `apps/migrate` is untouched. Core
+migration `0012_assets` adds `assets` (content-addressed — the sha256 IS the
+storage key, so dedup and `Cache-Control: immutable` are free) and
+`entity_assets` (`(scope, entity_id, slot) → asset`). **`entity_assets` has no
+foreign key on `entity_id`, deliberately**: the obvious design — an `asset_id`
+column per entity table — would add an FK from every plugin table into a core
+one, and a foreign key is a lock (rule 6). This adds exactly one FK,
+core-to-core; the orphan rows it therefore permits are the sweeper's job
+(`assets/sweep.ts`, with a one-hour grace so a sweep cannot delete an image
+mid-bind, and core-scope-only orphan detection because core cannot enumerate a
+plugin's tables). Storage is `StorageDriver` with two REAL backends —
+filesystem for dev/test, S3-compatible for production — so the suite never
+exercises the S3 path; `test/asset-driver-contract.test.ts` runs the same cases
+against a live endpoint when `S3_TEST_ENDPOINT` is exported. Uploads are a
+CORE route because plugin routes take a Zod-parsed JSON body; there is no
+`@fastify/multipart` and no `sharp` (pure-TS sniffing and header parsing in
+`assets/image.ts`), and the per-type `addContentTypeParser` entries are
+mandatory because `app.ts`'s catch-all `*` parser would read image bytes as a
+string. Binding checks `hasPermission(scope)`, not blanket admin. The SDK
+gained `providesAssets` (no `scope` field — the loader derives it), `ctx.assetSlots`
+and a **batched-by-construction** `ctx.assets.resolve`; the view vocabulary
+gained `image`, `table.columns[].render: "image"` and the admin-only
+`assetBinder`. `@gl3/shared` → `0.1.9`, `@gl3/plugin-sdk` → `0.1.4`, both
+published.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime
@@ -371,6 +398,11 @@ unavailable here.
    `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`,
    `test/properties-consumer-lock-order.test.ts`,
    `test/casino-lock-order.test.ts` (`economy/ledger.ts`).
+
+   The asset cluster adds **no** lock-order test, because it adds no edge:
+   `entity_assets` carries a foreign key only to `assets`, and no gameplay path
+   locks either table. That was the whole reason the slot-registry shape was
+   chosen over an `asset_id` column per entity table — see `docs/STATUS.md`.
 
    Corollary for tests: a concurrency test whose participants all acquire locks via
    the same helper proves only the case that was already safe. The pre-existing

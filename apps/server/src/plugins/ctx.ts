@@ -1,6 +1,6 @@
 import type {
-  CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx, PluginEventInput,
-  PluginTx, PropertyTypeDecl,
+  AssetSlot, CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx,
+  PluginEventInput, PluginTx, PropertyTypeDecl,
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
@@ -13,6 +13,8 @@ import type { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
+import type { StorageDriver } from "../assets/driver.js";
+import { resolveAssets } from "../assets/service.js";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
@@ -32,6 +34,7 @@ import { sendToJail } from "../game/jail/status.js";
 import { recordScore } from "../game/leaderboard/service.js";
 import { insertNotification } from "../game/notifications/service.js";
 import { newSeed } from "../game/rng.js";
+import { slotKey } from "./asset-slots.js";
 
 export interface PluginCtxDeps {
   db: Db;
@@ -47,6 +50,12 @@ export interface PluginCtxDeps {
    * place that already owns that decision.
    */
   leaderboardPrefix: string;
+  /**
+   * Object storage behind `ctx.assets`. Reads only from a plugin's side — the
+   * driver is here rather than a whole asset service because `resolveAssets`
+   * needs `urlFor` to turn a stored hash into something a browser can fetch.
+   */
+  assetDriver: StorageDriver;
 }
 
 export interface PluginCtxOptions {
@@ -56,6 +65,8 @@ export interface PluginCtxOptions {
   filters: readonly FilterSubscription[];
   propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
   installedPluginIds: ReadonlySet<string>;
+  /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
+  assetSlots: ReadonlyMap<string, AssetSlot>;
 }
 
 /**
@@ -295,6 +306,14 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       list: () => [...options.propertyTypes.values()],
     },
     installedPluginIds: options.installedPluginIds,
+    assetSlots: {
+      get: (scope, slot) => options.assetSlots.get(slotKey(scope, slot)) ?? null,
+      list: () => [...options.assetSlots.values()],
+    },
+    assets: {
+      resolve: (scope, entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, scope, entityIds, slot),
+      mine: (entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, options.pluginId, entityIds, slot),
+    },
     log: {
       info: (message, fields) => console.log({ plugin: options.pluginId, ...fields }, message),
       warn: (message, fields) => console.warn({ plugin: options.pluginId, ...fields }, message),

@@ -1,4 +1,5 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
+import { collectAssetSlots, containsAssetBinder } from "./asset-slots.js";
 import { collectPropertyTypes } from "./property-types.js";
 
 /** Core owns these; a plugin claiming one is a hard boot failure (spec: Routes). */
@@ -119,6 +120,15 @@ function viewActions(view: ViewNode): string[] {
         break;
       case "table":
         actions.push(node.source);
+        break;
+      case "assetBinder":
+        // The picker's entity list fetches on mount exactly like
+        // `table.source`, so it is contained the same way. The two endpoints
+        // the widget POSTs and PUTs to are CORE routes and deliberately not
+        // listed here — containment is about a plugin claiming paths, and
+        // `/api/admin/assets` belongs to core, not to whoever declared the
+        // widget.
+        actions.push(node.entitySource);
         break;
       case "panel":
         for (const child of node.children) pending.push(child);
@@ -255,6 +265,19 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     // plugin touches — the route half of the same manifest has never allowed it.
     // Admin pages share the same namespace: their view actions are still
     // attributed to the plugin's basePaths.
+    // An upload widget on a PLAYER page would render a file picker for anyone
+    // logged in. The bind route behind it still checks `hasPermission(scope)`,
+    // so nothing could actually be rebound — but the page would offer an action
+    // every non-admin is refused, which is a bug in the plugin either way.
+    // Caught at boot rather than at render, where only an admin would see it.
+    for (const page of manifest.pages) {
+      if (containsAssetBinder(page.view)) {
+        fail(
+          `plugin "${manifest.id}" page "${page.id}" declares an assetBinder, which is valid only on an admin page`,
+        );
+      }
+    }
+
     const allPages = [...manifest.pages, ...manifest.adminPages];
     for (const page of allPages) {
       for (const action of viewActions(page.view)) {
@@ -278,4 +301,9 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
   // with the "plugin validation failed — " prefix `fail()` uses, so calling
   // it here for its side effect is enough — the result itself is unused.
   collectPropertyTypes(manifests);
+
+  // Same reason and same shape as `collectPropertyTypes` above: a plugin
+  // declaring the same asset slot twice is a hard boot failure, and the
+  // collector already throws with the right prefix.
+  collectAssetSlots(manifests);
 }
