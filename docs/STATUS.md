@@ -2328,7 +2328,7 @@ act on them — and gives hospital its first **voluntary** door.
   there). Every fact this cluster produces was already expressible: bail and
   a successful bust publish `player.released` to the freed target; paid
   discharge publishes `player.discharged` to the healed patient; a failed
-  bust publishes `player.jailed` (`reason: "bust_failed"`) to the caller who
+  bust publishes `player.jailed` (`reason: "bust.failed"`) to the caller who
   gets jailed by their own failure; and "someone paid you out" is a
   `notification.created` row inserted inside the transaction via
   `insertNotification`, whose event follows the commit with `actorId` set to
