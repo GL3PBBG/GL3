@@ -47,7 +47,7 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
     }).onConflictDoUpdate({
       target: players.id,
       set: {
-        username: user.U_name, email: user.U_email, roleId, roundId, emailVerifiedAt,
+        username: user.U_name, email: user.U_email, roleId, roundId,
         // Never clobber a legacy hash the server has already nulled out
         // after a successful upgrade to argon2id (SPEC §4.3, Task 31's
         // e2e test) — only refresh it while the player is still
@@ -56,6 +56,15 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
         // `excluded.*` refers to the proposed new row), so this survives
         // any number of re-runs after login has upgraded the player.
         legacyPasswordSha256: sql`CASE WHEN ${players.passwordHash} IS NULL THEN ${user.U_password} ELSE ${players.legacyPasswordSha256} END`,
+        // Same shape, opposite direction: never downgrade a player who has
+        // since verified natively in GL3 (email_verified_at non-null) back
+        // to NULL just because V2 still shows U_status=2 on a re-run. Only
+        // ever move NULL -> non-null here, never the other way. The
+        // incoming value is passed as an ISO string (not the raw Date) —
+        // unlike a `.values()` insert, a raw `sql` template does not run
+        // drizzle's column-type mapping, so an embedded Date reaches the
+        // driver un-serialised and postgres-js rejects it.
+        emailVerifiedAt: sql`CASE WHEN ${players.emailVerifiedAt} IS NOT NULL THEN ${players.emailVerifiedAt} ELSE ${emailVerifiedAt === null ? null : emailVerifiedAt.toISOString()} END`,
       },
     });
     bumpTable(report, "users", "written");
