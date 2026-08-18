@@ -2,6 +2,7 @@ import type { PluginManifest } from "@gl3/plugin-sdk";
 import bankPlugin from "@gl3/plugin-bank";
 import bountiesPlugin from "@gl3/plugin-bounties";
 import detectivesPlugin from "@gl3/plugin-detectives";
+import forumPlugin from "@gl3/plugin-forum";
 import ocPlugin from "@gl3/plugin-oc";
 import bulletsPlugin from "@gl3/plugin-bullets";
 import newsPlugin from "@gl3/plugin-news";
@@ -39,6 +40,7 @@ export const CORE_PLUGINS: readonly PluginManifest[] = [
   propertiesPlugin,
   casinoPlugin,
   blackjackPlugin,
+  forumPlugin,
 ];
 
 /**
