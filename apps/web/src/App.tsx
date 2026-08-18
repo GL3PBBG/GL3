@@ -25,6 +25,7 @@ import { MailThread } from "./pages/MailThread.js";
 import { News } from "./pages/News.js";
 import { NotFound } from "./pages/NotFound.js";
 import { Notifications } from "./pages/Notifications.js";
+import { Online } from "./pages/Online.js";
 import { OrganizedCrime } from "./pages/OrganizedCrime.js";
 import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
@@ -97,6 +98,7 @@ export function App(): JSX.Element {
               <Route path="mail/:threadId" element={<MailThread />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="news" element={<News />} />
+              <Route path="online" element={<Online />} />
               <Route path="profile" element={<Profile />} />
               <Route path="players/:playerId" element={<PlayerProfile />} />
               {/*

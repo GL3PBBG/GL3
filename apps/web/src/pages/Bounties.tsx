@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useBounties, useMe, usePlaceBounty } from "../api/queries.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -64,10 +65,15 @@ export function Bounties(): JSX.Element {
           {rows.map((bounty) => (
             <li key={bounty.id} className={styles.row}>
               <span>
-                {bounty.targetUsername}
+                <PlayerLink playerId={bounty.targetPlayerId} username={bounty.targetUsername} />
                 {bounty.targetRank ? <span className={styles.muted}> · {bounty.targetRank}</span> : null}
                 {" · "}<Money value={bounty.amount} />
-                <span className={styles.muted}> · placed by {bounty.placerUsername === me.data?.username ? "you" : bounty.placerUsername}</span>
+                <span className={styles.muted}>
+                  {" · placed by "}
+                  {bounty.placerUsername === me.data?.username
+                    ? "you"
+                    : <PlayerLink playerId={bounty.placerPlayerId} username={bounty.placerUsername} />}
+                </span>
               </span>
               <span className={styles.meta}><When iso={bounty.createdAt} /></span>
             </li>
