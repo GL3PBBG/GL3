@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
@@ -98,6 +99,27 @@ function PageBanner(): JSX.Element | null {
   );
 }
 
+/**
+ * Per-route document titles. An SPA leaves `<title>` at whatever index.html
+ * shipped, so every tab, every history entry and — for a screen-reader user,
+ * who hears the title to learn a page changed — every navigation reads "GL3".
+ */
+function usePageTitle(pluginLabelFor: (pageId: string) => string | undefined): void {
+  const { pathname } = useLocation();
+  // Computed per render, effect keyed on the result: a plugin page's label
+  // arrives with the plugins query, possibly after the navigation that needs
+  // it, and the title must catch up when it does.
+  const [, first, second] = pathname.split("/");
+  let label: string | undefined;
+  if (first === "" || first === undefined) label = "Dashboard";
+  else if (first === "admin") label = "Admin";
+  else if (first === "plugins" && second !== undefined) {
+    label = pluginLabelFor(decodeURIComponent(second));
+  } else label = LINKS.find(([to]) => to === `/${first}`)?.[1];
+  const title = label === undefined ? "GL3" : `${label} — GL3`;
+  useEffect(() => { document.title = title; }, [title]);
+}
+
 export function Shell(): JSX.Element {
   const me = useMe();
   const jail = useJail();
@@ -122,6 +144,8 @@ export function Shell(): JSX.Element {
   const pluginLinks = [...(plugins.data?.menu ?? [])]
     .sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
 
+  usePageTitle((pageId) => pluginLinks.find((entry) => entry.pageId === pageId)?.label);
+
   // /api/auth/me carries neither rank nor location; both are derived from the
   // list endpoints, which is why the HUD depends on three queries.
   const rank = me.data ? progressToNextRank(me.data.exp, ranks.data?.ranks ?? []) : null;
@@ -139,6 +163,7 @@ export function Shell(): JSX.Element {
 
   return (
     <div className={styles.shell}>
+      <a href="#main" className={styles.skipLink}>Skip to content</a>
       <header className={styles.header}>
         <h1 className={styles.brand}>GL3</h1>
         <div className={styles.hud}>
@@ -168,7 +193,11 @@ export function Shell(): JSX.Element {
               }
             >
               {label}
-              {unread > 0 ? <span className={styles.badge}>{unread}</span> : null}
+              {unread > 0 ? (
+                <span className={styles.badge}>
+                  {unread}<span className={styles.srOnly}> unread</span>
+                </span>
+              ) : null}
             </NavLink>
           );
         })}
@@ -209,7 +238,7 @@ export function Shell(): JSX.Element {
       ) : null}
 
       <div className={styles.body}>
-        <main className={styles.content}>
+        <main id="main" className={styles.content}>
           <PageBanner />
           <Outlet />
         </main>

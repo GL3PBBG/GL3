@@ -37,6 +37,7 @@ export function Admin(): JSX.Element {
           <button
             key={section.pluginId}
             type="button"
+            aria-pressed={section.pluginId === current.pluginId}
             className={section.pluginId === current.pluginId ? styles.tabActive : styles.tabIdle}
             onClick={() => { setActive(section.pluginId); }}
           >

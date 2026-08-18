@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.js";
 import styles from "./ui.module.css";
 
@@ -120,8 +120,29 @@ export function SlotImage({ scope, slot, alt, size = "lg" }: {
  * close button) because a modal with one exit is a trap on some input device.
  */
 function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }): JSX.Element {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus management: `aria-modal` alone hides nothing from the keyboard. Move
+  // focus onto the close button when the dialog opens, hold it there (the
+  // button is the dialog's only focusable control, so trapping is keeping Tab
+  // from walking out behind the overlay), and put it back on the element that
+  // opened the dialog when it closes.
   useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => { if (event.key === "Escape") onClose(); };
+    // Mount-only: capture the opener once and restore it once, so a parent
+    // re-render (which recreates onClose) cannot bounce focus mid-dialog.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    return () => { opener?.focus(); };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "Tab") {
+        event.preventDefault();
+        closeRef.current?.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
   }, [onClose]);
@@ -136,7 +157,7 @@ function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: ()
         alt={alt}
         onClick={(event) => { event.stopPropagation(); }}
       />
-      <button type="button" className={styles.lightboxClose} onClick={onClose}>Close</button>
+      <button ref={closeRef} type="button" className={styles.lightboxClose} onClick={onClose}>Close</button>
     </div>
   );
 }

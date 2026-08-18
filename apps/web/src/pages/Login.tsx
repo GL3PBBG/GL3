@@ -15,12 +15,16 @@ export function Login(): JSX.Element {
       onSubmit={(event) => { event.preventDefault(); auth.mutate({ username, password }); }}
     >
       <h1 className={styles.brand}>GL3</h1>
-      <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" />
+      {/* aria-label, not a visible <label>: the placeholder is the visual
+          design, but a placeholder alone names the field for nobody once it
+          has content. */}
+      <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" aria-label="Username" autoComplete="username" />
       <input
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         type="password"
         placeholder="Password"
+        aria-label="Password"
         autoComplete={mode === "login" ? "current-password" : "new-password"}
       />
       <button type="submit" disabled={auth.isPending}>{mode === "login" ? "Log in" : "Register"}</button>

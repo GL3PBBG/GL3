@@ -387,6 +387,7 @@ function Permissions({
           <button
             key={permission}
             type="button"
+            aria-pressed={held}
             className={held ? `${styles.chip} ${styles.chipOn}` : styles.chip}
             disabled={busy}
             onClick={() => { (held ? onRevoke : onGrant)(permission); }}
@@ -426,7 +427,10 @@ function InviteForm({ gangId }: { gangId: string }): JSX.Element {
           Invite
         </button>
       </div>
-      {invite.isSuccess && !invite.isPending ? <p className={styles.ok}>Invite sent.</p> : null}
+      {/* Always-mounted live region: inserted-with-content regions are often not announced. */}
+      <p className={styles.ok} role="status">
+        {invite.isSuccess && !invite.isPending ? "Invite sent." : null}
+      </p>
       <ErrorText error={invite.error} />
     </Panel>
   );

@@ -28,9 +28,12 @@ function Row({ item, cash }: { item: ShopItem; cash: string }) {
   const [quantity, setQuantity] = useState(1);
   const buy = useBuyItem();
 
-  const total = multiplyMoney(item.price, quantity);
+  // A cleared or garbage number input reads back as NaN; treat it as "no valid
+  // quantity" rather than clamping under the user's cursor while they type.
+  const validQuantity = Number.isInteger(quantity) && quantity >= 1;
+  const total = multiplyMoney(item.price, validQuantity ? quantity : 0);
   const affordable = canAfford(cash, total);
-  const inStock = quantity > 0 && quantity <= item.stock;
+  const inStock = validQuantity && quantity <= item.stock;
 
   return (
     <li className={styles.row}>
@@ -44,8 +47,9 @@ function Row({ item, cash }: { item: ShopItem; cash: string }) {
           type="number"
           min={1}
           max={item.stock}
-          value={quantity}
-          onChange={(event) => setQuantity(Number(event.target.value))}
+          value={Number.isNaN(quantity) ? "" : quantity}
+          aria-label={`Quantity of ${item.name}`}
+          onChange={(event) => setQuantity(event.target.valueAsNumber)}
         />
         <span className={styles.meta}>= <Money value={total} /></span>
         <button
@@ -57,7 +61,7 @@ function Row({ item, cash }: { item: ShopItem; cash: string }) {
         </button>
         {!affordable ? <span className={styles.muted}> can't afford</span> : null}
       </div>
-      {buy.error ? <p className={styles.bad}>{describeError(buy.error)}</p> : null}
+      {buy.error ? <p className={styles.bad} role="alert">{describeError(buy.error)}</p> : null}
     </li>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useMe, useProperties, useBuyProperty,
   useSetLever, useTransferProperty, useDropProperty, useResetProperty,
@@ -58,6 +58,17 @@ function OwnedControls({
   const validLever = isValidLever(leverValue);
   const validUsername = username.length >= 1;
 
+  // Swapping Drop for Confirm/Cancel unmounts the focused button, which dumps
+  // keyboard focus to <body>. Follow the swap in both directions.
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const dropRef = useRef<HTMLButtonElement | null>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirmingDrop) confirmRef.current?.focus();
+    else if (wasConfirming.current) dropRef.current?.focus();
+    wasConfirming.current = confirmingDrop;
+  }, [confirmingDrop]);
+
   return (
     <span className={styles.actions}>
       <span className={styles.meta}>P&amp;L <Money value={profit} /></span>
@@ -93,10 +104,11 @@ function OwnedControls({
       </button>
       {confirmingDrop ? (
         <>
-          <span className={styles.meta}>
+          <span className={styles.meta} role="alert">
             Drop it for good? You get back <Money value={dropRefundOf(price)} /> — half its price.
           </span>
           <button
+            ref={confirmRef}
             type="button"
             disabled={drop.isPending}
             onClick={() => drop.mutate(undefined, { onSettled: () => { setConfirmingDrop(false); } })}
@@ -106,7 +118,7 @@ function OwnedControls({
           <button type="button" onClick={() => { setConfirmingDrop(false); }}>Cancel</button>
         </>
       ) : (
-        <button type="button" disabled={drop.isPending} onClick={() => { setConfirmingDrop(true); }}>
+        <button ref={dropRef} type="button" disabled={drop.isPending} onClick={() => { setConfirmingDrop(true); }}>
           Drop
         </button>
       )}
