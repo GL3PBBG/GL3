@@ -44,6 +44,12 @@ describe("migratePlayers", () => {
       const adminRoleId = await lookupV3Id(db, "userRoles", 2);
       expect(oldTimer?.roleId).toBe(adminRoleId); // U_userLevel=2 -> role 2
 
+      // U_status=1 (active) -> email_verified_at set; U_status=2 (awaiting
+      // validation, GhostGangMember in the fixture) -> left NULL.
+      expect(vito?.emailVerifiedAt).not.toBeNull();
+      const ghost = playerRows.find((p) => p.username === "GhostGangMember");
+      expect(ghost?.emailVerifiedAt).toBeNull();
+
       const vitoStats = (await db.select().from(playerStats).where(eq(playerStats.playerId, vito!.id)))[0];
       expect(vitoStats?.cash).toBe(2100000000n); // above the V2 int32 comfort zone, exact
       expect(vitoStats?.gangId).toBeNull(); // deferred to the gangs migrator (Task 23)
