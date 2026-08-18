@@ -325,6 +325,7 @@ export default defineWorkspace([
         "test/hospital-discharge-player.test.ts",
         "test/inventory.test.ts",
         "test/jail.test.ts",
+        "test/jail-bail-bust.test.ts",
         "test/leaderboard.test.ts",
         "test/mail.test.ts",
         "test/money-ranks.test.ts",
