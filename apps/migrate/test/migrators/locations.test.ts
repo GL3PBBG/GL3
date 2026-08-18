@@ -18,7 +18,26 @@ describe("migrateLocations", () => {
       const rows = await db.select().from(locations);
       expect(rows).toHaveLength(2);
       expect(rows.find((r) => r.name === "Chicago")?.travelCost).toBe(100n);
+      expect(rows.every((r) => r.combatMode === "open")).toBe(true);
 
+      await pool.end();
+      await sql.end();
+    } finally {
+      await fixture.teardown();
+      await target.teardown();
+    }
+  });
+
+  it("stamps underground on every town when asked", async () => {
+    const fixture = await createIsolatedMysqlFixture();
+    const target = await createIsolatedPgTarget();
+    try {
+      const pool = mysql.createPool(fixture.url);
+      const { db, sql } = createDb(target.url);
+      await migrateLocations(pool, db, createReport(false), "underground");
+      const rows = await db.select().from(locations);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((r) => r.combatMode === "underground")).toBe(true);
       await pool.end();
       await sql.end();
     } finally {

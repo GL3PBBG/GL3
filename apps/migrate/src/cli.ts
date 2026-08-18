@@ -28,6 +28,7 @@ const KEY_TO_FLAG: Record<string, string> = {
   reportPath: "--report",
   sqlDumpPath: "--sql-dump",
   dryRun: "--dry-run",
+  townCombatMode: "--town-combat-mode",
 };
 
 /** A raw `ZodError.message` is a JSON dump of every issue — unreadable as the
@@ -79,7 +80,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const { db, sql } = createDb(args.pgUrl);
   try {
-    await runMigration({ mysql: pool, db, report, dryRun: args.dryRun });
+    await runMigration({ mysql: pool, db, report, dryRun: args.dryRun, townCombatMode: args.townCombatMode });
   } finally {
     await pool.end();
     await sql.end();
