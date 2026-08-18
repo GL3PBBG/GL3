@@ -219,6 +219,7 @@ export default defineWorkspace([
         "test/plugin-map.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",
+        "test/facility-settings.test.ts",
         "test/rounds-settings.test.ts",
         "test/theft-settings.test.ts",
         "test/bullets-settings.test.ts",
