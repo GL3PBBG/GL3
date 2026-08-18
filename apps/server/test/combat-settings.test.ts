@@ -31,12 +31,13 @@ describe("readCombatSettings", () => {
       unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1, dps: undefined },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
-      repair: { costPerPoint: 1000n },
+      repair: { costPerPoint: 1000n, costMultiplier: 3 },
     });
   });
 
   it("takes every key from the database when all are set", () => {
     const settings = readCombatSettings(getter({
+      "repair.cost_multiplier": "5",
       "cooldown_seconds": "90",
       "hospital_seconds": "300",
       "newbie_exp_threshold": "250",
@@ -58,7 +59,7 @@ describe("readCombatSettings", () => {
       unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3, dps: 2 },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
-      repair: { costPerPoint: 1000n },
+      repair: { costPerPoint: 1000n, costMultiplier: 5 },
     });
   });
 
