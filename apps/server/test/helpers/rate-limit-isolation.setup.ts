@@ -30,6 +30,10 @@ import { createRedis } from "../../src/redis.js";
  * (test/helpers/register.ts) made every test-helper registration also POST
  * /api/auth/verify: a file with more than ten registrations trips the real
  * 10-per-15-min verify limit purely from its own setup traffic otherwise.
+ * `forgot`/`reset` joined the same way once auth-reset.test.ts started
+ * calling POST /api/auth/forgot from every test in the file: it is limited
+ * to 5/hour, well under what a handful of tests in one file legitimately
+ * need.
  *
  * A sweep clearing another concurrently-running file's namespaced bucket in
  * the middle of its run is harmless — it only resets that file's own
@@ -49,7 +53,7 @@ const redis = createRedis(loadConfig(process.env).redisUrl);
 
 async function clearAuthRateLimitBuckets(): Promise<void> {
   const keys: string[] = [];
-  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*", "ratelimit*:verify:*", "ratelimit*:verifyresend:*"]) {
+  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*", "ratelimit*:verify:*", "ratelimit*:verifyresend:*", "ratelimit*:forgot:*", "ratelimit*:reset:*"]) {
     let cursor = "0";
     do {
       const [next, found] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
