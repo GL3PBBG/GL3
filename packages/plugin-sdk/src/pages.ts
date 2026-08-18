@@ -131,6 +131,10 @@ const leafOptions = [
           // value as a URL and renders an `<img>` — additive, so every column
           // written before this existed is unaffected.
           render: z.literal("image").optional(),
+          // Thumbnail size for `render: "image"`, ignored otherwise. Defaults
+          // to `sm`, which is right for a dense table and too small for a page
+          // whose whole point is the picture (the garage) — hence the choice.
+          imageSize: z.enum(["sm", "md", "lg"]).optional(),
         }).strict(),
       ).min(1),
     })
@@ -164,15 +168,33 @@ const leafOptions = [
   // `scope` is absent on purpose: the loader fills it from the declaring
   // plugin's id, so a plugin cannot declare a widget that rebinds another
   // plugin's art. Valid in `adminPages` only.
+  // A singleton slot's image, resolved at render time.
+  //
+  // Needed because a page's view is STATIC data built at boot: it cannot carry
+  // a URL that depends on what an admin uploaded afterwards. The node names its
+  // slot and the renderer asks `GET /api/assets/slot/:scope/:slot`. `scope` is
+  // stamped by the loader, exactly as on `assetBinder`.
+  z
+    .object({
+      kind: z.literal("slotImage"),
+      slot: z.string().min(1),
+      alt: z.string().min(1),
+      size: z.enum(["sm", "md", "lg"]).optional(),
+      scope: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("assetBinder"),
       slot: z.string().min(1),
       // GET-only for the same reason `table.source` is: the entity list renders
       // on mount and must never mutate.
-      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`"),
+      //
+      // Both entity fields are omitted for a `singleton: true` slot: there is
+      // one image and therefore nothing to pick.
+      entitySource: z.string().regex(GET_SOURCE_RE, "entitySource must be `GET /absolute/path`").optional(),
       /** Which field of a row to show in the picker. Its id is always `id`. */
-      entityLabelKey: z.string().min(1),
+      entityLabelKey: z.string().min(1).optional(),
       /**
        * Never written by a plugin author. The loader OVERWRITES it with the
        * declaring plugin's id on the way to the wire — unconditionally, so

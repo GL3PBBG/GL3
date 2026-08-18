@@ -266,8 +266,18 @@ string. Binding checks `hasPermission(scope)`, not blanket admin. The SDK
 gained `providesAssets` (no `scope` field — the loader derives it), `ctx.assetSlots`
 and a **batched-by-construction** `ctx.assets.resolve`; the view vocabulary
 gained `image`, `table.columns[].render: "image"` and the admin-only
-`assetBinder`. `@gl3/shared` → `0.1.9`, `@gl3/plugin-sdk` → `0.1.4`, both
-published.
+`assetBinder`. Art comes in two shapes: **per-row** (an item, a town, a car)
+and **singleton** (`singleton: true`, bound against the nil UUID
+`SINGLETON_ENTITY_ID`), which is what gives a PAGE a picture — jail, hospital,
+bank and the casino floor have no row to hang art on. A page's view is static
+data built at boot and cannot carry a URL uploaded later, so the `slotImage`
+node names its slot and the client resolves it via
+`GET /api/assets/slot/:scope/:slot`; core's 20 `page-*` banners render from one
+route→slot map in `Shell.tsx`, not from nineteen page components. The admin art
+section is derived from the registry, so a declared slot is always bindable —
+the first cut hand-wrote three binders and shipped `location` and `rank` with
+nothing rendering them. `@gl3/shared` → `0.1.10`, `@gl3/plugin-sdk` → `0.1.5`,
+both published.
 
 **Hospital self-admission and local facility rosters** have since shipped on
 `feat/hospital-jail-social`: `POST /api/hospital/checkin` is the first

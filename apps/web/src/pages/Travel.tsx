@@ -5,6 +5,7 @@ import { useCountdowns } from "../hooks/useCountdowns.js";
 import { canAfford } from "../lib/money.js";
 import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 /** Same shape as crimes: `cooldown:travel:<playerId>` is one key per player. */
 const COOLDOWN_ID = "travel";
@@ -44,6 +45,7 @@ export function Travel(): JSX.Element {
               key={location.id}
               className={location.current ? `${styles.row} ${styles.rowCurrent}` : styles.row}
             >
+              <GameImage url={location.imageUrl} alt={location.name} size="md" />
               <div>
                 <strong>{location.name}</strong>
                 {location.current ? <span className={styles.meta}> · you are here</span> : null}

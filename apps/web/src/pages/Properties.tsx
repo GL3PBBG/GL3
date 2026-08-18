@@ -6,6 +6,7 @@ import {
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import type { PropertyRow } from "@gl3/shared";
+import { GameImage } from "../components/GameImage.js";
 
 export function rowAction(
   row: PropertyRow,
@@ -144,6 +145,7 @@ export function Properties(): JSX.Element {
               buy.variables?.pluginId === row.pluginId && buy.variables?.locationId === row.locationId;
             return (
               <li key={row.id} className={styles.row}>
+                <GameImage url={row.imageUrl} alt={row.typeName} size="md" />
                 <span>
                   {row.typeName}
                   <span className={styles.muted}> &middot; {row.locationName}</span>

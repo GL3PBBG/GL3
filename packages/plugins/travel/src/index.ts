@@ -58,6 +58,10 @@ const listRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       const rows = await tx.db.select().from(locations);
+      // `locations` is a CORE table, so its art lives under the `core` scope
+      // even though travel is what renders it. One lookup for every town on the
+      // page, not one per row.
+      const art = await ctx.assets.resolve("core", rows.map((l) => l.id), "location");
 
       return {
         status: 200,
@@ -71,6 +75,7 @@ const listRoute = route({
             bulletStock: l.bulletStock,
             current: l.id === stats?.locationId,
             cooldownRemaining,
+            ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
           })),
         },
       };

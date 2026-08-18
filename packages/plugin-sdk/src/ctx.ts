@@ -274,6 +274,14 @@ export interface PluginCtx {
     resolve(scope: string, entityIds: readonly string[], slot: string): Promise<Map<string, string>>;
     /** `resolve` with `scope` fixed to the calling plugin's own id. */
     mine(entityIds: readonly string[], slot: string): Promise<Map<string, string>>;
+    /**
+     * The one image bound to a `singleton: true` slot, or null when none is.
+     *
+     * Single-valued rather than batched, and that is not a contradiction of the
+     * batching rule above: a singleton is one row by definition, so there is no
+     * list to N+1 over.
+     */
+    singleton(scope: string, slot: string): Promise<string | null>;
   };
   readonly log: {
     info(message: string, fields?: Record<string, unknown>): void;

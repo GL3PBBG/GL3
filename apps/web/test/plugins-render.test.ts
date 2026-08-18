@@ -134,20 +134,23 @@ describe("renderNode", () => {
       // `render` is normalised to a required value here, the same way
       // `allowEmpty` is on a select field, so the renderer never has to
       // re-derive the DTO's optionality at the point of drawing a cell.
-      columns: [{ key: "id", label: "Id", render: null }],
+      columns: [{ key: "id", label: "Id", render: null, imageSize: "sm" }],
     }]);
   });
 
   it("carries a column's image render mode through", () => {
     const out = renderNode({
       kind: "table", source: "GET /api/garage",
-      columns: [{ key: "image", label: "", render: "image" }, { key: "carName", label: "Car" }],
+      columns: [
+        { key: "image", label: "", render: "image", imageSize: "md" },
+        { key: "carName", label: "Car" },
+      ],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
       kind: "table", source: "GET /api/garage",
       columns: [
-        { key: "image", label: "", render: "image" },
-        { key: "carName", label: "Car", render: null },
+        { key: "image", label: "", render: "image", imageSize: "md" },
+        { key: "carName", label: "Car", render: null, imageSize: "sm" },
       ],
     }]);
   });
@@ -157,6 +160,25 @@ describe("renderNode", () => {
       .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "md" }]);
     expect(renderNode({ kind: "image", url: "/assets/abc", alt: "A car", size: "lg" }, {}))
       .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "lg" }]);
+  });
+
+  it("maps a slotImage node, defaulting its size to lg", () => {
+    // A page banner is the whole point of this node, so the default is the big
+    // one — unlike a table cell, which defaults to a thumbnail.
+    expect(renderNode({ kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail" }, {}))
+      .toEqual<RenderInstruction[]>([
+        { kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail", size: "lg" },
+      ]);
+  });
+
+  it("maps a singleton assetBinder, whose entity fields are absent", () => {
+    const out = renderNode({ kind: "assetBinder", slot: "banner", scope: "casino" }, {});
+    // Null, not "": the renderer branches on it to decide whether to draw an
+    // entity picker at all.
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "assetBinder", slot: "banner", scope: "casino",
+      entitySource: null, entityLabelKey: null,
+    }]);
   });
 
   it("maps an assetBinder node, keeping the server-stamped scope", () => {

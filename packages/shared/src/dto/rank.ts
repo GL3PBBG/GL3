@@ -9,6 +9,8 @@ export const RankDtoSchema = z.object({
   bulletReward: z.number().int().nonnegative(),
   maxHealth: z.number().int().positive(),
   current: z.boolean(),
+  /** Absent when no badge is bound — see `InventoryItemSchema.imageUrl`. */
+  imageUrl: z.string().optional(),
 });
 export type RankDto = z.infer<typeof RankDtoSchema>;
 

@@ -3,6 +3,7 @@ import { formatAmount } from "../lib/money.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 export function Ranks(): JSX.Element {
   const me = useMe();
@@ -34,6 +35,7 @@ export function Ranks(): JSX.Element {
             key={rank.id}
             className={rank.current ? `${styles.row} ${styles.rowCurrent}` : styles.row}
           >
+            <GameImage url={rank.imageUrl} alt={rank.name} size="sm" />
             <div>
               <strong>{rank.name}</strong>
               {rank.current ? <span className={styles.meta}> · you</span> : null}

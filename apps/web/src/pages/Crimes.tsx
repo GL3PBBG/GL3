@@ -4,6 +4,7 @@ import { useCommitCrime, useCrimes, useJail } from "../api/queries.js";
 import { useCountdowns } from "../hooks/useCountdowns.js";
 import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./Crimes.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 /**
  * The crime cooldown is one Redis key per *player* (`cooldown:crime:<id>`, see
@@ -45,6 +46,7 @@ export function Crimes(): JSX.Element {
       <ul className={styles.crimeList}>
         {crimes.data?.crimes.map((crime) => (
           <li key={crime.id} className={styles.crime}>
+            <GameImage url={crime.imageUrl} alt={crime.name} size="md" />
             <div>
               <strong>{crime.name}</strong>
               <div className={styles.meta}>

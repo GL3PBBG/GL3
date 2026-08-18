@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
-import { GameImage } from "../components/GameImage.js";
+import { GameImage, SlotImage } from "../components/GameImage.js";
 import { Hand } from "../components/PlayingCard.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
@@ -66,7 +66,12 @@ function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup
  */
 function TableBlock({ source, columns, refetchSignal }: {
   source: string;
-  columns: readonly { readonly key: string; readonly label: string; readonly render: "image" | null }[];
+  columns: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly render: "image" | null;
+    readonly imageSize: "sm" | "md" | "lg";
+  }[];
   refetchSignal: number;
 }): JSX.Element {
   const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
@@ -116,7 +121,7 @@ function TableBlock({ source, columns, refetchSignal }: {
                   // The cell value is a URL the server resolved; `GameImage`
                   // owns the missing-art case, which for a table means most
                   // rows on a fresh install.
-                  ? <GameImage url={row[col.key] ?? null} alt={col.label} size="sm" />
+                  ? <GameImage url={row[col.key] ?? null} alt={col.label || "image"} size={col.imageSize} />
                   : row[col.key] ?? ""}
               </td>
             ))}
@@ -205,8 +210,9 @@ function SelectField({ field, value, onChange, refetchSignal }: {
 function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSignal }: {
   scope: string;
   slot: string;
-  entitySource: string;
-  entityLabelKey: string;
+  /** Null for a singleton slot: one image, so no entity picker is drawn. */
+  entitySource: string | null;
+  entityLabelKey: string | null;
   refetchSignal: number;
 }): JSX.Element {
   const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
@@ -216,9 +222,11 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const path = entitySource.replace(/^GET\s+/, "");
+  const singleton = entitySource === null;
+  const path = entitySource === null ? null : entitySource.replace(/^GET\s+/, "");
 
   useEffect(() => {
+    if (path === null) return;
     let cancelled = false;
     void api<unknown>(path)
       .then((body) => {
@@ -231,7 +239,7 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    if (file === null || entityId === "") return;
+    if (file === null || (!singleton && entityId === "")) return;
     setBusy(true);
     setError(null);
     setStatus(null);
@@ -247,7 +255,9 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
       });
       await api<{ bound: boolean }>("/api/admin/assets/bind", {
         method: "PUT",
-        body: JSON.stringify({ scope, entityId, slot, assetId: uploaded.assetId }),
+        // `entityId` is omitted entirely for a singleton — the server supplies
+        // the constant, so the client never names it.
+        body: JSON.stringify({ scope, slot, assetId: uploaded.assetId, ...(singleton ? {} : { entityId }) }),
       });
       setStatus("Image bound.");
       setFile(null);
@@ -259,14 +269,14 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
   }
 
   async function clear(): Promise<void> {
-    if (entityId === "") return;
+    if (!singleton && entityId === "") return;
     setBusy(true);
     setError(null);
     setStatus(null);
     try {
       await api<{ bound: boolean }>("/api/admin/assets/bind", {
         method: "PUT",
-        body: JSON.stringify({ scope, entityId, slot, assetId: null }),
+        body: JSON.stringify({ scope, slot, assetId: null, ...(singleton ? {} : { entityId }) }),
       });
       setStatus("Image removed.");
     } catch (caught: unknown) {
@@ -278,17 +288,19 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
 
   return (
     <form className={styles.form} onSubmit={(event) => { void submit(event); }}>
-      <label>
-        Entity
-        <select value={entityId} onChange={(event) => { setEntityId(event.target.value); }}>
-          <option value="">Select…</option>
-          {rows.map((row) => (
-            <option key={row["id"] ?? ""} value={row["id"] ?? ""}>
-              {row[entityLabelKey] ?? row["id"] ?? ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      {singleton ? null : (
+        <label>
+          Entity
+          <select value={entityId} onChange={(event) => { setEntityId(event.target.value); }}>
+            <option value="">Select…</option>
+            {rows.map((row) => (
+              <option key={row["id"] ?? ""} value={row["id"] ?? ""}>
+                {(entityLabelKey === null ? undefined : row[entityLabelKey]) ?? row["id"] ?? ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label>
         Image
         <input
@@ -297,8 +309,8 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
           onChange={(event) => { setFile(event.target.files?.[0] ?? null); }}
         />
       </label>
-      <button type="submit" disabled={busy || file === null || entityId === ""}>Upload &amp; bind</button>
-      <button type="button" disabled={busy || entityId === ""} onClick={() => { void clear(); }}>
+      <button type="submit" disabled={busy || file === null || (!singleton && entityId === "")}>Upload &amp; bind</button>
+      <button type="button" disabled={busy || (!singleton && entityId === "")} onClick={() => { void clear(); }}>
         Remove image
       </button>
       {status !== null ? <p className={styles.muted}>{status}</p> : null}
@@ -489,6 +501,8 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         );
       case "image":
         return <GameImage key={index} url={inst.url} alt={inst.alt} size={inst.size} />;
+      case "slotImage":
+        return <SlotImage key={index} scope={inst.scope} slot={inst.slot} alt={inst.alt} size={inst.size} />;
       case "assetBinder":
         return (
           <AssetBinderBlock

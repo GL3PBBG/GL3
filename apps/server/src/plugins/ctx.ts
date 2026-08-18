@@ -14,7 +14,7 @@ import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { StorageDriver } from "../assets/driver.js";
-import { resolveAssets } from "../assets/service.js";
+import { resolveAssets, resolveSingletonAsset } from "../assets/service.js";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
 import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
@@ -313,6 +313,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     assets: {
       resolve: (scope, entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, scope, entityIds, slot),
       mine: (entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, options.pluginId, entityIds, slot),
+      singleton: (scope, slot) => resolveSingletonAsset(deps.db, deps.assetDriver, scope, slot),
     },
     log: {
       info: (message, fields) => console.log({ plugin: options.pluginId, ...fields }, message),

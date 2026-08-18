@@ -417,6 +417,9 @@ export default definePlugin({
   // side clamps too (`effectiveCost`), because the cap can be lowered after a
   // lever was already accepted.
   filters: [capLever],
+  // The building on the properties board — art per property TYPE, not per
+  // town's copy of it.
+  providesAssets: [{ slot: "property", label: "Bullet factory building", singleton: true }],
   providesProperties: [{
     id: "bullets",
     name: "Bullet Factory",

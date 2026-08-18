@@ -13,6 +13,7 @@ import { canGrant, canInvite, canKick, canTransfer, canWithdraw, memberOf } from
 import { canAfford } from "../lib/money.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
+import { GameImage } from "../components/GameImage.js";
 
 const PERMISSIONS: readonly GangPermission[] = GangPermissionSchema.options;
 
@@ -206,6 +207,7 @@ function Summary({
 
   return (
     <Panel title={gang.name}>
+      <GameImage url={gang.imageUrl} alt={`${gang.name} crest`} size="lg" />
       <p className={styles.meta}>
         Level {gang.level} · {gang.memberCount} member{gang.memberCount === 1 ? "" : "s"}
       </p>
