@@ -66,6 +66,9 @@ const srcAliases = {
       "@gl3/plugin-detectives": fileURLToPath(
         new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-forum": fileURLToPath(
+        new URL("./packages/plugins/forum/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
@@ -320,6 +323,7 @@ export default defineWorkspace([
         "test/facility-concurrency.test.ts",
         "test/facility-rosters.test.ts",
         "test/first-admin.test.ts",
+        "test/forum.test.ts",
         "test/gang-bank.test.ts",
         "test/gang-invites.test.ts",
         "test/gang-lock-order.test.ts",
