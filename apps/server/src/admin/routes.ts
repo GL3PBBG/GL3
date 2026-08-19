@@ -1,14 +1,18 @@
 import { hasPermission, type PluginManifest } from "@gl3/plugin-sdk";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
+import { clearBanned, markBanned } from "../auth/ban.js";
+import { destroyAllSessions } from "../auth/session.js";
 import type { Db } from "../db/client.js";
 import { players, roleModuleAccess, rounds, roles } from "../db/schema/index.js";
 import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { buildAssetsPage } from "./assets-page.js";
+import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
 
@@ -41,6 +45,16 @@ const RoundCreateBodySchema = z.object({
 }).strict();
 
 const RoundEditBodySchema = RoundCreateBodySchema.extend({ roundId: z.string().uuid() }).strict();
+
+// The web form serializes EVERY field as a string ("" when blank); curl sends
+// a number. Both shapes accepted; blank/absent expiry = permanent.
+const BanBodySchema = z.object({
+  username: z.string().min(1),
+  reason: z.string().transform((v) => v.trim()).pipe(z.string().min(1)),
+  expiresHours: z.union([z.number(), z.string()]).optional()
+    .transform((v) => (v === undefined || v === "" ? null : Number(v)))
+    .pipe(z.union([z.null(), z.number().int().positive()])),
+}).strict();
 
 /** Shared with `game/rounds/service.ts`'s settle() — an admin write and a
  *  rollover can then never interleave, so an edit cannot move `ends_at` out
@@ -80,12 +94,13 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     // under, and a second name for one thing is how the two drift apart.
     { id: CORE_SCOPE, name: "core (game art)" },
     { id: "rounds", name: "rounds" },
+    { id: "players", name: "players (moderation)" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
 }
 
 export function registerAdminRoutes(
-  app: FastifyInstance, db: Db, manifests: readonly PluginManifest[],
+  app: FastifyInstance, db: Db, redis: Redis, manifests: readonly PluginManifest[],
 ): void {
   // requireAuth is decorated by registerAuthRoutes, which app.ts runs first.
   // The grant check is two inline lines per handler on purpose: a helper
@@ -137,6 +152,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "rounds",
         pages: [{ pluginId: "rounds", id: roundsPage.id, path: roundsPage.path, view: roundsPage.view }],
+      });
+    }
+    if (hasPermission(grants, "players")) {
+      sections.push({
+        pluginId: "players",
+        pages: [{ pluginId: "players", id: playersPage.id, path: playersPage.path, view: playersPage.view }],
       });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });
@@ -483,5 +504,95 @@ export function registerAdminRoutes(
     if (result === "not_found") return reply.code(404).send({ error: "round_not_found" });
     if (result === "started") return reply.code(409).send({ error: "round_not_scheduled" });
     return reply.code(204).send();
+  });
+
+  // ── Player moderation ────────────────────────────────────────────────────
+  // Gated on the `players` grant. Ban state lives on the players row (truth)
+  // mirrored into a `banned:<id>` Redis flag (cache) read by requireAuth on
+  // every request — see auth/ban.ts.
+
+  // Table-source: pre-stringified rows, like the rounds table above. The 50
+  // most recently seen players, PLUS every currently banned one regardless of
+  // recency — a moderator lifting an old ban must be able to see it.
+  app.get("/api/admin/players/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "players")) return reply.code(403).send({ error: "forbidden" });
+
+    const now = new Date();
+    const activeBan = sql`${players.bannedAt} is not null
+      and (${players.banExpiresAt} is null or ${players.banExpiresAt} > now())`;
+    const rows = await db.select({
+      id: players.id, username: players.username, roleName: roles.name,
+      lastSeenAt: players.lastSeenAt, emailVerifiedAt: players.emailVerifiedAt, email: players.email,
+      bannedAt: players.bannedAt, banReason: players.banReason, banExpiresAt: players.banExpiresAt,
+    }).from(players).leftJoin(roles, eq(players.roleId, roles.id))
+      .where(sql`(${activeBan}) or ${players.id} in (
+        select id from players order by last_seen_at desc nulls last limit 50)`)
+      .orderBy(sql`${players.lastSeenAt} desc nulls last`);
+
+    return reply.send({
+      rows: rows.map((r) => {
+        const banActive = r.bannedAt !== null && (r.banExpiresAt === null || r.banExpiresAt > now);
+        return {
+          id: r.id,
+          username: r.username,
+          role: r.roleName ?? "",
+          lastSeen: r.lastSeenAt?.toISOString() ?? "",
+          // Mirrors login's grandfathering: a row with no email is never gated.
+          verified: r.emailVerifiedAt !== null || r.email === null ? "yes" : "no",
+          banned: banActive
+            ? `${r.banReason ?? ""}${r.banExpiresAt ? ` (until ${r.banExpiresAt.toISOString()})` : ""}`.trim()
+            : "",
+        };
+      }),
+    });
+  });
+
+  app.post("/api/admin/players/ban", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "players")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = BanBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+
+    const [target] = await db.select({ id: players.id }).from(players)
+      .where(eq(players.username, parsed.data.username));
+    if (!target) return reply.code(404).send({ error: "player_not_found" });
+    // Counterpart of cannot_demote_self: a moderator locking themselves out
+    // is never what the click meant.
+    if (target.id === playerId) return reply.code(409).send({ error: "cannot_ban_self" });
+
+    const expiresAt = parsed.data.expiresHours === null
+      ? null : new Date(Date.now() + parsed.data.expiresHours * 3600_000);
+    await db.update(players)
+      .set({ bannedAt: sql`now()`, banReason: parsed.data.reason, banExpiresAt: expiresAt })
+      .where(eq(players.id, target.id));
+    // Row first, then flag, then sessions: if the process dies mid-way the
+    // row already holds the ban and the next login re-asserts the rest.
+    await markBanned(redis, target.id, expiresAt);
+    await destroyAllSessions(redis, target.id);
+    return reply.code(200).send({ banned: true });
+  });
+
+  app.post("/api/admin/players/:id/unban", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "players")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = z.object({ id: z.string().uuid() }).strict().safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const [target] = await db.select({ id: players.id }).from(players)
+      .where(eq(players.id, parsed.data.id));
+    if (!target) return reply.code(404).send({ error: "player_not_found" });
+
+    await db.update(players)
+      .set({ bannedAt: null, banReason: null, banExpiresAt: null })
+      .where(eq(players.id, target.id));
+    await clearBanned(redis, target.id);
+    return reply.code(200).send({ banned: false });
   });
 }

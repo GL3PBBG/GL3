@@ -13,6 +13,7 @@ import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.j
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
+import { clearBanned, isBanned, markBanned } from "./ban.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
 
 /**
@@ -57,6 +58,13 @@ export function registerAuthRoutes(
     const token = bearer(request);
     const playerId = token ? await readSession(redis, token) : null;
     if (!playerId) { await reply.code(401).send({ error: "unauthorized" }); return; }
+    // Before touchPresence, and with no GATE_EXEMPT carve-out: a banned player
+    // must neither show as online nor reach even the verify/resend routes. The
+    // ban itself destroys every session, so this only fires for a token the
+    // reverse index missed — belt and braces, same 403 either way.
+    if (await isBanned(redis, playerId)) {
+      await reply.code(403).send({ error: "banned" }); return;
+    }
     await touchPresence(redis, db, playerId);
     const url = request.url.split("?")[0] ?? request.url;
     if (!GATE_EXEMPT.some((p) => url === p || url.startsWith(`${p}/`))) {
@@ -194,6 +202,25 @@ export function registerAuthRoutes(
     }
 
     if (!authenticated) return reply.code(401).send({ error: "invalid_credentials" });
+
+    // Same row-is-truth shape as the unverified gate below: a live ban
+    // re-asserts its Redis flag (surviving a flush), an expired one clears its
+    // own columns here — lazily, no cron — so the admin table never shows a
+    // ban that is no longer in force.
+    if (player.bannedAt !== null) {
+      if (player.banExpiresAt !== null && player.banExpiresAt <= new Date()) {
+        await db.update(players).set({ bannedAt: null, banReason: null, banExpiresAt: null })
+          .where(eq(players.id, player.id));
+        await clearBanned(redis, player.id);
+      } else {
+        await markBanned(redis, player.id, player.banExpiresAt);
+        return reply.code(403).send({
+          error: "banned",
+          reason: player.banReason,
+          expiresAt: player.banExpiresAt?.toISOString() ?? null,
+        });
+      }
+    }
 
     // Redis is a cache of the gate, the row is the truth: a flushed flag
     // re-asserts here, and a verified player never re-acquires it.
