@@ -137,6 +137,67 @@ function OwnedControls({
 }
 
 /**
+ * The Buy side of a row. Quiet chip styling, not the theme's solid button —
+ * this panel sits on pages whose own solid Buy button spends pocket money,
+ * and a property costs orders of magnitude more, so the two must not look
+ * alike. Two-step for the same reason, mirroring Drop: one stray click must
+ * not be able to move property-scale money.
+ */
+function BuyControl({ row }: { row: PropertyRow }): JSX.Element {
+  const buy = useBuyProperty();
+  const [confirming, setConfirming] = useState(false);
+
+  // Same focus-follow as Drop's confirm: swapping the button unmounts the
+  // focused element, which dumps keyboard focus to <body>.
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const buyRef = useRef<HTMLButtonElement | null>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) confirmRef.current?.focus();
+    else if (wasConfirming.current) buyRef.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
+
+  return (
+    <span className={styles.actions}>
+      {confirming ? (
+        <>
+          <span className={styles.meta} role="alert">
+            Buy {row.typeName} for <Money value={row.price} />?
+          </span>
+          <button
+            ref={confirmRef}
+            type="button"
+            className={styles.chip}
+            disabled={buy.isPending}
+            onClick={() => buy.mutate(
+              { pluginId: row.pluginId, locationId: row.locationId },
+              { onSettled: () => { setConfirming(false); } },
+            )}
+          >
+            Confirm purchase
+          </button>
+          <button type="button" className={styles.chip} onClick={() => { setConfirming(false); }}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button
+          ref={buyRef}
+          type="button"
+          className={styles.chip}
+          disabled={buy.isPending}
+          onClick={() => { setConfirming(true); }}
+        >
+          Buy property
+        </button>
+      )}
+      <ErrorText error={buy.error} />
+    </span>
+  );
+}
+
+/**
  * One plugin's properties in the caller's town, embedded on that plugin's own
  * page — the replacement for the retired /properties tab. Shows the owner,
  * offers Buy when nobody owns it, and the full owner tools when the viewer
@@ -146,7 +207,6 @@ function OwnedControls({
 export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element | null {
   const properties = useProperties();
   const me = useMe();
-  const buy = useBuyProperty();
 
   // Silent while loading or on error: this is a side panel, and the page it
   // sits on has its own loading and error surfaces for its own data.
@@ -157,8 +217,6 @@ export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element |
     <ul className={styles.rows}>
       {rows.map((row) => {
         const action = rowAction(row, me.data?.username);
-        const buyingThisRow =
-          buy.variables?.pluginId === row.pluginId && buy.variables?.locationId === row.locationId;
         return (
           <li key={row.id} className={styles.row}>
             <GameImage url={row.imageUrl} alt={row.typeName} size="md" />
@@ -169,15 +227,7 @@ export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element |
               ) : null}
               {" "}&middot; owner {row.ownerName}
             </span>
-            {action.kind === "buy" ? (
-              <button
-                type="button"
-                disabled={buy.isPending}
-                onClick={() => buy.mutate({ pluginId: row.pluginId, locationId: row.locationId })}
-              >
-                Buy
-              </button>
-            ) : null}
+            {action.kind === "buy" ? <BuyControl row={row} /> : null}
             {action.kind === "owned" ? (
               <OwnedControls
                 propertyId={row.id}
@@ -187,7 +237,6 @@ export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element |
                 price={row.price}
               />
             ) : null}
-            <ErrorText error={buy.isError && buyingThisRow ? buy.error : undefined} />
           </li>
         );
       })}
