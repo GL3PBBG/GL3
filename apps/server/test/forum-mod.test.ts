@@ -269,7 +269,7 @@ describe("admin forum: authorization (loader tier)", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("a plain `forum` ABAC grant (not admin) does not pass the loader tier", async () => {
+  it("a plain `forum` ABAC grant (not admin) DOES pass the loader tier, because both check the same grant", async () => {
     // The moderation grant and the admin loader tier are deliberately
     // separate mechanisms: an in-handler ABAC grant on "forum" is not the
     // same thing as passing `auth: "admin"`'s own grant check — both happen

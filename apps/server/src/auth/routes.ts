@@ -10,13 +10,20 @@ import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
-import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "./rate-limit.js";
+import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
 
-/** Gated players may still verify, sign out, or read their own profile. Query strings are stripped before the check. */
-const GATE_EXEMPT = ["/api/auth/verify", "/api/auth/logout", "/api/auth/me"];
+/**
+ * Gated players may still verify, sign out, read their own profile, or open
+ * the events socket. Query strings are stripped before the check.
+ * `/api/ws/ticket` is exempt because presence already counts an unverified
+ * player as online and the event stream carries nothing gated — without the
+ * exemption, `useGameEvents` minting a ticket from the /verify page itself
+ * would 403 and retrigger the client's own gate redirect to /verify, looping.
+ */
+const GATE_EXEMPT = ["/api/auth/verify", "/api/auth/logout", "/api/auth/me", "/api/ws/ticket"];
 
 declare module "fastify" {
   interface FastifyRequest { playerId?: string }
@@ -190,6 +197,15 @@ export function registerAuthRoutes(
 
     // Redis is a cache of the gate, the row is the truth: a flushed flag
     // re-asserts here, and a verified player never re-acquires it.
+    //
+    // `player.email === null` deliberately falls into the else branch (never
+    // gated) rather than being treated as unverified: a migrated V2 player
+    // with `U_status=2` and no email on file could never satisfy the
+    // verification flow (there's nowhere to send a code), and
+    // `verify/resend` would 409 `no_email` on every attempt. Gating them
+    // would be a dead end with no way out, so they're grandfathered in the
+    // same spirit as `email_verified_at` being backfilled for every
+    // pre-cluster row.
     if (player.emailVerifiedAt === null && player.email !== null) {
       await markUnverified(redis, player.id);
     } else {
@@ -237,16 +253,28 @@ export function registerAuthRoutes(
   }, async (request, reply) => {
     const parsed = ForgotRequestSchema.safeParse(request.body);
     // Every path answers 200 with the same body: the response must not reveal
-    // whether the email exists (account enumeration).
+    // whether the email exists (account enumeration) or whether the email-key
+    // limiter below tripped — a 429 here would itself be a signal.
     if (!parsed.success) return reply.code(200).send({});
-    const [row] = await db.select({ id: players.id, verifiedAt: players.emailVerifiedAt })
-      .from(players).where(eq(players.email, parsed.data.email));
-    if (row && row.verifiedAt !== null) {
-      const token = await issueResetToken(redis, row.id);
-      await mail.send({
-        to: parsed.data.email, subject: "Reset your GL3 password",
-        text: `Reset link: ${config.mail.appBaseUrl}/reset?token=${token}\n\nThe link expires in 1 hour. If you didn't ask for this, ignore it.`,
-      });
+
+    // The per-IP bucket above stops one IP from hammering /forgot, but not an
+    // attacker spraying requests for one victim's address across many IPs —
+    // that needs a second bucket keyed on the email itself. Applied
+    // in-handler, after the body is parsed, since a preHandler runs before
+    // Fastify has a body to key on.
+    const emailKey = `${rateLimitPrefix}:forgotemail:${parsed.data.email.trim().toLowerCase()}`;
+    const withinEmailLimit = await withinRateLimit(redis, emailKey, { limit: 3, windowSeconds: 3600 });
+
+    if (withinEmailLimit) {
+      const [row] = await db.select({ id: players.id, verifiedAt: players.emailVerifiedAt })
+        .from(players).where(eq(players.email, parsed.data.email));
+      if (row && row.verifiedAt !== null) {
+        const token = await issueResetToken(redis, row.id);
+        await mail.send({
+          to: parsed.data.email, subject: "Reset your GL3 password",
+          text: `Reset link: ${config.mail.appBaseUrl}/reset?token=${token}\n\nThe link expires in 1 hour. If you didn't ask for this, ignore it.`,
+        });
+      }
     }
     return reply.code(200).send({});
   });

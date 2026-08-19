@@ -3023,6 +3023,16 @@ web image serves only the SPA's own assets.
   migrator never populates a `forumV3ById`/`topicV3ById` entry for anything
   under a gang forum, so every downstream lookup already misses), but nothing
   turns red if that inspection is ever wrong.
+- **`POST /api/auth/register` answers a distinct 409 `email_taken` when the
+  address is already registered, while `POST /api/auth/forgot` always
+  answers 200 regardless of whether the address exists.** That is an
+  intentional inconsistency, not an oversight missed on one of the two
+  routes: register's 409 is unavoidable (a duplicate account can't silently
+  succeed) and is itself a small email-enumeration surface — an attacker can
+  probe whether an address has an account by registering with it. Forgot's
+  anti-enumeration 200 doesn't close that surface, only avoids adding a
+  second one. Revisit together if enumeration hardening is ever prioritized;
+  fixing one without the other doesn't remove the leak.
 
 **Resolved, but the reasoning matters if you touch these areas:**
 

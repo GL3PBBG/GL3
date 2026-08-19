@@ -33,7 +33,9 @@ import { createRedis } from "../../src/redis.js";
  * `forgot`/`reset` joined the same way once auth-reset.test.ts started
  * calling POST /api/auth/forgot from every test in the file: it is limited
  * to 5/hour, well under what a handful of tests in one file legitimately
- * need.
+ * need. `forgotemail` is a second, independent bucket on the same route —
+ * keyed by the normalised email rather than the IP — and needs its own sweep
+ * entry since it lives under a different key name, not a different prefix.
  *
  * A sweep clearing another concurrently-running file's namespaced bucket in
  * the middle of its run is harmless — it only resets that file's own
@@ -53,7 +55,7 @@ const redis = createRedis(loadConfig(process.env).redisUrl);
 
 async function clearAuthRateLimitBuckets(): Promise<void> {
   const keys: string[] = [];
-  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*", "ratelimit*:verify:*", "ratelimit*:verifyresend:*", "ratelimit*:forgot:*", "ratelimit*:reset:*"]) {
+  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*", "ratelimit*:verify:*", "ratelimit*:verifyresend:*", "ratelimit*:forgot:*", "ratelimit*:forgotemail:*", "ratelimit*:reset:*"]) {
     let cursor = "0";
     do {
       const [next, found] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);

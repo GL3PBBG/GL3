@@ -45,6 +45,12 @@ describe("email verification hard gate", () => {
     const me = await app.inject({ method: "GET", url: "/api/auth/me", headers: { authorization: `Bearer ${token}` } });
     expect(me.statusCode).toBe(200);
 
+    // exempt: an unverified player can still mint a WS ticket — the events
+    // socket carries nothing gated, and this is what stops the client's own
+    // /verify-page gate redirect from looping against itself.
+    const ticket = await app.inject({ method: "POST", url: "/api/ws/ticket", headers: { authorization: `Bearer ${token}` } });
+    expect(ticket.statusCode).toBe(201);
+
     const code = await verifyCodeFor(redis, playerId);
     const verify = await app.inject({ method: "POST", url: "/api/auth/verify", payload: { code } });
     expect(verify.statusCode).toBe(200);

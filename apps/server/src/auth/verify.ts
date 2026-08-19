@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { Redis } from "ioredis";
 
-/** Crockford base32 — unambiguous when read from an email and typed back. */
+/**
+ * Crockford base32 — unambiguous when read from an email and typed back:
+ * the generated alphabet omits I, L, O and U, and `consumeVerifyToken`
+ * folds a typed-back O to 0 and a typed-back I or L to 1 per the Crockford
+ * spec, so a player who reads a generated 0 as an O (or a 1 as an I or L)
+ * still verifies.
+ */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 12;
 
@@ -21,12 +27,17 @@ export async function issueVerifyToken(redis: Redis, playerId: string): Promise<
   return code;
 }
 
+/** Crockford decode folding: a typed-back O reads as 0, I and L read as 1. */
+function foldAmbiguousChars(code: string): string {
+  return code.replace(/O/g, "0").replace(/[IL]/g, "1");
+}
+
 /**
  * GETDEL, not GET+compare (rule 2): the token IS the lookup key, so a wrong
  * code deletes nothing and a right one can only ever be redeemed once.
  */
 export async function consumeVerifyToken(redis: Redis, code: string): Promise<string | null> {
-  const normalized = code.trim().toUpperCase();
+  const normalized = foldAmbiguousChars(code.trim().toUpperCase());
   if (!/^[0-9A-Z]{1,32}$/.test(normalized)) return null;
   return redis.getdel(verifyKey(normalized));
 }

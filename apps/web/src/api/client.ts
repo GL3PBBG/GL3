@@ -71,7 +71,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     // no client-side state that tracks verification (MeResponseSchema carries
     // no such field — see docs), so the redirect lives here, at the one place
     // every request already passes through, rather than duplicated per query.
-    if (response.status === 403 && code === "email_unverified") {
+    // Guarded to skip when already on /verify: without it, a gated player's
+    // own useGameEvents on that page (POST /api/ws/ticket, not gate-exempt)
+    // would 403 into a self-redirect to the same URL — a full document
+    // reload that fires the same request again on load, forever.
+    if (response.status === 403 && code === "email_unverified" && window.location.pathname !== "/verify") {
       window.location.assign("/verify");
     }
     throw new ApiError(response.status, code, {
