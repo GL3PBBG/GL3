@@ -503,7 +503,9 @@ const adminListForumsRoute = route({
       tx.db.select().from(forums).orderBy(forums.sort));
     return {
       status: 200,
-      body: { rows: rows.map((r) => ({ id: r.id, name: r.name, sort: r.sort })) },
+      // Every cell stringified: PageRenderer parses table feeds with
+      // TableRowsResponseSchema (z.record(z.string())), travel's precedent.
+      body: { rows: rows.map((r) => ({ id: r.id, name: r.name, sort: String(r.sort) })) },
     };
   },
 });

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { TableRowsResponseSchema } from "@gl3/shared";
 import { uuidv7 } from "uuidv7";
 import { loadConfig } from "../src/config.js";
 import { players, roleModuleAccess, roles } from "../src/db/schema/index.js";
@@ -323,6 +324,18 @@ describe("admin forum: CRUD", () => {
     expect(res.statusCode, res.body).toBe(200);
     const body = res.json() as { rows: { id: string; name: string; sort: number }[] };
     expect(body.rows.some((r) => r.name === "General")).toBe(true);
+  });
+
+  it("table feed rows are pre-stringified, as the renderer's parse demands", async () => {
+    // PageRenderer parses every table feed with TableRowsResponseSchema
+    // (rows: z.record(z.string())), so a numeric `sort` here throws in the
+    // browser AFTER a create succeeded — the create lands, the refetch dies,
+    // and every retry mints another forum.
+    const founder = await registerVerifiedPlayer({ app, redis });
+    await seedForum("General");
+    const res = await get("/api/admin/forum/forums", founder.token);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(() => TableRowsResponseSchema.parse(res.json())).not.toThrow();
   });
 
   it("renames and re-sorts an existing forum", async () => {
