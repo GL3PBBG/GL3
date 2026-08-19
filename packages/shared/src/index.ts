@@ -27,4 +27,5 @@ export * from "./dto/properties.js";
 export * from "./dto/rank.js";
 export * from "./dto/rounds.js";
 export * from "./dto/shop.js";
+export * from "./dto/theme.js";
 export * from "./dto/travel.js";

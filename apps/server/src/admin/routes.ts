@@ -15,6 +15,7 @@ import { buildAssetsPage } from "./assets-page.js";
 import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
+import { themePage } from "../theme/page.js";
 
 const AssignBodySchema = z.object({
   username: z.string().min(1),
@@ -95,6 +96,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     { id: CORE_SCOPE, name: "core (game art)" },
     { id: "rounds", name: "rounds" },
     { id: "players", name: "players (moderation)" },
+    { id: "theme", name: "theme" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
 }
@@ -158,6 +160,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "players",
         pages: [{ pluginId: "players", id: playersPage.id, path: playersPage.path, view: playersPage.view }],
+      });
+    }
+    if (hasPermission(grants, "theme")) {
+      sections.push({
+        pluginId: "theme",
+        pages: [{ pluginId: "theme", id: themePage.id, path: themePage.path, view: themePage.view }],
       });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });

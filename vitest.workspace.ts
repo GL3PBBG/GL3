@@ -371,6 +371,7 @@ export default defineWorkspace([
         "test/admin-properties.test.ts",
         "test/admin-rounds.test.ts",
         "test/admin-players.test.ts",
+        "test/theming.test.ts",
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",

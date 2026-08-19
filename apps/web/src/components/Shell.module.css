@@ -74,6 +74,47 @@
   .body { grid-template-columns: 1fr; }
 }
 
+/* Sidebar mode — `data-nav="left"` is stamped on <html> by applyTheme from
+   the admin-picked theme, so the same markup lays out either way and React
+   never knows. The shell becomes a two-column grid whose first column is the
+   nav, running from under the header to the bottom; the conditional jail
+   banner gets its own named row so its absence collapses to nothing. */
+:global([data-nav="left"]) .shell {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  column-gap: 1.5rem;
+  grid-template-areas:
+    "header header"
+    "nav    banner"
+    "nav    body";
+  grid-template-rows: auto auto 1fr;
+}
+:global([data-nav="left"]) .header { grid-area: header; }
+:global([data-nav="left"]) .jailBanner { grid-area: banner; }
+:global([data-nav="left"]) .nav {
+  grid-area: nav;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  align-self: start;
+  border-bottom: 0;
+  border-right: 1px solid var(--line);
+  padding: 0.75rem 0.75rem 0.75rem 0;
+}
+:global([data-nav="left"]) .body { grid-area: body; }
+
+/* The sidebar has no room on a phone — fall back to the top bar. */
+@media (max-width: 860px) {
+  :global([data-nav="left"]) .shell { display: block; }
+  :global([data-nav="left"]) .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0.75rem 0;
+  }
+}
+
 /* The page banner sits above the page's own content. No fixed height: an
    unbound slot renders nothing at all and must not leave a gap. */
 .pageBanner:not(:empty) {
