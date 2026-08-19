@@ -2558,6 +2558,168 @@ Gate: bare `npm run verify` on `362803a`, **217 files / 1733 passed, 1
 skipped, exit 0** (third run; run 2 hit the known casino-lock-order flake
 documented in CLAUDE.md, now on its third recorded occurrence).
 
+### Social — email verification, presence, and the forum
+
+Shipped on `worktree-social-cluster`, commits `8ef1b49..9f9ceb6`, 16 tasks
+plus this one. Three SPEC §1 gaps V2 had and GL3 never ported close in one
+cluster: email verification, presence (who's online), and the forum. The
+shared surface widened enough to need its own version
+(`@gl3/shared` → `0.1.14`), and the plugin SDK gained its first-ever
+route-level query-string support (`@gl3/plugin-sdk` → `0.1.7`). **Neither is
+published** — see the version note near the end of this section.
+
+**Email verification is a hard gate, and grandfathering is total.** Core
+migration `0014_email_verified.sql` adds `players.email_verified_at`
+(nullable) and, in the same migration, backfills every existing row to
+`now()` — nobody already playing is ever asked to verify. Registration now
+requires an email (`RegisterRequestSchema.email` is
+`noNulByte(z.string().email().max(254))`, closing the NUL-guard watch item
+below); a new player inserts `email_verified_at: NULL`, and
+`POST /api/auth/register` sends the verification email only after the
+transaction commits (rule 5). The gate itself is one Redis flag, not a
+per-request DB read: `markUnverified` sets `unverified:<id>` (no TTL) when a
+new player registers, `requireAuth` answers 403 `email_unverified` for a
+flagged player on any non-exempt route, and `clearUnverified` fires on
+successful verification. **Login re-asserts the flag from the `players` row
+every time**, so a Redis flush self-heals on the player's next login instead
+of silently unlocking an unverified account forever. Verification tokens are
+12-character Crockford-base32 codes (unambiguous when typed back out of an
+email), stored as `emailverify:<code>` with a 24-hour TTL and consumed by
+`GETDEL` (rule 2) — a wrong code deletes nothing, a right one redeems
+exactly once; resend is capped at 3/hour through the existing `tokenBucket`.
+`GATE_EXEMPT` (`/api/auth/verify`, `/api/auth/logout`, `/api/auth/me`) is
+the only carve-out — everything else, core routes and plugin routes alike,
+403s for a flagged player, because `registerPluginRoutes` runs every plugin
+route through the same `app.requireAuth` decorator core uses.
+
+**`requireAuth` became the one choke point for the gate and for presence in
+the same commit.** Every authenticated request, core or plugin, calls
+`touchPresence` before the unverified check runs, so both facts land off one
+decorator with no per-route wiring anywhere else.
+
+**Password reset reuses the token shape.** `POST /api/auth/forgot` always
+answers 200 whether or not the email exists (anti-enumeration) and only
+actually mails a *verified* account; `pwreset:<token>` is a 32-byte-random
+token, 1-hour TTL, `GETDEL`-consumed, same as verification. A successful
+reset kills every session on the account, not only the one that reset it —
+`playersessions:<playerId>`, a new Redis SET, is a reverse index of every
+live session token (`createSession` SADDs the new token in,
+`destroySession` GETDELs the session key then SREMs it out, and the new
+`destroyAllSessions` reads the whole SET and deletes every member key plus
+the SET itself).
+
+**Presence.** `touchPresence` (`apps/server/src/presence/touch.ts`) runs on
+every authenticated request: an unconditional `ZADD presence <now> <id>`,
+plus a throttled write to `players.last_seen_at` — the V2 column GL3 had
+carried but never written — gated by `SET lastseenmark:<id> 1 EX 60 NX`,
+where the `NX` outcome *is* the decision (rule 2) so concurrent requests
+need no read to agree on who does the write. `GET /api/online` trims the
+ZSET lazily (`ZREMRANGEBYSCORE presence -inf now-1h`, no cron — the same
+settle-at-read shape `ensureCurrentRound` established) and returns two
+windows, `onlineNow` (active in the last 5 minutes) and `lastHour`, built
+off one `inArray`-batched hydration joining `players` → `player_stats` →
+`locations`. An underground town's residents keep their name and recency in
+the listing — only `locationName` comes back `null`, the same concealment
+rule location combat modes established for combat and travel. Profile
+gained `lastSeenAt`, and the public profile route gained a `tokenBucket`
+(60/60s), closing the "unauthenticated and un-rate-limited" watch item
+below.
+
+**The test-suite migration was this cluster's largest mechanical cost.**
+Requiring a verified email broke registration for roughly 90 existing test
+files that logged a player in over the plain HTTP flow.
+`registerVerifiedPlayer` — a new test helper that registers for real, scans
+Redis for the `emailverify:*` code by player id, and calls
+`POST /api/auth/verify` — was adopted across all of them rather than any
+test-only bypass, so the suite still exercises the real gate end to end. The
+rate-limit-isolation sweep gained buckets for
+`verify`/`verifyresend`/`forgot`/`reset`; zod's `.email()` rejects a digit
+top-level domain, so every fixture generating an address switched to an
+`example.test`-style domain; and two subscribe-mode Redis clients
+(combat's backfire test, theft's chase test) needed a second, ordinary
+client alongside the one already in subscribe mode, since the new
+verification-email lookup needs an ordinary `GET`/`SCAN`-capable connection.
+**The full suite now runs ~525s**, up noticeably from the low-300s range the
+tree had settled at since the `resetDb` batched-`TRUNCATE` fix (CLAUDE.md) —
+almost entirely the cost of one extra register-then-verify round trip per
+file that logs a player in.
+
+**Forum** (`@gl3/plugin-forum`) is the **nineteenth plugin and the ninth to
+own tables and migrations** — `p_forum_forums` / `p_forum_topics` /
+`p_forum_posts`, one `CREATE TABLE`/`CREATE INDEX` statement per migration
+entry, the same postgres.js `unsafe()`-rejects-multi-statement constraint
+bounties' migrations already documented. Foreign keys cascade a forum's
+deletion down through its topics and posts, and `SET NULL` a deleted
+author out of their own content rather than deleting it. **No forum route
+takes an explicit lock anywhere**: a reply advances `last_post_at` /
+`post_count` with a plain self-serializing
+`UPDATE ... SET post_count = post_count + 1`, and the only locking the FKs
+impose (`FOR KEY SHARE` on the parent forum/topic and, when set, on
+`players`) has no second lock in the same transaction to invert against —
+so this cluster adds **no new lock-graph edge, and deliberately no
+lock-order test**. Reads are paginated 20/page, sticky topics first then
+most-recently-posted, off one indexed `ORDER BY`
+(`p_forum_topics_listing_idx` on `(forum_id, type, last_post_at DESC)`) — no
+N+1. Writes go through `ctx.cooldown` — the same SDK surface combat's shot
+cooldown already uses, not new SDK surface — 60s between topics and 15s
+between posts, V2's own numbers. A reply notifies the topic's author via
+`tx.notify` unless the author is the replier or the topic is a migrated V2
+row with no author at all. Moderation is `hasPermission("forum")`: an ABAC
+grant doubles as forum moderator and, by the existing shape of
+`role_module_access`, also passes the `/api/admin/forum` loader tier —
+consistent with every other module grant, noted rather than special-cased.
+Admin CRUD is `adminPages`, with no UUID column displayed anywhere
+(`admin-ids-hidden`'s floor moves 10 → 12 to cover it), and the
+rename/reorder route is `POST /api/admin/forum/forums/update` with the
+target id in the request body rather than the path, because an `adminPages`
+form's `action` has to be a static string — the same shape travel's
+`/locations/update` already established. Web pages `Forum.tsx` /
+`ForumTopic.tsx` follow Mail's list/detail structure and Crimes' countdown
+idiom for the cooldown, with client-side quote prefill.
+
+**M4 gained a ninth migration phase, after social, just for forum
+content.** `migrateForum` needs players already resolved in `id_map` for
+author lookups, and nothing later in the pipeline reads a forum table, so it
+did not need a slot inside the social phase — one more `runPhase` call in
+`orchestrator.ts`. V2's gang forums (`F_id < 0` by convention) are
+reported-skipped wholesale, and every topic or post filed under one cascades
+to skipped for the same reason — V2 enforces no foreign keys, so a topic or
+post referencing a forum this run never saw is indistinguishable from one
+under a gang forum and is treated the same way. V2's `T_type` bitmask
+(sticky | important) collapses onto GL3's two-value `CHECK`: either bit set
+becomes `'sticky'`. V2 kept no `post_count`/`last_post_at` columns at all,
+so both are recomputed from the migrated posts in one aggregate `UPDATE`
+after every post is in, never trusted from source. All three inserts are
+idempotent upserts keyed on the `id_map`-resolved UUIDv7, so a re-run is a
+no-op. `mysql/fingerprint.ts`'s `KNOWN_TABLES` gained `forums`/`topics`/
+`posts`, and `orchestrator-idempotency.test.ts`'s three-run
+identical-count proof grew from 26 to 29 target tables.
+
+**No new `GameEvent` variant anywhere in this cluster, and no new explicit
+lock-graph edge anywhere in this cluster.** Forum's reasoning is above;
+email verification, password reset and presence publish nothing beyond the
+existing `notification.created` where they publish at all, and none of the
+three touches a row two other paths don't already lock the same way.
+
+**`@gl3/shared` → `0.1.14`** — the required-email + NUL guard on
+`RegisterRequestSchema`, `VerifyRequestSchema` / `ForgotRequestSchema` /
+`ResetRequestSchema`, `dto/online.ts`, `dto/forum.ts`, `targetPlayerId` /
+`placerPlayerId` on the bounty row DTO, and `lastSeenAt` on `ProfileDto` —
+additive, **not yet published**, same registry-check-first caveat as every
+prior bump. **`@gl3/plugin-sdk` → `0.1.7`**, its first-ever route-level
+query-string support: an optional `query` zod field on `route()`, defaulted
+to `z.unknown()` the same way `params`/`body` already default, parsed by the
+loader with a clean 400 on a malformed query string — neither the forum
+plan nor its design anticipated `?page=`, and this is the SDK gap that
+closed it. **Also not yet published.**
+
+Gate: bare `npm run verify` on `9f9ceb6`, **228 files / 1804 passed, 1
+skipped, exit 0**, no unhandled rejections, no `(0 test)` cross-talk (the two
+`.test-d.ts` typecheck-only files are the same expected pair prior gates
+recorded), and the known `casino-lock-order` flake did not fire this run
+(clean 5/5). Duration 711.5s, up from 217/1733's run — almost entirely the
+email round-trip cost described above.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
@@ -2694,10 +2856,6 @@ web image serves only the SPA's own assets.
 - **No unique constraint on `gang_invites (gang_id, invited_player_id)`.** Duplicate
   invites produce duplicate rows and duplicate notifications. Inert today because
   accepting clears all of the invitee's pending invites.
-- **The public profile route is the only unauthenticated, un-rate-limited route in
-  the app**, and it runs a four-table join per anonymous hit. Reviewed and accepted:
-  the join is keyed on a primary key with at most one result row, so the exposure is
-  amplification at request rate, not enumeration. Revisit before deployment.
 - **Create-gang's duck-typed unique-violation check tests only `code === "23505"`,
   not `constraint_name`.** `gangs_name_unique` is the sole unique constraint
   reachable on that insert path today, so any `23505` there is unambiguous —
@@ -2710,10 +2868,6 @@ web image serves only the SPA's own assets.
   (`gang-members.test.ts:52`) guards shared↔core only; shared↔plugin drift
   would surface at runtime as a `z.enum` mismatch on the PUT/DELETE
   permission param, not at compile time or in that test.
-- **`RegisterRequestSchema.email` has no explicit `noNulByte` guard.** It is safe
-  only *incidentally*, because zod's `.email()` regex happens to reject NUL — verified
-  independently across local-part, domain, leading and trailing positions. Fragile
-  against a zod bump that loosens the regex.
 - **Leaderboard scores above 2^53.** Redis sorted-set scores are IEEE doubles;
   balances are deliberately `bigint` because V2's signed-32-bit ceiling was a real
   problem in long-running games. Documented but *not enforced* — no GL3 value
@@ -2807,8 +2961,84 @@ web image serves only the SPA's own assets.
   share one database, so the second boot's first job would be swallowed as
   already-applied by the first boot's `plugin_job_runs` row. No file does both
   today.
+- **`@gl3/shared`'s `index.ts` export order is no longer alphabetical.**
+  `dto/online.js` and `dto/forum.js` were appended after `dto/oc.js` rather
+  than sorted in (`forum` belongs before `gangs`); harmless — barrel exports
+  don't care about order — but the next reader scanning for a DTO by eye will
+  be misled. Fix whenever that file is next touched.
+- **The bounty row DTO carries `targetId` and `targetPlayerId` (and
+  `placerPlayerId` with no `placerId` counterpart) as duplicate values under
+  two keys.** `targetPlayerId`/`placerPlayerId` were added this cluster so
+  `PlayerLink` has a stable id to link against everywhere a bounty row
+  renders; `targetId` already existed and means the same thing. A
+  consolidation pass — one id field per party, named consistently — is a
+  clean follow-up, not urgent since both fields agree by construction.
+- **`MailDriver`'s error logging uses string interpolation, not a structured
+  log object** (`apps/server/src/mail/driver.ts:30,35`), unlike the rest of
+  this codebase's logging convention. Cosmetic; `MailDriver.send` never
+  throws regardless of what it logs (see below).
+- **The `resend` backend's network-failure branch (a rejected `fetch`) has no
+  test.** `MailDriver.send`'s never-throws contract is proven for the `log`
+  driver and for a resend *rejection response*, but not for the transport
+  itself throwing. The registration and forgot-password routes both rely on
+  never-throws to avoid needing a try/catch around `mail.send` (see the next
+  item) — this is the one branch of that contract that isn't pinned by a
+  test.
+- **`POST /api/auth/register` does not wrap `mail.send` in a try/catch.**
+  Deliberate, not an oversight: `MailDriver`'s contract is never-throws, so a
+  wrapping catch would be defensive against a guarantee the driver already
+  makes. Latent only, and only as strong as the untested branch immediately
+  above — if that branch is ever wrong, registration itself would 500 on a
+  mail-transport failure instead of completing with the email merely
+  undelivered.
+- **A verified player who opens `/verify` anyway sees a form with no way
+  back.** There's no redirect-if-already-verified and no link off the page;
+  harmless (the form's own submit just 404s or no-ops on an already-consumed
+  code) but a rough edge worth closing in the same pass that revisits the
+  auth pages.
+- **Every parallel query the `Shell` component fires can independently
+  redirect on a 403.** A gated player with several panels loading at once may
+  see `window.location.assign("/verify")` called more than once — idempotent
+  (the second call is a no-op once the first has navigated), but worth a
+  once-guard so it isn't relying on that idempotence by accident.
+- **Player names outside the spec's linking list are still plain text.**
+  `PlayerLink` shipped for the pages the design named; Leaderboards, Mail,
+  Dashboard, Properties, Detectives, Rounds and OC all render a username
+  somewhere and none of them link it yet. A follow-up sweep, not scoped to
+  this cluster.
+- **The forum listing's `ORDER BY sort` has no tiebreaker.** Two forums with
+  the same `sort` value order arbitrarily (whatever Postgres returns without
+  a second key) rather than deterministically. Cosmetic until an admin
+  actually creates two forums at the same sort rank.
+- **`ForumTopicSchema` doesn't carry its own `forumId`.** A page holding only
+  a `ForumTopic` (the reply view) can't link back to the forum it belongs to,
+  can't seed a targeted cache invalidation narrower than the whole forum
+  prefix, and can't pre-seed the post cooldown from that view alone. Additive
+  — a candidate for the next `@gl3/shared` bump that touches forum DTOs,
+  not urgent enough to justify one on its own.
+- **`packages/plugins/forum/src/index.ts:106` has a redundant `isGangForum`
+  check sitting beside a map lookup that already encodes the same
+  information**, and the cascade-skip branch for a gang forum's own topics
+  and posts has no direct test — it's correct by inspection (the migrator
+  never populates a `forumV3ById`/`topicV3ById` entry for anything under a
+  gang forum, so every downstream lookup already misses), but nothing turns
+  red if that inspection is ever wrong.
 
 **Resolved, but the reasoning matters if you touch these areas:**
+
+- **The public profile route used to be the only unauthenticated,
+  un-rate-limited route in the app**, running a four-table join per
+  anonymous hit. Accepted at the time because the join is keyed on a primary
+  key with at most one result row, so the exposure was amplification at
+  request rate, not enumeration — but "revisit before deployment" was always
+  the plan. Closed on the social cluster: the route now sits behind the same
+  `tokenBucket` (60/60s) every other rate-limited route uses.
+- **`RegisterRequestSchema.email` used to have no explicit `noNulByte`
+  guard**, safe only incidentally because zod's `.email()` regex happened to
+  reject NUL. Closed on the social cluster along with making the field
+  required: `RegisterRequestSchema.email` is now
+  `noNulByte(z.string().email().max(254))`, an explicit guard rather than a
+  fragile coincidence of the regex.
 
 - **`bank.test.ts`'s `app.inject` block used to boot `buildApp` with no
   `leaderboardPrefix`** (`apps/server/test/bank.test.ts:114`), so its
