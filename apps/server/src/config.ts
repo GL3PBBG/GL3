@@ -20,6 +20,25 @@ const EnvSchema = z.object({
   ),
   /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
   PLUGIN_IDS: z.string().default(""),
+  /**
+   * Comma-separated npm package specifiers to import at boot from outside this
+   * build — see `plugins/dynamic.ts` for why the image forces this.
+   *
+   * These are LOADED, not merely made available. `PLUGIN_IDS` selects among
+   * plugins compiled into the server, where "installed but not enabled" is a
+   * real state; a package an operator installed into their plugin directory
+   * and then named here has no such state to model, and requiring them to also
+   * discover its manifest id — which `available.ts` is emphatic is not its
+   * package name — would be a papercut with nothing behind it.
+   */
+  PLUGIN_PACKAGES: z.string().default(""),
+  /**
+   * Directory the above are resolved from, e.g. a volume at `/data/plugins`
+   * populated by `npm i --prefix /data/plugins @acme/plugin-x`. Unset resolves
+   * them from the server's own `node_modules` instead, which is what a
+   * from-source deployment wants.
+   */
+  PLUGIN_DIR: z.string().optional(),
 
   /**
    * Which object-storage backend serves game art. `fs` writes under
@@ -87,6 +106,10 @@ export interface Config {
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
   pluginIds: string[];
+  /** Package specifiers imported at boot from outside this build. */
+  pluginPackages: string[];
+  /** Where those are resolved from; `null` means the server's own node_modules. */
+  pluginDir: string | null;
   sweepIntervalMs: number;
   assets: AssetConfig;
   mail: MailConfig;
@@ -102,6 +125,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     nodeEnv: parsed.NODE_ENV,
     pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+    pluginPackages: parsed.PLUGIN_PACKAGES.split(",").map((p) => p.trim()).filter(Boolean),
+    pluginDir: parsed.PLUGIN_DIR ?? null,
     sweepIntervalMs: parsed.SWEEP_INTERVAL_MS,
     assets: {
       driver: parsed.ASSET_DRIVER,

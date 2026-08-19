@@ -563,7 +563,15 @@ unavailable here.
   which rewrites the generated `apps/server/src/plugins/installed-plugins.ts`.
   It needs no tsconfig reference (it ships built `dist/`), no `srcAliases`
   entry, and no Dockerfile COPY (it arrives through the existing `npm ci` in
-  both stages). The eight below are:
+  both stages). **Those two serve a from-source deployment only.** GL3 deploys
+  as Docker, where the runtime stage has no toolchain and cannot rebuild the
+  static import map — there, a plugin arrives through `PLUGIN_PACKAGES` +
+  `PLUGIN_DIR` (`plugins/dynamic.ts`), resolved and zod-validated at boot,
+  needing **zero** registration sites and no image rebuild. Note the
+  consequence: a dynamically loaded plugin brings its own `@gl3/plugin-sdk`
+  copy, so **never use `instanceof` on an SDK error class across the
+  plugin/core boundary** — use `isPluginError` and its siblings. The eight
+  below are:
   `packages/plugins/<id>/` itself, then:
   `apps/server/package.json` (+ `npm install`), `apps/server/tsconfig.json`
   references, root `tsconfig.json` references, `vitest.workspace.ts`

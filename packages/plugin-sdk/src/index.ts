@@ -1,4 +1,7 @@
-export { PluginError, JobAlreadyAppliedError, InsufficientFundsError, InsufficientGangFundsError } from "./errors.js";
+export {
+  PluginError, JobAlreadyAppliedError, InsufficientFundsError, InsufficientGangFundsError,
+  isPluginError, isJobAlreadyAppliedError, isInsufficientFundsError, isInsufficientGangFundsError,
+} from "./errors.js";
 export {
   filterPoint,
   on,
@@ -33,6 +36,7 @@ export {
 export { renderDescribe, PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
 export {
   definePlugin,
+  parsePluginManifest,
   PLUGIN_ID_PATTERN,
   SEMVER_PATTERN,
   type PluginManifest,

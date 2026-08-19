@@ -2054,7 +2054,9 @@ touch. The map is now generated:
   and staleness of the committed map.
 
 Installing a plugin is therefore `npm i` + `npm run plugins:generate` + commit,
-and enabling it is `PLUGIN_IDS`. Registry-installed plugins need **two**
+and enabling it is `PLUGIN_IDS` — **for a from-source deployment**. See
+"Dynamic plugin loading" below for the container path, which none of that
+serves. Registry-installed plugins need **two**
 registration sites, not the eight CLAUDE.md lists for workspace-local ones —
 they ship built `dist/`, so no tsconfig reference, no `srcAliases` entry and no
 Dockerfile COPY. Two latent defects were fixed on the way: `@gl3/hello-plugin`
@@ -3275,3 +3277,92 @@ web image serves only the SPA's own assets.
   and *do* apply from root.) This was proven empirically, not assumed.
 - Leaderboard Redis keys are namespaced per `bootTestServer()` call; production
   keeps the global keys, which is correct there.
+
+
+---
+
+## Dynamic plugin loading (`PLUGIN_PACKAGES`)
+
+The plugin story above assumes an operator who builds from source. GL3 deploys
+as Docker, and for that operator it does not work at all: `Dockerfile.server`'s
+runtime stage carries only compiled `dist/` dirs plus the `node_modules` that
+`npm ci` resolved at **build** time, and `installed-plugins.ts` is compiled into
+`apps/server/dist`. There is no toolchain to rebuild it with. Adding any
+third-party plugin meant rebuilding the image, and the image's plugin COPY
+lines only ever covered our own workspace packages.
+
+`PLUGIN_PACKAGES` is the second route in. Each entry is an npm package
+specifier resolved out of `PLUGIN_DIR` — an operator-controlled directory, in
+practice a volume populated by an init container running
+`npm i --prefix /data/plugins @acme/plugin-x`, the same slot the migration
+initContainer already occupies. Install becomes an env var and a restart.
+
+- **`apps/server/src/plugins/dynamic.ts`** resolves, imports, and validates.
+  Resolution tries `createRequire().resolve` first (it implements the whole
+  algorithm including `exports` maps) and falls back to reading the package's
+  own `package.json` — needed because `require.resolve` answers
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` for an **ESM-only** exports map, which a
+  modern third-party plugin may legitimately ship. Every GL3 plugin declares
+  `default` and resolves on the fast path; the fallback exists for everyone
+  else. With no `PLUGIN_DIR`, a bare `import(spec)` resolves from the server's
+  own `node_modules`.
+- **`parsePluginManifest`** (new SDK export) is what replaces the compile-time
+  check. `definePlugin` is now a typed wrapper over it — one schema, two entry
+  points. The static import never verified more than "the default export
+  matches `PluginManifest`" for a prebuilt package anyway, since `tsc` never
+  sees a registry plugin's sources; a zod parse does that job against what
+  actually shipped, and names the offending field.
+- **`PLUGIN_PACKAGES` entries load unconditionally**, unlike `PLUGIN_IDS`.
+  "Installed but not enabled" is a real state for a plugin compiled into the
+  server and no state at all for one an operator installed and then named; a
+  second variable would only have forced them to discover a manifest id that
+  `available.ts` is emphatic is not the package name.
+- **Id collisions fail boot loudly** (`assertNoIdCollisions` in `index.ts`),
+  naming the package and the id. `withCorePlugins` de-duplicates silently,
+  which is right for its own case and wrong here — an operator whose
+  `@acme/casino` collided with ours would otherwise see it simply never appear.
+
+### The hazard this had to close first
+
+Two module instances of `@gl3/plugin-sdk` now exist in a live deployment: ours
+under `/app`, and the plugin's own under `/data/plugins`. `plugins/routes.ts`
+mapped a plugin's thrown error to its HTTP status with
+`error instanceof PluginError`, which is **false** across two instances — so
+every deliberate 400/409/423 from a dynamically loaded plugin would have
+surfaced as a 500. The SDK had already met this exact problem with zod
+(`events.ts:14`, duck-typed on purpose) and now states it once, structurally:
+`PluginError`, `InsufficientFundsError`, `InsufficientGangFundsError` and
+`JobAlreadyAppliedError` carry `Symbol.for` brands, and the SDK exports
+`isPluginError` and friends. `routes.ts` and `jobs.ts` use the guards.
+
+Each guard also accepts a legacy `name`+shape match, because every plugin
+published against `0.1.0`–`0.1.8` predates the brand. `isPluginError`
+additionally requires `code`/`status` on that arm — the two fields the caller
+goes on to read, where a bare `name` match would produce `reply.code(undefined)`.
+
+`ctx.ts:129/153` deliberately stay on `instanceof`: those catch core's own
+`economy/ledger.ts` errors, thrown and caught inside core, one instance, never
+crossing the boundary.
+
+`filterPoint`'s `declared` Set is also per-instance, which weakens its
+duplicate-name check across the boundary. Left alone on purpose —
+`runFilterChain` routes by name *string*, so cross-instance filters still work,
+and the loader's own collision pass covers what matters.
+
+### Tests
+
+`apps/server/test/plugin-dynamic.test.ts` (`@gl3/server:unit`, so it runs in
+`verify:ci` with no DB) writes **real** packages to a tmpdir and really imports
+them — a mocked `import` would prove nothing about the thing that actually
+breaks. It covers the happy path, the ESM-only exports map, ordering, a
+malformed manifest, a missing default export, an unresolvable specifier, and an
+entry point that throws at module scope.
+`packages/plugin-sdk/test/error-guards.test.ts` stands in for a second SDK copy
+with classes carrying the same brand and name but a different class object, and
+asserts `foreign instanceof PluginError === false` outright next to
+`isPluginError(foreign) === true`. Both files were verified red: reverting
+`isPluginError` to `instanceof` fails 2, deleting the ESM-only fallback fails 1.
+
+`@gl3/plugin-sdk` → **`0.1.9`** (additive: `parsePluginManifest` plus the four
+guards). **Not published** — the registry already serves `0.1.8` from another
+session, and publishing needs the user's approval.

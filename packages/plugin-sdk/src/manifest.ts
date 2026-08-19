@@ -169,9 +169,10 @@ export interface PluginManifest {
 }
 
 /**
- * Validated at definition time rather than only at boot, so a malformed
- * manifest fails on `import` with the plugin's own id in the message. The
- * loader re-checks cross-plugin concerns (collisions) it cannot see from here.
+ * The one schema behind both `definePlugin` (typed input, checked at
+ * definition time) and `parsePluginManifest` (untyped value, checked at boot).
+ * The loader re-checks cross-plugin concerns (collisions) it cannot see from
+ * here.
  *
  * The function-bearing fields — `routes` and `jobs` — are `z.unknown()`: their
  * shape is enforced by the TypeScript types, and a zod schema over a function
@@ -294,7 +295,24 @@ function describeId(input: unknown): string {
   return "<unknown>";
 }
 
-export function definePlugin(input: PluginManifestInput): PluginManifest {
+/**
+ * Validates an UNTYPED value as a manifest — the entry point for a plugin
+ * whose shape the compiler never saw.
+ *
+ * `definePlugin` gets its guarantee twice over: the author writes a
+ * `PluginManifestInput` and `tsc` checks it. A plugin loaded through
+ * `PLUGIN_PACKAGES` gets it once, here, because it arrives as the default
+ * export of a prebuilt package resolved at runtime — `import()` returns
+ * `any`-shaped module namespace and nothing has checked it. This is the parse
+ * that replaces the compile-time check the static import map used to provide
+ * (see `apps/server/src/plugins/dynamic.ts`).
+ *
+ * `InputSchema` is reused rather than a second "normalised" schema written,
+ * because every field it makes optional also accepts a present valid value —
+ * so an already-normalised manifest parses clean, and one schema stays the
+ * single source of truth for both paths.
+ */
+export function parsePluginManifest(input: unknown): PluginManifest {
   const result = InputSchema.safeParse(input);
   if (!result.success) {
     const detail = result.error.issues
@@ -322,4 +340,13 @@ export function definePlugin(input: PluginManifestInput): PluginManifest {
     providesAssets: parsed.providesAssets ?? [],
     filters: parsed.filters ?? [],
   };
+}
+
+/**
+ * Validated at definition time rather than only at boot, so a malformed
+ * manifest fails on `import` with the plugin's own id in the message. The
+ * loader re-checks cross-plugin concerns (collisions) it cannot see from here.
+ */
+export function definePlugin(input: PluginManifestInput): PluginManifest {
+  return parsePluginManifest(input);
 }

@@ -1,5 +1,5 @@
 import type { PluginCtx, PluginManifest } from "@gl3/plugin-sdk";
-import { JobAlreadyAppliedError } from "@gl3/plugin-sdk";
+import { isJobAlreadyAppliedError } from "@gl3/plugin-sdk";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import { createRng } from "../game/rng.js";
@@ -91,7 +91,8 @@ export async function runPluginJob(
     // Already applied is the expected outcome of a retry after a committed
     // run, not a failure — swallowing it here is what stops BullMQ from
     // burning its remaining attempts on work that is already done.
-    if (error instanceof JobAlreadyAppliedError) return;
+    // Structural, not `instanceof` — see routes.ts and the SDK's errors.ts.
+    if (isJobAlreadyAppliedError(error)) return;
     throw error;
   }
 }

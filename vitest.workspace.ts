@@ -223,6 +223,7 @@ export default defineWorkspace([
         "test/admin-hidden-discriminator.test.ts",
         "test/admin-validate.test.ts",
         "test/plugin-map.test.ts",
+        "test/plugin-dynamic.test.ts",
         "test/plugin-validate.test.ts",
         "test/rng.test.ts",
         "test/rounds-settings.test.ts",
