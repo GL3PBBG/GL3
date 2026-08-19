@@ -3,6 +3,7 @@ import { parseNonNegativeBigint, parsePositiveInt } from "../hospital/settings.j
 const DEFAULT_BAIL_COST_PER_SECOND = 1000n;
 const DEFAULT_BUST_SUCCESS_PERCENT = 25;
 const DEFAULT_BUST_FAIL_JAIL_SECONDS = 300;
+const DEFAULT_ESCAPE_FAIL_EXTRA_SECONDS = 90;
 
 export function bailCostPerSecond(settings: Record<string, string>): bigint {
   return parseNonNegativeBigint(settings["jail.bail_cost_per_second"], DEFAULT_BAIL_COST_PER_SECOND);
@@ -23,4 +24,9 @@ export function bustSuccessPercent(settings: Record<string, string>): number {
 
 export function bustFailJailSeconds(settings: Record<string, string>): number {
   return parsePositiveInt(settings["jail.bust_fail_jail_seconds"], DEFAULT_BUST_FAIL_JAIL_SECONDS);
+}
+
+/** Added to the escaper's EXISTING sentence on a failed escape (V2's +90s). */
+export function escapeFailExtraSeconds(settings: Record<string, string>): number {
+  return parsePositiveInt(settings["jail.escape_fail_extra_seconds"], DEFAULT_ESCAPE_FAIL_EXTRA_SECONDS);
 }
