@@ -269,6 +269,37 @@ describe("properties admin", () => {
     ).rejects.toThrow();
   });
 
+  it("deletes an unowned property", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bullets", cost: "10000" },
+    });
+    const { id } = create.json() as { id: string };
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/properties/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id))).toEqual([]);
+  });
+
+  it("refuses deleting an owned property", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/properties", headers: auth(),
+      payload: { locationId, pluginId: "bullets", cost: "10000" },
+    });
+    const { id } = create.json() as { id: string };
+    const owner = await registerVerifiedPlayer({ app, redis }, { username: "Deedholder", remoteAddress: "10.99.2.1" });
+    await db.update(propertiesPlugin).set({ ownerPlayerId: owner.playerId }).where(eq(propertiesPlugin.id, id));
+
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/properties/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(409);
+    expect(del.json().error).toBe("property_owned");
+    expect((await db.select().from(propertiesPlugin).where(eq(propertiesPlugin.id, id))).length).toBe(1);
+  });
+
+  it("404s deleting an unknown property", async () => {
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/properties/${uuidv7()}`, headers: auth() });
+    expect(del.statusCode).toBe(404);
+  });
+
   it("never renders id as a table column, only as a select's valueKey", () => {
     const idKeys: string[] = [];
     const valueKeys: string[] = [];

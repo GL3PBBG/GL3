@@ -340,4 +340,22 @@ describe("admin forum: CRUD", () => {
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("forum_not_found");
   });
+
+  it("deletes a forum, cascading its topics and posts", async () => {
+    const founder = await registerVerifiedPlayer({ app, redis });
+    const forumId = await seedForum("Doomed board");
+    const topicId = await seedTopic(forumId);
+
+    const res = await del(`/api/admin/forum/forums/${forumId}`, founder.token);
+    expect(res.statusCode, res.body).toBe(204);
+    expect(await db.select().from(forumForums).where(eq(forumForums.id, forumId))).toEqual([]);
+    expect(await db.select().from(forumTopics).where(eq(forumTopics.id, topicId))).toEqual([]);
+    expect(await db.select().from(forumPosts).where(eq(forumPosts.topicId, topicId))).toEqual([]);
+  });
+
+  it("404s deleting an unknown forum id", async () => {
+    const founder = await registerVerifiedPlayer({ app, redis });
+    const res = await del(`/api/admin/forum/forums/${uuidv7()}`, founder.token);
+    expect(res.statusCode).toBe(404);
+  });
 });

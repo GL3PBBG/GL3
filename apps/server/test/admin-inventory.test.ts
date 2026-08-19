@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { locations } from "../src/db/schema/content.js";
 import { items } from "../src/db/schema/content.js";
+import { playerItems } from "../src/db/schema/economy.js";
 import { playerStats } from "../src/db/schema/identity.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -581,6 +582,90 @@ describe("inventory admin", () => {
         headers: { authorization: `Bearer ${p.token}` },
       });
       expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe("deletion", () => {
+    async function createItem(name: string): Promise<string> {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name, itemType: "weapon", damageMin: 1, damageMax: 2 },
+      });
+      return res.json().id as string;
+    }
+
+    it("deletes an unowned item along with its shop listings", async () => {
+      const itemId = await createItem("Rusty pipe");
+      const locationId = uuidv7();
+      await db.insert(locations).values({
+        id: locationId, name: "Palermo", travelCost: 0n, travelCooldownSeconds: 0,
+        bulletStock: 0, bulletCost: 0n,
+      });
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/shop", headers: auth(),
+        payload: { locationId, itemId, price: "100", stock: 5 },
+      });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/inventory/items/${itemId}`, headers: auth() });
+      expect(del.statusCode).toBe(204);
+      expect(await db.select().from(items).where(eq(items.id, itemId))).toEqual([]);
+      // p_inventory_shop_stock has no FK, so the route must have cleaned it.
+      const shop = await app.inject({ method: "GET", url: "/api/admin/inventory/shop", headers: auth() });
+      expect(shop.json().rows).toEqual([]);
+    });
+
+    it("refuses deleting an item a player owns", async () => {
+      const itemId = await createItem("Heirloom");
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Owner" });
+      await db.insert(playerItems).values({ playerId: p.playerId, itemId, qty: 1 });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/inventory/items/${itemId}`, headers: auth() });
+      expect(del.statusCode).toBe(409);
+      expect(del.json().error).toBe("item_in_use");
+      expect((await db.select().from(items).where(eq(items.id, itemId))).length).toBe(1);
+    });
+
+    it("refuses deleting an item someone has equipped", async () => {
+      const itemId = await createItem("Cursed blade");
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Wielder" });
+      await db.update(playerStats).set({ weaponItemId: itemId }).where(eq(playerStats.playerId, p.playerId));
+
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/inventory/items/${itemId}`, headers: auth() });
+      expect(del.statusCode).toBe(409);
+      expect(del.json().error).toBe("item_in_use");
+    });
+
+    it("deletes one shop listing by its composite key", async () => {
+      const itemId = await createItem("Snubnose");
+      const locationId = uuidv7();
+      await db.insert(locations).values({
+        id: locationId, name: "Corleone", travelCost: 0n, travelCooldownSeconds: 0,
+        bulletStock: 0, bulletCost: 0n,
+      });
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/shop", headers: auth(),
+        payload: { locationId, itemId, price: "100", stock: 5 },
+      });
+
+      const del = await app.inject({
+        method: "DELETE", url: `/api/admin/inventory/shop/${locationId}/${itemId}`, headers: auth(),
+      });
+      expect(del.statusCode).toBe(204);
+      const shop = await app.inject({ method: "GET", url: "/api/admin/inventory/shop", headers: auth() });
+      expect(shop.json().rows).toEqual([]);
+      // The item itself survives — only the listing went.
+      expect((await db.select().from(items).where(eq(items.id, itemId))).length).toBe(1);
+    });
+
+    it("404s deleting an unknown item and an unknown shop listing", async () => {
+      const missingItem = await app.inject({
+        method: "DELETE", url: `/api/admin/inventory/items/${uuidv7()}`, headers: auth(),
+      });
+      expect(missingItem.statusCode).toBe(404);
+      const missingStock = await app.inject({
+        method: "DELETE", url: `/api/admin/inventory/shop/${uuidv7()}/${uuidv7()}`, headers: auth(),
+      });
+      expect(missingStock.statusCode).toBe(404);
     });
   });
 });

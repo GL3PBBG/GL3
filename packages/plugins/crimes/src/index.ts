@@ -335,6 +335,25 @@ const adminCrimesUpdateRoute = route({
   },
 });
 
+const adminCrimesDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/crimes/:id", auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      // `crime_log.crime_id` and `player_crime_skill.crime_id` both cascade —
+      // a crime's attempt history and per-player skill are ABOUT the crime
+      // and go with it, unlike an item in someone's inventory. A worker still
+      // holding a queued attempt at it fails its insert on the missing FK,
+      // which is the at-least-once path failing closed (rule 1).
+      const result = await tx.db.delete(crimes)
+        .where(eq(crimes.id, params.id)).returning({ id: crimes.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("crime_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminCrimesPage: PageSchema = {
   id: "crimes-admin",
   path: "/admin/crimes",
@@ -349,6 +368,8 @@ const adminCrimesPage: PageSchema = {
         { key: "expReward", label: "Exp" },
         { key: "jailChancePercent", label: "Jail %" },
         { key: "jailSeconds", label: "Jail (s)" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/crimes/:id", confirm: "Delete this crime? Its attempt history and player skill go with it." },
       ] },
       { kind: "form", action: "POST /api/admin/crimes", submitLabel: "Add crime", fields: [
         { name: "name", label: "Name", type: "text" },
@@ -383,7 +404,7 @@ export default definePlugin({
   id: "crimes",
   version: "1.0.0",
   basePaths: ["/api/crimes", "/api/admin/crimes"],
-  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute],
+  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a

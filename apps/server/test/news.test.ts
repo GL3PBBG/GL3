@@ -201,3 +201,37 @@ describe("GET /api/admin/news", () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe("DELETE /api/admin/news/:id", () => {
+  it("deletes a post and the public listing loses it", async () => {
+    const post = await app.inject({
+      method: "POST", url: "/api/news",
+      headers: { authorization: `Bearer ${staffToken}` },
+      payload: { title: "Old news", body: "Soon gone." },
+    });
+    const { id } = post.json() as { id: string };
+
+    const del = await app.inject({
+      method: "DELETE", url: `/api/admin/news/${id}`,
+      headers: { authorization: `Bearer ${staffToken}` },
+    });
+    expect(del.statusCode).toBe(204);
+
+    const list = await app.inject({ method: "GET", url: "/api/news" });
+    expect((list.json().news as { id: string }[]).find((n) => n.id === id)).toBeUndefined();
+  });
+
+  it("404s an unknown post and 403s a regular player", async () => {
+    const missing = await app.inject({
+      method: "DELETE", url: `/api/admin/news/${uuidv7()}`,
+      headers: { authorization: `Bearer ${staffToken}` },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const forbidden = await app.inject({
+      method: "DELETE", url: `/api/admin/news/${uuidv7()}`,
+      headers: { authorization: `Bearer ${regularToken}` },
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+});

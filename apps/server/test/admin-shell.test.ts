@@ -338,3 +338,59 @@ describe("role creation and module grants", () => {
     expect(modules.statusCode).toBe(403);
   });
 });
+
+describe("role deletion", () => {
+  it("deletes an unassigned role, cascading its grants", async () => {
+    const founder = await register("Founder");
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/roles", headers: auth(founder.token),
+      payload: { name: "Doomed" },
+    });
+    const { id } = create.json() as { id: string };
+    await app.inject({
+      method: "POST", url: "/api/admin/roles/grants", headers: auth(founder.token),
+      payload: { roleId: id, moduleKey: "alpha" },
+    });
+
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/roles/${id}`, headers: auth(founder.token) });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(roles).where(eq(roles.id, id))).toEqual([]);
+    expect(await db.select().from(roleModuleAccess).where(eq(roleModuleAccess.roleId, id))).toEqual([]);
+  });
+
+  it("refuses deleting the caller's own role", async () => {
+    const founder = await register("Founder");
+    const [self] = await db.select({ roleId: players.roleId }).from(players)
+      .where(eq(players.id, founder.playerId));
+    const del = await app.inject({
+      method: "DELETE", url: `/api/admin/roles/${self!.roleId}`, headers: auth(founder.token),
+    });
+    expect(del.statusCode).toBe(400);
+    expect(del.json()).toEqual({ error: "cannot_delete_own_role" });
+  });
+
+  it("refuses deleting a role a player still holds", async () => {
+    const founder = await register("Founder");
+    const p = await register("Holder");
+    const roleId = await giveRole(p.playerId, ["alpha"]);
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/roles/${roleId}`, headers: auth(founder.token) });
+    expect(del.statusCode).toBe(409);
+    expect(del.json()).toEqual({ error: "role_in_use" });
+    expect((await db.select().from(roles).where(eq(roles.id, roleId))).length).toBe(1);
+  });
+
+  it("404s an unknown role and 403s without the roles grant", async () => {
+    const founder = await register("Founder");
+    const missing = await app.inject({
+      method: "DELETE", url: `/api/admin/roles/${uuidv7()}`, headers: auth(founder.token),
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const p = await register("AlphaOnly");
+    await giveRole(p.playerId, ["alpha"]);
+    const forbidden = await app.inject({
+      method: "DELETE", url: `/api/admin/roles/${uuidv7()}`, headers: auth(p.token),
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+});

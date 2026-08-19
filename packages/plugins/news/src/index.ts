@@ -49,6 +49,8 @@ const adminPage: PageSchema = {
       { kind: "table", source: "GET /api/admin/news", columns: [
         { key: "title", label: "Title" },
         { key: "createdAt", label: "Created" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/news/:id", confirm: "Delete this news post?" },
       ] },
     ],
   },
@@ -148,6 +150,24 @@ export default definePlugin({
           },
         };
       }),
+    }),
+    route({
+      method: "DELETE",
+      path: "/api/admin/news/:id",
+      auth: "admin",
+      params: z.object({ id: z.string().uuid() }),
+      handler: async (ctx, { params }) => {
+        // Nothing references game_news, so the row simply goes. The
+        // `news.posted` event already published is a fact about the past and
+        // deliberately stays in the feed (rule 5: events are facts).
+        const deleted = await ctx.transaction(async (tx) => {
+          const result = await tx.db.delete(gameNews)
+            .where(eq(gameNews.id, params.id)).returning({ id: gameNews.id });
+          return result.length > 0;
+        });
+        if (!deleted) throw new PluginError("news_not_found", 404);
+        return { status: 204 };
+      },
     }),
   ],
   adminPages: [adminPage],

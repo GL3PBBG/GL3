@@ -530,3 +530,59 @@ describe("admin rounds: GET /api/admin/rounds/table", () => {
     expect(open?.status).toBe("active");
   });
 });
+
+describe("admin rounds: DELETE /api/admin/rounds/:id", () => {
+  it("deletes a scheduled round", async () => {
+    const founder = await registerPlayer("Founder");
+    const now = new Date();
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/rounds", headers: auth(founder.token),
+      payload: { name: "Future season", startsAt: iso(addDays(now, 10)), endsAt: iso(addDays(now, 20)) },
+    });
+    expect(create.statusCode).toBe(201);
+    const { id } = create.json() as { id: string };
+
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/rounds/${id}`, headers: auth(founder.token) });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(rounds).where(eq(rounds.id, id))).toEqual([]);
+  });
+
+  it("refuses deleting an active round", async () => {
+    const founder = await registerPlayer("Founder");
+    const id = uuidv7();
+    const now = new Date();
+    await db.insert(rounds).values({ id, name: "Live", startsAt: addDays(now, -1), endsAt: addDays(now, 1) });
+
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/rounds/${id}`, headers: auth(founder.token) });
+    expect(del.statusCode).toBe(409);
+    expect(del.json().error).toBe("round_not_scheduled");
+    expect((await db.select().from(rounds).where(eq(rounds.id, id))).length).toBe(1);
+  });
+
+  it("refuses deleting a finalized round — the hall of fame", async () => {
+    const founder = await registerPlayer("Founder");
+    const id = uuidv7();
+    const now = new Date();
+    await db.insert(rounds).values({
+      id, name: "History", startsAt: addDays(now, -20), endsAt: addDays(now, -10), finalizedAt: addDays(now, -10),
+    });
+
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/rounds/${id}`, headers: auth(founder.token) });
+    expect(del.statusCode).toBe(409);
+    expect(del.json().error).toBe("round_not_scheduled");
+  });
+
+  it("404s an unknown round, 403s without the rounds grant", async () => {
+    const founder = await registerPlayer("Founder");
+    const missing = await app.inject({
+      method: "DELETE", url: `/api/admin/rounds/${uuidv7()}`, headers: auth(founder.token),
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const pleb = await registerPlayer("Pleb");
+    const forbidden = await app.inject({
+      method: "DELETE", url: `/api/admin/rounds/${uuidv7()}`, headers: auth(pleb.token),
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+});

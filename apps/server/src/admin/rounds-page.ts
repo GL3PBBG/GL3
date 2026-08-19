@@ -28,6 +28,10 @@ export const roundsPage: PageSchema = {
         { key: "startsAt", label: "Starts" },
         { key: "endsAt", label: "Ends" },
         { key: "status", label: "Status" },
+      ], rowActions: [
+        // The route only ever deletes a `scheduled` round — an active or
+        // ended one is owed a settle and a finalized one is the hall of fame.
+        { label: "Delete", action: "DELETE /api/admin/rounds/:id", confirm: "Delete this round? Only a round that has not started can go." },
       ] },
       { kind: "form", action: "POST /api/admin/rounds", submitLabel: "Create round", fields: [
         { name: "name", label: "Round name", type: "text" },

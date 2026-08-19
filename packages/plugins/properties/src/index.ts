@@ -723,6 +723,37 @@ const adminUpdateRoute = route({
   },
 });
 
+const adminDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/properties/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    // Same one-row FOR UPDATE shape as adminUpdateRoute above — one lock,
+    // no second acquisition, no new deadlock edge.
+    const outcome = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db
+        .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
+        .from(propertiesTable)
+        .where(eq(propertiesTable.id, params.id))
+        .for("update");
+      if (existing === undefined) return "not_found" as const;
+      // An owned deed is a player's asset (they paid the declared price for
+      // it) — refused, the item_in_use shape. Disown it first: the admin
+      // update path or the owner's own drop makes the dispossession a
+      // deliberate act. An UNOWNED row is pure config and simply goes;
+      // a casino session still pinned to it settles as against an unowned
+      // house (`ownerAt` finds no owner), which cannot go bankrupt.
+      if (existing.ownerPlayerId !== null) return "owned" as const;
+      await tx.db.delete(propertiesTable).where(eq(propertiesTable.id, params.id));
+      return "ok" as const;
+    });
+    if (outcome === "not_found") throw new PluginError("property_not_found", 404);
+    if (outcome === "owned") throw new PluginError("property_owned", 409);
+    return { status: 204 };
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Event declarations (cont.)
 // ---------------------------------------------------------------------------
@@ -762,7 +793,7 @@ export default definePlugin({
   migrations: PROPERTIES_MIGRATIONS,
   routes: [
     listRoute, buyRoute, leverRoute, transferRoute, dropRoute, resetRoute,
-    adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute,
+    adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
   ],
   events: [boughtEvent, droppedEvent, transferredEvent],
   pages: [],

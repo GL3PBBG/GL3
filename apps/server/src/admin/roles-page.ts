@@ -18,6 +18,10 @@ export const rolesPage: PageSchema = {
       { kind: "table", source: "GET /api/admin/roles/table", columns: [
         { key: "name", label: "Name" },
         { key: "moduleKeys", label: "Grants" },
+      ], rowActions: [
+        // The route refuses the caller's own role and any role still assigned
+        // (`role_in_use`), so the confirm is the only irreversible step here.
+        { label: "Delete", action: "DELETE /api/admin/roles/:id", confirm: "Delete this role? Its grants go with it." },
       ] },
       { kind: "form", action: "POST /api/admin/roles", submitLabel: "Create role", fields: [
         { name: "name", label: "Role name", type: "text" },

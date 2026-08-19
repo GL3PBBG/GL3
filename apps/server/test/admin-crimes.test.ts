@@ -185,6 +185,26 @@ describe("crimes admin", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("deletes a crime, cascading its log", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Doomed caper", description: "", cooldownSeconds: 30,
+        minPayout: "1", maxPayout: "2", minBullets: 0, maxBullets: 0,
+        expReward: "1", jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    const { id } = create.json();
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/crimes/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(crimes).where(eq(crimes.id, id))).toEqual([]);
+  });
+
+  it("404s deleting an unknown crime", async () => {
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/crimes/${uuidv7()}`, headers: auth() });
+    expect(del.statusCode).toBe(404);
+  });
+
   it("403s a non-admin creating a crime", async () => {
     const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb2" });
     const res = await app.inject({
