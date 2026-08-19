@@ -120,6 +120,10 @@ function viewActions(view: ViewNode): string[] {
         break;
       case "table":
         actions.push(node.source);
+        // A row action mutates exactly like a button's action; the `:id`
+        // placeholder never matters to containment, which is a prefix check
+        // on the path the plugin wrote.
+        for (const rowAction of node.rowActions ?? []) actions.push(rowAction.action);
         break;
       case "assetBinder":
         // The picker's entity list fetches on mount exactly like

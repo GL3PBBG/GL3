@@ -27,7 +27,12 @@ export type RenderInstruction =
   | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "assetBinder"; scope: string; slot: string; entitySource: string | null; entityLabelKey: string | null }
-  | { kind: "table"; source: string; columns: { key: string; label: string; render: "image" | null; imageSize: "sm" | "md" | "lg" }[] }
+  | {
+      kind: "table";
+      source: string;
+      columns: { key: string; label: string; render: "image" | null; imageSize: "sm" | "md" | "lg" }[];
+      rowActions: { label: string; action: string; confirm: string | null }[];
+    }
   | { kind: "cards"; cards: string[] }
   | { kind: "panelHeader"; title: string };
 
@@ -155,7 +160,18 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       // on a select field: the renderer never re-derives the DTO's optionality.
       imageSize: isRecord(c) && isSize(c.imageSize) ? c.imageSize : "sm",
     }));
-    return [{ kind: "table", source: String(node.source), columns }];
+    // Normalised like `columns`: absent → [], absent confirm → null, so the
+    // renderer never re-derives the DTO's optionality.
+    const rowActions = childArray(node.rowActions).flatMap((a) =>
+      isRecord(a)
+        ? [{
+            label: String(a.label),
+            action: String(a.action),
+            confirm: a.confirm === undefined ? null : String(a.confirm),
+          }]
+        : [],
+    );
+    return [{ kind: "table", source: String(node.source), columns, rowActions }];
   }
   if (isNode(node, "panel")) {
     const out: RenderInstruction[] = [{ kind: "panelHeader", title: String(node.title) }];
