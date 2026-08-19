@@ -503,7 +503,10 @@ const adminListForumsRoute = route({
       tx.db.select().from(forums).orderBy(forums.sort));
     return {
       status: 200,
-      body: { rows: rows.map((r) => ({ id: r.id, name: r.name, sort: r.sort })) },
+      // Pre-stringified: TableRowsResponseSchema is z.record(z.string()) and
+      // the client parses it inside TableBlock — a numeric `sort` here fails
+      // that parse and blanks the whole admin table, not just the cell.
+      body: { rows: rows.map((r) => ({ id: r.id, name: r.name, sort: String(r.sort) })) },
     };
   },
 });
@@ -541,6 +544,27 @@ const adminUpdateForumRoute = route({
   },
 });
 
+const adminDeleteForumRoute = route({
+  method: "DELETE",
+  path: "/api/admin/forum/forums/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      // Topics cascade (`p_forum_topics.forum_id`), posts cascade off topics —
+      // deleting a board takes its entire contents, which is what the row
+      // action's confirm text says in as many words.
+      const result = await tx.db
+        .delete(forums)
+        .where(eq(forums.id, params.id))
+        .returning({ id: forums.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("forum_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminPage: PageSchema = {
   id: "forum-admin",
   path: "/admin/forum",
@@ -550,6 +574,8 @@ const adminPage: PageSchema = {
       { kind: "table", source: "GET /api/admin/forum/forums", columns: [
         { key: "name", label: "Name" },
         { key: "sort", label: "Sort" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/forum/forums/:id", confirm: "Delete this forum? Every topic and post in it goes too." },
       ] },
       { kind: "form", action: "POST /api/admin/forum/forums", submitLabel: "Add forum", fields: [
         { name: "name", label: "Name", type: "text" },
@@ -572,7 +598,7 @@ export default definePlugin({
   routes: [
     listForumsRoute, listTopicsRoute, viewTopicRoute, createTopicRoute, replyRoute,
     lockRoute, typeRoute, deletePostRoute, deleteTopicRoute,
-    adminListForumsRoute, adminCreateForumRoute, adminUpdateForumRoute,
+    adminListForumsRoute, adminCreateForumRoute, adminUpdateForumRoute, adminDeleteForumRoute,
   ],
   adminPages: [adminPage],
 });
