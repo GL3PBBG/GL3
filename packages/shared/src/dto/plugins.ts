@@ -189,6 +189,19 @@ const leafOptions = [
           imageSize: z.enum(["sm", "md", "lg"]).optional(),
         }).strict(),
       ).min(1),
+      /**
+       * Per-row mutations. Kept identical to the SDK's copy — the parity the
+       * `cards` leaf below records the hard way. Every `:token` in the action
+       * path is replaced by the renderer with the row's field of that name;
+       * `confirm` makes the button a two-step arm-then-fire in place.
+       */
+      rowActions: z.array(
+        z.object({
+          label: z.string().min(1),
+          action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
+          confirm: z.string().min(1).optional(),
+        }).strict(),
+      ).optional(),
     })
     .strict(),
   // Game art, and the admin widget that binds it. Kept identical to the SDK's

@@ -55,4 +55,21 @@ describe("view node vocabulary parity", () => {
     expect(leafKindsOf(ViewNodeSchema)).toContain("cards");
     expect(leafKindsOf(ViewNodeDtoSchema)).toContain("cards");
   });
+
+  // The kind-set check above cannot see a PROPERTY that exists in one copy
+  // and not the other — both leaves are `.strict()`, so a property shared
+  // lacks fails the whole payload parse in the browser, the exact `cards`
+  // failure one level down. Parse a representative node through both.
+  it("accepts `table.rowActions` in both the SDK and on the wire", () => {
+    const node = {
+      kind: "table",
+      source: "GET /api/admin/example/rows",
+      columns: [{ key: "name", label: "Name" }],
+      rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/example/rows/:id", confirm: "Delete this row?" },
+      ],
+    };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+  });
 });

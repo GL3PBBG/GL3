@@ -71,7 +71,7 @@ function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup
  * Uses plain `useState` + `useEffect` + `api()` — same pattern as the rest of
  * `PageRenderer` — instead of react-query, which is not wired into plugin pages.
  */
-function TableBlock({ source, columns, refetchSignal }: {
+function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }: {
   source: string;
   columns: readonly {
     readonly key: string;
@@ -79,11 +79,18 @@ function TableBlock({ source, columns, refetchSignal }: {
     readonly render: "image" | null;
     readonly imageSize: "sm" | "md" | "lg";
   }[];
+  rowActions: readonly { readonly label: string; readonly action: string; readonly confirm: string | null }[];
+  /** Fires the resolved action; resolves true on success so the arm state can clear either way. */
+  onRowAction: (action: string) => Promise<boolean>;
   refetchSignal: number;
 }): JSX.Element {
   const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  // `"<rowIndex>:<actionIndex>"` of the one armed confirm — arming another row
+  // disarms this one, so at most one destructive action is ever primed.
+  const [armed, setArmed] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   // `source` is `"GET /api/..."` — strip the method prefix for `api()`.
   const path = source.replace(/^GET\s+/, "");
@@ -112,11 +119,39 @@ function TableBlock({ source, columns, refetchSignal }: {
   if (error !== null) return <ErrorText error={error} />;
   if (rows.length === 0) return <p className={styles.muted}>No data.</p>;
 
+  // `:id` (or `:locationId`, any `:token`) resolves against the row's own
+  // fields, which every table source carries even when no column displays
+  // them (selects consume them as `valueKey`s; admin-ids-hidden keeps them
+  // out of the columns only). Null when the row lacks a token — the button
+  // is then not drawn at all, rather than firing at a literal ":id" path.
+  function resolveAction(action: string, row: Record<string, string>): string | null {
+    let missing = false;
+    const resolved = action.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, token: string) => {
+      const value = row[token];
+      if (value === undefined) { missing = true; return ""; }
+      return encodeURIComponent(value);
+    });
+    return missing ? null : resolved;
+  }
+
+  async function fire(key: string, resolved: string): Promise<void> {
+    setBusy(key);
+    try {
+      await onRowAction(resolved);
+    } finally {
+      setBusy(null);
+      setArmed(null);
+    }
+  }
+
+  const showActions = rowActions.length > 0;
+
   return (
     <table className={styles.table}>
       <thead>
         <tr>
           {columns.map((col) => <th key={col.key}>{col.label}</th>)}
+          {showActions ? <th aria-label="actions" /> : null}
         </tr>
       </thead>
       <tbody>
@@ -132,6 +167,52 @@ function TableBlock({ source, columns, refetchSignal }: {
                   : row[col.key] ?? ""}
               </td>
             ))}
+            {showActions ? (
+              <td>
+                {rowActions.map((rowAction, actionIndex) => {
+                  const key = `${rowIndex}:${actionIndex}`;
+                  const resolved = resolveAction(rowAction.action, row);
+                  if (resolved === null) return null;
+                  if (rowAction.confirm !== null && armed === key) {
+                    // Two-step in place, the property board's shape rather
+                    // than `window.confirm`: the first click armed it, this
+                    // renders the question with an explicit way out.
+                    return (
+                      <Fragment key={actionIndex}>
+                        <span className={styles.meta} role="alert">{rowAction.confirm}</span>{" "}
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => { void fire(key, resolved); }}
+                        >
+                          Confirm
+                        </button>{" "}
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => { setArmed(null); }}
+                        >
+                          Cancel
+                        </button>
+                      </Fragment>
+                    );
+                  }
+                  return (
+                    <button
+                      key={actionIndex}
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        if (rowAction.confirm !== null) setArmed(key);
+                        else void fire(key, resolved);
+                      }}
+                    >
+                      {rowAction.label}
+                    </button>
+                  );
+                })}
+              </td>
+            ) : null}
           </tr>
         ))}
       </tbody>
@@ -381,6 +462,28 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
     }
   }
 
+  /**
+   * A table row's action: same wire behaviour as a bodyless `button` action,
+   * but pending state lives in the TableBlock (per row, not per instruction),
+   * so this only reports success back for the arm state to clear.
+   */
+  async function runRowAction(action: string): Promise<boolean> {
+    setError(null);
+    const [method, path] = action.split(" ");
+    if (method === undefined || path === undefined) {
+      setError(new Error(`Plugin action is malformed: ${action}`));
+      return false;
+    }
+    try {
+      await api<unknown>(path, { method });
+      setRefetchSignal((n) => n + 1);
+      return true;
+    } catch (caught) {
+      setError(caught);
+      return false;
+    }
+  }
+
   function renderInstruction(index: number, inst: RenderInstruction): JSX.Element | null {
     switch (inst.kind) {
       case "panelHeader":
@@ -503,6 +606,8 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             key={index}
             source={inst.source}
             columns={inst.columns}
+            rowActions={inst.rowActions}
+            onRowAction={runRowAction}
             refetchSignal={refetchSignal}
           />
         );

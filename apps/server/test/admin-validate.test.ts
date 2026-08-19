@@ -66,6 +66,36 @@ describe("admin validation rules", () => {
     expect(() => validatePlugins([m])).toThrow(/outside/);
   });
 
+  it("treats a table rowAction as a view action for containment", () => {
+    const m = manifest({
+      id: "hello", version: "1.0.0", basePaths: ["/api/hello", "/api/admin/hello"],
+      adminPages: [{
+        id: "hello-admin", path: "/admin/hello",
+        view: {
+          kind: "table", source: "GET /api/admin/hello/things",
+          columns: [{ key: "a", label: "A" }],
+          rowActions: [{ label: "Delete", action: "DELETE /api/other/things/:id", confirm: "Sure?" }],
+        },
+      }],
+    });
+    expect(() => validatePlugins([m])).toThrow(/outside/);
+  });
+
+  it("accepts a contained rowAction with an :id placeholder", () => {
+    const m = manifest({
+      id: "hello", version: "1.0.0", basePaths: ["/api/hello", "/api/admin/hello"],
+      adminPages: [{
+        id: "hello-admin", path: "/admin/hello",
+        view: {
+          kind: "table", source: "GET /api/admin/hello/things",
+          columns: [{ key: "a", label: "A" }],
+          rowActions: [{ label: "Delete", action: "DELETE /api/admin/hello/things/:id", confirm: "Sure?" }],
+        },
+      }],
+    });
+    expect(() => validatePlugins([m])).not.toThrow();
+  });
+
   it("rejects a table source containing a dot segment", () => {
     const m = manifest({
       id: "hello", version: "1.0.0", basePaths: ["/api/hello", "/api/admin/hello"],

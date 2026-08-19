@@ -135,6 +135,26 @@ describe("renderNode", () => {
       // `allowEmpty` is on a select field, so the renderer never has to
       // re-derive the DTO's optionality at the point of drawing a cell.
       columns: [{ key: "id", label: "Id", render: null, imageSize: "sm" }],
+      rowActions: [],
+    }]);
+  });
+
+  it("carries rowActions through, normalising an absent confirm to null", () => {
+    const out = renderNode({
+      kind: "table", source: "GET /api/admin/travel/locations",
+      columns: [{ key: "name", label: "Name" }],
+      rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/travel/locations/:id", confirm: "Delete this town?" },
+        { label: "Poke", action: "POST /api/admin/travel/locations/:id/poke" },
+      ],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "table", source: "GET /api/admin/travel/locations",
+      columns: [{ key: "name", label: "Name", render: null, imageSize: "sm" }],
+      rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/travel/locations/:id", confirm: "Delete this town?" },
+        { label: "Poke", action: "POST /api/admin/travel/locations/:id/poke", confirm: null },
+      ],
     }]);
   });
 
@@ -152,6 +172,7 @@ describe("renderNode", () => {
         { key: "image", label: "", render: "image", imageSize: "md" },
         { key: "carName", label: "Car", render: null, imageSize: "sm" },
       ],
+      rowActions: [],
     }]);
   });
 

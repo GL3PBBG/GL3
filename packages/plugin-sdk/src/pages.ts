@@ -137,6 +137,23 @@ const leafOptions = [
           imageSize: z.enum(["sm", "md", "lg"]).optional(),
         }).strict(),
       ).min(1),
+      // Per-row mutations (delete, mostly). Every `:token` in the action's
+      // path is replaced by the renderer with the row's field of that name —
+      // `:id` for most tables, `:locationId/:itemId` where the row's key is
+      // composite — which the table-source endpoint already carries even when
+      // no column shows it, because selects consume ids as their `valueKey`.
+      // The loader's containment pass collects these like any button action
+      // (`:` is charset-legal under VIEW_ACTION_RE and `startsWith`
+      // containment never reaches the placeholder). `confirm` makes the
+      // button two-step in place — first click arms, second fires — the same
+      // shape the property board uses instead of `window.confirm`.
+      rowActions: z.array(
+        z.object({
+          label: z.string().min(1),
+          action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
+          confirm: z.string().min(1).optional(),
+        }).strict(),
+      ).optional(),
     })
     .strict(),
   // A hand of playing cards. Values are @letele/playing-cards component names:
