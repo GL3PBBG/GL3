@@ -106,11 +106,25 @@ export function registerPluginRoutes(
             // load-dependent failures on this repo's lock-order tests have now
             // been diagnosed blind for exactly this reason. Logging the cause
             // does not change the response.
+            //
+            // console, NOT request.log: app.ts builds Fastify with
+            // `logger: config.nodeEnv !== "test"`, so a request.log line is a
+            // no-op in the ONE environment where those flakes occur and the
+            // datum kept being dropped (three occurrences before this was
+            // noticed). ctx.log already logs plugins via console, and vitest
+            // captures console output — see plugin-routes.test.ts's
+            // "logs a driver error's SQLSTATE cause" for the pin.
             const cause: unknown = error instanceof Error ? error.cause : undefined;
             if (cause !== null && typeof cause === "object") {
               const pg: Record<string, unknown> = { ...cause };
-              request.log.error(
-                { pgCode: pg["code"], pgDetail: pg["detail"], pgTable: pg["table_name"], pgMessage: pg["message"] },
+              console.error(
+                {
+                  plugin: manifest.id,
+                  pgCode: pg["code"],
+                  pgDetail: pg["detail"],
+                  pgTable: pg["table_name"],
+                  pgMessage: pg["message"],
+                },
                 "plugin route failed with a driver error",
               );
             }
