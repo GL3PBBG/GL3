@@ -27,15 +27,17 @@ const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(
 const LockBodySchema = z.object({ locked: z.boolean() }).strict();
 const TypeBodySchema = z.object({ type: z.enum(["normal", "sticky"]) }).strict();
 
+// `z.coerce` on sort, not `z.number()`: the adminPages form renderer submits
+// every field as a string (travel's admin schema sets the precedent).
 const AdminCreateForumBodySchema = z.object({
   name: z.string().min(1).max(120),
-  sort: z.number().int(),
+  sort: z.coerce.number().int(),
 }).strict();
 
 const AdminUpdateForumBodySchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(120),
-  sort: z.number().int(),
+  sort: z.coerce.number().int(),
 }).strict();
 
 /**

@@ -302,6 +302,20 @@ describe("admin forum: CRUD", () => {
     expect(row).toMatchObject({ name: "Off Topic", sort: 5 });
   });
 
+  it("creates and updates a forum from form-shaped string values", async () => {
+    // The adminPages renderer submits EVERY field as a string
+    // (PageRenderer.tsx builds Record<string, string>), so `sort` arrives as
+    // "5", not 5 — the schema must coerce, as travel's admin schema does.
+    const founder = await registerVerifiedPlayer({ app, redis });
+    const created = await post("/api/admin/forum/forums", founder.token, { name: "Form Made", sort: "5" });
+    expect(created.statusCode, created.body).toBe(201);
+    const { id } = created.json();
+    const updated = await post("/api/admin/forum/forums/update", founder.token, { id, name: "Form Made", sort: "7" });
+    expect(updated.statusCode, updated.body).toBe(204);
+    const [row] = await db.select().from(forumForums).where(eq(forumForums.id, id));
+    expect(row).toMatchObject({ sort: 7 });
+  });
+
   it("lists forums via the table feed", async () => {
     const founder = await registerVerifiedPlayer({ app, redis });
     await seedForum("General");
