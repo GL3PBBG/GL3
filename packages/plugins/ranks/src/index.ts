@@ -100,6 +100,24 @@ const adminRanksUpdateRoute = route({
   },
 });
 
+const adminRanksDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/ranks/:id", auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      // `player_stats.rank_id` is ON DELETE SET NULL and self-healing: rank
+      // is recomputed from exp on the next exp change and every reader
+      // left-joins it — so unlike a town or an item, a held rank is safe to
+      // delete and no in-use refusal is warranted.
+      const result = await tx.db.delete(ranks)
+        .where(eq(ranks.id, params.id)).returning({ id: ranks.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("rank_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminMoneyRanksListRoute = route({
   method: "GET", path: "/api/admin/ranks/money/list", auth: "admin",
   handler: async (ctx) => {
@@ -147,6 +165,22 @@ const adminMoneyRanksUpdateRoute = route({
   },
 });
 
+const adminMoneyRanksDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/ranks/money/:id", auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      // Money ranks are pure display brackets over cash+bank; nothing
+      // references them, so this is the simplest delete on the page.
+      const result = await tx.db.delete(moneyRanks)
+        .where(eq(moneyRanks.id, params.id)).returning({ id: moneyRanks.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("money_rank_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminRanksPage: PageSchema = {
   id: "ranks-admin",
   path: "/admin/ranks",
@@ -159,6 +193,8 @@ const adminRanksPage: PageSchema = {
         { key: "cashReward", label: "Cash reward" },
         { key: "bulletReward", label: "Bullets" },
         { key: "maxHealth", label: "Max health" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/ranks/:id", confirm: "Delete this rank? Holders re-rank on their next exp change." },
       ] },
       { kind: "form", action: "POST /api/admin/ranks", submitLabel: "Add rank", fields: [
         { name: "name", label: "Name", type: "text" },
@@ -178,6 +214,8 @@ const adminRanksPage: PageSchema = {
       { kind: "table", source: "GET /api/admin/ranks/money/list", columns: [
         { key: "label", label: "Money rank" },
         { key: "threshold", label: "Threshold" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/ranks/money/:id", confirm: "Delete this money rank?" },
       ] },
       { kind: "form", action: "POST /api/admin/ranks/money", submitLabel: "Add money rank", fields: [
         { name: "label", label: "Label", type: "text" },
@@ -242,9 +280,11 @@ export default definePlugin({
     adminRanksListRoute,
     adminRanksCreateRoute,
     adminRanksUpdateRoute,
+    adminRanksDeleteRoute,
     adminMoneyRanksListRoute,
     adminMoneyRanksCreateRoute,
     adminMoneyRanksUpdateRoute,
+    adminMoneyRanksDeleteRoute,
   ],
   adminPages: [adminRanksPage],
 });

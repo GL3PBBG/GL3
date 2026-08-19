@@ -2,7 +2,7 @@ import {
   definePlugin, filterPoint, InsufficientFundsError, newId, PluginError, route,
   type PageSchema, type PlayerSnapshot, type PluginCtx, type RouteResult,
 } from "@gl3/plugin-sdk";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { locations, playerStats } from "./schema.js";
 
@@ -398,6 +398,79 @@ const adminUpdateRoute = route({
   },
 });
 
+/**
+ * drizzle re-throws the driver's `PostgresError` either directly or wrapped as
+ * an `Error` whose `cause` is it (gangs' helper, restated — `@gl3/shared` and
+ * `postgres` are both off-limits to a plugin package). Guards, not casts.
+ */
+function pgErrorCode(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || !("code" in value)) return null;
+  const { code } = value;
+  return typeof code === "string" ? code : null;
+}
+
+const isForeignKeyViolation = (error: unknown): boolean =>
+  pgErrorCode(error) === "23503" ||
+  (error instanceof Error && pgErrorCode(error.cause) === "23503");
+
+const adminDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/travel/locations/:id", auth: "admin",
+  params: z.object({ id: IdSchema }),
+  handler: async (ctx, { params }) => {
+    let deleted: boolean;
+    try {
+      deleted = await ctx.transaction(async (tx) => {
+        // `player_stats.location_id` is ON DELETE SET NULL, so the database
+        // would strand every player standing here on a null location without
+        // a word. Refused instead, same reasoning as core's `role_in_use`:
+        // moving them out first makes the displacement deliberate.
+        const [occupant] = await tx.db.select({ playerId: playerStats.playerId })
+          .from(playerStats).where(eq(playerStats.locationId, params.id)).limit(1);
+        if (occupant !== undefined) throw new PluginError("location_in_use", 409);
+        // Two plugin tables reference locations with ON DELETE CASCADE, so
+        // the FK catch below never fires for them — the rows would just
+        // vanish. Only the rows that are someone's ASSET block the delete: an
+        // owned property deed was paid for, and an open casino hand holds an
+        // escrowed wager (an unowned property is config and a settled hand is
+        // history — both may cascade). Checked by table name through
+        // to_regclass rather than by import, so travel gains no dependency
+        // edge and a deployment without those plugins skips the check.
+        // Read-only peeking only — cleanup stays with the owning plugin.
+        const cascadeAssets: { table: string; predicate: string }[] = [
+          { table: "p_properties_properties", predicate: "owner_player_id is not null" },
+          { table: "p_casino_sessions", predicate: "status = 'open'" },
+        ];
+        for (const { table, predicate } of cascadeAssets) {
+          // postgres.js returns an Array subclass of row objects; guards,
+          // not casts (packages/*).
+          const guarded: unknown = await tx.db.execute(
+            sql`select to_regclass(${table}) is not null as present`,
+          );
+          const first: unknown = Array.isArray(guarded) ? guarded[0] : undefined;
+          const present = typeof first === "object" && first !== null
+            && "present" in first && (first as { present: unknown }).present === true;
+          if (!present) continue;
+          const hit: unknown = await tx.db.execute(sql`
+            select 1 from ${sql.raw(table)}
+            where location_id = ${params.id} and ${sql.raw(predicate)} limit 1
+          `);
+          if (Array.isArray(hit) && hit.length > 0) throw new PluginError("location_in_use", 409);
+        }
+        const result = await tx.db.delete(locations)
+          .where(eq(locations.id, params.id)).returning({ id: locations.id });
+        return result.length > 0;
+      });
+    } catch (error) {
+      // A plugin table's FK (a property deed, a garaged car) still points
+      // here — same answer as an occupant, found by the database instead.
+      if (isForeignKeyViolation(error)) throw new PluginError("location_in_use", 409);
+      throw error;
+    }
+    if (!deleted) throw new PluginError("location_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminModesRoute = route({
   method: "GET", path: "/api/admin/travel/combat-modes", auth: "admin",
   handler: async () => ({
@@ -415,7 +488,9 @@ const adminPage: PageSchema = {
   view: {
     kind: "panel", title: "Towns",
     children: [
-      { kind: "table", source: "GET /api/admin/travel/locations", columns: [
+      { kind: "table", source: "GET /api/admin/travel/locations", rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/travel/locations/:id", confirm: "Delete this town? Refused while anyone is standing in it." },
+      ], columns: [
         { key: "name", label: "Name" },
         { key: "travelCost", label: "Travel cost" },
         { key: "travelCooldownSeconds", label: "Cooldown (s)" },
@@ -444,7 +519,7 @@ export default definePlugin({
   // First port claiming two base paths; plugins/validate.ts checks each route
   // path is contained in one of them and that no other plugin claims either.
   basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],
-  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminModesRoute],
+  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly

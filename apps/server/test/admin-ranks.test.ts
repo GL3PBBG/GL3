@@ -200,4 +200,32 @@ describe("money ranks admin", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  it("deletes a rank even while held — holders re-rank from exp", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/ranks", headers: auth(),
+      payload: { name: "Doomed", expRequired: "0", cashReward: "0", bulletReward: 0, maxHealth: 100 },
+    });
+    const { id } = create.json();
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/ranks/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(ranks).where(eq(ranks.id, id))).toEqual([]);
+  });
+
+  it("deletes a money rank", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/ranks/money", headers: auth(),
+      payload: { label: "Comfortable", threshold: "1000" },
+    });
+    const { id } = create.json();
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/ranks/money/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(204);
+    const list = await app.inject({ method: "GET", url: "/api/admin/ranks/money/list", headers: auth() });
+    expect(list.json().rows).toEqual([]);
+  });
+
+  it("404s deleting an unknown rank or money rank", async () => {
+    expect((await app.inject({ method: "DELETE", url: `/api/admin/ranks/${uuidv7()}`, headers: auth() })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: `/api/admin/ranks/money/${uuidv7()}`, headers: auth() })).statusCode).toBe(404);
+  });
 });

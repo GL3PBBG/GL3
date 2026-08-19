@@ -231,6 +231,37 @@ export function registerAdminRoutes(
     return reply.code(201).send({ id });
   });
 
+  app.delete("/api/admin/roles/:id", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "roles")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = z.object({ id: z.string().uuid() }).strict().safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const [role] = await db.select({ id: roles.id }).from(roles).where(eq(roles.id, parsed.data.id));
+    if (!role) return reply.code(404).send({ error: "role_not_found" });
+
+    // Same lockout as `cannot_revoke_own_role`, one notch harder: deleting the
+    // caller's own role strips admin from the account doing the deleting —
+    // for the founder, from the only account that could restore it.
+    const [self] = await db.select({ roleId: players.roleId }).from(players).where(eq(players.id, playerId));
+    if (self?.roleId === parsed.data.id) {
+      return reply.code(400).send({ error: "cannot_delete_own_role" });
+    }
+
+    // `players.role_id` is ON DELETE SET NULL, so the database would happily
+    // demote every holder in silence. Refused instead: unassigning first makes
+    // the demotion a deliberate act the admin performed, not a side effect.
+    const [holder] = await db.select({ id: players.id }).from(players)
+      .where(eq(players.roleId, parsed.data.id)).limit(1);
+    if (holder !== undefined) return reply.code(409).send({ error: "role_in_use" });
+
+    // Grants go with the role (`role_module_access.role_id` cascades).
+    await db.delete(roles).where(eq(roles.id, parsed.data.id));
+    return reply.code(204).send();
+  });
+
   app.post("/api/admin/roles/grants", { preHandler: [app.requireAuth] }, async (request, reply) => {
     const playerId = request.playerId;
     if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
@@ -422,5 +453,35 @@ export function registerAdminRoutes(
       case "overlap": return reply.code(400).send({ error: "round_overlap" });
       case "ok": return reply.code(204).send();
     }
+  });
+
+  app.delete("/api/admin/rounds/:id", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "rounds")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = z.object({ id: z.string().uuid() }).strict().safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const result = await db.transaction(async (tx) => {
+      // Same lock, first statement, as create and edit: a delete and a
+      // rollover must never interleave — `ensureCurrentRound` could otherwise
+      // be mid-settle onto the round this removes.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`);
+
+      const [target] = await tx.select().from(rounds).where(eq(rounds.id, parsed.data.id));
+      if (!target) return "not_found" as const;
+      // Only a round that never ran is deletable. An active or ended round is
+      // owed a settle, and a finalized one IS the hall of fame — its
+      // `round_entries` cascade, so deleting it erases the record.
+      if (roundStatus(target, new Date()) !== "scheduled") return "started" as const;
+
+      await tx.delete(rounds).where(eq(rounds.id, parsed.data.id));
+      return "ok" as const;
+    });
+
+    if (result === "not_found") return reply.code(404).send({ error: "round_not_found" });
+    if (result === "started") return reply.code(409).send({ error: "round_not_scheduled" });
+    return reply.code(204).send();
   });
 }

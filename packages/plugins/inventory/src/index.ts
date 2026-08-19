@@ -563,6 +563,52 @@ const adminShopUpsertRoute = route({
   },
 });
 
+const adminItemDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/inventory/items/:id", auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const outcome = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db.select({ id: items.id }).from(items).where(eq(items.id, params.id));
+      if (!existing) return "not_found" as const;
+      // `player_items.item_id` is ON DELETE CASCADE and the equip columns are
+      // SET NULL — the database would vaporise every owned copy and silently
+      // unequip every holder. Refused instead (the role_in_use shape): an
+      // item still in someone's hands is not the admin's to destroy.
+      const [owned] = await tx.db.select({ id: playerItems.playerId }).from(playerItems)
+        .where(eq(playerItems.itemId, params.id)).limit(1);
+      if (owned !== undefined) return "in_use" as const;
+      const [equipped] = await tx.db.select({ id: playerStats.playerId }).from(playerStats)
+        .where(sql`${playerStats.weaponItemId} = ${params.id} or ${playerStats.armorItemId} = ${params.id}`)
+        .limit(1);
+      if (equipped !== undefined) return "in_use" as const;
+      // `p_inventory_shop_stock` carries NO foreign keys (its migration
+      // predates none — it simply has none), so its rows for this item must
+      // go explicitly or they orphan.
+      await tx.db.delete(shopStock).where(eq(shopStock.itemId, params.id));
+      await tx.db.delete(items).where(eq(items.id, params.id));
+      return "ok" as const;
+    });
+    if (outcome === "not_found") throw new PluginError("item_not_found", 404);
+    if (outcome === "in_use") throw new PluginError("item_in_use", 409);
+    return { status: 204 };
+  },
+});
+
+const adminShopDeleteRoute = route({
+  method: "DELETE", path: "/api/admin/inventory/shop/:locationId/:itemId", auth: "admin",
+  params: z.object({ locationId: z.string().uuid(), itemId: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      const result = await tx.db.delete(shopStock)
+        .where(and(eq(shopStock.locationId, params.locationId), eq(shopStock.itemId, params.itemId)))
+        .returning({ itemId: shopStock.itemId });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("stock_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 /**
  * Declared once and spread into both the add-weapon and update-weapon forms:
  * they must offer the same stats, and the reason this page needed fixing in
@@ -609,6 +655,8 @@ const adminPage: PageSchema = {
             { key: "dps", label: "DPS" },
             { key: "armor", label: "Armor" },
             { key: "heal", label: "Heal" },
+          ], rowActions: [
+            { label: "Delete", action: "DELETE /api/admin/inventory/items/:id", confirm: "Delete this item? Refused while any player owns or wields one." },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add weapon", fields: [
             { name: "name", label: "Name", type: "text" },
@@ -659,6 +707,10 @@ const adminPage: PageSchema = {
             { key: "itemName", label: "Item" },
             { key: "price", label: "Price" },
             { key: "stock", label: "Stock" },
+          ], rowActions: [
+            // Composite key: the shop row has no single id, so the action
+            // names both halves and the renderer fills each from the row.
+            { label: "Delete", action: "DELETE /api/admin/inventory/shop/:locationId/:itemId", confirm: "Remove this shop listing?" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/shop", submitLabel: "Set stock", fields: [
             { name: "locationId", label: "Location", type: "select", optionsSource: "GET /api/admin/inventory/locations", valueKey: "id", labelKey: "name" },
@@ -682,8 +734,8 @@ export default definePlugin({
   migrations: SHOP_MIGRATIONS,
   routes: [
     listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute,
-    adminItemListRoute, adminItemCreateRoute, adminItemUpdateRoute,
-    adminShopListRoute, adminShopUpsertRoute,
+    adminItemListRoute, adminItemCreateRoute, adminItemUpdateRoute, adminItemDeleteRoute,
+    adminShopListRoute, adminShopUpsertRoute, adminShopDeleteRoute,
     adminLocationListRoute,
   ],
   events: [purchasedEvent],

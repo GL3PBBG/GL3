@@ -4,7 +4,7 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { adminPage as theftAdminPage } from "@gl3/plugin-theft";
-import { theftCars, theftTiers } from "./helpers/plugin-tables.js";
+import { theftCars, theftGarage, theftTiers } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -182,6 +182,50 @@ describe("theft admin", () => {
   // valueKey. `test/admin-ids-hidden.test.ts` enforces this across every
   // loaded plugin's `adminPages`; re-checked here directly against this
   // plugin's own manifest object rather than by inference.
+  describe("deletion", () => {
+    it("deletes an ungaraged car", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/theft/cars", headers: auth(),
+        payload: { name: "Scrapper", value: "100", theftWeight: 1 },
+      });
+      const { id } = create.json() as { id: string };
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/theft/cars/${id}`, headers: auth() });
+      expect(del.statusCode).toBe(204);
+      expect(await db.select().from(theftCars).where(eq(theftCars.id, id))).toEqual([]);
+    });
+
+    it("refuses deleting a car someone keeps in a garage", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/theft/cars", headers: auth(),
+        payload: { name: "Keeper", value: "100", theftWeight: 1 },
+      });
+      const { id } = create.json() as { id: string };
+      const keeper = await registerVerifiedPlayer({ app, redis }, { username: "Keeper" });
+      await db.insert(theftGarage).values({ id: uuidv7(), playerId: keeper.playerId, carId: id });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/theft/cars/${id}`, headers: auth() });
+      expect(del.statusCode).toBe(409);
+      expect(del.json().error).toBe("car_in_use");
+      expect((await db.select().from(theftCars).where(eq(theftCars.id, id))).length).toBe(1);
+    });
+
+    it("deletes a tier", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/theft/tiers", headers: auth(),
+        payload: { name: "Doomed tier", successChance: 50, maxDamage: 10, minCarValue: "0", maxCarValue: "100" },
+      });
+      const { id } = create.json() as { id: string };
+      const del = await app.inject({ method: "DELETE", url: `/api/admin/theft/tiers/${id}`, headers: auth() });
+      expect(del.statusCode).toBe(204);
+      expect(await db.select().from(theftTiers).where(eq(theftTiers.id, id))).toEqual([]);
+    });
+
+    it("404s deleting an unknown car or tier", async () => {
+      expect((await app.inject({ method: "DELETE", url: `/api/admin/theft/cars/${uuidv7()}`, headers: auth() })).statusCode).toBe(404);
+      expect((await app.inject({ method: "DELETE", url: `/api/admin/theft/tiers/${uuidv7()}`, headers: auth() })).statusCode).toBe(404);
+    });
+  });
+
   it("never renders id as a table column, only as a select's valueKey", () => {
     const idKeys: string[] = [];
     const valueKeys: string[] = [];

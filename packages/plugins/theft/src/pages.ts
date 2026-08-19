@@ -68,6 +68,8 @@ export const adminPage: PageSchema = {
           { key: "name", label: "Name" },
           { key: "value", label: "Value" },
           { key: "theftWeight", label: "Weight" },
+        ], rowActions: [
+          { label: "Delete", action: "DELETE /api/admin/theft/cars/:id", confirm: "Delete this car? Refused while one sits in any garage." },
         ] },
         { kind: "form", action: "POST /api/admin/theft/cars", submitLabel: "Add car", fields: [
           { name: "name", label: "Name", type: "text" },
@@ -89,6 +91,8 @@ export const adminPage: PageSchema = {
           { key: "maxDamage", label: "Max damage" },
           { key: "minCarValue", label: "Min value" },
           { key: "maxCarValue", label: "Max value" },
+        ], rowActions: [
+          { label: "Delete", action: "DELETE /api/admin/theft/tiers/:id", confirm: "Delete this theft tier?" },
         ] },
         { kind: "form", action: "POST /api/admin/theft/tiers", submitLabel: "Add tier", fields: [
           { name: "name", label: "Name", type: "text" },

@@ -2775,6 +2775,61 @@ surface owner/buy on its own page, since there is no fallback tab any more.
 The management routes were never location-gated, but the old tab only ever
 listed the caller's town, so nothing a player could do was lost.
 
+### Admin deletion — per-row delete with in-page confirm, everywhere
+
+Branch `worktree-feat-admin-delete`. The view vocabulary's `table` leaf gained
+an optional `rowActions` array (`{ label, action, confirm? }`) in BOTH copies —
+`packages/plugin-sdk/src/pages.ts` and `packages/shared/src/dto/plugins.ts`,
+the parity the `cards` leaf broke once already; `view-node-parity.test.ts` now
+also parses a rowActions-bearing node through both schemas, since the kind-set
+check cannot see a property that exists in one copy only. Every `:token` in an
+action's path is substituted by the renderer from the row's own fields (`:id`
+mostly; `:locationId/:itemId` for shop stock's composite key), and `confirm`
+makes the button a two-step arm-then-fire in place — the property board's
+shape, never `window.confirm`. The loader's containment pass collects row
+actions like any button action (`admin-validate.test.ts`).
+
+Delete routes, all `auth: "admin"` (or core's inline grant check), each with
+its own semantics — the FK graph decided them:
+
+- **travel towns** — refused while occupied (`location_in_use`, 409):
+  `player_stats.location_id` is SET NULL and would strand players silently; a
+  plugin-table FK (deed, garaged car) surfaces as the same 409 via 23503.
+- **inventory items** — refused while owned or equipped (`item_in_use`):
+  `player_items` CASCADEs and the equip columns SET NULL. Deleting also
+  removes the item's `p_inventory_shop_stock` rows explicitly — that table
+  has no FKs, so orphans are the route's job. **Shop listings** delete by
+  composite key (`DELETE .../shop/:locationId/:itemId`).
+- **theft cars** — refused while garaged (`car_in_use`); **tiers** delete
+  plainly (nothing references a tier).
+- **crimes** — plain delete; `crime_log` and `player_crime_skill` CASCADE
+  (history about the crime goes with it), and a queued worker attempt fails
+  closed on the missing FK.
+- **ranks** — plain delete even while held: `rank_id` SET NULL self-heals at
+  the next exp change and every reader left-joins. **Money ranks** likewise.
+- **news, forum** — plain deletes; a forum takes its topics and posts
+  (declared in the confirm text).
+- **properties** — refused while owned (`property_owned`); an unowned row is
+  config. One-row FOR UPDATE, no second lock.
+- **core roles** — refused for the caller's own role
+  (`cannot_delete_own_role`, the revoke guard's harder sibling) and while any
+  player holds it (`role_in_use`); grants cascade.
+- **core rounds** — only `scheduled` deletes (`round_not_scheduled` 409),
+  under the ROUNDS_LOCK advisory lock so a delete can never interleave with a
+  rollover; active/ended rounds are owed a settle and a finalized round IS
+  the hall of fame (`round_entries` cascade).
+- **bullets** (per-location config rows) and **casino** (open hands are
+  read-only by design — settling needs locks only a player's own `play`
+  holds) deliberately gained no delete.
+
+No new lock-graph edge: every delete is a single-row operation (plus
+same-table cleanup) behind at most one FOR UPDATE. Also fixed in passing:
+forum's admin table feed returned `sort` as a JSON number, which fails
+`TableRowsResponseSchema`'s all-string parse inside TableBlock and blanked
+the whole table client-side. `@gl3/shared` → `0.1.15`, `@gl3/plugin-sdk` →
+`0.1.8` (additive; **neither published**, like the social cluster's bumps
+they ride on).
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There

@@ -13,6 +13,8 @@ export const adminPage: PageSchema = {
         { key: "ownerName", label: "Owner" },
         { key: "cost", label: "Lever" },
         { key: "profit", label: "Profit" },
+      ], rowActions: [
+        { label: "Delete", action: "DELETE /api/admin/properties/:id", confirm: "Delete this property? Refused while a player owns it." },
       ] },
       { kind: "form", action: "POST /api/admin/properties", submitLabel: "Add property", fields: [
         { name: "locationId", label: "Location", type: "select",

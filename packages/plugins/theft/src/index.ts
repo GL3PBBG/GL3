@@ -585,6 +585,48 @@ const adminCarUpdateRoute = route({
   },
 });
 
+const adminCarDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/theft/cars/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const outcome = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db.select({ id: cars.id }).from(cars).where(eq(cars.id, params.id));
+      if (existing === undefined) return "not_found" as const;
+      // `p_theft_garage.car_id` is ON DELETE CASCADE — deleting a garaged
+      // model would vaporise players' cars. Refused (the item_in_use shape):
+      // a car someone stole and kept is not the admin's to destroy.
+      const [kept] = await tx.db.select({ playerId: garage.playerId }).from(garage)
+        .where(eq(garage.carId, params.id)).limit(1);
+      if (kept !== undefined) return "in_use" as const;
+      await tx.db.delete(cars).where(eq(cars.id, params.id));
+      return "ok" as const;
+    });
+    if (outcome === "not_found") throw new PluginError("car_not_found", 404);
+    if (outcome === "in_use") throw new PluginError("car_in_use", 409);
+    return { status: 204 };
+  },
+});
+
+const adminTierDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/theft/tiers/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      // Nothing references a tier: steals draw cars by the tier's value
+      // bracket at request time and the garage keeps no tier column.
+      const result = await tx.db.delete(theftTiers)
+        .where(eq(theftTiers.id, params.id)).returning({ id: theftTiers.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("tier_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const adminTierListRoute = route({
   method: "GET",
   path: "/api/admin/theft/tiers",
@@ -692,9 +734,11 @@ export default definePlugin({
     adminCarListRoute,
     adminCarCreateRoute,
     adminCarUpdateRoute,
+    adminCarDeleteRoute,
     adminTierListRoute,
     adminTierCreateRoute,
     adminTierUpdateRoute,
+    adminTierDeleteRoute,
   ],
   events: [resolvedEvent, soldEvent],
   // One slot: every row in this plugin's cars table may carry art. The loader
