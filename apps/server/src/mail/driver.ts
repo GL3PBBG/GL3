@@ -25,6 +25,13 @@ export function createMailDriver(mail: MailConfig): MailDriver {
           method: "POST",
           headers: { Authorization: `Bearer ${mail.apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ from: mail.from, to: [msg.to], subject: msg.subject, text: msg.text }),
+          // A hung provider must not hang the caller: register and forgot-password
+          // both rely on send() settling to keep their own never-throws contract
+          // (see the class doc above), and an unbounded fetch would leave both
+          // routes waiting on Resend forever instead of completing with the
+          // email merely undelivered. The catch block below already maps an
+          // abort to `false`, same as any other rejected fetch.
+          signal: AbortSignal.timeout(10_000),
         });
         if (!response.ok) {
           console.error(`[mail:resend] ${response.status} ${await response.text().catch(() => "")}`);

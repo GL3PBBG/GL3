@@ -23,6 +23,18 @@ describe("verify tokens", () => {
     expect(await consumeVerifyToken(redis, "WRONGWRONG22")).toBeNull();
     expect(await consumeVerifyToken(redis, code)).toBe(playerId);
   });
+  it("folds ambiguous Crockford chars: O reads as 0, I and L read as 1", async () => {
+    // Written directly to Redis (same key shape `issueVerifyToken` uses)
+    // rather than via a generated code: a random 12-char code has close to
+    // even odds of containing no 0 or 1 at all, which would make a
+    // generated-code version of this test flaky.
+    const playerId = crypto.randomUUID();
+    const canonicalCode = "AB012CD345E1";
+    await redis.set(`emailverify:${canonicalCode}`, playerId, "EX", 60);
+    const misTyped = canonicalCode.replace(/0/g, "O").replace(/1/g, "I");
+    expect(misTyped).not.toBe(canonicalCode); // the fixture must actually exercise the fold
+    expect(await consumeVerifyToken(redis, misTyped)).toBe(playerId);
+  });
 });
 
 describe("unverified flag", () => {

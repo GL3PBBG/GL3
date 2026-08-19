@@ -130,8 +130,14 @@ const listForumsRoute = route({
 
 /**
  * Topics in one forum, paginated 20/page, sticky first then most recently
- * posted-to — one indexed ORDER BY (the `(forum_id, type, last_post_at DESC)`
- * index this plugin's `0003_topics_listing_idx` migration adds), no N+1.
+ * posted-to, no N+1. The `(forum_id, type, last_post_at DESC)` index this
+ * plugin's `0003_topics_listing_idx` migration adds serves the `WHERE
+ * forum_id = ?` filter, but not the ORDER BY: the `CASE WHEN type =
+ * 'sticky' ...` expression below is what actually ranks sticky topics
+ * first, and Postgres can't walk an index by an expression over one of its
+ * columns — only by the column's own value — so the sort still costs a
+ * pass over the matched rows. The index earns its keep on the filter and on
+ * the `count(*)` just above; the ordering is a genuine sort.
  */
 const listTopicsRoute = route({
   method: "GET",
@@ -156,7 +162,9 @@ const listTopicsRoute = route({
         .select()
         .from(topics)
         .where(eq(topics.forumId, params.forumId))
-        // sticky first, then recency — one indexed ORDER BY, no N+1
+        // sticky first, then recency. The CASE expression can't ride the
+        // (forum_id, type, last_post_at) index — see the route doc above —
+        // so this is a real sort, just over an already-filtered row set.
         .orderBy(sql`case when ${topics.type} = 'sticky' then 0 else 1 end`, desc(topics.lastPostAt))
         .limit(PAGE_SIZE)
         .offset((query.page - 1) * PAGE_SIZE);

@@ -59,6 +59,27 @@ describe("POST /api/auth/forgot", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({});
   });
+
+  it("caps reset tokens per email at 3/hour regardless of IP, still answering 200", async () => {
+    const email = `capped_${Date.now()}@example.test`;
+    await registerVerifiedPlayer({ app, redis }, { email });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await app.inject({ method: "POST", url: "/api/auth/forgot", payload: { email } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({});
+    }
+    const beforeFourth = await redis.keys("pwreset:*");
+
+    // The 4th call for the same email within the window still answers 200
+    // (no enumeration signal, not even a 429) but mints no new token.
+    const fourth = await app.inject({ method: "POST", url: "/api/auth/forgot", payload: { email } });
+    expect(fourth.statusCode).toBe(200);
+    expect(fourth.json()).toEqual({});
+
+    const afterFourth = await redis.keys("pwreset:*");
+    expect(afterFourth.length).toBe(beforeFourth.length);
+  });
 });
 
 describe("password reset", () => {
