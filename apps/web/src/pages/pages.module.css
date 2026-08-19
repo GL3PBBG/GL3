@@ -10,6 +10,10 @@
   background: var(--bg);
 }
 .rowCurrent { border-color: var(--accent); }
+/* Middle cell of an image · text · button row: absorb the free space so the
+   text left-aligns beside the image instead of floating centered (space-
+   between treats three children as evenly spread otherwise). */
+.rowGrow { flex: 1; min-width: 0; }
 .meta { color: var(--muted); font-size: 0.9rem; }
 .muted { color: var(--muted); }
 .big { font-size: 1.6rem; font-variant-numeric: tabular-nums; margin: 0; }

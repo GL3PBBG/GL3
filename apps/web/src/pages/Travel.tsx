@@ -46,7 +46,7 @@ export function Travel(): JSX.Element {
               className={location.current ? `${styles.row} ${styles.rowCurrent}` : styles.row}
             >
               <GameImage url={location.imageUrl} alt={location.name} size="md" />
-              <div>
+              <div className={styles.rowGrow}>
                 <strong>{location.name}</strong>
                 {location.current ? <span className={styles.meta}> · you are here</span> : null}
                 <div className={styles.meta}>
