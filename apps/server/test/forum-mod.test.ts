@@ -1,3 +1,4 @@
+import { TableRowsResponseSchema } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -323,6 +324,17 @@ describe("admin forum: CRUD", () => {
     expect(res.statusCode, res.body).toBe(200);
     const body = res.json() as { rows: { id: string; name: string; sort: number }[] };
     expect(body.rows.some((r) => r.name === "General")).toBe(true);
+  });
+
+  it("table feed rows are pre-stringified, as the renderer's parse demands", async () => {
+    const founder = await registerVerifiedPlayer({ app, redis });
+    await seedForum("General");
+    const res = await get("/api/admin/forum/forums", founder.token);
+    expect(res.statusCode, res.body).toBe(200);
+    // TableRowsResponseSchema is z.record(z.string()) and TableBlock parses
+    // with it client-side — a numeric `sort` blanked this whole table once.
+    const parsed = TableRowsResponseSchema.safeParse(res.json());
+    expect(parsed.success, JSON.stringify(res.json())).toBe(true);
   });
 
   it("renames and re-sorts an existing forum", async () => {
