@@ -235,8 +235,11 @@ const SETTING_LABELS = [
 
 const AdminSettingsBodySchema = z.object({
   cost: z.string().regex(/^\d+$/),
-  duration: z.number().int().min(1),
-  expire: z.number().int().min(1),
+  // The admin form serialises every field as a string (PageRenderer.tsx's
+  // `body: Record<string, string>`), so these must coerce — bullets' options
+  // panel is the same shape.
+  duration: z.coerce.number().int().min(1),
+  expire: z.coerce.number().int().min(1),
 }).strict();
 
 const adminSettingsListRoute = route({
