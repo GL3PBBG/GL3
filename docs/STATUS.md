@@ -2739,13 +2739,15 @@ three touches a row two other paths don't already lock the same way.
 `RegisterRequestSchema`, `VerifyRequestSchema` / `ForgotRequestSchema` /
 `ResetRequestSchema`, `dto/online.ts`, `dto/forum.ts`, `targetPlayerId` /
 `placerPlayerId` on the bounty row DTO, and `lastSeenAt` on `ProfileDto` —
-additive, **not yet published**, same registry-check-first caveat as every
-prior bump. **`@gl3/plugin-sdk` → `0.1.7`**, its first-ever route-level
+additive, **since published** (`0.1.14` reached the registry from another
+session; `0.1.15` followed with the money-units cluster below), same
+registry-check-first caveat as every prior bump. **`@gl3/plugin-sdk` → `0.1.7`**, its first-ever route-level
 query-string support: an optional `query` zod field on `route()`, defaulted
 to `z.unknown()` the same way `params`/`body` already default, parsed by the
 loader with a clean 400 on a malformed query string — neither the forum
 plan nor its design anticipated `?page=`, and this is the SDK gap that
-closed it. **Also not yet published.**
+closed it. **Also since published** (`0.1.7`, then `0.1.8` with the
+money-units cluster below).
 
 Gate: bare `npm run verify` on `9f9ceb6`, **228 files / 1804 passed, 1
 skipped, exit 0**, no unhandled rejections, no `(0 test)` cross-talk (the two
@@ -2827,8 +2829,66 @@ same-table cleanup) behind at most one FOR UPDATE. Also fixed in passing:
 forum's admin table feed returned `sort` as a JSON number, which fails
 `TableRowsResponseSchema`'s all-string parse inside TableBlock and blanked
 the whole table client-side. `@gl3/shared` → `0.1.15`, `@gl3/plugin-sdk` →
-`0.1.8` (additive; **neither published**, like the social cluster's bumps
-they ride on).
+`0.1.8` (additive; both **since published** — see the money-units section
+below).
+
+### Money units are whole dollars — the 100× cents bug
+
+Branch `fix/money-units-dollars`, merged to `main` (`1b093dd`). The
+properties-franchise design doc invented an "in cents" convention
+(`docs/superpowers/specs/2026-08-15-properties-design.md` onward) that no
+layer ever implemented: the M4 migrator copies `US_money`/`PR_cost`/
+`L_bulletCost` **verbatim**, `seed.ts` is dollar-scale, and
+`apps/web/src/lib/money.ts` formats without dividing — GL3 money bigints are
+V2's own unit, whole dollars. Every figure derived from the comment charged
+100×: bullets' and blackjack's `providesProperties` price (`100_000_000n` →
+`1_000_000n`, V2's $1,000,000), properties' `LEVER_FLOOR` (`10_000n` →
+`100n`, V2's $100 floor), casino's `DEFAULT_MIN_BET`/`DEFAULT_MAX_BET`
+(`10_000n`/`10_000_000n` → `100n`/`100_000n`). On migrated data the old
+values were not just expensive but wrong-shaped: a migrated house lever
+(dollars) sat *below* the min bet, making tables unplayable, and legal V2
+levers sat below the floor and could never be re-set. Twelve test files
+restated expectations — two of them (`casino-play`'s `"5000"` wager,
+`properties-events`' `"100000000"` price) were **string** literals a bigint
+grep missed, and surfaced only in the full gate run. The stale "cents"
+wording in the 2026-08 design docs is left as a historical record; the
+convention is now pinned in the SDK's `providesProperties.price` docblock.
+With this branch's commit, `@gl3/shared@0.1.15` and `@gl3/plugin-sdk@0.1.8`
+were **published** with the user's approval — `npm.gl3.dev` now serves
+shared `0.1.1`–`0.1.15` and the SDK `0.1.0`–`0.1.8`.
+
+### Admin section tabs wrap
+
+Same branch (`c8572fc`): `pages.module.css`'s `.tabs` row never declared
+`flex-wrap`, so once the admin grew past ~10 sections the row overflowed the
+content column and the sticky event feed — an opaque panel, later in the
+DOM — painted over the overflow, leaving the right end of the section menu
+unreadable. One line (`flex-wrap: wrap`), matching what `.nav` always did;
+Leaderboards shares the class and inherits the safety.
+
+### Detectives admin and V2 duration-unit parity
+
+Same branch (`dc2b619`). V2's "hours" dropdown is really a **unit count**:
+`detectiveDuration` (default `1` in shipped V2 — operators used it for
+fast timings; `3600` makes units real hours) says how many real seconds one
+unit lasts, and cost and success odds are per *unit*, not per real second.
+GL3 already read `detectives.duration` but had no admin for it and the page
+hard-labelled the dropdown "Hours". Three changes: an `adminPages` panel
+plus `GET/POST /api/admin/detectives/settings` (cost, duration, expire —
+bullets' options-panel pattern: reads and writes the settings TABLE, edits
+take effect on the next restart, and the panel says so); `durationSeconds`
+on the list DTO (rode `@gl3/shared@0.1.15`) so the web dropdown labels its
+1–5 options from the real span ("1 hour" at 3600, "1 second" at 1 — V2 fed
+`i × detectiveDuration` through `timeElapsedString()` the same way), with
+the wire field still named `hours` (published shape, V2's own name); and
+three new `migrateSettings` renames — `detectiveCost`/`detectiveDuration`/
+`detectiveExpire` → `detectives.cost/duration/expire` — so a migrated
+operator's tuning no longer reverts silently to the coded defaults (the
+exact failure the rename map exists to prevent; the map is now nine keys).
+No new lock-graph edge, no migration, no new `GameEvent` variant. New test
+file `admin-detectives.test.ts` is registered in `vitest.workspace.ts` (the
+ninth-site trap). Merge gate: bare `npm run verify` exit 0 from the
+process, 231 files / 1873 passed.
 
 ## What M3 established that later work must not undo
 
