@@ -58,6 +58,18 @@ describe("detectives admin settings", () => {
     expect(updated?.value).toBe("3600");
   });
 
+  it("accepts string-typed numbers, which is what the admin form actually sends", async () => {
+    // PageRenderer.tsx serialises every form field as a string
+    // (`body: Record<string, string>`), so the wire shape is all-strings.
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
+      payload: { cost: "90000", duration: "60", expire: "300" },
+    });
+    expect(res.statusCode).toBe(204);
+    const [row] = await db.select().from(settings).where(eq(settings.key, "detectives.duration"));
+    expect(row?.value).toBe("60");
+  });
+
   it("400s a zero duration and a non-digit cost", async () => {
     const zero = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
