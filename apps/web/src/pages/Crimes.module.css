@@ -9,5 +9,8 @@
   border-radius: 6px;
   background: var(--bg);
 }
+/* Middle cell of the image · text · button row: absorb the free space so the
+   text left-aligns beside the image (space-between would centre it). */
+.crimeGrow { flex: 1; min-width: 0; }
 .meta { color: var(--muted); font-size: 0.9rem; }
 .note { margin: 0 0 0.75rem; color: var(--danger); }

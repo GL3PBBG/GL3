@@ -47,7 +47,7 @@ export function Crimes(): JSX.Element {
         {crimes.data?.crimes.map((crime) => (
           <li key={crime.id} className={styles.crime}>
             <GameImage url={crime.imageUrl} alt={crime.name} size="md" />
-            <div>
+            <div className={styles.crimeGrow}>
               <strong>{crime.name}</strong>
               <div className={styles.meta}>
                 {crime.chance}% · <Money value={crime.minPayout} />–<Money value={crime.maxPayout} />{" "}

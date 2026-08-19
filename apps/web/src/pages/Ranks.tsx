@@ -36,7 +36,7 @@ export function Ranks(): JSX.Element {
             className={rank.current ? `${styles.row} ${styles.rowCurrent}` : styles.row}
           >
             <GameImage url={rank.imageUrl} alt={rank.name} size="sm" />
-            <div>
+            <div className={styles.rowGrow}>
               <strong>{rank.name}</strong>
               {rank.current ? <span className={styles.meta}> · you</span> : null}
               <div className={styles.meta}>
