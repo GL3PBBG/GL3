@@ -47,6 +47,10 @@ export const players = pgTable("players", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  /** NULL = not banned. With bannedAt set, a NULL banExpiresAt is permanent. */
+  bannedAt: timestamp("banned_at", { withTimezone: true }),
+  banReason: text("ban_reason"),
+  banExpiresAt: timestamp("ban_expires_at", { withTimezone: true }),
 }, (t) => ({
   usernameUnique: uniqueIndex("players_username_unique").on(t.username),
   emailUnique: uniqueIndex("players_email_unique").on(t.email),
