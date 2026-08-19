@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkinSecondsPerHp, dischargeCostPerSecond } from "../src/game/hospital/settings.js";
-import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent } from "../src/game/jail/settings.js";
+import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "../src/game/jail/settings.js";
 import { bustSucceeds } from "../src/game/jail/bust.js";
 
 /**
@@ -17,6 +17,7 @@ describe("facility settings parsers", () => {
     expect(bailCostPerSecond({})).toBe(1000n);
     expect(bustSuccessPercent({})).toBe(25);
     expect(bustFailJailSeconds({})).toBe(300);
+    expect(escapeFailExtraSeconds({})).toBe(90);
   });
 
   it("reads well-formed values", () => {
@@ -25,20 +26,24 @@ describe("facility settings parsers", () => {
     expect(bustSuccessPercent({ "jail.bust_success_percent": "0" })).toBe(0);
     expect(bustSuccessPercent({ "jail.bust_success_percent": "100" })).toBe(100);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "60" })).toBe(60);
+    expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": "120" })).toBe(120);
   });
 
   it.each(["", "   ", "abc", "-1", "1.5"])("falls back on %j", (raw) => {
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": raw })).toBe(30);
     expect(bailCostPerSecond({ "jail.bail_cost_per_second": raw })).toBe(1000n);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": raw })).toBe(300);
+    expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": raw })).toBe(90);
   });
 
-  it("rejects 0 for the two parsers a zero-length stay would exploit", () => {
+  it("rejects 0 for the parsers a zero-length stay would exploit", () => {
     // `parsePositiveInt` rejects <= 0, not just negatives — a zero
     // `checkin_seconds_per_hp` or `bust_fail_jail_seconds` would otherwise
-    // write a sentence with a deadline already in the past.
+    // write a sentence with a deadline already in the past, and a zero
+    // `escape_fail_extra_seconds` would make escape a free reroll forever.
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "0" })).toBe(30);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "0" })).toBe(300);
+    expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": "0" })).toBe(90);
   });
 
   it("clamps an out-of-range bust percentage instead of falling back", () => {

@@ -2559,6 +2559,40 @@ Gate: bare `npm run verify` on `362803a`, **217 files / 1733 passed, 1
 skipped, exit 0** (third run; run 2 hit the known casino-lock-order flake
 documented in CLAUDE.md, now on its third recorded occurrence).
 
+### Jail self-escape — V2's "Escape" restored
+
+Shipped on `feat/jail-escape`. V2's jail template offered ONE action,
+`action=breakout&id={id}`, relabelled "Escape" on your own row — self-target
+was legal (`jail.inc.php` names the target "yourself") and a failure added
+**+90s to the existing timer**. GL3's `bust` refuses `self_target`, so the
+mechanic was silently lost in the hospital-jail-social port. Restored as its
+own route rather than by relaxing bust's guard, because the guards conflict
+(bust 409s a jailed caller; being jailed is escape's precondition):
+
+- **`POST /api/jail/escape`** — no body, free, no cooldown. Same
+  `bustSucceeds` roll and the same `jail.bust_success_percent` as bust.
+  Success clears `jailedUntil` and publishes `player.released` to self;
+  failure **extends** the sentence to `existing + jail.escape_fail_extra_seconds`
+  (default 90, `parsePositiveInt` so `"0"` falls back — a zero penalty would
+  make escape a free reroll forever) and publishes `player.jailed` with
+  `reason: "escape.failed"`. `sendToJail` is deliberately not used on the
+  failure branch: it overwrites from now, which is bust's fresh-sentence
+  semantics, not V2's extension. `test/jail-escape.test.ts` proves the
+  distinction with an exact-ms assertion (`before + 120_000`).
+- **No shared bump, no new event variant, no new lock edge.** The response
+  reuses the `BustResponse` shape (`{ success, jailedUntil }` — the doc
+  comment's "caller's new sentence" reading holds verbatim); both events
+  already existed, so none of the four variant-census sites moved; the
+  transaction opens with `lockPlayersForUpdate` on the caller alone, an
+  existing pattern.
+- Web: `useEscape` mutation and an Escape button in the jailed branch of
+  `Jail.tsx`, with the fail-warning copy mirroring bust's.
+
+Gate: bare `npm run verify` on `faa3102`'s tree, **218 files / 1736 passed,
+1 skipped, exit 0** — after a voided first attempt that overlapped another
+session's `verify:related` (caught by the user, both runs discarded, re-run
+after cross-session coordination; the casino-lock-order flake did not recur).
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
