@@ -9,7 +9,6 @@ import { Detectives } from "./pages/Detectives.js";
 import { Forgot } from "./pages/Forgot.js";
 import { Forum } from "./pages/Forum.js";
 import { ForumTopic } from "./pages/ForumTopic.js";
-import { Properties } from "./pages/Properties.js";
 import { Bullets } from "./pages/Bullets.js";
 import { Casino } from "./pages/Casino.js";
 import { Combat } from "./pages/Combat.js";
@@ -89,7 +88,6 @@ export function App(): JSX.Element {
               <Route path="combat" element={<Combat />} />
               <Route path="bounties" element={<Bounties />} />
               <Route path="detectives" element={<Detectives />} />
-              <Route path="properties" element={<Properties />} />
               <Route path="casino" element={<Casino />} />
               <Route path="oc" element={<OrganizedCrime />} />
               <Route path="ranks" element={<Ranks />} />

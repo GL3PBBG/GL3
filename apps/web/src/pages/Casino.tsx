@@ -5,6 +5,7 @@ import { useCasino, useCasinoAct, useJail, useMe, usePlayCasino } from "../api/q
 import { canAfford } from "../lib/money.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
+import { PropertyPanel } from "../components/PropertyPanel.js";
 import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 import type { CasinoGame, CasinoSessionView, CasinoStepResponse } from "@gl3/shared";
@@ -364,6 +365,13 @@ export function Casino(): JSX.Element {
               />
             ))}
           </ul>
+
+          {/* The tables themselves — each game's property row for this town,
+              buyable when the town still holds it, with the owner tools when
+              it's yours. This replaced the /properties tab. */}
+          {games.map((game) => (
+            <PropertyPanel key={game.gameId} pluginId={game.gameId} />
+          ))}
         </>
       )}
 

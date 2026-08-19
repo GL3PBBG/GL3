@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useBulletShop, useBuyBullets, useJail, useMe } from "../api/queries.js";
 import { canAfford, multiplyMoney } from "../lib/money.js";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { PropertyPanel } from "../components/PropertyPanel.js";
 import styles from "./pages.module.css";
 
 export function Bullets(): JSX.Element {
@@ -67,6 +68,10 @@ export function Bullets(): JSX.Element {
           Buy
         </button>
       </div>
+
+      {/* The town's bullet factory — owner shown, buyable when nobody's.
+          Half of every sale here goes to whoever holds it. */}
+      <PropertyPanel pluginId="bullets" />
 
       {jailed ? <p className={styles.bad}>No shopping from jail.</p> : null}
       {count > here.bulletStock ? (
