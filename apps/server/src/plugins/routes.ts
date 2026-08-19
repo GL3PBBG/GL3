@@ -1,5 +1,5 @@
 import type { PlayerSnapshot, PluginManifest } from "@gl3/plugin-sdk";
-import { PluginError, hasPermission } from "@gl3/plugin-sdk";
+import { isPluginError, hasPermission } from "@gl3/plugin-sdk";
 import type { Db } from "../db/client.js";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -90,7 +90,13 @@ export function registerPluginRoutes(
               ? await reply.code(result.status).send()
               : await reply.code(result.status).send(result.body);
           } catch (error) {
-            if (error instanceof PluginError) {
+            // `isPluginError`, NOT `instanceof`: a plugin loaded through
+            // `PLUGIN_PACKAGES` resolves its own copy of @gl3/plugin-sdk out of
+            // the operator's plugin directory, so its PluginError is a
+            // different class object than ours and `instanceof` is false. Every
+            // deliberate 400/409/423 from such a plugin would fall through to
+            // the 500 below. See the brand comment in the SDK's errors.ts.
+            if (isPluginError(error)) {
               for (const [name, value] of Object.entries(error.headers)) {
                 reply.header(name, value);
               }

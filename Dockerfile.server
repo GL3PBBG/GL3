@@ -27,6 +27,20 @@
 # the runtime stage the server cannot boot, even with PLUGIN_IDS empty — core
 # plugins are never optional.
 #
+# Third-party plugins are NOT copied here and do not need to be. Everything
+# below is compiled into the image at build time; a plugin an operator installs
+# later arrives through PLUGIN_PACKAGES + PLUGIN_DIR, resolved at boot out of a
+# mounted volume (see src/plugins/dynamic.ts). That is deliberate: the runtime
+# stage has no sources and no toolchain, so without it adding any plugin would
+# mean rebuilding this image. Recipe:
+#
+#   initContainer: npm i --prefix /data/plugins @acme/plugin-x
+#   volumeMount:   /data/plugins
+#   env:           PLUGIN_DIR=/data/plugins
+#                  PLUGIN_PACKAGES=@acme/plugin-x
+#
+# The volume needs no node binary at runtime — only the installed tree.
+#
 # argon2 ships a linux-x64 musl prebuild, so node:22-alpine needs no
 # build toolchain (no python/make/g++).
 #

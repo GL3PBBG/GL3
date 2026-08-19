@@ -7,7 +7,8 @@ import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderbo
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
-import { withCorePlugins } from "./plugins/core-plugins.js";
+import { CORE_PLUGINS, withCorePlugins } from "./plugins/core-plugins.js";
+import { loadDynamicPlugins, type DynamicPlugin } from "./plugins/dynamic.js";
 import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
 import { createStorageDriver } from "./assets/factory.js";
 import { sweepOrphanedCoreBindings, sweepUnreferencedAssets } from "./assets/sweep.js";
@@ -35,6 +36,35 @@ import { attachGateway } from "./ws/gateway.js";
  */
 const AVAILABLE_PLUGINS: Record<string, PluginManifest> = buildAvailablePlugins(INSTALLED_PLUGINS);
 
+/**
+ * Fails boot when a dynamically loaded package declares an id already taken by
+ * a core plugin or by a compiled-in one, naming both sides.
+ *
+ * `withCorePlugins` de-duplicates by id SILENTLY, which is right for its own
+ * case — a core module named redundantly in `PLUGIN_IDS` should just not load
+ * twice. It is wrong here: an operator who installs `@acme/casino` and gets
+ * nothing has no way to discover that its id collided with ours, because the
+ * plugin simply never appears. Two packages colliding with each other is
+ * already caught by `buildAvailablePlugins`; this covers the two cases it
+ * cannot see.
+ */
+function assertNoIdCollisions(
+  loaded: readonly DynamicPlugin[],
+  takenIds: readonly string[],
+): PluginManifest[] {
+  const taken = new Set(takenIds);
+  return loaded.map(([packageName, manifest]) => {
+    if (taken.has(manifest.id)) {
+      throw new Error(
+        `plugin package "${packageName}" declares id "${manifest.id}", which is already loaded — ` +
+          `remove it from PLUGIN_PACKAGES or PLUGIN_IDS`,
+      );
+    }
+    taken.add(manifest.id);
+    return manifest;
+  });
+}
+
 const config = loadConfig(process.env);
 const { db } = createDb(config.databaseUrl);
 const redis = createRedis(config.redisUrl);
@@ -52,7 +82,14 @@ const optionalManifests = config.pluginIds.map((id) => {
   return manifest;
 });
 
-const manifests: PluginManifest[] = withCorePlugins(optionalManifests);
+// Plugins the operator installed outside this build (`PLUGIN_PACKAGES`), which
+// is the only route into the published image — see `plugins/dynamic.ts`.
+const dynamicManifests = assertNoIdCollisions(
+  await loadDynamicPlugins(config.pluginPackages, config.pluginDir),
+  [...CORE_PLUGINS.map((m) => m.id), ...optionalManifests.map((m) => m.id)],
+);
+
+const manifests: PluginManifest[] = withCorePlugins([...optionalManifests, ...dynamicManifests]);
 
 const loadedSettings = await loadSettings(db);
 
