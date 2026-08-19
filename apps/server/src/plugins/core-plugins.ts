@@ -11,6 +11,7 @@ import rankPlugin from "@gl3/plugin-ranks";
 import travelPlugin from "@gl3/plugin-travel";
 import crimesPlugin from "@gl3/plugin-crimes";
 import mailPlugin from "@gl3/plugin-mail";
+import membershipPlugin from "@gl3/plugin-membership";
 import gangsPlugin from "@gl3/plugin-gangs";
 import inventoryPlugin from "@gl3/plugin-inventory";
 import combatPlugin from "@gl3/plugin-combat";
@@ -41,6 +42,7 @@ export const CORE_PLUGINS: readonly PluginManifest[] = [
   casinoPlugin,
   blackjackPlugin,
   forumPlugin,
+  membershipPlugin,
 ];
 
 /**
