@@ -22,8 +22,8 @@ const from = (rows: Record<string, string>) => ({
 
 describe("readMinBet / readMaxBet", () => {
   it("defaults on an empty settings table", () => {
-    expect(readMinBet(from({}))).toBe(10_000n);
-    expect(readMaxBet(from({}))).toBe(10_000_000n);
+    expect(readMinBet(from({}))).toBe(100n);
+    expect(readMaxBet(from({}))).toBe(100_000n);
   });
 
   it("reads BARE keys — ctx.settings.get already namespaces by plugin id", () => {
@@ -31,13 +31,13 @@ describe("readMinBet / readMaxBet", () => {
     expect(readMaxBet(from({ max_bet: "900" }))).toBe(900n);
     // A reader asking for "casino.min_bet" would resolve
     // "casino.casino.min_bet" and silently default forever.
-    expect(readMinBet(from({ "casino.min_bet": "500" }))).toBe(10_000n);
+    expect(readMinBet(from({ "casino.min_bet": "500" }))).toBe(100n);
   });
 
   it("falls back on anything that is not a digit string, and has no ceiling", () => {
-    expect(readMinBet(from({ min_bet: "10.00" }))).toBe(10_000n);
-    expect(readMinBet(from({ min_bet: "-5" }))).toBe(10_000n);
-    expect(readMinBet(from({ min_bet: "" }))).toBe(10_000n);
+    expect(readMinBet(from({ min_bet: "10.00" }))).toBe(100n);
+    expect(readMinBet(from({ min_bet: "-5" }))).toBe(100n);
+    expect(readMinBet(from({ min_bet: "" }))).toBe(100n);
     // Money is bigint end to end, so a huge stake is representable exactly and
     // is NOT clamped — only the expiry feeds date arithmetic.
     const huge = "9".repeat(40);

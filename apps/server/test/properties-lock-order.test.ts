@@ -50,7 +50,8 @@ import { bootTestServer } from "./helpers/server.js";
  * `POST /api/properties/buy` with `{pluginId, locationId}` in the body, and
  * the row is created lazily on first purchase rather than pre-seeded. Every
  * buy below targets `pluginId: "bullets"` (the Bullet Factory franchise,
- * bullets' `providesProperties` declaration, $1,000,000 / 100,000,000 cents)
+ * bullets' `providesProperties` declaration, $1,000,000 — money bigints are
+ * whole dollars, V2's unit, copied verbatim by the migrator)
  * — the only property type any core plugin declares. `sell` and `claim` are
  * gone (Task 5 dropped the accrual clock they served); the load test below
  * no longer drives them.
@@ -64,7 +65,7 @@ const PLAYERS = 8;
 const ROUNDS = 20;
 
 /** Bullets' declared property price — packages/plugins/bullets/src/index.ts. */
-const PROPERTY_PRICE = 100_000_000n;
+const PROPERTY_PRICE = 1_000_000n;
 const STARTING_CASH = 5n * PROPERTY_PRICE;
 
 let app: FastifyInstance;

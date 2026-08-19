@@ -115,7 +115,7 @@ describe("properties events", () => {
       name: "bought",
       actorId: playerId,
       audience: { kind: "player", playerId },
-      payload: { typeName: "Bullet Factory", locationName: expect.any(String), price: "100000000" },
+      payload: { typeName: "Bullet Factory", locationName: expect.any(String), price: "1000000" },
     });
   });
 

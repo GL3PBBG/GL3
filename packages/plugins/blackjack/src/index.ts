@@ -94,7 +94,7 @@ export default definePlugin({
   providesProperties: [{
     id: "blackjack",
     name: "Blackjack Table",
-    price: 100_000_000n,     // $1,000,000 in cents — V2's hardcoded figure
+    price: 1_000_000n,       // $1,000,000 — V2's hardcoded figure; money bigints are whole dollars
     leverLabel: "Maximum bet",
   }],
   filters: [on(games, (_ctx, list) => [...list, BLACKJACK as GameDef])],

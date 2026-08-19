@@ -1,6 +1,6 @@
 /** Settings are read via ctx.settings.get(key), which resolves DB row `casino.<key>`. */
-export const DEFAULT_MIN_BET = 10_000n;             // $100 — V2's PR_cost floor
-export const DEFAULT_MAX_BET = 10_000_000n;         // $100,000, when no house lever is set
+export const DEFAULT_MIN_BET = 100n;                // $100 — V2's PR_cost floor
+export const DEFAULT_MAX_BET = 100_000n;            // $100,000, when no house lever is set
 export const DEFAULT_SESSION_EXPIRY_MINUTES = 30;
 
 interface SettingsReader { get(key: string): string | null }

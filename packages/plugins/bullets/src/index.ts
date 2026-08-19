@@ -413,7 +413,7 @@ export default definePlugin({
   providesProperties: [{
     id: "bullets",
     name: "Bullet Factory",
-    price: 100_000_000n,          // $1,000,000 in cents — V2's hardcoded figure
+    price: 1_000_000n,            // $1,000,000 — V2's hardcoded figure; money bigints are whole dollars
     leverLabel: "Price per bullet",
   }],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87
