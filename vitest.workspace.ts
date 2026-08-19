@@ -72,6 +72,9 @@ const srcAliases = {
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-membership": fileURLToPath(
+        new URL("./packages/plugins/membership/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-properties": fileURLToPath(
         new URL("./packages/plugins/properties/src/index.ts", import.meta.url),
       ),
@@ -399,6 +402,7 @@ export default defineWorkspace([
         "test/properties-pay-owner.test.ts",
         "test/properties-routes.test.ts",
         "test/properties-seizure.test.ts",
+        "test/membership-plugin.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",
