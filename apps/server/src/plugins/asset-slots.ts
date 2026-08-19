@@ -29,7 +29,6 @@ export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   { scope: CORE_SCOPE, slot: "page-bounties", label: "Bounties page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-detectives", label: "Detectives page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-oc", label: "Organized crime page banner", singleton: true },
-  { scope: CORE_SCOPE, slot: "page-properties", label: "Properties page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-garage", label: "Garage page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-theft", label: "Car theft page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-gang", label: "Gang page banner", singleton: true },

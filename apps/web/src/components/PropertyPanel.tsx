@@ -3,10 +3,16 @@ import {
   useMe, useProperties, useBuyProperty,
   useSetLever, useTransferProperty, useDropProperty, useResetProperty,
 } from "../api/queries.js";
-import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
-import styles from "./pages.module.css";
+import { ErrorText, Money } from "./ui.js";
+import styles from "../pages/pages.module.css";
 import type { PropertyRow } from "@gl3/shared";
-import { GameImage } from "../components/GameImage.js";
+import { GameImage } from "./GameImage.js";
+
+/** The rows a page owns: `GET /api/properties` lists the whole town, and each
+ *  page shows only the type its plugin declares. */
+export function rowsFor(rows: readonly PropertyRow[], pluginId: string): PropertyRow[] {
+  return rows.filter((row) => row.pluginId === pluginId);
+}
 
 export function rowAction(
   row: PropertyRow,
@@ -130,66 +136,61 @@ function OwnedControls({
   );
 }
 
-export function Properties(): JSX.Element {
+/**
+ * One plugin's properties in the caller's town, embedded on that plugin's own
+ * page — the replacement for the retired /properties tab. Shows the owner,
+ * offers Buy when nobody owns it, and the full owner tools when the viewer
+ * does. Renders nothing when the town has no row of this type: the surrounding
+ * page already says where the player is.
+ */
+export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element | null {
   const properties = useProperties();
   const me = useMe();
   const buy = useBuyProperty();
 
-  if (properties.isLoading) return <Loading what="properties" />;
-  if (properties.error) return <ErrorText error={properties.error} />;
-
-  const rows = properties.data?.rows ?? [];
+  // Silent while loading or on error: this is a side panel, and the page it
+  // sits on has its own loading and error surfaces for its own data.
+  const rows = rowsFor(properties.data?.rows ?? [], pluginId);
+  if (rows.length === 0) return null;
 
   return (
-    <Panel title="Properties">
-      {/* The server lists only the caller's current location, so every row
-          carries the same town name — take it from the first row. */}
-      <h3 className={styles.meta}>
-        {rows[0]?.locationName ? `Properties in ${rows[0].locationName}` : "Properties here"}
-      </h3>
-      {rows.length === 0 ? (
-        <p className={styles.meta}>No properties available.</p>
-      ) : (
-        <ul className={styles.rows}>
-          {rows.map((row) => {
-            const action = rowAction(row, me.data?.username);
-            const buyingThisRow =
-              buy.variables?.pluginId === row.pluginId && buy.variables?.locationId === row.locationId;
-            return (
-              <li key={row.id} className={styles.row}>
-                <GameImage url={row.imageUrl} alt={row.typeName} size="md" />
-                <span>
-                  {row.typeName}
-                  <span className={styles.muted}> &middot; {row.locationName}</span>
-                  {action.kind === "buy" ? (
-                    <span className={styles.muted}> &middot; <Money value={action.price} /></span>
-                  ) : null}
-                  {" "}&middot; owner {row.ownerName}
-                </span>
-                {action.kind === "buy" ? (
-                  <button
-                    type="button"
-                    disabled={buy.isPending}
-                    onClick={() => buy.mutate({ pluginId: row.pluginId, locationId: row.locationId })}
-                  >
-                    Buy
-                  </button>
-                ) : null}
-                {action.kind === "owned" ? (
-                  <OwnedControls
-                    propertyId={row.id}
-                    leverLabel={action.leverLabel}
-                    lever={action.lever}
-                    profit={action.profit}
-                    price={row.price}
-                  />
-                ) : null}
-                <ErrorText error={buy.isError && buyingThisRow ? buy.error : undefined} />
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Panel>
+    <ul className={styles.rows}>
+      {rows.map((row) => {
+        const action = rowAction(row, me.data?.username);
+        const buyingThisRow =
+          buy.variables?.pluginId === row.pluginId && buy.variables?.locationId === row.locationId;
+        return (
+          <li key={row.id} className={styles.row}>
+            <GameImage url={row.imageUrl} alt={row.typeName} size="md" />
+            <span>
+              {row.typeName}
+              {action.kind === "buy" ? (
+                <span className={styles.muted}> &middot; <Money value={action.price} /></span>
+              ) : null}
+              {" "}&middot; owner {row.ownerName}
+            </span>
+            {action.kind === "buy" ? (
+              <button
+                type="button"
+                disabled={buy.isPending}
+                onClick={() => buy.mutate({ pluginId: row.pluginId, locationId: row.locationId })}
+              >
+                Buy
+              </button>
+            ) : null}
+            {action.kind === "owned" ? (
+              <OwnedControls
+                propertyId={row.id}
+                leverLabel={action.leverLabel}
+                lever={action.lever}
+                profit={action.profit}
+                price={row.price}
+              />
+            ) : null}
+            <ErrorText error={buy.isError && buyingThisRow ? buy.error : undefined} />
+          </li>
+        );
+      })}
+    </ul>
   );
 }

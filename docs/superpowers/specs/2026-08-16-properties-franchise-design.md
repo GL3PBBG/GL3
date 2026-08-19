@@ -381,6 +381,16 @@ columns: location, type name, owner, and either a Buy button with the declared
 price, or — when it is yours — the lever input, P&L, Reset, Transfer and Drop.
 The `accrued` column goes.
 
+> **Amended 2026-08-19 (`feat/properties-inline`):** the `/properties` tab is
+> retired. The same hand-written React survives as
+> `apps/web/src/components/PropertyPanel.tsx`, embedded on each declaring
+> plugin's own page — the bullets page shows the factory, the casino lobby
+> shows each game's table — with owner line, Buy when unowned, and the full
+> owner tools when yours. Rule going forward: a plugin declaring a property
+> type via `providesProperties` surfaces owner/buy on its own page. No API
+> change; `GET /api/properties` still lists the caller's town and each panel
+> filters by its `pluginId`.
+
 **`/admin/properties`** keeps its manifest-declared `adminPages` table.
 `plugin_id` becomes a select over the loader registry; `rate` leaves; a
 `profit` column stays read-only *(admin does not adjust P&L — that is a ledger

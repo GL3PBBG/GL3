@@ -2754,6 +2754,27 @@ recorded), and the known `casino-lock-order` flake did not fire this run
 (clean 5/5). Duration 711.5s, up from 217/1733's run — almost entirely the
 email round-trip cost described above.
 
+### Properties inline — the /properties tab retired
+
+Branch `feat/properties-inline`. Pure web relocation, no server gameplay
+change: the hand-written `/properties` page moved into
+`apps/web/src/components/PropertyPanel.tsx`, embedded on each declaring
+plugin's own page — the bullets page shows the town's factory (it previously
+showed no owner at all), the casino lobby shows each game's table under the
+games list. Owner line always; Buy when unowned and the type is installed;
+the full owner tools (lever, P&L, Transfer, two-step Drop with half-price
+refund, Reset) when yours. `rowAction`/`dropRefundOf` moved with their tests
+(`test/property-panel.test.ts`, replacing `properties-page.test.ts`) plus a
+new `rowsFor` filter. Deleted: `Properties.tsx`, its App route, the nav tab,
+the `/properties` banner-map entry, and core's `page-properties` singleton
+asset slot (orphaned bindings are the sweeper's job, by design). API
+untouched — `GET /api/properties` still serves the caller's town and each
+panel filters by its `pluginId`. Rule recorded in the franchise design doc's
+amendment: a plugin declaring a property type via `providesProperties` must
+surface owner/buy on its own page, since there is no fallback tab any more.
+The management routes were never location-gated, but the old tab only ever
+listed the caller's town, so nothing a player could do was lost.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There

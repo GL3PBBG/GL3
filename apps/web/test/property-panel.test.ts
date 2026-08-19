@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { dropRefundOf, rowAction } from "../src/pages/Properties.js";
+import { dropRefundOf, rowAction, rowsFor } from "../src/components/PropertyPanel.js";
 
 const base = {
   id: "p1", locationId: "l1", locationName: "Brooklyn", pluginId: "bullets",
   typeName: "Bullet Factory", price: "100000000", leverLabel: "Price per bullet",
   ownerName: "—", lever: "", profit: "",
 };
+
+describe("rowsFor", () => {
+  it("keeps only the rows declared by the given plugin", () => {
+    const rows = [base, { ...base, id: "p2", pluginId: "blackjack", typeName: "Blackjack Table" }];
+    expect(rowsFor(rows, "blackjack").map((r) => r.id)).toEqual(["p2"]);
+  });
+
+  it("answers empty when the plugin declares nothing here", () => {
+    expect(rowsFor([base], "casino")).toEqual([]);
+  });
+});
 
 describe("rowAction", () => {
   it("offers Buy on an unowned, installed type", () => {
