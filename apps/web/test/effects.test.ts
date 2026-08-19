@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numericEffect, weaponStatLine } from "../src/lib/effects.js";
+import { numericEffect, shotsToKill, weaponStatLine } from "../src/lib/effects.js";
 
 describe("numericEffect", () => {
   it("reads a numeric field out of an unknown effects blob", () => {
@@ -33,27 +33,46 @@ describe("numericEffect", () => {
  * stat lines a test can reach at all.
  */
 describe("weaponStatLine", () => {
-  it("reads the damage range", () => {
-    expect(weaponStatLine({ damageMin: 10, damageMax: 20 })).toBe("10–20 damage");
+  it("reads the damage range and appends shots to kill", () => {
+    // avg 15, no crit -> ceil(100 / 15) = 7
+    expect(weaponStatLine({ damageMin: 10, damageMax: 20 }))
+      .toBe("10–20 damage · ~7 shots to kill");
   });
 
   it("appends the dps that paces the weapon's cooldown", () => {
     expect(weaponStatLine({ damageMin: 10, damageMax: 20, dps: 2 }))
-      .toBe("10–20 damage · 2 dps");
+      .toBe("10–20 damage · 2 dps · ~7 shots to kill");
   });
 
   it("keeps a fractional dps as written", () => {
     // 0.5 is the value a half-rate weapon needs; rounding it to 0 or 1 here
     // would misreport a 20-second cooldown as instant or as 10 seconds.
     expect(weaponStatLine({ damageMin: 10, damageMax: 10, dps: 0.5 }))
-      .toBe("10–10 damage · 0.5 dps");
+      .toBe("10–10 damage · 0.5 dps · ~10 shots to kill");
   });
 
   it("omits the dps clause entirely when the weapon declares none", () => {
     // Absent means the flat combat.cooldown_seconds, which this page has no
     // way to know — so it says nothing rather than inventing a number.
-    expect(weaponStatLine({ damageMin: 4, damageMax: 6, dps: 0 })).toBe("4–6 damage");
-    expect(weaponStatLine({ damageMin: 4, damageMax: 6, dps: "fast" })).toBe("4–6 damage");
+    expect(weaponStatLine({ damageMin: 4, damageMax: 6, dps: 0 }))
+      .toBe("4–6 damage · ~20 shots to kill");
+    expect(weaponStatLine({ damageMin: 4, damageMax: 6, dps: "fast" }))
+      .toBe("4–6 damage · ~20 shots to kill");
+  });
+
+  it("shows the bullet count when a shot spends more than one bullet", () => {
+    // avg 15 -> 7 shots x 3 bullets = 21
+    expect(weaponStatLine({ damageMin: 10, damageMax: 20, bulletsPerShot: 3 }))
+      .toBe("10–20 damage · ~7 shots to kill (21 bullets)");
+  });
+
+  it("omits the bullet count when a shot spends exactly one bullet", () => {
+    expect(weaponStatLine({ damageMin: 10, damageMax: 20, bulletsPerShot: 1 }))
+      .toBe("10–20 damage · ~7 shots to kill");
+  });
+
+  it("omits the shots clause for a weapon that cannot deal damage", () => {
+    expect(weaponStatLine({ damageMin: 0, damageMax: 0 })).toBe("0–0 damage");
   });
 
   it("returns null for a weapon whose damage range is unusable", () => {
@@ -62,5 +81,48 @@ describe("weaponStatLine", () => {
     expect(weaponStatLine({ damageMin: 4 })).toBeNull();
     expect(weaponStatLine(null)).toBeNull();
     expect(weaponStatLine({})).toBeNull();
+  });
+});
+
+/**
+ * Estimated shots to drop a 100-health unarmored target — 100 matches
+ * `ranks.max_health`'s default. Accuracy is deliberately ignored: a migrated
+ * V2 weapon carries none and the server-side default is invisible here, so
+ * factoring it in only when present would make two rows non-comparable.
+ */
+describe("shotsToKill", () => {
+  it("divides baseline health by the average damage", () => {
+    expect(shotsToKill({ damageMin: 10, damageMax: 20 }))
+      .toEqual({ shots: 7, bullets: 7 });
+  });
+
+  it("rounds shots up — a target on 1 health still takes a shot", () => {
+    // avg 30 -> 100/30 = 3.33 -> 4
+    expect(shotsToKill({ damageMin: 30, damageMax: 30 }))
+      .toEqual({ shots: 4, bullets: 4 });
+  });
+
+  it("folds the crit chance and multiplier into the expected damage", () => {
+    // 10 x (1 + 0.5 x (2 - 1)) = 15 -> ceil(100/15) = 7
+    expect(shotsToKill({ damageMin: 10, damageMax: 10, critChance: 50, critMultiplier: 2 }))
+      .toEqual({ shots: 7, bullets: 7 });
+  });
+
+  it("multiplies bullets by bulletsPerShot", () => {
+    expect(shotsToKill({ damageMin: 10, damageMax: 20, bulletsPerShot: 3 }))
+      .toEqual({ shots: 7, bullets: 21 });
+  });
+
+  it("ignores a non-positive or non-numeric bulletsPerShot", () => {
+    expect(shotsToKill({ damageMin: 10, damageMax: 20, bulletsPerShot: 0 }))
+      .toEqual({ shots: 7, bullets: 7 });
+    expect(shotsToKill({ damageMin: 10, damageMax: 20, bulletsPerShot: "3" }))
+      .toEqual({ shots: 7, bullets: 7 });
+  });
+
+  it("returns null when the damage range is unusable or cannot kill", () => {
+    expect(shotsToKill({ damageMax: 20 })).toBeNull();
+    expect(shotsToKill({ damageMin: 0, damageMax: 0 })).toBeNull();
+    expect(shotsToKill(null)).toBeNull();
   });
 });

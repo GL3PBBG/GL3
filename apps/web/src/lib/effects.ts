@@ -36,6 +36,35 @@ export function weaponStatLine(effects: unknown): string | null {
   const max = numericEffect(effects, "damageMax");
   if (min === null || max === null) return null;
   const dps = numericEffect(effects, "dps");
-  const damage = `${min}–${max} damage`;
-  return dps === null || dps <= 0 ? damage : `${damage} · ${dps} dps`;
+  const parts = [`${min}–${max} damage`];
+  if (dps !== null && dps > 0) parts.push(`${dps} dps`);
+  const kill = shotsToKill(effects);
+  if (kill !== null) {
+    const bullets = kill.bullets > kill.shots ? ` (${kill.bullets} bullets)` : "";
+    parts.push(`~${kill.shots} shots to kill${bullets}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Estimated shots (and bullets — a shot may spend several) to drop a
+ * 100-health unarmored target; 100 mirrors `ranks.max_health`'s default. Crit
+ * folds into the expectation because both crit fields always arrive in the
+ * parsed DTO; accuracy deliberately does NOT — a migrated V2 weapon carries
+ * none and the server-side default is invisible here, so including it only
+ * when present would make two rows non-comparable. Hence the "~" in the line
+ * above.
+ */
+export function shotsToKill(effects: unknown): { shots: number; bullets: number } | null {
+  const min = numericEffect(effects, "damageMin");
+  const max = numericEffect(effects, "damageMax");
+  if (min === null || max === null) return null;
+  const critChance = numericEffect(effects, "critChance") ?? 0;
+  const critMultiplier = numericEffect(effects, "critMultiplier") ?? 1;
+  const expected = ((min + max) / 2) * (1 + (critChance / 100) * (critMultiplier - 1));
+  if (expected <= 0) return null;
+  const shots = Math.ceil(100 / expected);
+  const perShot = numericEffect(effects, "bulletsPerShot");
+  const bullets = perShot !== null && perShot > 0 ? shots * perShot : shots;
+  return { shots, bullets };
 }
