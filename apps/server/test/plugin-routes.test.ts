@@ -1,7 +1,7 @@
 import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { loadConfig } from "../src/config.js";
@@ -56,6 +56,19 @@ const testPlugin = definePlugin({
       auth: "public",
       handler: async () => {
         throw new PluginError("on_cooldown", 429, { retryAfter: 42 }, { "retry-after": "42" });
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/rt/db-explode",
+      auth: "public",
+      // A deterministic driver error: the table does not exist, so Postgres
+      // answers 42P01 and drizzle wraps it with the SQLSTATE on `cause`.
+      handler: async (ctx) => {
+        await ctx.transaction(async (tx) => {
+          await tx.db.execute(sql`select 1 from p_rt_missing_table`);
+        });
+        return { status: 200, body: { unreachable: true } };
       },
     }),
   ],
@@ -168,6 +181,27 @@ describe("plugin routes", () => {
     expect(res.statusCode).toBe(429);
     expect(res.json()).toEqual({ error: "on_cooldown", retryAfter: 42 });
     expect(res.headers["retry-after"]).toBe("42");
+  });
+
+  it("logs a driver error's SQLSTATE cause even under the test env", async () => {
+    // app.ts disables the Fastify logger when nodeEnv is "test", so a
+    // request.log-based cause log is a no-op exactly where the lock-order
+    // flakes occur. The loader logs via console instead (ctx.log's own
+    // convention), which vitest captures — this pins that the SQLSTATE
+    // datum actually reaches the test log.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/rt/db-explode" });
+      expect(res.statusCode).toBe(500);
+
+      const call = spy.mock.calls.find((c) => c[1] === "plugin route failed with a driver error");
+      expect(call, "driver-error cause was not logged").toBeDefined();
+      const fields = call?.[0] as Record<string, unknown>;
+      expect(fields["pgCode"]).toBe("42P01");
+      expect(fields["plugin"]).toBe("rt");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
