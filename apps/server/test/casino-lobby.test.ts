@@ -159,7 +159,7 @@ describe("GET /api/casino", () => {
 
     expect(body.locationId).toBe(locationId);
     expect(body.locationName).toMatch(/^city-/);
-    expect(body.minBet).toBe("10000"); // the default min_bet
+    expect(body.minBet).toBe("100"); // the default min_bet
     // Every game the registry holds, which on this branch is exactly one.
     expect(body.games.map((game) => game.gameId)).toEqual(["blackjack"]);
     expect(body.games[0]).toEqual({
@@ -182,7 +182,7 @@ describe("GET /api/casino", () => {
     expect(unowned.statusCode).toBe(200);
     expect(unowned.json<LobbyBody>().games[0]).toMatchObject({
       ownerName: null,
-      maxBet: "10000000", // DEFAULT_MAX_BET — nobody's lever applies
+      maxBet: "100000", // DEFAULT_MAX_BET — nobody's lever applies
     });
 
     // A property row that exists but is UNOWNED is the same case: the
@@ -192,7 +192,7 @@ describe("GET /api/casino", () => {
     const stillUnowned = await lobby(punter.token);
     expect(stillUnowned.json<LobbyBody>().games[0]).toMatchObject({
       ownerName: null,
-      maxBet: "10000000",
+      maxBet: "100000",
     });
   });
 
@@ -270,7 +270,7 @@ describe("GET /api/casino", () => {
     const body = result.body as LobbyBody;
 
     expect(body.games).toEqual([{
-      gameId: "casino", name: "Coin toss", ownerName: null, maxBet: "10000000",
+      gameId: "casino", name: "Coin toss", ownerName: null, maxBet: "100000",
     }]);
     expect(body.session).not.toBeNull();
     expect(body.session?.sessionId).toBe(sessionId);
@@ -518,7 +518,7 @@ describe("the casino admin section", () => {
     const rows = res.json<{ rows: { key: string; label: string; value: string; source: string }[] }>().rows;
     expect(rows.map((row) => row.key)).toEqual(["min_bet", "max_bet", "session_expiry_minutes"]);
     // No settings rows are seeded, so every one of them is the coded default.
-    expect(rows.map((row) => row.value)).toEqual(["10000", "10000000", "30"]);
+    expect(rows.map((row) => row.value)).toEqual(["100", "100000", "30"]);
     expect(rows.map((row) => row.source)).toEqual(["default", "default", "default"]);
   });
 
@@ -549,7 +549,7 @@ describe("the casino admin section", () => {
     expect(by("session_expiry_minutes")).toMatchObject({ value: "45", source: "configured" });
     // The genuine fallback still reads as one, with the offending text so an
     // admin can find the row.
-    expect(by("max_bet")).toMatchObject({ value: "10000000", source: "ignored (10.00)" });
+    expect(by("max_bet")).toMatchObject({ value: "100000", source: "ignored (10.00)" });
 
     // A value the reader rejects for being out of range, not for its shape:
     // `readExpiryMinutes` requires > 0, so "0" falls back to 30.

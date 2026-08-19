@@ -16,8 +16,8 @@ import { bootTestServer } from "./helpers/server.js";
  * Buy moved off the id-in-path shape (Task 5 deleted sell/claim; this task
  * replaces buy itself, the last route still id-in-path): it now takes
  * {pluginId, locationId} in the body and charges whatever the consumer
- * plugin's `providesProperties` declares (bullets: $1,000,000, i.e.
- * 100,000,000 cents) rather than a price stored on the row. The row is
+ * plugin's `providesProperties` declares (bullets: $1,000,000 — money
+ * bigints are whole dollars) rather than a price stored on the row. The row is
  * created lazily on first purchase, as V2 did.
  *
  * lever/transfer/drop/reset are V2's `propertyManagement` methods: set the
@@ -158,7 +158,7 @@ describe("properties routes", () => {
     expect(bulletsRows.map((r) => r.locationId)).toEqual([locationId]);
     for (const row of bulletsRows) {
       expect(row.ownerName).toBe("—");
-      expect(row.price).toBe("100000000");
+      expect(row.price).toBe("1000000");
     }
   });
 
@@ -181,7 +181,7 @@ describe("properties routes", () => {
     expect(res.statusCode).toBe(200);
     ({ propertyId } = res.json<{ propertyId: string }>());
     expect(propertyId).toBeTruthy();
-    expect(await cashOf(playerId)).toBe(startingCash - 100_000_000n);
+    expect(await cashOf(playerId)).toBe(startingCash - 1_000_000n);
   });
 
   // The assertion that actually matters: once a real row exists for a
@@ -220,7 +220,7 @@ describe("properties routes", () => {
   it("sets the lever, refusing anything under the floor", async () => {
     const low = await app.inject({
       method: "POST", url: `/api/properties/${propertyId}/lever`, headers: playerHeaders,
-      payload: { value: "9999" },
+      payload: { value: "99" },
     });
     expect(low.statusCode).toBe(400);
 
@@ -290,15 +290,15 @@ describe("properties routes", () => {
 
   // V2's drop is a DELETE with no refund. GL3 pays half the declared price
   // back instead, so a franchise is a partial sink rather than a total loss —
-  // the price here is 100_000_000n, so the refund is 50_000_000n exactly.
+  // the price here is 1_000_000n, so the refund is 500_000n exactly.
   it("drops a property and refunds half its declared price", async () => {
     const before = await cashOf(otherPlayerId);
     const res = await app.inject({
       method: "POST", url: `/api/properties/${propertyId}/drop`, headers: otherPlayerHeaders,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json<{ refund: string }>().refund).toBe("50000000");
-    expect(await cashOf(otherPlayerId)).toBe(before + 50_000_000n);
+    expect(res.json<{ refund: string }>().refund).toBe("500000");
+    expect(await cashOf(otherPlayerId)).toBe(before + 500_000n);
     const [row] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
     expect(row!.ownerPlayerId).toBeNull();
     expect(row!.cost).toBe(0n);

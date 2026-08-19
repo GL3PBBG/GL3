@@ -285,8 +285,8 @@ async function loadOwnedRow(
   return { id: row.id, locationId: row.locationId, pluginId: row.pluginId, cost: row.cost, profit: row.profit };
 }
 
-/** V2's `$100` floor on PR_cost, in GL3's cents. */
-const LEVER_FLOOR = 10_000n;
+/** V2's `$100` floor on PR_cost — money bigints are whole dollars. */
+const LEVER_FLOOR = 100n;
 
 const LeverBodySchema = z.object({ value: NonNegativeIntegerString }).strict();
 

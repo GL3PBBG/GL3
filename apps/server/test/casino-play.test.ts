@@ -103,8 +103,8 @@ describe("POST /api/casino/play", () => {
     const locationId = await seedLocation();
     await placePlayer(playerId, locationId, 1_000_000n);
 
-    // Default min_bet is 10,000.
-    const res = await play(token, "blackjack", "5000");
+    // Default min_bet is 100.
+    const res = await play(token, "blackjack", "50");
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: string }>().error).toBe("wager_below_min");
   });

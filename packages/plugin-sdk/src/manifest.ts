@@ -28,7 +28,7 @@ const MigrationSchema = z.object({ name: z.string().min(1), sql: z.string().min(
 export interface PropertyTypeDecl {
   id: string;
   name: string;
-  /** Acquisition price in cents. V2 hardcoded $1,000,000 → 100_000_000n. */
+  /** Acquisition price in whole dollars (GL3 money unit, V2's own). V2 hardcoded $1,000,000 → 1_000_000n. */
   price: bigint;
   /** What `cost` means for this type, shown next to the owner's input. */
   leverLabel: string;

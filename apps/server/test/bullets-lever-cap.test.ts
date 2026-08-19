@@ -24,7 +24,7 @@ let app: FastifyInstance;
 let redis: Redis;
 let closeServer: () => Promise<void>;
 
-/** Above `LEVER_FLOOR` (10_000n) so a rejection can only be the cap. */
+/** Above `LEVER_FLOOR` (100n) so a rejection can only be the cap. */
 const cap = 15_000n;
 
 let regCounter = 0;
