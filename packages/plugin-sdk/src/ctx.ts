@@ -171,6 +171,23 @@ export interface PluginTx {
     locations(locationIds: readonly (string | null)[]): Promise<void>;
   };
   /**
+   * Per-player key→expiry timers over core's `player_timers` — the table V2's
+   * open-ended `userTimers` migrated into, so a plugin can read keys a V2
+   * custom module wrote. `set` is an upsert on the (player, key) primary key.
+   * `clear` reports whether a row was actually deleted, which is what lets a
+   * caller use the DELETE as an atomic once-only claim (membership's lazy
+   * expiry notification) instead of a check-then-act.
+   *
+   * Rule-6 note: the upsert's FK takes FOR KEY SHARE on the players row.
+   * Every write path must already hold that player FOR UPDATE (via
+   * `economy.applyBalanceChange` or `locks.player`) before calling `set`.
+   */
+  readonly timers: {
+    get(playerId: string, key: string): Promise<Date | null>;
+    set(playerId: string, key: string, expiresAt: Date): Promise<void>;
+    clear(playerId: string, key: string): Promise<boolean>;
+  };
+  /**
    * Reads core's three-layer gang permission mask
    * (`game/gangs/permissions.ts`): boss/underboss bypass, then a
    * `gang_permissions` row that must join a live `gang_members` row.
