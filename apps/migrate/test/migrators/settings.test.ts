@@ -18,7 +18,7 @@ describe("migrateSettings", () => {
       await migrateSettings(pool, db, createReport(false)); // re-run
 
       const rows = await db.select().from(settings);
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(12);
       expect(rows.find((r) => r.key === "gangName")?.value).toBe("Family");
 
       await pool.end();
@@ -52,10 +52,16 @@ describe("migrateSettings", () => {
         "bullets.max_buy": "250",
         // Carried over as-is: a stale cursor is bounded by the 12-hour clamp.
         "bullets.last_restock": "1420070400",
+        // V2's three detective knobs, including the shipped 1-second duration
+        // an operator may have deliberately tuned — carried, not defaulted.
+        "detectives.cost": "90000",
+        "detectives.duration": "1",
+        "detectives.expire": "450",
       });
       // The flat originals are gone, not duplicated.
       expect(byKey["maxBulletCost"]).toBeUndefined();
       expect(byKey["bulletsStockMinPerHour"]).toBeUndefined();
+      expect(byKey["detectiveDuration"]).toBeUndefined();
 
       await pool.end();
       await sql.end();

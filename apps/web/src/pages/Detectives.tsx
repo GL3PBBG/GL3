@@ -7,6 +7,20 @@ import styles from "./pages.module.css";
 
 const UNITS = [1, 2, 3, 4, 5] as const;
 
+/**
+ * The 1–5 dropdown is a unit count; the server says how many real seconds one
+ * unit lasts (V2's detectiveDuration). Label each option with its real span —
+ * "1 hour" at 3600, "1 second" at V2's shipped default of 1 — the way V2 fed
+ * i × detectiveDuration through timeElapsedString().
+ */
+function spanLabel(units: number, secondsPerUnit: number): string {
+  const total = units * secondsPerUnit;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (total % 3600 === 0) return plural(total / 3600, "hour");
+  if (total % 60 === 0) return plural(total / 60, "minute");
+  return plural(total, "second");
+}
+
 /** pending | failed | succeeded-expired | succeeded-active — spec §3's states. */
 function rowState(row: DetectiveSearchRow, nowMs: number): "pending" | "failed" | "expired" | "active" {
   if (row.succeeded === null) return "pending";
@@ -90,9 +104,13 @@ export function Detectives(): JSX.Element {
           </select>
         </label>
         <label>
-          <span className={styles.meta}>Hours </span>
-          <select value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Hours">
-            {UNITS.map((n) => <option key={n} value={n}>{n}</option>)}
+          <span className={styles.meta}>Duration </span>
+          <select value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Duration">
+            {UNITS.map((n) => (
+              <option key={n} value={n}>
+                {spanLabel(n, detectives.data?.durationSeconds ?? 3600)}
+              </option>
+            ))}
           </select>
         </label>
         <span className={styles.meta}>
