@@ -43,7 +43,7 @@
 .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 0.5rem 0; }
 .barFill { height: 100%; background: var(--accent); }
 
-.tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
 .tabActive { background: var(--accent); }
 .tabIdle { background: var(--panel); color: var(--fg); border: 1px solid var(--line); }
 
