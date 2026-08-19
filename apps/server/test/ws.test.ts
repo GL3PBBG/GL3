@@ -2,15 +2,18 @@ import type { AddressInfo } from "node:net";
 import { ServerFrameSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import WebSocket from "ws";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crimes } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
 let token: string;
@@ -18,7 +21,7 @@ let playerId: string;
 let crimeId: string;
 
 beforeAll(async () => {
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
   await app.listen({ port: 0, host: "127.0.0.1" });
   const { port } = app.server.address() as AddressInfo;
   baseUrl = `ws://127.0.0.1:${port}/ws`;
@@ -27,11 +30,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetDb(db);
   await seedCrimes(db);
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Vito", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
   crimeId = first!.id;
 });
@@ -185,11 +184,8 @@ describe("/ws gateway", () => {
   });
 
   it("does not leak another player's event", async () => {
-    const other = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Sonny", password: "hunter2hunter2" },
-    });
-    const otherTicket = await mintTicket(other.json().token);
+    const other = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
+    const otherTicket = await mintTicket(other.token);
     const socket = await open(`${baseUrl}?ticket=${otherTicket}`);
     await nextFrame(socket); // ready
 

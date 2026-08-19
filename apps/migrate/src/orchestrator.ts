@@ -19,6 +19,7 @@ import { migrateInventory } from "./migrators/inventory.js";
 import { migrateProperties } from "./migrators/properties.js";
 import { migrateSocial } from "./migrators/social.js";
 import { migrateBountiesAndDetectives } from "./migrators/bounties-detectives.js";
+import { migrateForum } from "./migrators/forum.js";
 import { migrateSettings } from "./migrators/settings.js";
 
 export interface RunMigrationOptions {
@@ -33,11 +34,13 @@ export interface RunMigrationOptions {
  * SPEC §4.2 item 2's exact dependency order: roles -> rounds -> content ->
  * players(+stats,timers,crime-skill) -> gangs(+members,permissions,invites,
  * logs) -> inventory/garage/properties -> social(mail,notifications,news,
- * bounties,detectives) -> settings. One Postgres transaction per phase
- * (§4.2 item 3, Task 10's runPhase) — a failure partway through a later
- * phase does not undo an earlier, already-committed phase; re-running is
- * always safe because every migrator is id_map-idempotent (Task 30 proves
- * this end to end).
+ * bounties,detectives) -> forum -> settings. One Postgres transaction per
+ * phase (§4.2 item 3, Task 10's runPhase) — a failure partway through a
+ * later phase does not undo an earlier, already-committed phase; re-running
+ * is always safe because every migrator is id_map-idempotent (Task 30 proves
+ * this end to end). Forum (Task 16) got its own phase, not a slot in the
+ * social phase above, per the SDD controller ruling: it only needs players
+ * already in id_map, and nothing later in the pipeline reads forum tables.
  */
 export async function runMigration(
   { mysql: pool, db, report, dryRun, townCombatMode = "open" }: RunMigrationOptions,
@@ -74,6 +77,11 @@ export async function runMigration(
     await migrateSocial(pool, tx, report);
     await migrateBountiesAndDetectives(pool, tx, report);
   });
+
+  // Its own phase, after social: forum posts/topics need players already in
+  // id_map (author lookups), and nothing later in the pipeline reads forum
+  // tables, so it has no ordering constraint against settings.
+  await runPhase(db, dryRun, (tx) => migrateForum(pool, tx, report));
 
   await runPhase(db, dryRun, (tx) => migrateSettings(pool, tx, report));
 }

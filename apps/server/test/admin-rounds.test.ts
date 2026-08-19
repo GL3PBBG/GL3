@@ -1,6 +1,7 @@
 import { TableRowsResponseSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
@@ -8,6 +9,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { players, roleModuleAccess, rounds, roles } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -29,6 +31,7 @@ import { bootTestServer } from "./helpers/server.js";
 const { db, sql: conn } = testDb();
 const config = loadConfig({ ...process.env, NODE_ENV: "test" });
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 /** app.inject() is lazy — it dispatches only when something calls .then. */
@@ -55,12 +58,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 }
 
 async function registerPlayer(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  expect(res.statusCode, res.body).toBe(201);
-  return res.json();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 /** First-registered player auto-becomes Administrator (`*`) — a fresh, non-first
@@ -81,7 +79,7 @@ const EXIST_END = new Date("2026-06-20T00:00:00.000Z");
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });

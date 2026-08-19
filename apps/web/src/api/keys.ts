@@ -36,6 +36,7 @@ export const keys = {
   mailThread: (threadId: string) => ["mail", "thread", threadId] as const,
   notifications: () => ["notifications"] as const,
   news: () => ["news"] as const,
+  online: () => ["online"] as const,
 
   // Pass 3 (plugin SDK). One key for the whole manifest: menu, pages and event
   // metadata arrive from `GET /api/plugins` in a single payload, so splitting
@@ -66,4 +67,18 @@ export const keys = {
 
   // Admin sections (grant-gated).
   adminSections: () => ["admin", "sections"] as const,
+
+  // Pass 5 (social). `forum` is the shared prefix — mutations that don't know
+  // which forum a topic belongs to (ForumTopicSchema carries no `forumId`,
+  // see packages/shared/src/dto/forum.ts) invalidate it whole rather than a
+  // narrower key they can't construct. The list and view queries are keyed by
+  // page too, so paging never serves a stale page's cached rows as page 1's.
+  forum: () => ["forum"] as const,
+  forums: () => ["forum", "forums"] as const,
+  forumTopics: (forumId: string, page: number) => ["forum", "forums", forumId, "topics", page] as const,
+  /** Prefix over every page of one forum's topic list — for invalidation. */
+  forumTopicsAll: (forumId: string) => ["forum", "forums", forumId, "topics"] as const,
+  forumTopic: (topicId: string, page: number) => ["forum", "topics", topicId, page] as const,
+  /** Prefix over every page of one topic's posts — for invalidation. */
+  forumTopicAll: (topicId: string) => ["forum", "topics", topicId] as const,
 };

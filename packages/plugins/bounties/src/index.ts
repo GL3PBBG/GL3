@@ -124,6 +124,8 @@ const listRoute = route({
           targetUsername: targetPlayers.username,
           targetRank: ranks.name,
           placerUsername: placerPlayers.username,
+          targetPlayerId: bounties.target,
+          placerPlayerId: bounties.placedBy,
         })
         .from(bounties)
         .innerJoin(targetPlayers, eq(targetPlayers.id, bounties.target))
@@ -145,6 +147,8 @@ const listRoute = route({
             targetUsername: r.targetUsername,
             targetRank: r.targetRank,
             placerUsername: r.placerUsername,
+            targetPlayerId: r.targetPlayerId,
+            placerPlayerId: r.placerPlayerId,
           })),
         },
       };

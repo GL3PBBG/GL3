@@ -70,6 +70,8 @@ export function registerPluginRoutes(
           if (!params.success) return reply.code(400).send({ error: "invalid_request" });
           const body = pluginRoute.body.safeParse(request.body);
           if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+          const query = pluginRoute.query.safeParse(request.query);
+          if (!query.success) return reply.code(400).send({ error: "invalid_request" });
 
           const player = playerId === undefined ? null : await loadSnapshot(deps, playerId);
           const ctx = createPluginCtx(deps, {
@@ -83,7 +85,7 @@ export function registerPluginRoutes(
           });
 
           try {
-            const result = await pluginRoute.handler(ctx, { params: params.data, body: body.data });
+            const result = await pluginRoute.handler(ctx, { params: params.data, body: body.data, query: query.data });
             return result.body === undefined
               ? await reply.code(result.status).send()
               : await reply.code(result.status).send(result.body);

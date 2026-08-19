@@ -15,6 +15,7 @@ import {
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -74,21 +75,11 @@ beforeEach(async () => {
     travelCooldownSeconds: 60, bulletStock: 500, bulletCost: 5n,
   });
 
-  const leader = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Boss", password: "hunter2hunter2" },
-  });
-  ({ token: leaderToken, playerId: leaderId } = leader.json());
+  ({ token: leaderToken, playerId: leaderId } = await registerVerifiedPlayer({ app, redis }, { username: "Boss" }));
   await db.update(playerStats).set({ locationId })
     .where(eq(playerStats.playerId, leaderId));
 
-  const other = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Crewman", password: "hunter2hunter2" },
-  });
-  ({ token: otherToken, playerId: otherId } = other.json());
+  ({ token: otherToken, playerId: otherId } = await registerVerifiedPlayer({ app, redis }, { username: "Crewman" }));
   await db.update(playerStats).set({ locationId })
     .where(eq(playerStats.playerId, otherId));
 });
@@ -326,15 +317,11 @@ describe("POST /api/oc/:heistId/invite", () => {
 
   it("two invites for one seat are allowed (first-to-accept-wins is Task 7's race)", async () => {
     const heistId = await createHeist();
-    // Register a third player
-    const third = await app.inject({
-      method: "POST",
-      url: "/api/auth/register",
-      payload: { username: "DriverB", password: "hunter2hunter2" },
-    });
-    const { playerId: thirdId } = third.json();
+    // Register a third player — it authenticates below (GET /api/oc), so it
+    // needs the full verified flow, not just a playerId.
+    const third = await registerVerifiedPlayer({ app, redis }, { username: "DriverB" });
     await db.update(playerStats).set({ locationId })
-      .where(eq(playerStats.playerId, thirdId));
+      .where(eq(playerStats.playerId, third.playerId));
 
     const res1 = await inject("POST", `/api/oc/${heistId}/invite`, leaderToken, {
       targetUsername: "Crewman", role: "driver",
@@ -348,7 +335,7 @@ describe("POST /api/oc/:heistId/invite", () => {
 
     // Both players see an invite for "driver"
     const state1 = (await inject("GET", "/api/oc", otherToken)).json();
-    const state2 = (await inject("GET", "/api/oc", third.json().token)).json();
+    const state2 = (await inject("GET", "/api/oc", third.token)).json();
     expect(state1.invites[0].role).toBe("driver");
     expect(state2.invites[0].role).toBe("driver");
   });
@@ -402,12 +389,7 @@ describe("POST /api/oc/:heistId/decline", () => {
 // ── helpers ──────────────────────────────────────────────────────────
 /** Register a player with the given username, assign shared location, return token + id. */
 async function registerPlayer(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  const { token, playerId } = res.json();
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username });
   await db.update(playerStats).set({ locationId }).where(eq(playerStats.playerId, playerId));
   return { token, playerId };
 }

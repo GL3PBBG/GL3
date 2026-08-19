@@ -1,26 +1,25 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { locations } from "../src/db/schema/content.js";
 import { items } from "../src/db/schema/content.js";
 import { playerStats } from "../src/db/schema/identity.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { uuidv7 } from "uuidv7";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let adminToken: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const founder = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Founder", password: "hunter2hunter2" },
-  });
-  adminToken = founder.json().token;
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  adminToken = (await registerVerifiedPlayer({ app, redis }, { username: "Founder" })).token;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -277,13 +276,10 @@ describe("inventory admin", () => {
     });
 
     it("403s a non-admin", async () => {
-      const p = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        payload: { username: "Pleb", password: "hunter2hunter2" },
-      });
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
       const res = await app.inject({
         method: "GET", url: "/api/admin/inventory/items",
-        headers: { authorization: `Bearer ${p.json().token}` },
+        headers: { authorization: `Bearer ${p.token}` },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -422,13 +418,10 @@ describe("inventory admin", () => {
 
     it("403s a non-admin", async () => {
       const id = await makeWeapon();
-      const p = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        payload: { username: "Pleb", password: "hunter2hunter2" },
-      });
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items/update",
-        headers: { authorization: `Bearer ${p.json().token}` },
+        headers: { authorization: `Bearer ${p.token}` },
         payload: { id, itemType: "weapon", damageMin: 1, damageMax: 2 },
       });
       expect(res.statusCode).toBe(403);
@@ -454,13 +447,10 @@ describe("inventory admin", () => {
     });
 
     it("403s a non-admin", async () => {
-      const p = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        payload: { username: "Pleb", password: "hunter2hunter2" },
-      });
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
       const res = await app.inject({
         method: "GET", url: "/api/admin/inventory/locations",
-        headers: { authorization: `Bearer ${p.json().token}` },
+        headers: { authorization: `Bearer ${p.token}` },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -485,12 +475,9 @@ describe("inventory admin", () => {
       const itemId: string = itemRes.json().id;
 
       // Register a player and place them at the seeded location
-      const player = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        payload: { username: "Buyer", password: "hunter2hunter2" },
-      });
-      const playerToken = player.json().token;
-      const buyerId = player.json().playerId;
+      const player = await registerVerifiedPlayer({ app, redis }, { username: "Buyer" });
+      const playerToken = player.token;
+      const buyerId = player.playerId;
       await db.update(playerStats).set({ locationId }).where(eq(playerStats.playerId, buyerId));
 
       // First upsert (insert)
@@ -588,13 +575,10 @@ describe("inventory admin", () => {
     });
 
     it("403s a non-admin", async () => {
-      const p = await app.inject({
-        method: "POST", url: "/api/auth/register",
-        payload: { username: "Pleb", password: "hunter2hunter2" },
-      });
+      const p = await registerVerifiedPlayer({ app, redis }, { username: "Pleb" });
       const res = await app.inject({
         method: "GET", url: "/api/admin/inventory/shop",
-        headers: { authorization: `Bearer ${p.json().token}` },
+        headers: { authorization: `Bearer ${p.token}` },
       });
       expect(res.statusCode).toBe(403);
     });

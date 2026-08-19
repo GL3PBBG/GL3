@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -29,6 +31,7 @@ import { bootTestServer } from "./helpers/server.js";
 const { db, sql: conn } = testDb();
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 let playerId: string;
@@ -52,16 +55,10 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string; username: string }> {
   regCounter += 1;
-  const username = `PropOwner${regCounter}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `PropOwner${regCounter}`,
     remoteAddress: `10.50.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  const body = res.json<{ token: string; playerId: string }>();
-  return { ...body, username };
 }
 
 async function seedLocation(): Promise<string> {
@@ -84,7 +81,7 @@ const cashOf = async (id: string): Promise<bigint> => {
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
   const owner = await register();
   playerId = owner.playerId;

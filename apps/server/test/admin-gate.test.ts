@@ -1,10 +1,12 @@
 import { definePlugin, route } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { players, roleModuleAccess, roles } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const testPlugin = definePlugin({
@@ -21,14 +23,11 @@ const testPlugin = definePlugin({
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 async function registerPlayer(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  return res.json();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 async function giveRole(playerId: string, moduleKey: string): Promise<void> {
@@ -40,7 +39,7 @@ async function giveRole(playerId: string, moduleKey: string): Promise<void> {
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [testPlugin] }));
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [testPlugin] }));
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });

@@ -33,6 +33,7 @@ import { runPluginJob } from "../src/plugins/jobs.js";
 import { createRedis } from "../src/redis.js";
 import ocPlugin from "@gl3/plugin-oc";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -110,12 +111,7 @@ async function seedCash(playerId: string): Promise<void> {
 
 /** Register a player, assign shared location, seed cash through ledger. */
 async function registerAndSeed(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  const { token, playerId } = res.json();
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username });
   // The server's register route puts the player at the default location.
   // All members must be co-located for execute; the default works.
   await seedCash(playerId);

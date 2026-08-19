@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
@@ -8,6 +9,7 @@ import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -46,6 +48,7 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 let tokenA: string;
@@ -132,20 +135,10 @@ async function raceBothBuys(): Promise<[LightMyRequestResponse, LightMyRequestRe
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const a = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Frankieoak", password: "hunter2hunter2" },
-  });
-  ({ token: tokenA, playerId: playerA } = a.json());
-  const b = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Frankiepine", password: "hunter2hunter2" },
-  });
-  ({ token: tokenB, playerId: playerB } = b.json());
+  ({ token: tokenA, playerId: playerA } = await registerVerifiedPlayer({ app, redis }, { username: "Frankieoak" }));
+  ({ token: tokenB, playerId: playerB } = await registerVerifiedPlayer({ app, redis }, { username: "Frankiepine" }));
 
   const locA = uuidv7();
   const locB = uuidv7();

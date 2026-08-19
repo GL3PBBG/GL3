@@ -68,6 +68,7 @@ COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY packages/plugins/bounties/package.json packages/plugins/bounties/
 COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
+COPY packages/plugins/forum/package.json packages/plugins/forum/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 # Scoped registry for marketplace plugins. Inert until a `@gl3-plugins/*`
@@ -120,6 +121,8 @@ COPY packages/plugins/oc/tsconfig.json packages/plugins/oc/tsconfig.json
 COPY packages/plugins/oc/src packages/plugins/oc/src
 COPY packages/plugins/detectives/tsconfig.json packages/plugins/detectives/tsconfig.json
 COPY packages/plugins/detectives/src packages/plugins/detectives/src
+COPY packages/plugins/forum/tsconfig.json packages/plugins/forum/tsconfig.json
+COPY packages/plugins/forum/src packages/plugins/forum/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -174,6 +177,7 @@ COPY packages/plugins/combat/package.json packages/plugins/combat/
 COPY packages/plugins/bounties/package.json packages/plugins/bounties/
 COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
+COPY packages/plugins/forum/package.json packages/plugins/forum/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 COPY .npmrc ./
@@ -203,6 +207,7 @@ COPY --from=builder /app/packages/plugins/combat/dist packages/plugins/combat/di
 COPY --from=builder /app/packages/plugins/bounties/dist packages/plugins/bounties/dist
 COPY --from=builder /app/packages/plugins/oc/dist packages/plugins/oc/dist
 COPY --from=builder /app/packages/plugins/detectives/dist packages/plugins/detectives/dist
+COPY --from=builder /app/packages/plugins/forum/dist packages/plugins/forum/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist

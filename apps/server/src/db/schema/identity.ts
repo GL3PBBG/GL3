@@ -46,6 +46,7 @@ export const players = pgTable("players", {
   roundId: uuid("round_id").references(() => rounds.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
 }, (t) => ({
   usernameUnique: uniqueIndex("players_username_unique").on(t.username),
   emailUnique: uniqueIndex("players_email_unique").on(t.email),

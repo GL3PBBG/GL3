@@ -9,6 +9,7 @@ import { loadPlugins } from "../src/plugins/loader.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 // testDb() returns createDb's { db, sql } pair, NOT a drizzle db — calling it
@@ -37,18 +38,11 @@ let regCounter = 0;
 /** Register a player and return { token, playerId } — inline because no shared factories file exists. */
 function register(app: FastifyInstance): Promise<{ token: string; playerId: string }> {
   regCounter++;
-  return app
-    .inject({
-      method: "POST",
-      url: "/api/auth/register",
-      // Distinct IP per registration to keep this file's rate-limit bucket private.
-      remoteAddress: `10.13.${regCounter >> 8 & 0xff}.${regCounter & 0xff}`,
-      payload: {
-        username: `HPLUser${regCounter}`,
-        password: "hunter2hunter2",
-      },
-    })
-    .then((res) => res.json() as { token: string; playerId: string });
+  // Distinct IP per registration to keep this file's rate-limit bucket private.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `HPLUser${regCounter}`,
+    remoteAddress: `10.13.${regCounter >> 8 & 0xff}.${regCounter & 0xff}`,
+  });
 }
 
 describe("hello-plugin end to end", () => {

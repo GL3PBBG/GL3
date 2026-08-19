@@ -9,6 +9,7 @@ import { items, locations, playerItems, playerStats } from "../src/db/schema/ind
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -102,18 +103,8 @@ beforeAll(async () => {
   await resetDb(db);
   ({ app, close: closeServer } = await bootTestServer());
 
-  const a = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Tommy", password: "hunter2hunter2" },
-  });
-  ({ token: tokenA, playerId: playerA } = a.json());
-  const b = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Paulie", password: "hunter2hunter2" },
-  });
-  ({ token: tokenB, playerId: playerB } = b.json());
+  ({ token: tokenA, playerId: playerA } = await registerVerifiedPlayer({ app, redis }, { username: "Tommy" }));
+  ({ token: tokenB, playerId: playerB } = await registerVerifiedPlayer({ app, redis }, { username: "Paulie" }));
 
   const locationId = uuidv7();
   await db.insert(locations).values({

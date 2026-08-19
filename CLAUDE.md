@@ -355,6 +355,39 @@ approval after a registry check — `npm.gl3.dev` now serves `0.1.1` through
 `0.1.13` (`0.1.12`, the hospital cluster's bump, had landed on the registry
 by another session in the meantime).
 
+**Email verification, presence and the forum** have since shipped on the
+social cluster: three SPEC §1 gaps V2 had and GL3 had never ported, closed
+together. Email verification is a hard 403 gate (`email_unverified`) behind
+one Redis flag (`unverified:<id>`, no TTL — verification is the only exit,
+and login re-asserts it from the `players` row so a Redis flush self-heals
+rather than silently unlocking an account), set by core migration
+`0014_email_verified.sql`'s new nullable `players.email_verified_at`, which
+backfills every existing row to `now()` in the same migration — grandfathering
+is total, nobody already playing is ever asked to verify. Verification and
+password-reset tokens are both 12-/32-byte random codes consumed by `GETDEL`
+(rule 2), and a reset kills every session on the account through a new
+`playersessions:<playerId>` Redis SET reverse index, not just the session
+that reset it. `requireAuth` is now the one choke point for both the gate and
+presence — every authenticated request, core or plugin route alike, calls
+`touchPresence` (an unconditional heartbeat `ZADD` plus a `SET NX EX 60`-
+throttled `players.last_seen_at` write, rule 2 again) before the unverified
+check runs. `GET /api/online` reads that ZSET lazily (no cron, the
+`ensureCurrentRound` settle-at-read shape) into two windows, concealing an
+underground town's residents' location the same way combat and travel
+already do. The forum (`@gl3/plugin-forum`) is the **nineteenth plugin and
+the ninth to own tables and migrations**, so **nine of nineteen plugins now
+declare migrations**; it takes no explicit lock anywhere — a reply's
+`post_count`/`last_post_at` update is a plain self-serializing `UPDATE`, and
+its FKs impose no second lock in the same transaction to invert against — so
+it adds no new lock-graph edge and deliberately has no lock-order test.
+Moderation is `hasPermission("forum")`, admin CRUD is `adminPages`. M4
+gained a ninth migration phase, after social, for forum content; V2's gang
+forums (`F_id < 0`) are reported-skipped wholesale, along with everything
+filed under one. `@gl3/shared` → `0.1.14` and `@gl3/plugin-sdk` → `0.1.7`
+(the SDK's first-ever route-level query-string support — an optional `query`
+zod field on `route()`, needed because the forum plan never anticipated
+`?page=`) — **neither is published**, pending the user's approval.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime
@@ -517,8 +550,8 @@ unavailable here.
   tables appear only when `loadPlugins` → `runPluginMigrations` runs. A file
   using `callPluginRoute` or `runPluginJob` directly needs an explicit
   `await runPluginMigrations(db, [thePlugin])`, or every test in it dies on
-  42P01. Eight plugins now own tables (`inventory`, `oc`, `bounties`,
-  `detectives`, `combat`, `theft`, `properties`, `casino`), so this catches far more files than it
+  42P01. Nine plugins now own tables (`inventory`, `oc`, `bounties`,
+  `detectives`, `combat`, `theft`, `properties`, `casino`, `forum`), so this catches far more files than it
   used to — `economy-invariant.test.ts`, `detectives-worker.test.ts` and
   `casino-rogue-game.test.ts` are the worked examples (the last needs
   `properties` migrated too, because `ownerAt` reads its table on every hand).

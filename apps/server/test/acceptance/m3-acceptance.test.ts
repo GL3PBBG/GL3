@@ -10,6 +10,7 @@ import { gangInvites, gangs, playerStats, players, roleModuleAccess, roles, tran
 import { createRedis } from "../../src/redis.js";
 import { uuidv7 } from "uuidv7";
 import { resetDb, testDb } from "../helpers/db.js";
+import { registerVerifiedPlayer } from "../helpers/register.js";
 import { bootTestServer } from "../helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -126,10 +127,8 @@ const ledgerSum = async (where: ReturnType<typeof eq>): Promise<bigint> => {
 describe("M3 acceptance: gangs, mail, notifications, profile, news", () => {
   it("plays the full social loop end to end", async () => {
     // --- gang founded ---
-    const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-    const { token: bossToken, playerId: bossId } = boss.json();
-    const recruit = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
-    const { token: recruitToken, playerId: recruitId } = recruit.json();
+    const { token: bossToken, playerId: bossId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+    const { token: recruitToken, playerId: recruitId } = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
 
     const gangRes = await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` },

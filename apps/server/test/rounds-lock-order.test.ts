@@ -12,6 +12,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { combatLog } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -129,13 +130,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 }
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  expect(res.statusCode, res.body).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 const auth = (token: string): { authorization: string } => ({ authorization: `Bearer ${token}` });

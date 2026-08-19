@@ -1,14 +1,17 @@
 import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { gangMembers, gangs, locations, players, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { detectiveSearches } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 /**
@@ -70,12 +73,7 @@ async function seedReport(
  */
 async function register(): Promise<{ id: string; token: string; username: string }> {
   const username = `p-${uuidv7().slice(-8)}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  const body = res.json<{ token: string; playerId: string; username: string }>();
+  const body = await registerVerifiedPlayer({ app, redis }, { username });
   return { id: body.playerId, token: body.token, username: body.username };
 }
 
@@ -106,7 +104,7 @@ let t: { id: string; username: string };
 // budget free per test body for anything a test still needs to register.
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
   a = await register();
   t = await makeStranger();
 });

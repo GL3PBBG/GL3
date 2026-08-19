@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
@@ -7,11 +8,13 @@ import { gangInvites, gangPermissions, playerStats } from "../src/db/schema/inde
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let bossToken: string;
 let bossId: string;
@@ -20,8 +23,7 @@ let memberToken: string;
 let memberId: string;
 
 async function joinGang(username: string): Promise<{ token: string; playerId: string }> {
-  const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username, password: "hunter2hunter2" } });
-  const { token, playerId } = reg.json();
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username });
   await app.inject({
     method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
     payload: { username },
@@ -33,10 +35,10 @@ async function joinGang(username: string): Promise<{ token: string; playerId: st
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  ({ token: bossToken, playerId: bossId } = boss.json());
+  const boss = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  ({ token: bossToken, playerId: bossId } = boss);
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` }, payload: { name: "The Corleones" },
   });
@@ -61,8 +63,8 @@ describe("POST /api/gangs/:gangId/leave", () => {
   });
 
   it("404s leaving a gang the caller isn't a member of, and does not clear their real membership", async () => {
-    const otherBoss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const { token: otherBossToken } = otherBoss.json();
+    const otherBoss = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const { token: otherBossToken } = otherBoss;
     const otherGang = await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${otherBossToken}` }, payload: { name: "The Tattaglias" },
     });
@@ -125,8 +127,8 @@ describe("DELETE /api/gangs/:gangId/members/:playerId", () => {
   });
 
   it("404s kicking a player who belongs to a different gang, and does not clear their real membership", async () => {
-    const otherBoss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const { token: otherBossToken, playerId: otherBossId } = otherBoss.json();
+    const otherBoss = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const { token: otherBossToken, playerId: otherBossId } = otherBoss;
     await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${otherBossToken}` }, payload: { name: "The Tattaglias" },
     });
@@ -173,7 +175,8 @@ describe("PUT /api/gangs/:gangId/permissions", () => {
   // 403/409 matches what kick and leave already answer for the identical
   // "this player is not in this gang" condition.
   it("404s a permission granted to a player who is not a member of the gang, storing no dormant row", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", password: "hunter2hunter2" } });
+    // Never authenticates as Fredo below, just needs a real player row.
+    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2" } });
     const { playerId: outsiderId } = outsider.json();
 
     const grant = await app.inject({
@@ -189,8 +192,8 @@ describe("PUT /api/gangs/:gangId/permissions", () => {
   // ops write, or a future code path), hasGangPermission's membership join
   // must still refuse it.
   it("a dangling permission row for a non-member confers no authority even when it exists", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", password: "hunter2hunter2" } });
-    const { token: outsiderToken, playerId: outsiderId } = outsider.json();
+    const outsider = await registerVerifiedPlayer({ app, redis }, { username: "Fredo" });
+    const { token: outsiderToken, playerId: outsiderId } = outsider;
     await db.insert(gangPermissions).values({ gangId, playerId: outsiderId, permission: "kick" });
 
     const kick = await app.inject({
@@ -208,8 +211,8 @@ describe("PUT /api/gangs/:gangId/permissions", () => {
   // (gangId, playerId) permission rows inside its own transaction — the
   // mirror of removeMember, which already clears them on the way out.
   it("clears a dormant permission row for the joining player when they accept an invite", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", password: "hunter2hunter2" } });
-    const { token: outsiderToken, playerId: outsiderId } = outsider.json();
+    const outsider = await registerVerifiedPlayer({ app, redis }, { username: "Fredo" });
+    const { token: outsiderToken, playerId: outsiderId } = outsider;
     await db.insert(gangPermissions).values({ gangId, playerId: outsiderId, permission: "kick" });
 
     await app.inject({

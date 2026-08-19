@@ -66,6 +66,9 @@ const srcAliases = {
       "@gl3/plugin-detectives": fileURLToPath(
         new URL("./packages/plugins/detectives/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-forum": fileURLToPath(
+        new URL("./packages/plugins/forum/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-theft": fileURLToPath(
         new URL("./packages/plugins/theft/src/index.ts", import.meta.url),
       ),
@@ -213,6 +216,7 @@ export default defineWorkspace([
         "test/combat-settings.test.ts",
         "test/effects-parity.test.ts",
         "test/config.test.ts",
+        "test/mail-driver.test.ts",
         "test/facility-settings.test.ts",
         "test/password.test.ts",
         "test/admin-ids-hidden.test.ts",
@@ -241,7 +245,12 @@ export default defineWorkspace([
     test: {
       name: "@gl3/server:redis-only",
       root: "./apps/server",
-      include: ["test/cooldown.test.ts", "test/plugin-ctx-cooldown.test.ts", "test/rate-limit.test.ts"],
+      include: [
+        "test/cooldown.test.ts",
+        "test/plugin-ctx-cooldown.test.ts",
+        "test/rate-limit.test.ts",
+        "test/auth-verify-tokens.test.ts",
+      ],
       // No rateLimitIsolation setupFile: neither file boots a server or
       // exercises the real ratelimit:register:*/ratelimit:login:* keys —
       // rate-limit.test.ts drives tokenBucket() directly against its own
@@ -281,6 +290,8 @@ export default defineWorkspace([
       root: "./apps/server",
       include: [
         "test/assets-routes.test.ts",
+        "test/auth-reset.test.ts",
+        "test/auth-verify.test.ts",
         "test/auth.test.ts",
         "test/bank.test.ts",
         "test/bounties-claim.test.ts",
@@ -312,6 +323,9 @@ export default defineWorkspace([
         "test/facility-concurrency.test.ts",
         "test/facility-rosters.test.ts",
         "test/first-admin.test.ts",
+        "test/forum-mod.test.ts",
+        "test/forum-write.test.ts",
+        "test/forum.test.ts",
         "test/gang-bank.test.ts",
         "test/gang-invites.test.ts",
         "test/gang-lock-order.test.ts",
@@ -358,6 +372,8 @@ export default defineWorkspace([
         "test/plugin-manifest-endpoint.test.ts",
         "test/plugin-routes.test.ts",
         "test/plugin-loader.test.ts",
+        "test/online.test.ts",
+        "test/presence.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/rounds-finalize.test.ts",

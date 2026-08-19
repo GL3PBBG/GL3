@@ -8,6 +8,7 @@ import { loadConfig } from "../src/config.js";
 import { players, playerStats } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -68,17 +69,11 @@ let regCounter = 0;
 /** Register a player and return { token, playerId } — inline because no shared factories file exists. */
 async function register(target: FastifyInstance): Promise<{ token: string; playerId: string }> {
   regCounter++;
-  const reg = await target.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Distinct IP per registration to keep this file's rate-limit bucket private.
+  // Distinct IP per registration to keep this file's rate-limit bucket private.
+  return registerVerifiedPlayer({ app: target, redis }, {
+    username: `RTUser${regCounter}`,
     remoteAddress: `10.20.${regCounter >> 8 & 0xff}.${regCounter & 0xff}`,
-    payload: {
-      username: `RTUser${regCounter}`,
-      password: "hunter2hunter2",
-    },
   });
-  return reg.json();
 }
 
 beforeAll(async () => {

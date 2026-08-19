@@ -34,8 +34,10 @@ const LINKS: ReadonlyArray<readonly [string, string]> = [
   ["/rounds", "Rounds"],
   ["/gang", "Gang"],
   ["/mail", "Mail"],
+  ["/forum", "Forum"],
   ["/notifications", "Alerts"],
   ["/news", "News"],
+  ["/online", "Online"],
   ["/profile", "Profile"],
 ];
 

@@ -11,6 +11,7 @@ import crimesPlugin from "@gl3/plugin-crimes";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -34,15 +35,10 @@ beforeEach(async () => {
   if (!app) ({ app, close: closeServer } = await bootTestServer());
   await seedCrimes(db);
 
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    // A distinct remoteAddress keeps this suite's register-rate-limit bucket
-    // from colliding with every other agent's tests hitting the shared
-    // Redis instance under the default 127.0.0.1 key (see task-9 report).
-    remoteAddress: "10.9.0.9",
-    payload: { username: "Vito", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  // A distinct remoteAddress keeps this suite's register-rate-limit bucket
+  // from colliding with every other agent's tests hitting the shared
+  // Redis instance under the default 127.0.0.1 key (see task-9 report).
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito", remoteAddress: "10.9.0.9" }));
   auth = { authorization: `Bearer ${token}` };
 
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));

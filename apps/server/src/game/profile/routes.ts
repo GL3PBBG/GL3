@@ -1,15 +1,18 @@
 import { desc, eq, lte } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { Redis } from "ioredis";
 import { IdSchema, UpdateProfileRequestSchema } from "@gl3/shared";
 import { z } from "zod";
+import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "../../auth/rate-limit.js";
 import type { Db } from "../../db/client.js";
 import { gangs, moneyRanks, players, playerStats, ranks } from "../../db/schema/index.js";
 
 const ProfileParamsSchema = z.object({ playerId: IdSchema });
 
 export function registerProfileRoutes(
-  app: FastifyInstance, db: Db,
+  app: FastifyInstance, db: Db, redis: Redis,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
 ): void {
   // Public — no requireAuth. The response is a public surface: only the
   // explicit columns selected below ever leave this handler. `players`
@@ -18,7 +21,9 @@ export function registerProfileRoutes(
   // wealth FIGURE is not: `cash` and `bank` are selected here solely to
   // resolve the `money_ranks` label, and neither is ever returned. This
   // never selects a whole row and spreads it into the response.
-  app.get("/api/players/:playerId/profile", async (request, reply) => {
+  app.get("/api/players/:playerId/profile", {
+    preHandler: tokenBucket(redis, { name: "profile", limit: 60, windowSeconds: 60 }, rateLimitPrefix),
+  }, async (request, reply) => {
     const params = ProfileParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
 
@@ -27,6 +32,7 @@ export function registerProfileRoutes(
       bio: playerStats.bio, avatarUrl: playerStats.avatarUrl, exp: playerStats.exp,
       gangId: playerStats.gangId, gangName: gangs.name, rankName: ranks.name,
       cash: playerStats.cash, bank: playerStats.bank, backfire: playerStats.backfire,
+      lastSeenAt: players.lastSeenAt,
     })
       .from(players)
       .innerJoin(playerStats, eq(playerStats.playerId, players.id))
@@ -52,6 +58,7 @@ export function registerProfileRoutes(
       moneyRankLabel: bracket?.label ?? null,
       backfire: row.backfire,
       createdAt: row.createdAt.toISOString(),
+      lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     });
   });
 

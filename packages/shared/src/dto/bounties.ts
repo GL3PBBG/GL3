@@ -28,6 +28,8 @@ export const BountyRowSchema = z.object({
   targetUsername: z.string(),
   targetRank: z.string().nullable(),
   placerUsername: z.string(),
+  targetPlayerId: IdSchema,
+  placerPlayerId: IdSchema,
 });
 export type BountyRow = z.infer<typeof BountyRowSchema>;
 

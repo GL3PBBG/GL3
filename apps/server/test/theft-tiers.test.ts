@@ -1,11 +1,13 @@
 import theftPlugin from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, describe, expect, it } from "vitest";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -32,6 +34,7 @@ describe("theft migrations", () => {
 
 describe("GET /api/theft/tiers", () => {
   let app: FastifyInstance;
+  let redis: Redis;
   let closeServer: () => Promise<void>;
 
   afterAll(async () => {
@@ -41,18 +44,12 @@ describe("GET /api/theft/tiers", () => {
   /** Registers a player and returns their id plus a bearer token. */
   async function register(): Promise<{ id: string; token: string }> {
     const username = `thief_${randomUUID().slice(0, 8)}`;
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/auth/register",
-      payload: { username, password: "correct horse battery staple" },
-    });
-    expect(res.statusCode).toBe(201);
-    const body = res.json<{ playerId: string; token: string }>();
+    const body = await registerVerifiedPlayer({ app, redis }, { username });
     return { id: body.playerId, token: body.token };
   }
 
   it("lists tiers with their car counts and does not spend the cooldown", async () => {
-    ({ app, close: closeServer } = await bootTestServer());
+    ({ app, close: closeServer, redis } = await bootTestServer());
 
     const cheapId = uuidv7();
     await db.execute(sql`
