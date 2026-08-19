@@ -283,6 +283,9 @@ describe("GET /api/detectives — reveal gating and live tracking", () => {
 
     const body = (await list(hirerToken)).json();
     expect(body.cost).toBe("125000");
+    // Seconds per duration unit, so the client can label the 1–5 dropdown
+    // ("1 hour" at 3600, "1 second" at V2's shipped default of 1).
+    expect(body.durationSeconds).toBe(3600);
     expect(body.searches).toHaveLength(2);
     expect(body.searches.map((s: { id: string }) => s.id)).toEqual([newer, older]);
     expect(body.searches[0].targetUsername).toBe("Fugitive");

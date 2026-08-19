@@ -24,6 +24,16 @@ export const locations = pgTable("locations", {
   name: text("name").notNull(),
 });
 
+/**
+ * Core-owned key/value config. The admin panel reads and writes the TABLE
+ * rather than `ctx.settings` — the snapshot is boot-time, so the panel must
+ * show what the next boot will read (bullets' options panel set the pattern).
+ */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export const detectiveSearches = pgTable("p_detectives_searches", {
   id: uuid("id").primaryKey(),
   playerId: uuid("player_id").notNull(),

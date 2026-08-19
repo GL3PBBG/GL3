@@ -43,13 +43,17 @@ INSERT INTO itemMeta (IM_item, IM_key, IM_value) VALUES
   (1, 'rarity', 'common');
 INSERT INTO premiumMembership (PM_id, PM_name, PM_seconds, PM_cost) VALUES
   (1, 'VIP Week', 604800, 500);
--- The five bullet options plus the restock cursor are V2's flat keys; GL3
--- namespaces every plugin setting as `<pluginId>.<key>`, so migrateSettings
--- renames these six rather than copying them verbatim like the rest.
+-- The five bullet options plus the restock cursor, and the three detective
+-- knobs, are V2's flat keys; GL3 namespaces every plugin setting as
+-- `<pluginId>.<key>`, so migrateSettings renames these nine rather than
+-- copying them verbatim like the rest.
 INSERT INTO settings (S_key, S_value) VALUES
   ('pointsName', 'Respect Points'),
   ('gangName', 'Family'),
   ('detectiveReport', '1'),
+  ('detectiveCost', '90000'),
+  ('detectiveDuration', '1'),
+  ('detectiveExpire', '450'),
   ('bulletsStockMinPerHour', '1000'),
   ('bulletsStockMaxPerHour', '1500'),
   ('maxBulletStock', '25000'),

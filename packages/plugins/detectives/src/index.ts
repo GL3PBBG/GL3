@@ -1,9 +1,12 @@
-import { definePlugin, InsufficientFundsError, PluginError, route, type PluginCtx } from "@gl3/plugin-sdk";
+import {
+  definePlugin, InsufficientFundsError, PluginError, route,
+  type PageSchema, type PluginCtx,
+} from "@gl3/plugin-sdk";
 import { and, desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { DETECTIVES_MIGRATIONS } from "./migrations.js";
-import { detectiveSearches, locations, playerStats, players } from "./schema.js";
+import { detectiveSearches, locations, playerStats, players, settings } from "./schema.js";
 export { activeReportTargetIds } from "./reports.js";
 
 /**
@@ -11,7 +14,9 @@ export { activeReportTargetIds } from "./reports.js";
  * Spec: the offline design note.
  * Owns and migrates `p_detectives_searches` (`migrations.ts`) — core held it
  * until `0007_relinquish_plugin_tables`. No combat coupling; no events, menu
- * or pages (plugin-manifest-endpoint.test.ts pins the no-arg boot payload).
+ * or pages (plugin-manifest-endpoint.test.ts pins the no-arg boot payload) —
+ * `adminPages` rides the separate `GET /api/admin/plugins` payload and is
+ * outside that pin.
  */
 
 // ---------------------------------------------------------------------------
@@ -124,6 +129,7 @@ const listRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
 
     const unitCost = readCost(ctx.settings);
+    const durationSeconds = readSeconds(ctx.settings, "duration", DEFAULT_DURATION_SECONDS);
     const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
 
     return ctx.transaction(async (tx) => {
@@ -157,6 +163,10 @@ const listRoute = route({
         body: {
           // Unit cost so the client can preview cost x dets x hours.
           cost: unitCost.toString(),
+          // Seconds per duration unit, so the client can label the 1–5
+          // dropdown honestly ("1 hour" at 3600, "1 second" at V2's shipped
+          // default of 1) instead of assuming hours.
+          durationSeconds,
           searches: rows.map((r) => {
             const ended = now >= r.endsAt.getTime();
             const expiresAtMs = r.expiresAt?.getTime()
@@ -211,6 +221,83 @@ const removeRoute = route({
 });
 
 // ---------------------------------------------------------------------------
+// Admin — V2's detectives.admin.php, GL3-shaped after bullets' options panel.
+// Reads and writes the settings TABLE, not `ctx.settings`: the snapshot is
+// boot-time, so the panel shows what the next boot will read, and an edit
+// takes effect on restart (which the panel says out loud).
+// ---------------------------------------------------------------------------
+
+const SETTING_LABELS = [
+  ["cost", "Cost per detective per unit"],
+  ["duration", "Seconds one duration unit lasts (V2's detectiveDuration; 3600 = real hours)"],
+  ["expire", "Seconds a successful report stays live (V2's detectiveExpire)"],
+] as const;
+
+const AdminSettingsBodySchema = z.object({
+  cost: z.string().regex(/^\d+$/),
+  duration: z.number().int().min(1),
+  expire: z.number().int().min(1),
+}).strict();
+
+const adminSettingsListRoute = route({
+  method: "GET", path: "/api/admin/detectives/settings", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(settings));
+    const stored = new Map(rows.map((r) => [r.key, r.value]));
+    const read: Settings = { get: (key) => stored.get(`detectives.${key}`) ?? null };
+
+    const values: Record<(typeof SETTING_LABELS)[number][0], string> = {
+      cost: readCost(read).toString(),
+      duration: String(readSeconds(read, "duration", DEFAULT_DURATION_SECONDS)),
+      expire: String(readSeconds(read, "expire", DEFAULT_EXPIRE_SECONDS)),
+    };
+    return {
+      status: 200,
+      body: { rows: SETTING_LABELS.map(([key, label]) => ({ key, label, value: values[key] })) },
+    };
+  },
+});
+
+const adminSettingsWriteRoute = route({
+  method: "POST", path: "/api/admin/detectives/settings", auth: "admin",
+  body: AdminSettingsBodySchema,
+  handler: async (ctx, { body }) => {
+    const values = [
+      { key: "detectives.cost", value: body.cost },
+      { key: "detectives.duration", value: String(body.duration) },
+      { key: "detectives.expire", value: String(body.expire) },
+    ];
+    await ctx.transaction(async (tx) => {
+      for (const row of values) {
+        await tx.db.insert(settings).values(row)
+          .onConflictDoUpdate({ target: settings.key, set: { value: row.value } });
+      }
+    });
+    return { status: 204 };
+  },
+});
+
+const adminPage: PageSchema = {
+  id: "detectives-admin",
+  path: "/admin/detectives",
+  view: {
+    kind: "panel", title: "Detectives",
+    children: [
+      { kind: "text", value: "The 1–5 \"hours\" dropdown is a unit count; the duration setting is how many real seconds one unit lasts (V2's detectiveDuration — 1 for fast testing, 3600 for real hours). Cost and success odds are per unit, not per real second. Edits take effect on the next server restart." },
+      { kind: "table", source: "GET /api/admin/detectives/settings", columns: [
+        { key: "label", label: "Setting" },
+        { key: "value", label: "Value" },
+      ] },
+      { kind: "form", action: "POST /api/admin/detectives/settings", submitLabel: "Update settings", fields: [
+        { name: "cost", label: "Cost per detective per unit", type: "money" },
+        { name: "duration", label: "Seconds per duration unit", type: "number" },
+        { name: "expire", label: "Report lifetime (seconds)", type: "number" },
+      ] },
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Resolve job — the roll happens HERE, seeded, not at hire time (spec §2):
 // a BullMQ retry replays the same seed and the plugin_job_runs claim aborts
 // it anyway. The outcome sits hidden in the row until ends_at (time-gated
@@ -244,8 +331,9 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
 export default definePlugin({
   id: "detectives",
   version: "1.0.0",
-  basePaths: ["/api/detectives"],
+  basePaths: ["/api/detectives", "/api/admin/detectives"],
   migrations: DETECTIVES_MIGRATIONS,
-  routes: [hireRoute, listRoute, removeRoute],
+  routes: [hireRoute, listRoute, removeRoute, adminSettingsListRoute, adminSettingsWriteRoute],
+  adminPages: [adminPage],
   jobs: { resolve: resolveJob },
 });

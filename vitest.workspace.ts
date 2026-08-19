@@ -363,6 +363,7 @@ export default defineWorkspace([
         "test/admin-shell.test.ts",
         "test/admin-travel.test.ts",
         "test/admin-bullets.test.ts",
+        "test/admin-detectives.test.ts",
         "test/admin-crimes.test.ts",
         "test/admin-ranks.test.ts",
         "test/admin-inventory.test.ts",

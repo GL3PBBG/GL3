@@ -10,7 +10,7 @@ interface SettingRow { S_key: string; S_value: string | null; }
  * `<pluginId>.<key>`, because `ctx.settings.get` looks the key up that way.
  * A verbatim copy would therefore leave an operator's tuned bullet options
  * unreadable and silently revert the game to the built-in defaults — a
- * failure with no error anywhere. These six are the only keys any GL3 plugin
+ * failure with no error anywhere. These nine are the only keys any GL3 plugin
  * reads today; everything else in the table is still core's or unread, and
  * keeps its V2 name.
  */
@@ -23,6 +23,12 @@ const RENAMES: Readonly<Record<string, string>> = {
   // Carried over rather than reset: V2's own 12-hour catch-up clamp bounds
   // what a years-stale cursor can pay out.
   lastBulletRestock: "bullets.last_restock",
+  // Detectives' three knobs — including detectiveDuration, whose shipped V2
+  // default of 1 second an operator may have tuned deliberately (fast-testing
+  // vs. 3600 for real hours); carried, not defaulted.
+  detectiveCost: "detectives.cost",
+  detectiveDuration: "detectives.duration",
+  detectiveExpire: "detectives.expire",
 };
 
 /**

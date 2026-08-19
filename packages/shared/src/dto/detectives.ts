@@ -36,6 +36,12 @@ export type DetectiveSearchRow = z.infer<typeof DetectiveSearchRowSchema>;
 export const DetectiveListResponseSchema = z.object({
   /** Unit cost — the client previews cost x detectives x hours. */
   cost: MoneySchema,
+  /**
+   * Seconds one duration unit lasts — V2's `detectiveDuration`. The 1–5
+   * "hours" dropdown is really a unit count; the client labels it from this
+   * ("1 hour" at 3600, "1 second" at V2's shipped default of 1).
+   */
+  durationSeconds: z.number().int().positive(),
   searches: z.array(DetectiveSearchRowSchema),
 });
 export type DetectiveListResponse = z.infer<typeof DetectiveListResponseSchema>;

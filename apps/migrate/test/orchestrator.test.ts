@@ -40,9 +40,10 @@ describe("runMigration", () => {
       expect(await db.select().from(forums)).toHaveLength(1); // gang forum (F_id -1) skipped
       expect(await db.select().from(forumTopics)).toHaveLength(1);
       expect(await db.select().from(forumPosts)).toHaveLength(2);
-      // 3 verbatim + the 6 bullet keys the fixture carries, which migrateSettings
-      // renames into the `bullets.` namespace rather than dropping or duplicating.
-      expect(await db.select().from(settings)).toHaveLength(9);
+      // 3 verbatim + the 6 bullet keys and 3 detective keys the fixture
+      // carries, which migrateSettings renames into the `bullets.` /
+      // `detectives.` namespaces rather than dropping or duplicating.
+      expect(await db.select().from(settings)).toHaveLength(12);
       expect((await db.select().from(idMap)).length).toBeGreaterThan(20); // every migrated row got a mapping
 
       await pool.end();
