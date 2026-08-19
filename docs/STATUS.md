@@ -3016,13 +3016,13 @@ web image serves only the SPA's own assets.
   prefix, and can't pre-seed the post cooldown from that view alone. Additive
   — a candidate for the next `@gl3/shared` bump that touches forum DTOs,
   not urgent enough to justify one on its own.
-- **`packages/plugins/forum/src/index.ts:106` has a redundant `isGangForum`
-  check sitting beside a map lookup that already encodes the same
-  information**, and the cascade-skip branch for a gang forum's own topics
-  and posts has no direct test — it's correct by inspection (the migrator
-  never populates a `forumV3ById`/`topicV3ById` entry for anything under a
-  gang forum, so every downstream lookup already misses), but nothing turns
-  red if that inspection is ever wrong.
+- **`apps/migrate/src/migrators/forum.ts:53` has a redundant `isGangForum`
+  check (defined at line 24) sitting beside a map lookup that already encodes
+  the same information**, and the cascade-skip branch for a gang forum's own
+  topics and posts has no direct test — it's correct by inspection (the
+  migrator never populates a `forumV3ById`/`topicV3ById` entry for anything
+  under a gang forum, so every downstream lookup already misses), but nothing
+  turns red if that inspection is ever wrong.
 
 **Resolved, but the reasoning matters if you touch these areas:**
 
