@@ -4,10 +4,29 @@ import { IdSchema, noNulByte } from "../primitives.js";
 /** V2 capped usernames at 30 chars (SPEC §1.2 users.U_name); GL3 keeps that ceiling. */
 export const RegisterRequestSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[A-Za-z0-9_-]+$/, "letters, digits, _ and - only"),
-  email: z.string().email().optional(),
+  // Required since the social cluster: registration hard-gates on verifying
+  // this address. noNulByte is explicit — .email()'s regex happens to reject
+  // NUL today, but that is an implementation detail, not a guarantee.
+  email: noNulByte(z.string().email().max(254)),
   password: z.string().min(8).max(200),
 });
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+
+export const VerifyRequestSchema = z.object({
+  code: noNulByte(z.string().min(1).max(32)),
+});
+export type VerifyRequest = z.infer<typeof VerifyRequestSchema>;
+
+export const ForgotRequestSchema = z.object({
+  email: noNulByte(z.string().email().max(254)),
+});
+export type ForgotRequest = z.infer<typeof ForgotRequestSchema>;
+
+export const ResetRequestSchema = z.object({
+  token: noNulByte(z.string().min(1).max(64)),
+  password: z.string().min(8).max(200),
+});
+export type ResetRequest = z.infer<typeof ResetRequestSchema>;
 
 /**
  * Unlike `RegisterRequestSchema.username`, login's username isn't

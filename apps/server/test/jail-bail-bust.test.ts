@@ -10,6 +10,7 @@ import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -34,12 +35,7 @@ async function register(name: string): Promise<Player> {
  * not the shared `app` from `beforeEach`.
  */
 async function registerOn(target: FastifyInstance, name: string): Promise<Player> {
-  const res = await target.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`, password: "hunter2hunter2" },
-  });
-  const body = res.json();
-  return { token: body.token, playerId: body.playerId, username: body.username };
+  return registerVerifiedPlayer({ app: target, redis }, { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}` });
 }
 
 async function place(p: Player, locationId: string | null, patch: Record<string, unknown> = {}): Promise<void> {

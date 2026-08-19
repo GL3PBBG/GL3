@@ -1,6 +1,7 @@
 import { definePlugin } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FilesystemDriver } from "../src/assets/fs-driver.js";
@@ -8,6 +9,7 @@ import { hashBytes } from "../src/assets/image.js";
 import { items, players, roleModuleAccess, roles } from "../src/db/schema/index.js";
 import { makeJpeg, makePng } from "./helpers/assets.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /** Declares one slot so the bind route has a plugin scope to validate against. */
@@ -23,15 +25,12 @@ const artPlugin = definePlugin({
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let driver: FilesystemDriver;
 let closeServer: () => Promise<void>;
 
 async function registerPlayer(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  return res.json();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 async function giveRole(playerId: string, moduleKey: string): Promise<void> {
@@ -58,7 +57,7 @@ function upload(token: string, bytes: Buffer, contentType: string) {
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer, assetDriver: driver } = await bootTestServer({ plugins: [artPlugin] }));
+  if (!app) ({ app, close: closeServer, assetDriver: driver, redis } = await bootTestServer({ plugins: [artPlugin] }));
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });

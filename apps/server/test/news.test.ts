@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -8,11 +9,13 @@ import { players, roleModuleAccess, roles } from "../src/db/schema/index.js";
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let staffToken: string;
 let staffId: string;
@@ -20,19 +23,19 @@ let regularToken: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
   const staffRoleId = uuidv7();
   await db.insert(roles).values({ id: staffRoleId, name: "Staff" });
   await db.insert(roleModuleAccess).values({ roleId: staffRoleId, moduleKey: "news" });
 
-  const staff = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Editor", password: "hunter2hunter2" } });
-  staffToken = staff.json().token;
-  staffId = staff.json().playerId;
+  const staff = await registerVerifiedPlayer({ app, redis }, { username: "Editor" });
+  staffToken = staff.token;
+  staffId = staff.playerId;
   await db.update(players).set({ roleId: staffRoleId }).where(eq(players.id, staffId));
 
-  const regular = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  regularToken = regular.json().token;
+  const regular = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  regularToken = regular.token;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
@@ -69,11 +72,11 @@ describe("POST /api/news", () => {
     const mailRoleId = uuidv7();
     await db.insert(roles).values({ id: mailRoleId, name: "Mail Moderator" });
     await db.insert(roleModuleAccess).values({ roleId: mailRoleId, moduleKey: "mail" });
-    const moderator = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Tessio", password: "hunter2hunter2" } });
-    await db.update(players).set({ roleId: mailRoleId }).where(eq(players.id, moderator.json().playerId));
+    const moderator = await registerVerifiedPlayer({ app, redis }, { username: "Tessio" });
+    await db.update(players).set({ roleId: mailRoleId }).where(eq(players.id, moderator.playerId));
 
     const res = await app.inject({
-      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${moderator.json().token}` },
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${moderator.token}` },
       payload: { title: "Spam", body: "..." },
     });
     expect(res.statusCode).toBe(403);
@@ -121,11 +124,11 @@ describe("POST /api/news", () => {
     const adminRoleId = uuidv7();
     await db.insert(roles).values({ id: adminRoleId, name: "Admin" });
     await db.insert(roleModuleAccess).values({ roleId: adminRoleId, moduleKey: "*" });
-    const admin = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Genco", password: "hunter2hunter2" } });
-    await db.update(players).set({ roleId: adminRoleId }).where(eq(players.id, admin.json().playerId));
+    const admin = await registerVerifiedPlayer({ app, redis }, { username: "Genco" });
+    await db.update(players).set({ roleId: adminRoleId }).where(eq(players.id, admin.playerId));
 
     const res = await app.inject({
-      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${admin.json().token}` },
+      method: "POST", url: "/api/news", headers: { authorization: `Bearer ${admin.token}` },
       payload: { title: "From the admins", body: "..." },
     });
     expect(res.statusCode).toBe(201);

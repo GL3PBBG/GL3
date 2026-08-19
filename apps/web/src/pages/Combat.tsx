@@ -5,6 +5,7 @@ import {
   useRepairWeapon, useWeaponCondition,
 } from "../api/queries.js";
 import { formatMoney } from "../lib/money.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -127,7 +128,7 @@ export function Combat(): JSX.Element {
               {rows.map((target) => (
                 <li key={target.playerId} className={styles.row}>
                   <span>
-                    {target.username}
+                    <PlayerLink playerId={target.playerId} username={target.username} />
                     {target.rank ? <span className={styles.muted}> · {target.rank}</span> : null}
                     {" · "}
                     <Amount value={String(target.health)} />

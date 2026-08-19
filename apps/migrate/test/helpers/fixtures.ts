@@ -6,6 +6,7 @@ import mysql from "mysql2/promise";
 import postgres from "postgres";
 import bountiesPlugin from "@gl3/plugin-bounties";
 import detectivesPlugin from "@gl3/plugin-detectives";
+import forumPlugin from "@gl3/plugin-forum";
 import propertiesPlugin from "@gl3/plugin-properties";
 import theftPlugin from "@gl3/plugin-theft";
 import { createDb } from "../../../server/src/db/client.js";
@@ -97,8 +98,9 @@ const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url)
 
 /**
  * Creates a uniquely-named Postgres database, runs every core migration from
- * apps/server/drizzle, then runs the bounties + detectives + theft plugin
- * migrations (the six plugin-owned target tables — "Known unknowns" item 8).
+ * apps/server/drizzle, then runs the bounties + detectives + properties +
+ * theft + forum plugin migrations (the nine plugin-owned target tables —
+ * "Known unknowns" item 8, plus the three `p_forum_*` tables Task 16 adds).
  * Returns a connection URL plus a teardown function.
  */
 export async function createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }> {
@@ -122,11 +124,12 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
     await migrator.end();
   }
 
-  // The six plugin-owned target tables ("Known unknowns" item 8), created
-  // the same way apps/server's loader creates them at boot.
+  // The nine plugin-owned target tables ("Known unknowns" item 8, plus
+  // forum's three), created the same way apps/server's loader creates them
+  // at boot.
   const pluginDb = createDb(target.toString());
   try {
-    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin]);
+    await runPluginMigrations(pluginDb.db, [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin, forumPlugin]);
   } finally {
     await pluginDb.sql.end();
   }

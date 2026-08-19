@@ -2,10 +2,12 @@ import { definePlugin } from "@gl3/plugin-sdk";
 import { AdminSectionsResponseSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { players, roleModuleAccess, roles } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const withAdminPage = (id: string) => definePlugin({
@@ -18,11 +20,12 @@ const withAdminPage = (id: string) => definePlugin({
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer({
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer({
     plugins: [withAdminPage("alpha"), withAdminPage("beta")],
   }));
 });
@@ -30,11 +33,7 @@ beforeEach(async () => {
 afterAll(async () => { await closeServer(); await conn.end(); });
 
 async function register(username: string) {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  return res.json() as { playerId: string; token: string };
+  return registerVerifiedPlayer({ app, redis }, { username }) as Promise<{ playerId: string; token: string }>;
 }
 
 async function giveRole(playerId: string, moduleKeys: string[]): Promise<string> {

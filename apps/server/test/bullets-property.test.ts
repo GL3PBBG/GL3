@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -21,6 +23,7 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 const startingCash = 1_000_000_000n;
@@ -35,16 +38,12 @@ async function cashOf(playerId: string): Promise<bigint> {
 let regCounter = 0;
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Registration is rate-limited per IP and the app is booted once, so
-    // every registration in this file must use a distinct address.
+  // Registration is rate-limited per IP and the app is booted once, so
+  // every registration in this file must use a distinct address.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Franchise${regCounter}${Date.now()}`,
     remoteAddress: `10.77.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Franchise${regCounter}${Date.now()}`, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
 }
 
 /**
@@ -106,7 +105,7 @@ async function scenario(ownership: { lever: bigint } | null): Promise<{
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => {

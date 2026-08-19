@@ -87,5 +87,6 @@ export const ProfileDtoSchema = z.object({
   /** Lifetime count of the player's own weapon backfiring. */
   backfire: z.number().int().nonnegative(),
   createdAt: TimestampSchema,
+  lastSeenAt: z.string().nullable().optional(),
 });
 export type ProfileDto = z.infer<typeof ProfileDtoSchema>;

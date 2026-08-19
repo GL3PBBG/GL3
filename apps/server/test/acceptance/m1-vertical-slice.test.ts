@@ -2,20 +2,23 @@ import type { AddressInfo } from "node:net";
 import { ServerFrameSchema, type GameEvent } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import WebSocket from "ws";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crimeLog, crimes, playerStats, transactions } from "../../src/db/schema/index.js";
 import { seedCrimes } from "../../src/db/seed.js";
 import { resetDb, testDb } from "../helpers/db.js";
+import { registerVerifiedPlayer } from "../helpers/register.js";
 import { bootTestServer } from "../helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let wsBase: string;
 
 beforeAll(async () => {
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
   await app.listen({ port: 0, host: "127.0.0.1" });
   const { port } = app.server.address() as AddressInfo;
   wsBase = `ws://127.0.0.1:${port}/ws`;
@@ -24,12 +27,7 @@ afterAll(async () => { await closeServer(); await conn.end(); });
 beforeEach(async () => { await resetDb(db); await seedCrimes(db); });
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
-  const res = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username, password: "hunter2hunter2" },
-  });
-  expect(res.statusCode).toBe(201);
-  return res.json();
+  return registerVerifiedPlayer({ app, redis }, { username });
 }
 
 /** Mints a handshake ticket the way a real client would: an authenticated POST.

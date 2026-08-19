@@ -44,6 +44,12 @@ describe("migratePlayers", () => {
       const adminRoleId = await lookupV3Id(db, "userRoles", 2);
       expect(oldTimer?.roleId).toBe(adminRoleId); // U_userLevel=2 -> role 2
 
+      // U_status=1 (active) -> email_verified_at set; U_status=2 (awaiting
+      // validation, GhostGangMember in the fixture) -> left NULL.
+      expect(vito?.emailVerifiedAt).not.toBeNull();
+      const ghost = playerRows.find((p) => p.username === "GhostGangMember");
+      expect(ghost?.emailVerifiedAt).toBeNull();
+
       const vitoStats = (await db.select().from(playerStats).where(eq(playerStats.playerId, vito!.id)))[0];
       expect(vitoStats?.cash).toBe(2100000000n); // above the V2 int32 comfort zone, exact
       expect(vitoStats?.gangId).toBeNull(); // deferred to the gangs migrator (Task 23)
@@ -106,6 +112,44 @@ describe("migratePlayers", () => {
           expect(ledgerSum).toBe(balance);
         }
       }
+
+      await pool.end();
+      await sql.end();
+    } finally {
+      await fixture.teardown();
+      await target.teardown();
+    }
+  });
+
+  it("never downgrades a native GL3 email verification back to NULL on re-run", async () => {
+    const fixture = await createIsolatedMysqlFixture();
+    const target = await createIsolatedPgTarget();
+    try {
+      const pool = mysql.createPool(fixture.url);
+      const { db, sql } = createDb(target.url);
+
+      await migrateRoles(pool, db, createReport(false));
+      await migrateRounds(pool, db, createReport(false));
+      await migrateRanks(pool, db, createReport(false));
+      await migrateLocations(pool, db, createReport(false));
+      await migrateItems(pool, db, createReport(false));
+
+      // First run: GhostGangMember is V2 U_status=2 -> migrates in NULL.
+      await migratePlayers(pool, db, createReport(false));
+      const ghostBefore = (await db.select().from(players)).find((p) => p.username === "GhostGangMember")!;
+      expect(ghostBefore.emailVerifiedAt).toBeNull();
+
+      // Simulate the player verifying natively in GL3 after migration.
+      await db.update(players).set({ emailVerifiedAt: new Date() }).where(eq(players.id, ghostBefore.id));
+      const verifiedAt = (await db.select().from(players).where(eq(players.id, ghostBefore.id)))[0]!.emailVerifiedAt;
+      expect(verifiedAt).not.toBeNull();
+
+      // Re-run the migrator. V2's fixture still shows U_status=2 for this
+      // user, but the upsert must not clobber the non-null GL3 state.
+      await migratePlayers(pool, db, createReport(false));
+      const ghostAfter = (await db.select().from(players).where(eq(players.id, ghostBefore.id)))[0]!;
+      expect(ghostAfter.emailVerifiedAt).not.toBeNull();
+      expect(ghostAfter.emailVerifiedAt).toEqual(verifiedAt);
 
       await pool.end();
       await sql.end();

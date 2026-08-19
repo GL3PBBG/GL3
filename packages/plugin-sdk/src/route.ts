@@ -6,7 +6,7 @@ export interface RouteResult {
   body?: unknown;
 }
 
-export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny> {
+export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny, Q extends z.ZodTypeAny> {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   auth?: "player" | "public" | "admin";
@@ -21,7 +21,18 @@ export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny> {
   accessInHospital?: boolean;
   params?: P;
   body?: B;
-  handler: (ctx: PluginCtx, input: { params: z.infer<P>; body: z.infer<B> }) => Promise<RouteResult>;
+  /**
+   * Query-string schema, parsed from the raw `?key=value` pairs (`page` etc.)
+   * — Fastify never merges these into `request.params`, so before this field
+   * existed a plugin route had no way to read one at all. Optional and
+   * defaulted to `z.unknown()`, same as `params`/`body`, so every route
+   * predating this field is unaffected.
+   */
+  query?: Q;
+  handler: (
+    ctx: PluginCtx,
+    input: { params: z.infer<P>; body: z.infer<B>; query: z.infer<Q> },
+  ) => Promise<RouteResult>;
 }
 
 /**
@@ -39,12 +50,15 @@ export interface PluginRoute {
   accessInHospital: boolean;
   params: z.ZodTypeAny;
   body: z.ZodTypeAny;
-  handler(ctx: PluginCtx, input: { params: unknown; body: unknown }): Promise<RouteResult>;
+  query: z.ZodTypeAny;
+  handler(ctx: PluginCtx, input: { params: unknown; body: unknown; query: unknown }): Promise<RouteResult>;
 }
 
-export function route<P extends z.ZodTypeAny = z.ZodUnknown, B extends z.ZodTypeAny = z.ZodUnknown>(
-  def: RouteDef<P, B>,
-): PluginRoute {
+export function route<
+  P extends z.ZodTypeAny = z.ZodUnknown,
+  B extends z.ZodTypeAny = z.ZodUnknown,
+  Q extends z.ZodTypeAny = z.ZodUnknown,
+>(def: RouteDef<P, B, Q>): PluginRoute {
   return {
     method: def.method,
     path: def.path,
@@ -53,6 +67,7 @@ export function route<P extends z.ZodTypeAny = z.ZodUnknown, B extends z.ZodType
     accessInHospital: def.accessInHospital ?? true,
     params: def.params ?? z.unknown(),
     body: def.body ?? z.unknown(),
+    query: def.query ?? z.unknown(),
     handler: def.handler,
   };
 }

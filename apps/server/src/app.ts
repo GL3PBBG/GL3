@@ -7,11 +7,14 @@ import type { StorageDriver } from "./assets/driver.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
+import { createMailDriver } from "./mail/driver.js";
+import type { MailDriver } from "./mail/driver.js";
 import { registerHospitalRoutes } from "./game/hospital/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
+import { registerPresenceRoutes } from "./presence/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
@@ -38,6 +41,8 @@ export interface AppDeps {
    * to whatever `config.assets` selects.
    */
   assetDriver?: StorageDriver;
+  /** Overridable so tests can assert on outbound mail without a real provider — see mail.test.ts. Defaults to `createMailDriver(config.mail)`. */
+  mail?: MailDriver;
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
@@ -67,14 +72,15 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   );
 
   app.get("/health", async () => ({ status: "ok" }));
-  registerAuthRoutes(app, config, deps.db, deps.redis, deps.rateLimitPrefix);
+  registerAuthRoutes(app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix);
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
-  registerProfileRoutes(app, deps.db, requireAuth);
+  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, deps.rateLimitPrefix);
+  registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerWsRoutes(app, deps.redis, requireAuth);
 

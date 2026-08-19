@@ -1,25 +1,24 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { gangLogs, gangs, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
-  const reg = await app.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: "Vito", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = reg.json());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -49,12 +48,9 @@ describe("POST /api/gangs", () => {
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${token}` },
       payload: { name: "The Corleones" },
     });
-    const other = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Sonny", password: "hunter2hunter2" },
-    });
+    const other = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
     const res = await app.inject({
-      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${other.json().token}` },
+      method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${other.token}` },
       payload: { name: "The Corleones" },
     });
     expect(res.statusCode).toBe(409);
@@ -198,12 +194,9 @@ describe("GET /api/gangs/:gangId/logs", () => {
   // so that narrowing it later is a decision someone makes on purpose.
   it("is readable by a player who is not in the gang", async () => {
     const gangId = await createGang();
-    const outsider = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Sonny", password: "hunter2hunter2" },
-    });
+    const outsider = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
 
-    const res = await fetchLogs(gangId, outsider.json().token);
+    const res = await fetchLogs(gangId, outsider.token);
     expect(res.statusCode).toBe(200);
     expect(res.json().logs).toHaveLength(1);
   });

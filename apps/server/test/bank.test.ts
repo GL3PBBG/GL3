@@ -10,6 +10,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -118,8 +119,7 @@ describe("POST /api/bank/deposit and /withdraw", () => {
       `plugin-bank-test-${uuidv7()}-`,
     );
     const app = await buildApp(config, { db, redis, leaderboardPrefix, plugins: loadedPlugins });
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: `Bank${Date.now()}`, password: "hunter2hunter2" } });
-    const { token, playerId: registeredId } = reg.json();
+    const { token, playerId: registeredId } = await registerVerifiedPlayer({ app, redis }, { username: `Bank${Date.now()}` });
     // registration starts a player at 0 cash — fund them directly so the
     // deposit below has something to move.
     await db.update(playerStats).set({ cash: 1000n }).where(eq(playerStats.playerId, registeredId));

@@ -67,6 +67,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const header = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
     const fromHeader = Number.isFinite(header) && header >= 0 ? header : undefined;
     const code = typeof body["error"] === "string" ? body["error"] : "unknown_error";
+    // The gate: any authed non-exempt route 403s an unverified player. There is
+    // no client-side state that tracks verification (MeResponseSchema carries
+    // no such field — see docs), so the redirect lives here, at the one place
+    // every request already passes through, rather than duplicated per query.
+    // Guarded to skip when already on /verify: without it, a gated player's
+    // own useGameEvents on that page (POST /api/ws/ticket, not gate-exempt)
+    // would 403 into a self-redirect to the same URL — a full document
+    // reload that fires the same request again on load, forever.
+    if (response.status === 403 && code === "email_unverified" && window.location.pathname !== "/verify") {
+      window.location.assign("/verify");
+    }
     throw new ApiError(response.status, code, {
       retryAfter: asCount(body["retryAfter"]) ?? fromHeader,
       remainingSeconds: asCount(body["remainingSeconds"]) ?? fromHeader,

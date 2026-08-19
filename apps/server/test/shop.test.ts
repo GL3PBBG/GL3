@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -8,12 +9,14 @@ import { loadConfig } from "../src/config.js";
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 afterAll(async () => {
@@ -24,19 +27,13 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 /** Registers a player and returns their id plus a bearer token. */
 async function register(): Promise<{ id: string; token: string }> {
   const username = `shopper_${randomUUID().slice(0, 8)}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username, password: "correct horse battery staple" },
-  });
-  expect(res.statusCode).toBe(201);
-  const body = res.json<{ playerId: string; token: string }>();
+  const body = await registerVerifiedPlayer({ app, redis }, { username });
   return { id: body.playerId, token: body.token };
 }
 

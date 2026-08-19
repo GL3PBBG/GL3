@@ -16,6 +16,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { combatLog } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -97,17 +98,13 @@ beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 
-  const attacker = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Rocco", password: "hunter2hunter2" },
-  });
-  ({ token: attackerToken, playerId: attackerId } = attacker.json());
+  ({ token: attackerToken, playerId: attackerId } = await registerVerifiedPlayer({ app, redis }, { username: "Rocco" }));
 
+  // Never authenticates as the target below, just needs a real player row.
   const target = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Fredo", password: "hunter2hunter2" },
+    payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: targetId } = target.json());
 });

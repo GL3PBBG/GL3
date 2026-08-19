@@ -8,6 +8,7 @@ import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -30,16 +31,10 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string; username: string }> {
   regCounter += 1;
-  const username = `PropEvt${regCounter}`;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `PropEvt${regCounter}`,
     remoteAddress: `10.51.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  const body = res.json<{ token: string; playerId: string }>();
-  return { ...body, username };
 }
 
 async function seedLocation(): Promise<string> {

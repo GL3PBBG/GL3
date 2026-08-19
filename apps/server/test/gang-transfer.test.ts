@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
@@ -7,11 +8,13 @@ import { gangInvites, gangLogs, gangs, playerStats } from "../src/db/schema/inde
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let bossToken: string;
 let bossId: string;
@@ -20,8 +23,7 @@ let memberToken: string;
 let memberId: string;
 
 async function joinGang(username: string): Promise<{ token: string; playerId: string }> {
-  const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username, password: "hunter2hunter2" } });
-  const { token, playerId } = reg.json();
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username });
   await app.inject({
     method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` },
     payload: { username },
@@ -39,10 +41,10 @@ const transfer = (token: string, targetId: string, gang = gangId) =>
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  ({ token: bossToken, playerId: bossId } = boss.json());
+  const boss = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  ({ token: bossToken, playerId: bossId } = boss);
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` }, payload: { name: "The Corleones" },
   });
@@ -139,27 +141,28 @@ describe("POST /api/gangs/:gangId/transfer", () => {
   });
 
   it("403s an outsider, who is also not a member", async () => {
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const res = await transfer(outsider.json().token, memberId);
+    const outsider = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const res = await transfer(outsider.token, memberId);
     // Not-the-boss is answered before target membership, so this is 403 and
     // not 404: an outsider learns nothing about who is in the gang.
     expect(res.statusCode).toBe(403);
   });
 
   it("404s a target who is in no gang", async () => {
-    const stranger = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
+    // Never authenticates as the stranger below, just needs a real player row.
+    const stranger = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2" } });
     const res = await transfer(bossToken, stranger.json().playerId);
     expect(res.statusCode).toBe(404);
   });
 
   it("404s a target who is in a different gang", async () => {
-    const rival = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", password: "hunter2hunter2" } });
-    const rivalToken: string = rival.json().token;
+    const rival = await registerVerifiedPlayer({ app, redis }, { username: "Barzini" });
+    const rivalToken: string = rival.token;
     await app.inject({
       method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${rivalToken}` }, payload: { name: "The Tattaglias" },
     });
 
-    const res = await transfer(bossToken, rival.json().playerId);
+    const res = await transfer(bossToken, rival.playerId);
     expect(res.statusCode).toBe(404);
     const [gang] = await db.select().from(gangs).where(eq(gangs.id, gangId));
     expect(gang?.bossPlayerId).toBe(bossId);

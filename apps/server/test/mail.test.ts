@@ -2,14 +2,17 @@ import type { AddressInfo } from "node:net";
 import { ServerFrameSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import WebSocket from "ws";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mailMessages } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
 let senderToken: string;
@@ -19,16 +22,16 @@ let recipientId: string;
 beforeEach(async () => {
   await resetDb(db);
   if (!app) {
-    ({ app, close: closeServer } = await bootTestServer());
+    ({ app, close: closeServer, redis } = await bootTestServer());
     await app.listen({ port: 0, host: "127.0.0.1" });
     const { port } = app.server.address() as AddressInfo;
     baseUrl = `ws://127.0.0.1:${port}/ws`;
   }
-  const sender = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  senderToken = sender.json().token;
-  const recipient = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
-  recipientToken = recipient.json().token;
-  recipientId = recipient.json().playerId;
+  const sender = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  senderToken = sender.token;
+  const recipient = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
+  recipientToken = recipient.token;
+  recipientId = recipient.playerId;
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -192,13 +195,13 @@ describe("POST /api/mail", () => {
   });
 
   it("403s replying with a threadId that isn't yours", async () => {
-    const other = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    const other = await registerVerifiedPlayer({ app, redis }, { username: "Clemenza" });
     const first = await app.inject({
       method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
       payload: { recipientUsername: "Sonny", subject: "Business", body: "We need to talk." },
     });
     const res = await app.inject({
-      method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${other.json().token}` },
+      method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${other.token}` },
       payload: { recipientUsername: "Sonny", subject: "Snoop", body: "...", threadId: first.json().threadId },
     });
     expect(res.statusCode).toBe(403);
@@ -212,7 +215,8 @@ describe("POST /api/mail", () => {
   // Clemenza) merely by reusing the threadId — corrupting what a "thread"
   // means without ever tripping the sender-side check above.
   it("403s replying in a real thread to a recipient who isn't part of it", async () => {
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", password: "hunter2hunter2" } });
+    // Never authenticates as Clemenza below, just needs the username to resolve as a recipient.
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", email: "clemenza@example.test", password: "hunter2hunter2" } });
     const first = await app.inject({
       method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
       payload: { recipientUsername: "Sonny", subject: "Business", body: "We need to talk." },

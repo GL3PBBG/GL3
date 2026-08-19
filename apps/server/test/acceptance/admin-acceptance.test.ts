@@ -13,17 +13,20 @@
  */
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { resetDb, testDb } from "../helpers/db.js";
+import { registerVerifiedPlayer } from "../helpers/register.js";
 import { bootTestServer } from "../helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -33,12 +36,7 @@ const auth = (token: string) => ({ authorization: `Bearer ${token}` });
 describe("admin acceptance: admin fills the world, players see it", () => {
   it("end-to-end flow from admin creation to public visibility", async () => {
     // --- Founder registers, becomes admin ---
-    const founderRes = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Founder", password: "hunter2hunter2" },
-    });
-    expect(founderRes.statusCode).toBe(201);
-    const { token: adminToken, playerId: adminId } = founderRes.json();
+    const { token: adminToken, playerId: adminId } = await registerVerifiedPlayer({ app, redis }, { username: "Founder" });
 
     // --- GET /api/admin/plugins lists expected sections ---
     const pluginsRes = await app.inject({
@@ -92,12 +90,7 @@ describe("admin acceptance: admin fills the world, players see it", () => {
     expect(newsRes.statusCode).toBe(201);
 
     // --- Second player registers ---
-    const playerRes = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      payload: { username: "Tourist", password: "hunter2hunter2" },
-    });
-    expect(playerRes.statusCode).toBe(201);
-    const { token: playerToken, playerId: playerId } = playerRes.json();
+    const { token: playerToken, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Tourist" });
 
     // Move the second player to the new town so the shop listing is scoped there.
     // The shop route reads player_stats.location_id to scope stock rows.

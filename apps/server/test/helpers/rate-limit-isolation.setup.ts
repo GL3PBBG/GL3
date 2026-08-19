@@ -3,8 +3,10 @@ import { loadConfig } from "../../src/config.js";
 import { createRedis } from "../../src/redis.js";
 
 /**
- * POST /api/auth/register and /api/auth/login are rate-limited per IP,
- * keyed `<prefix>:register:<ip>` / `<prefix>:login:<ip>` in Redis, where
+ * POST /api/auth/register, /api/auth/login, /api/auth/verify and
+ * /api/auth/verify/resend are rate-limited per IP, keyed
+ * `<prefix>:register:<ip>` / `<prefix>:login:<ip>` / `<prefix>:verify:<ip>` /
+ * `<prefix>:verifyresend:<ip>` in Redis, where
  * `<prefix>` is `ratelimit` in production and, for any server booted via
  * bootTestServer(), a random `ratelimit-test-<uuid>` assigned once in that
  * file's `beforeAll` (see server.ts) — the same fix, for the same reason, as
@@ -24,6 +26,16 @@ import { createRedis } from "../../src/redis.js";
  * literal production-shaped key (used directly by the handful of files that
  * call `buildApp()` without a `rateLimitPrefix`: bank/bullets/jail/
  * leaderboard/ranks/travel.test.ts) and every file's own namespaced one.
+ * `verify`/`verifyresend` joined the sweep once `registerVerifiedPlayer`
+ * (test/helpers/register.ts) made every test-helper registration also POST
+ * /api/auth/verify: a file with more than ten registrations trips the real
+ * 10-per-15-min verify limit purely from its own setup traffic otherwise.
+ * `forgot`/`reset` joined the same way once auth-reset.test.ts started
+ * calling POST /api/auth/forgot from every test in the file: it is limited
+ * to 5/hour, well under what a handful of tests in one file legitimately
+ * need. `forgotemail` is a second, independent bucket on the same route —
+ * keyed by the normalised email rather than the IP — and needs its own sweep
+ * entry since it lives under a different key name, not a different prefix.
  *
  * A sweep clearing another concurrently-running file's namespaced bucket in
  * the middle of its run is harmless — it only resets that file's own
@@ -36,14 +48,14 @@ import { createRedis } from "../../src/redis.js";
  * invent a distinct remoteAddress to dodge the shared one. rate-limit.test.ts
  * exercises the limiter itself (counting, TTL, 429) against dedicated
  * randomly-named buckets outside the `ratelimit` prefix entirely, so
- * clearing register/login buckets here never touches its coverage.
+ * clearing these buckets here never touches its coverage.
  */
 
 const redis = createRedis(loadConfig(process.env).redisUrl);
 
 async function clearAuthRateLimitBuckets(): Promise<void> {
   const keys: string[] = [];
-  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*"]) {
+  for (const pattern of ["ratelimit*:register:*", "ratelimit*:login:*", "ratelimit*:verify:*", "ratelimit*:verifyresend:*", "ratelimit*:forgot:*", "ratelimit*:forgotemail:*", "ratelimit*:reset:*"]) {
     let cursor = "0";
     do {
       const [next, found] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);

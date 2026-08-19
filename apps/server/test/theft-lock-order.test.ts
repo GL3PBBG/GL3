@@ -11,6 +11,7 @@ import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { theftCars, theftGarage, theftTiers } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -168,16 +169,12 @@ let regCounter = 0;
 
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    // Registration is rate-limited per IP and the app is booted once, so every
-    // registration in this file shares one bucket unless the address differs.
+  // Registration is rate-limited per IP and the app is booted once, so every
+  // registration in this file shares one bucket unless the address differs.
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Boost${regCounter}`,
     remoteAddress: `10.44.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Boost${regCounter}`, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
 }
 
 const auth = (token: string): { authorization: string } => ({ authorization: `Bearer ${token}` });

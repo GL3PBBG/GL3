@@ -97,7 +97,7 @@ describe("registration snapshot", () => {
 
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "midjoiner", password: "correct horse battery" },
+      payload: { username: "midjoiner", email: "midjoiner@example.test", password: "correct horse battery" },
     });
     expect(res.statusCode).toBe(201);
 
@@ -131,7 +131,7 @@ describe("registration snapshot", () => {
     expect(await db.select().from(rounds)).toEqual([]);
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "noroundplayer", password: "correct horse battery" },
+      payload: { username: "noroundplayer", email: "noroundplayer@example.test", password: "correct horse battery" },
     });
     expect(res.statusCode).toBe(201);
 
@@ -144,7 +144,7 @@ describe("registration snapshot", () => {
     await seedRound("Over", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "afterhours", password: "correct horse battery" },
+      payload: { username: "afterhours", email: "afterhours@example.test", password: "correct horse battery" },
     });
     expect(res.statusCode).toBe(201);
     const [player] = await db.select().from(players).where(eq(players.username, "afterhours"));
@@ -156,7 +156,7 @@ describe("registration snapshot", () => {
     await seedRound("Admin Round", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "firstadmin", password: "correct horse battery" },
+      payload: { username: "firstadmin", email: "firstadmin@example.test", password: "correct horse battery" },
     });
     expect(res.statusCode).toBe(201);
 

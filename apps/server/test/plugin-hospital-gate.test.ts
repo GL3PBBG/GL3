@@ -2,7 +2,9 @@ import { definePlugin, route } from "@gl3/plugin-sdk";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { playerStats } from "../src/db/schema/index.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { testDb } from "./helpers/db.js";
 
@@ -28,24 +30,17 @@ const probePlugin = definePlugin({
 
 describe("accessInHospital gate", () => {
   let app: FastifyInstance;
+  let redis: Redis;
   let close: () => Promise<void>;
   let token: string;
   let playerId: string;
 
   beforeAll(async () => {
-    ({ app, close } = await bootTestServer({ plugins: [probePlugin] }));
-    const res = await app.inject({
-      method: "POST", url: "/api/auth/register",
-      // uuidv7's first 8 hex chars are timestamp bits that barely change
-      // across a fast run — slice the tail, not the head, for uniqueness
-      // (see hospital-status.test.ts, Task 3).
-      payload: { username: `hosp-${Date.now()}`, password: "correct horse battery" },
-    });
-    // /api/auth/register answers { token, playerId, username } (auth/routes.ts)
-    // — not a nested `player` object.
-    const body = res.json();
-    token = body.token;
-    playerId = body.playerId;
+    ({ app, close, redis } = await bootTestServer({ plugins: [probePlugin] }));
+    // uuidv7's first 8 hex chars are timestamp bits that barely change
+    // across a fast run — slice the tail, not the head, for uniqueness
+    // (see hospital-status.test.ts, Task 3).
+    ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: `hosp-${Date.now()}` }));
   });
 
   afterAll(async () => { await close(); });

@@ -60,12 +60,15 @@ INSERT INTO settings (S_key, S_value) VALUES
 -- Users. Legacy passwords are sha256(U_id . plaintext) — SPEC §1.1/§4.3.
 -- Plaintext noted per row for the Task 31 login end-to-end test; never
 -- stored in the fixture itself beyond the hash, matching a real V2 dump.
+-- GhostGangMember carries U_status=2 (awaiting email validation) so the
+-- Task 9 email_verified_at mapping has a non-trivial fixture row; every
+-- other user is U_status=1 (active/verified).
 INSERT INTO users (U_id, U_name, U_email, U_password, U_userLevel, U_status, U_round) VALUES
   (1, 'DonVito', 'vito@family.test', 'd62a234e0d9f59d8240292e2042e50e7d1da3c668a0636bf5930fcaac5b52224', 1, 1, 1),        -- plaintext: vitopass1
   (2, 'Underboss', 'underboss@family.test', 'ad5729a45428b40f65f0bb98f213872dc0f12727938ccc7cfd5623a3de600d43', 1, 1, 1), -- plaintext: underbosspass2
   (3, 'Soldier', 'soldier@family.test', '3cf74ece85a49a6d02f53cf8c230edb71bcd3f8875228b808f5e663a3c21bf6e', 1, 1, 1),     -- plaintext: soldierpass3
   (4, 'LoneWolf', NULL, '413561a00a38a8ef52a938b55c06dd84361fa98178703dcea62ab7f0c138ba21', 1, 1, 1),                     -- plaintext: lonewolfpass4
-  (5, 'GhostGangMember', NULL, '637f7e11c418a91661037112b6b3f5f7665f977ce8300471e6b6e440809a9b78', 1, 1, 1),            -- plaintext: ghostpass5
+  (5, 'GhostGangMember', NULL, '637f7e11c418a91661037112b6b3f5f7665f977ce8300471e6b6e440809a9b78', 1, 2, 1),            -- plaintext: ghostpass5 (U_status=2, unverified)
   (6, 'OldTimer', NULL, '37701a2e572407c9b8e1f811a3b2c9eb738b529ae0d6a324b419d20d138edc8d', 2, 1, 1);                    -- plaintext: oldpass6 (admin, role 2)
 
 -- userStats. US_gang: 1 = DonVito's gang (id 1), but DonVito's OWN row is
@@ -147,6 +150,19 @@ INSERT INTO notifications (N_user, N_body, N_read, N_time) VALUES
 INSERT INTO gameNews (GN_author, GN_title, GN_body, GN_time) VALUES
   (1, 'Season 1 begins', 'Good luck.', 1700000000),
   (NULL, 'System announcement', 'Automated post.', 1700000100); -- system news, no author
+
+-- Forum. F_id -1 is a gang forum (negative id convention) — deferred
+-- cluster-wide, so it and anything filed under it must be skipped, not
+-- migrated. T_type 3 sets both the sticky (1) and important (2) bits, which
+-- GL3's single priority tier collapses to "sticky". T_status 1 = locked.
+INSERT INTO forums (F_id, F_name, F_sort) VALUES
+  (1, 'General Discussion', 1),
+  (-1, 'The Family (gang forum)', 1);
+INSERT INTO topics (T_date, T_user, T_subject, T_forum, T_status, T_type) VALUES
+  (1700000700, 1, 'Read this first', 1, 1, 3); -- locked, sticky+important
+INSERT INTO posts (P_date, P_user, P_body, P_topic) VALUES
+  (1700000700, 1, 'Welcome. Read the rules.', 1),
+  (1700000800, 999, 'From a ghost.', 1); -- orphan: author 999 does not exist
 
 -- A genuinely custom module table's data — irrelevant to migration, present
 -- only so the preflight test (Task 9) has a real unknown table to detect.

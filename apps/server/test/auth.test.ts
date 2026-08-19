@@ -26,7 +26,7 @@ describe("POST /api/auth/register", () => {
   it("creates a player with stats and returns a session token", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Vito", password: "hunter2hunter2" },
+      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -39,8 +39,8 @@ describe("POST /api/auth/register", () => {
   });
 
   it("rejects a duplicate username case-insensitively", async () => {
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "vito", password: "hunter2hunter2" } });
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
+    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "vito", email: "vito2@family.test", password: "hunter2hunter2" } });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "username_taken" });
   });
@@ -59,7 +59,7 @@ describe("POST /api/auth/register", () => {
   });
 
   it("rejects a short password with 400", async () => {
-    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "short" } });
+    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "short" } });
     expect(res.statusCode).toBe(400);
   });
 });
@@ -106,7 +106,7 @@ describe("POST /api/auth/login — legacy V2 upgrade (SPEC §4.3)", () => {
 
 describe("POST /api/auth/login — username-enumeration resistance", () => {
   it("returns byte-identical 401s for an unknown username and a wrong password", async () => {
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
 
     const unknownUser = await app.inject({
       method: "POST", url: "/api/auth/login",
@@ -140,7 +140,7 @@ describe("POST /api/auth/login — NUL byte handling", () => {
 
 describe("GET /api/auth/me", () => {
   it("returns the player behind a bearer token and 401 without one", async () => {
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
+    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
     const { token } = reg.json();
 
     const ok = await app.inject({ method: "GET", url: "/api/auth/me", headers: { authorization: `Bearer ${token}` } });

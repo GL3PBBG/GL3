@@ -3,6 +3,7 @@ import { useCheckin, useDischarge, useDischargePlayer, useHospital, useMe, useWa
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { canAfford } from "../lib/money.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -87,7 +88,7 @@ export function Hospital(): JSX.Element {
         ) : null}
         {ward.data?.patients.map((patient) => (
           <div key={patient.playerId} className={styles.row}>
-            <span>{patient.username} ({patient.rankName})</span>
+            <span><PlayerLink playerId={patient.playerId} username={patient.username} /> ({patient.rankName})</span>
             <span>{formatDuration(patient.remainingSeconds)}</span>
             <button
               type="button"

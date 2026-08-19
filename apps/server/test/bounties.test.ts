@@ -15,6 +15,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { bounties } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -39,17 +40,13 @@ beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 
-  const placer = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Placer", password: "hunter2hunter2" },
-  });
-  ({ token: placerToken, playerId: placerId } = placer.json());
+  ({ token: placerToken, playerId: placerId } = await registerVerifiedPlayer({ app, redis }, { username: "Placer" }));
 
+  // Never authenticates as the target below, just needs a real player row.
   const target = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Marked", password: "hunter2hunter2" },
+    payload: { username: "Marked", email: "marked@example.test", password: "hunter2hunter2" },
   });
   ({ playerId: targetId } = target.json());
 });

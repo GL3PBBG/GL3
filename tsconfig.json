@@ -17,6 +17,7 @@
     { "path": "./packages/plugins/bounties" },
     { "path": "./packages/plugins/oc" },
     { "path": "./packages/plugins/detectives" },
+    { "path": "./packages/plugins/forum" },
     { "path": "./packages/plugins/theft" },
     { "path": "./packages/plugins/properties" },
     { "path": "./packages/plugins/casino" },

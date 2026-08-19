@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -31,6 +33,7 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let playerId: string;
@@ -64,14 +67,9 @@ const HOSPITAL_MS = 600_000;
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Wounded", password: "hunter2hunter2" },
-  });
-  ({ token, playerId } = res.json());
+  ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Wounded" }));
 
   await db
     .update(playerStats)

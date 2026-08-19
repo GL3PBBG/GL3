@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, InjectOptions } from "fastify";
+import type { Redis } from "ioredis";
 import type { LightMyRequestResponse } from "light-my-request";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,6 +8,7 @@ import { loadConfig } from "../src/config.js";
 import { locations, playerStats, transactions } from "../src/db/schema/index.js";
 import { applyBalanceChange } from "../src/economy/ledger.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -35,19 +37,14 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let townA: string;
 
 interface Player { token: string; playerId: string }
 
 async function register(name: string): Promise<Player> {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`, password: "hunter2hunter2" },
-  });
-  const body = res.json();
-  return { token: body.token, playerId: body.playerId };
+  return registerVerifiedPlayer({ app, redis }, { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}` });
 }
 
 async function place(p: Player, locationId: string | null, patch: Record<string, unknown> = {}): Promise<void> {
@@ -85,7 +82,7 @@ async function waitForLockWaiters(n: number): Promise<void> {
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
   townA = crypto.randomUUID();
   await db.insert(locations).values({ id: townA, name: `Town A ${townA.slice(0, 8)}` });
 });

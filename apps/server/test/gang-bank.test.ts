@@ -1,14 +1,17 @@
 import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { gangInvites, gangs, playerStats, transactions } from "../src/db/schema/index.js";
 import { lockGangAndPlayerForUpdate } from "../src/economy/ledger.js";
 import { hasGangPermission } from "../src/game/gangs/permissions.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let bossToken: string;
 let gangId: string;
@@ -17,17 +20,17 @@ let memberId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const boss = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", password: "hunter2hunter2" } });
-  bossToken = boss.json().token;
+  const boss = await registerVerifiedPlayer({ app, redis }, { username: "Vito" });
+  bossToken = boss.token;
   const gang = await app.inject({
     method: "POST", url: "/api/gangs", headers: { authorization: `Bearer ${bossToken}` }, payload: { name: "The Corleones" },
   });
   gangId = gang.json().id;
 
-  const member = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Sonny", password: "hunter2hunter2" } });
-  ({ token: memberToken, playerId: memberId } = member.json());
+  const member = await registerVerifiedPlayer({ app, redis }, { username: "Sonny" });
+  ({ token: memberToken, playerId: memberId } = member);
   await app.inject({
     method: "POST", url: `/api/gangs/${gangId}/invites`, headers: { authorization: `Bearer ${bossToken}` }, payload: { username: "Sonny" },
   });
@@ -72,9 +75,9 @@ describe("POST /api/gangs/:gangId/bank/deposit", () => {
   });
 
   it("403s a non-member depositing", async () => {
-    const other = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Outsider", password: "hunter2hunter2" } });
+    const other = await registerVerifiedPlayer({ app, redis }, { username: "Outsider" });
     const res = await app.inject({
-      method: "POST", url: `/api/gangs/${gangId}/bank/deposit`, headers: { authorization: `Bearer ${other.json().token}` },
+      method: "POST", url: `/api/gangs/${gangId}/bank/deposit`, headers: { authorization: `Bearer ${other.token}` },
       payload: { amount: "10" },
     });
     expect(res.statusCode).toBe(403);

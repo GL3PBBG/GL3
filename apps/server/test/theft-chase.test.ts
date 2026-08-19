@@ -6,10 +6,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { locations, playerStats, settings } from "../src/db/schema/index.js";
-import { createSubscriber } from "../src/redis.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { theftCars, theftGarage, theftTiers } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -23,6 +24,10 @@ import { bootTestServer } from "./helpers/server.js";
  */
 const { db, sql: conn } = testDb();
 const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
+// A SEPARATE, ordinary client for registerVerifiedPlayer's Redis reads —
+// `subscriber` enters Redis's dedicated subscriber mode once any test calls
+// `subscriber.subscribe(...)`, after which no other command can run on it.
+const redis = createRedis(loadConfig(process.env).redisUrl);
 
 let app: FastifyInstance | undefined;
 let closeServer: (() => Promise<void>) | undefined;
@@ -38,14 +43,10 @@ async function bootWith(rows: { key: string; value: string }[]): Promise<Fixture
   ({ app, close: closeServer } = await bootTestServer());
 
   regCounter += 1;
-  const reg = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  const { token, playerId } = await registerVerifiedPlayer({ app, redis }, {
+    username: `Runner${regCounter}`,
     remoteAddress: `10.42.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Runner${regCounter}`, password: "hunter2hunter2" },
   });
-  expect(reg.statusCode).toBe(201);
-  const { token, playerId } = reg.json<{ token: string; playerId: string }>();
 
   const locationId = uuidv7();
   await db.insert(locations).values({
@@ -97,6 +98,7 @@ afterAll(async () => {
   if (closeServer) await closeServer();
   await conn.end();
   subscriber.disconnect();
+  redis.disconnect();
 });
 
 describe("POST /api/theft/steal — the police chase", () => {

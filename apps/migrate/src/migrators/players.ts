@@ -8,7 +8,7 @@ import type { Executor } from "../pg/types.js";
 
 interface UserRow {
   U_id: number; U_name: string; U_email: string | null; U_password: string;
-  U_userLevel: number; U_round: number;
+  U_userLevel: number; U_status: number; U_round: number;
 }
 interface UserStatsRow {
   US_id: number; US_money: number; US_bank: number; US_bullets: number; US_exp: number;
@@ -18,7 +18,7 @@ interface UserStatsRow {
 
 export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [userRows] = await pool.query<(UserRow & mysql.RowDataPacket)[]>(
-    "SELECT U_id, U_name, U_email, U_password, U_userLevel, U_round FROM users",
+    "SELECT U_id, U_name, U_email, U_password, U_userLevel, U_status, U_round FROM users",
   );
   const [statsRows] = await pool.query<(UserStatsRow & mysql.RowDataPacket)[]>(
     "SELECT US_id, US_money, US_bank, US_bullets, US_exp, US_health, US_backfire, US_points, " +
@@ -36,10 +36,14 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
     const roleId = await lookupV3Id(exec, "userRoles", user.U_userLevel);
     const roundId = await lookupV3Id(exec, "rounds", user.U_round);
 
+    // V2's U_status: 1 = active (email verified/not gated), 2 = awaiting
+    // email validation. Any status other than 2 counts as verified.
+    const emailVerifiedAt = user.U_status === 2 ? null : new Date();
+
     await exec.insert(players).values({
       id: playerId, username: user.U_name, email: user.U_email,
       passwordHash: null, legacyPasswordSha256: user.U_password, legacyV2Id: user.U_id,
-      roleId, roundId,
+      roleId, roundId, emailVerifiedAt,
     }).onConflictDoUpdate({
       target: players.id,
       set: {
@@ -52,6 +56,15 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
         // `excluded.*` refers to the proposed new row), so this survives
         // any number of re-runs after login has upgraded the player.
         legacyPasswordSha256: sql`CASE WHEN ${players.passwordHash} IS NULL THEN ${user.U_password} ELSE ${players.legacyPasswordSha256} END`,
+        // Same shape, opposite direction: never downgrade a player who has
+        // since verified natively in GL3 (email_verified_at non-null) back
+        // to NULL just because V2 still shows U_status=2 on a re-run. Only
+        // ever move NULL -> non-null here, never the other way. The
+        // incoming value is passed as an ISO string (not the raw Date) —
+        // unlike a `.values()` insert, a raw `sql` template does not run
+        // drizzle's column-type mapping, so an embedded Date reaches the
+        // driver un-serialised and postgres-js rejects it.
+        emailVerifiedAt: sql`CASE WHEN ${players.emailVerifiedAt} IS NOT NULL THEN ${players.emailVerifiedAt} ELSE ${emailVerifiedAt === null ? null : emailVerifiedAt.toISOString()} END`,
       },
     });
     bumpTable(report, "users", "written");

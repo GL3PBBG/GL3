@@ -37,19 +37,32 @@ const EnvSchema = z.object({
   S3_REGION: z.string().default("auto"),
   /** Public base the browser fetches images from, e.g. `https://cdn.example.com`. */
   ASSET_CDN_BASE: z.string().optional(),
+
+  /** Outbound mail. `log` prints to stdout (dev/test); `resend` POSTs to api.resend.com. */
+  EMAIL_DRIVER: z.enum(["log", "resend"]).default("log"),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().email().default("noreply@gl3.dev"),
+  /** Web origin used to build links in outbound mail (verify, reset). */
+  APP_BASE_URL: z.string().url().default("http://localhost:5173"),
 }).superRefine((env, ctx) => {
   // Selecting `s3` with a field missing must fail HERE, at boot, rather than on
   // the first upload an admin attempts — which would be days later, in
   // production, with a 500 and no clue which of six variables was forgotten.
-  if (env.ASSET_DRIVER !== "s3") return;
-  for (const key of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "ASSET_CDN_BASE"] as const) {
-    if (!env[key]) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: [key],
-        message: `${key} is required when ASSET_DRIVER=s3`,
-      });
+  if (env.ASSET_DRIVER === "s3") {
+    for (const key of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "ASSET_CDN_BASE"] as const) {
+      if (!env[key]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when ASSET_DRIVER=s3`,
+        });
+      }
     }
+  }
+
+  if (env.EMAIL_DRIVER === "resend" && !env.RESEND_API_KEY) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["RESEND_API_KEY"],
+      message: "RESEND_API_KEY is required when EMAIL_DRIVER=resend" });
   }
 });
 
@@ -57,6 +70,13 @@ export interface AssetConfig {
   driver: "fs" | "s3";
   fsRoot: string;
   s3: { endpoint: string; bucket: string; accessKeyId: string; secretAccessKey: string; region: string; cdnBase: string } | null;
+}
+
+export interface MailConfig {
+  driver: "log" | "resend";
+  apiKey: string | null;
+  from: string;
+  appBaseUrl: string;
 }
 
 export interface Config {
@@ -69,6 +89,7 @@ export interface Config {
   pluginIds: string[];
   sweepIntervalMs: number;
   assets: AssetConfig;
+  mail: MailConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -99,6 +120,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
           cdnBase: parsed.ASSET_CDN_BASE.replace(/\/+$/, ""),
         }
         : null,
+    },
+    mail: {
+      driver: parsed.EMAIL_DRIVER,
+      apiKey: parsed.RESEND_API_KEY ?? null,
+      from: parsed.EMAIL_FROM,
+      appBaseUrl: parsed.APP_BASE_URL.replace(/\/+$/, ""),
     },
   };
 }

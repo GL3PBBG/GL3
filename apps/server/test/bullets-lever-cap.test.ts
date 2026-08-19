@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { locations, playerStats, settings } from "../src/db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -19,6 +21,7 @@ import { bootTestServer } from "./helpers/server.js";
  */
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 
 /** Above `LEVER_FLOOR` (10_000n) so a rejection can only be the cap. */
@@ -27,14 +30,10 @@ const cap = 15_000n;
 let regCounter = 0;
 async function register(): Promise<{ token: string; playerId: string }> {
   regCounter += 1;
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
+  return registerVerifiedPlayer({ app, redis }, {
+    username: `Lever${regCounter}${Date.now()}`,
     remoteAddress: `10.79.${(regCounter >> 8) & 0xff}.${regCounter & 0xff}`,
-    payload: { username: `Lever${regCounter}${Date.now()}`, password: "hunter2hunter2" },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json<{ token: string; playerId: string }>();
 }
 
 /**
@@ -64,7 +63,7 @@ beforeAll(async () => {
   // Settings are a boot-time snapshot, so the cap must be in the table before
   // buildApp runs.
   await db.insert(settings).values({ key: "bullets.max_cost", value: cap.toString() });
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 });
 
 afterAll(async () => {

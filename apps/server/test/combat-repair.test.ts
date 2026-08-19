@@ -1,12 +1,14 @@
 import { RepairResponseSchema, WeaponConditionDtoSchema } from "@gl3/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { items, locations, playerItems, playerStats, settings, transactions } from "../src/db/schema/index.js";
 import { weaponCondition } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -19,6 +21,7 @@ import { bootTestServer } from "./helpers/server.js";
  */
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
+let redis: Redis;
 let closeServer: () => Promise<void>;
 let token: string;
 let player: string;
@@ -63,14 +66,9 @@ const post = (bearerToken: string, url: string, payload: unknown) =>
 beforeEach(async () => {
   await resetDb(db);
   if (app) await closeServer();
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer());
 
-  const registerRes = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    payload: { username: "Ren", password: "hunter2hunter2" },
-  });
-  ({ token, playerId: player } = registerRes.json());
+  ({ token, playerId: player } = await registerVerifiedPlayer({ app, redis }, { username: "Ren" }));
 
   const locationId = uuidv7();
   homeLocationId = locationId;
