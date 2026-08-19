@@ -358,6 +358,7 @@ export default defineWorkspace([
         "test/plugin-ctx-core-events.test.ts",
         "test/plugin-ctx-port-prereqs.test.ts",
         "test/plugin-ctx-transaction.test.ts",
+        "test/plugin-tx-timers.test.ts",
         "test/plugin-jobs.test.ts",
         "test/plugin-hospital-gate.test.ts",
         "test/admin-gate.test.ts",

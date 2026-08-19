@@ -10,14 +10,14 @@ import {
 } from "@gl3/plugin-sdk";
 import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
 import type { Queue } from "bullmq";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { StorageDriver } from "../assets/driver.js";
 import { resolveAssets, resolveSingletonAsset } from "../assets/service.js";
 import { publishEvent } from "../bus/publish.js";
 import type { Db } from "../db/client.js";
-import { players, playerStats, pluginJobRuns } from "../db/schema/index.js";
+import { players, playerStats, playerTimers, pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange, InsufficientFundsError,
   InsufficientGangFundsError, lockGangAndPlayerForUpdate, lockLocationForUpdate,
@@ -192,6 +192,31 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
             gangAndPlayer: (gangId, playerId) => lockGangAndPlayerForUpdate(tx, gangId, playerId),
             location: (locationId) => lockLocationForUpdate(tx, locationId),
             locations: (locationIds) => lockLocationsForUpdate(tx, locationIds),
+          },
+          timers: {
+            get: async (playerId, key) => {
+              const [row] = await tx
+                .select({ expiresAt: playerTimers.expiresAt })
+                .from(playerTimers)
+                .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, key)));
+              return row?.expiresAt ?? null;
+            },
+            set: async (playerId, key, expiresAt) => {
+              await tx
+                .insert(playerTimers)
+                .values({ playerId, key, expiresAt })
+                .onConflictDoUpdate({
+                  target: [playerTimers.playerId, playerTimers.key],
+                  set: { expiresAt },
+                });
+            },
+            clear: async (playerId, key) => {
+              const deleted = await tx
+                .delete(playerTimers)
+                .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, key)))
+                .returning({ playerId: playerTimers.playerId });
+              return deleted.length > 0;
+            },
           },
           /**
            * `tx`, never `db`. Defined inside this closure, so every call
