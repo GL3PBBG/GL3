@@ -9,6 +9,7 @@ import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
@@ -23,29 +24,31 @@ interface Player { token: string; playerId: string; username: string }
 /**
  * Same shape as jail-bail-bust.test.ts: `jail.bust_success_percent` is read
  * once at boot, so each branch boots its own app and registers players on it.
+ * Registration goes through the verified-register helper — the email gate
+ * (merged from the social cluster) 400s a payload without an email and 403s
+ * an unverified player on every game route, including escape.
  */
-async function registerOn(target: FastifyInstance, name: string): Promise<Player> {
-  const res = await target.inject({
-    method: "POST", url: "/api/auth/register",
-    payload: { username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`, password: "hunter2hunter2" },
+async function registerOn(target: { app: FastifyInstance; redis: import("ioredis").Redis }, name: string): Promise<Player> {
+  return registerVerifiedPlayer(target, {
+    username: `${name}${Date.now()}${Math.floor(Math.random() * 1000)}`,
   });
-  const body = res.json();
-  return { token: body.token, playerId: body.playerId, username: body.username };
 }
 
 async function place(p: Player, locationId: string | null, patch: Record<string, unknown> = {}): Promise<void> {
   await db.update(playerStats).set({ locationId, ...patch }).where(eq(playerStats.playerId, p.playerId));
 }
 
-async function bootWith(rows: Record<string, string>): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
+async function bootWith(rows: Record<string, string>): Promise<Awaited<ReturnType<typeof bootTestServer>>> {
   await db.insert(settingsTable)
     .values(Object.entries(rows).map(([key, value]) => ({ key, value })));
   return bootTestServer();
 }
 
+let appRedis: import("ioredis").Redis;
+
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer, redis: appRedis } = await bootTestServer());
   townA = uuidv7();
   await db.insert(locations).values([{ id: townA, name: `Town A ${townA.slice(0, 8)}` }]);
 });
@@ -59,7 +62,7 @@ const auth = (p: Player) => ({ authorization: `Bearer ${p.token}` });
 
 describe("POST /api/jail/escape", () => {
   it("refuses a caller who is not jailed", async () => {
-    const free = await registerOn(app, "Free");
+    const free = await registerOn({ app, redis: appRedis }, "Free");
     await place(free, townA);
 
     const res = await app.inject({ method: "POST", url: "/api/jail/escape", headers: auth(free) });
@@ -71,7 +74,7 @@ describe("POST /api/jail/escape", () => {
   it("frees the caller and publishes player.released when the roll always wins", async () => {
     const own = await bootWith({ "jail.bust_success_percent": "100" });
     try {
-      const escaper = await registerOn(own.app, "Escaper");
+      const escaper = await registerOn(own, "Escaper");
       await place(escaper, townA, { jailedUntil: new Date(Date.now() + 300_000) });
 
       await subscriber.subscribe(GAME_EVENTS_CHANNEL);
@@ -102,7 +105,7 @@ describe("POST /api/jail/escape", () => {
       "jail.escape_fail_extra_seconds": "120",
     });
     try {
-      const escaper = await registerOn(own.app, "Escaper");
+      const escaper = await registerOn(own, "Escaper");
       const before = new Date(Date.now() + 300_000);
       await place(escaper, townA, { jailedUntil: before });
 
