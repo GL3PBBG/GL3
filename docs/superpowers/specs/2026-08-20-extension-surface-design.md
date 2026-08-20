@@ -56,10 +56,15 @@ subscribers the trap scales; fix it now.
 
 - Loader stamps each manifest's `filters` entries with the owning plugin's id
   at load time: `BoundSubscription { sub: FilterSubscription, ownerId: string }`.
-  `on()` is unchanged — third-party plugins recompile nothing.
-- The server-side filter application path builds each subscriber a ctx for
-  its **own** plugin (events labelled correctly, own settings namespace, own
-  cooldown/asset scopes).
+  `on()` is unchanged.
+- `runFilterChain` is changed **in place** (no parallel function, no
+  deprecated original): it takes the bound subscriptions and a **ctx
+  factory** — `ctxFor(ownerId) => PluginCtx` — instead of a single ctx, and
+  builds each subscriber its own plugin's ctx (events labelled correctly,
+  own settings namespace, own cooldown/asset scopes). One function, one
+  signature; its single caller (`apps/server/src/plugins/ctx.ts`) is updated
+  with it. See "Compatibility regime" below for why breaking the signature
+  is free.
 - Existing 8 subscriber edges only relax: the existing workarounds keep
   working (detectives' expire-at-hire is data design, untouched; bullets'
   lever clamp-at-charge stays correct).
@@ -75,14 +80,60 @@ schemas live in **`@gl3/shared`** (the client parses them off the wire); the
 SDK already depends on shared. The whole core surface is therefore
 enumerable from SDK docs — marketplace documentation for free.
 
-### 1c. Failure policy split
+### 1c. Failure policy on the point
 
 A throwing subscriber today propagates — correct for data points (a broken
 payout filter must not half-apply), wrong for UI seams (one bad plugin would
-500 /profile for every player). New `runFilterChainCollecting`:
-per-subscriber try/catch; a failed contribution is dropped and logged; the
-chain continues. UI seams use it; existing data points keep propagate
-semantics. This generalizes casino's game-throw→400 precedent.
+500 /profile for every player). The policy belongs to the **point**, chosen
+by its owner, so `filterPoint`'s signature changes in place:
+
+```ts
+filterPoint<T>(name: string, policy: "propagate" | "collect"): FilterPoint<T>
+```
+
+Required second argument, no options bag, no overload. `"collect"` wraps
+each subscriber in try/catch — a failed contribution is dropped and logged,
+the chain continues. `runFilterChain` reads the policy off the point. The
+five existing declarations gain an explicit `"propagate"`; the UI seams
+declare `"collect"`. This generalizes casino's game-throw→400 precedent.
+
+### Point-name convention, enforced
+
+The five existing points already follow `<ownerId>.<suffix>` (verified —
+declarer matches prefix in all five), so no rename is needed. What the free-
+breakage window buys instead: `validatePlugins` now **enforces** that a
+plugin's declared point names are prefixed with its own id, and reserves the
+`core.` prefix for SDK-declared core points. After a real release this
+enforcement would be unaddable without breaking any nonconforming plugin;
+adding it now costs nothing.
+
+### Retired legacy: duck-type arm in error guards
+
+`isPluginError` and its three siblings (`packages/plugin-sdk/src/errors.ts`)
+each accept the `Symbol.for` brand **or** a `name`+shape duck-type kept for
+"plugins published against 0.1.0–0.1.8". No such plugin exists, so the arm
+defends nobody and is the one branch that lets an unrelated error named
+`PluginError` through if it happens to carry `code` and `status`. Delete
+`named()` and the four fallback arms, plus the tests pinning the legacy
+behaviour (`error-guards.test.ts`'s unbranded-copy case and its siblings).
+Brand-only is stricter and survives duplicate SDK copies (`Symbol.for` is
+process-global), which is the only property the boundary needs. Folded into
+this branch per the touch-the-SDK-next rule.
+
+### Compatibility regime (decision)
+
+`@gl3/shared` and `@gl3/plugin-sdk` have **no external consumers**: every
+in-repo consumer resolves through the workspace (`"*"`), and no third-party
+plugin exists. Until one does, CLAUDE.md's additive-only discipline protects
+nothing and costs the ability to fix shapes while fixing them is free. So:
+
+- Breaking changes to both packages are **authorized on this branch** and
+  ship without ceremony (version numbers still move; chosen at publish time
+  after a registry check, as always).
+- **The event that ends this regime is the first third-party plugin author —
+  not the first npm publish.** From that point CLAUDE.md's discipline is
+  correct again and mandatory. This decision is recorded here and in
+  `docs/STATUS.md` when this branch lands.
 
 ### 1d. Explicit non-changes
 
@@ -144,10 +195,13 @@ already exists (unchanged). The surface grows without coupling growth.
 
 ### Versioning / publishing
 
-- `@gl3/shared`: additive (extras fields, `MoneyFormat`, hud/badge DTOs) —
-  patch bump.
-- `@gl3/plugin-sdk`: additive (`core-points.ts`, `runFilterChainCollecting`,
-  `BoundSubscription`) — patch bump.
+- `@gl3/shared`: extras fields, `MoneyFormat`, hud/badge DTOs (additive as it
+  happens, but additivity is no longer a constraint — see Compatibility
+  regime).
+- `@gl3/plugin-sdk`: `core-points.ts`, `BoundSubscription`, plus the
+  **breaking** in-place signature changes (`filterPoint` policy arg,
+  `runFilterChain` ctx factory) and the error-guard legacy-arm deletion —
+  authorized under the regime.
 - Exact version numbers chosen **at publish time after a registry check**
   (0.1.12/0.1.14 pending-publish collisions with concurrent sessions are on
   record). Publishing needs the user's explicit approval, per standing rule.
