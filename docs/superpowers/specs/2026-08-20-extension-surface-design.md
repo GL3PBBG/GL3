@@ -153,7 +153,7 @@ Core-owned points (tokens in SDK, applied by core routes, schemas in shared):
 | `core.profileView` | `{ targetId, extras: ProfileExtra[] }`; extra = stat `{label, value}` \| link `{label, to}` | profile route after DTO assembly; `extras` new optional field on `ProfileDto` | Profile.tsx appends rows and action links generically |
 | `core.dashboard` | `DashboardWidget[]` = `{ title, view: ViewNode }` | new route `GET /api/dashboard/widgets` (dashboard has no data route today — it composes existing queries client-side) | rendered via existing `renderNode` — full view vocabulary available |
 | `core.hud` | `HudEntry[]` = `{ label, value, countdownTo? }` | new route `GET /api/hud/extras` | Shell appends `<Stat>` entries; `countdownTo` ticks client-side |
-| `core.menuBadges` | `{ pageId, count }[]` | new route `GET /api/menu/badges` | badge on plugin nav links, same styling as mail/notifications |
+| `core.menuBadges` | `{ path, count }[]` — `path` is the nav link target (`"/detectives"`, `"/plugins/x"`), so one shape covers core and plugin links | new route `GET /api/menu/badges` | badge on any nav link, same styling as mail/notifications |
 | `core.moneyFormat` | `MoneyFormat { symbol, position, thousandsSep }` | `/api/plugins` payload build, per request | `Money`/`Amount` components consume — currencyFormat parity, declarative |
 
 Plugin-owned new point:
@@ -165,9 +165,13 @@ Plugin-owned new point:
 
 Notes:
 
-- Every extra carries a stamped `pluginId` on the wire (stamped server-side
-  from the subscription's owner, never self-reported) — client can attribute,
-  style, and dedup deterministically.
+- Every extra carries `pluginId` for attribution, set by the subscriber as
+  `ctx.pluginId` — which, under per-subscriber ctx binding (1a), is the
+  owner's id by construction. A generic `runFilterChain` cannot stamp
+  entries inside an arbitrary `T`, and the marketplace trust model is
+  hand-audit, not runtime enforcement, so convention plus audit is the
+  design. (`PluginCtx` gains `readonly pluginId` if it does not already
+  expose it.)
 - **Links are the v1 action verb.** V2's hooks injected links; direct POST
   buttons from injected UI need an action-routing story and are deferred.
 - All new DTO fields are optional → additive shared bump.
@@ -186,7 +190,7 @@ Notes:
 | membership | `core.hud`, `core.profileView` | membership countdown entry; "Member" stat |
 | crimes | `core.dashboard` | next-crime-ready widget |
 | combat | `inventory.itemActions` | "Repair at gunsmith" link on weapon rows (gunsmith is combat's route; today undiscoverable from inventory) |
-| forum | `core.menuBadges` | new-posts count on the forum nav entry |
+| detectives | `core.menuBadges` | ready-report count on "/detectives" (searches past `ends_at`, not expired — plain SELECT, no new table) |
 | — | `core.moneyFormat` | no natural existing consumer; integration-test subscriber + SDK docs example |
 
 Dependency edges: **zero new plugin→plugin edges.** Core-point subscribers
@@ -225,4 +229,6 @@ already exists (unchanged). The surface grows without coupling growth.
 ### Deferred (recorded, out of v1)
 
 Template rewrite (class 5), POST buttons from injected UI, target-list
-augmentation, player-facing settings slot, badges on core nav entries.
+augmentation, player-facing settings slot, and a forum new-posts badge —
+that last because "unread" requires a per-player read-tracking table and
+this branch ships no migrations.
