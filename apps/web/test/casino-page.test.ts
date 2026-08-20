@@ -122,6 +122,8 @@ describe("the lobby DTO", () => {
     locationName: "Rome",
     minBet: MIN,
     games: [{ gameId: "blackjack", name: "Blackjack", ownerName: "Bob", maxBet: MAX }],
+    tableGames: [],
+    remote: [],
     session: null,
   };
 

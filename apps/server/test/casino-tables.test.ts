@@ -5,6 +5,7 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { definePlugin, on, type PluginManifest } from "@gl3/plugin-sdk";
+import { CasinoLobbyResponseSchema, CasinoTableResponseSchema } from "@gl3/shared";
 import { tableGames, type TableGameDef } from "@gl3/plugin-casino";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -425,5 +426,29 @@ describe("GET /api/casino table listings", () => {
 
     // A house with no seats is not a remote table — nobody is playing there.
     expect(body.remote.some((row) => row.locationId === townC)).toBe(false);
+  });
+});
+
+describe("shared DTO parity", () => {
+  it("parses a live GET /api/casino/table body with CasinoTableResponseSchema", async () => {
+    const locationId = await seedLocation();
+    const { token, playerId } = await register();
+    await placePlayer(playerId, locationId, 1_000_000n);
+    await sit(token);
+
+    const res = await tableView(token);
+    expect(res.statusCode).toBe(200);
+    expect(() => CasinoTableResponseSchema.parse(res.json())).not.toThrow();
+  });
+
+  it("parses a live GET /api/casino lobby body with CasinoLobbyResponseSchema", async () => {
+    const locationId = await seedLocation();
+    const { token, playerId } = await register();
+    await placePlayer(playerId, locationId, 1_000_000n);
+    await sit(token);
+
+    const res = await lobby(token);
+    expect(res.statusCode).toBe(200);
+    expect(() => CasinoLobbyResponseSchema.parse(res.json())).not.toThrow();
   });
 });
