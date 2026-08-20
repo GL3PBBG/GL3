@@ -4,14 +4,14 @@ import { createMysqlPool } from "../../src/mysql/client.js";
 import { fingerprintV2Schema } from "../../src/mysql/fingerprint.js";
 
 describe("fingerprintV2Schema", () => {
-  it("passes on the full fixture and reports the two known-unsupported tables as unknown", async () => {
+  it("passes on the full fixture and reports the genuinely custom table as unknown", async () => {
     const fixture = await createIsolatedMysqlFixture();
     try {
       const pool = await createMysqlPool(fixture.url);
       const result = await fingerprintV2Schema(pool);
       expect(result.ok).toBe(true);
       expect(result.missingTables).toEqual([]);
-      expect(result.unknownTables.sort()).toEqual(["blackjackHands", "premiumMembership"]);
+      expect(result.unknownTables.sort()).toEqual(["blackjackHands"]);
       await pool.end();
     } finally {
       await fixture.teardown();

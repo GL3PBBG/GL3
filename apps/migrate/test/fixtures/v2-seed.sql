@@ -41,7 +41,7 @@ INSERT INTO itemEffects (IE_item, IE_effect, IE_value) VALUES
   (99, 'orphan', 1); -- orphan: item 99 does not exist
 INSERT INTO itemMeta (IM_item, IM_key, IM_value) VALUES
   (1, 'rarity', 'common');
-INSERT INTO premiumMembership (PM_id, PM_name, PM_seconds, PM_cost) VALUES
+INSERT INTO premiumMembership (PM_id, PM_desc, PM_seconds, PM_cost) VALUES
   (1, 'VIP Week', 604800, 500);
 -- The five bullet options plus the restock cursor, and the three detective
 -- knobs, are V2's flat keys; GL3 namespaces every plugin setting as

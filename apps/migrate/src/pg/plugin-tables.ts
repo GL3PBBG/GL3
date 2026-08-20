@@ -101,3 +101,11 @@ export const forumPosts = pgTable("p_forum_posts", {
   body: text("body").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Mirrors `packages/plugins/membership/src/migrations.ts` `0001_packages`. */
+export const membershipPackages = pgTable("p_membership_packages", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  costPoints: bigint("cost_points", { mode: "bigint" }).notNull(),
+  durationSeconds: integer("duration_seconds").notNull(),
+});
