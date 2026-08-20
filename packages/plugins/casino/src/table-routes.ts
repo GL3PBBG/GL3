@@ -2,13 +2,21 @@ import { randomBytes } from "node:crypto";
 import { asc, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { PluginError, route, type PluginCtx, type PluginTx } from "@gl3/plugin-sdk";
-import { guardGame, resolveHouse } from "./engine.js";
+import {
+  InsufficientFundsError, PluginError, route, type PluginCtx, type PluginTx,
+} from "@gl3/plugin-sdk";
+import {
+  escrow, guardGame, NonNegativeIntegerString, parseAction, resolveHouse,
+} from "./engine.js";
 import { buildTableRegistry, type TableGameDef } from "./games.js";
 import { casinoSeats, casinoTables, locations, players, playerStats } from "./schema.js";
 import { fromStorableState } from "./state.js";
-import { readMaxBet, readMinBet, readTableMaxSeats } from "./settings.js";
-import { lockTable, type LockedTable } from "./table-engine.js";
+import {
+  readMaxBet, readMinBet, readTableBetSeconds, readTableMaxSeats,
+} from "./settings.js";
+import {
+  applyStep, assertTableCanCover, dealIfReady, lockTable, type LockedTable, type SeatRow,
+} from "./table-engine.js";
 
 /** The caller's current town, `play`'s idiom: 409 when nowhere. */
 async function locationOf(tx: PluginTx, playerId: string): Promise<string> {
@@ -207,4 +215,143 @@ const readRoute = route({
   },
 });
 
-export const tableRoutes = [sitRoute, leaveRoute, readRoute];
+/**
+ * What `bet` and `act` answer with: the table as it stands AFTER the write,
+ * read back under the locks this transaction already holds.
+ *
+ * A fresh `lockTable` rather than the pre-write snapshot, because a settle can
+ * delete the caller's `leaving` seat or the whole table — the same envelope
+ * GET uses, so one client schema parses all three routes, and a table that is
+ * gone answers `{ table: null }` rather than a snapshot of something that no
+ * longer exists.
+ */
+async function renderAfter(
+  tx: PluginTx, ctx: PluginCtx, tableId: string, game: TableGameDef, viewerId: string,
+): Promise<{ status: 200; body: { table: Record<string, unknown> | null } }> {
+  const after = await lockTable(tx, ctx, tableId);
+  if (after === null) return { status: 200, body: { table: null } };
+  return { status: 200, body: { table: await renderTablePayload(tx, ctx, after, game, viewerId) } };
+}
+
+/**
+ * The caller's seat and its table, under the full lock order, with the phase
+ * the route requires already checked. Shared by `bet` and `act` because the
+ * two open identically — and because the `wrong_location` refusal has to
+ * happen on the UNLOCKED pre-read (`play`'s idiom): a player who travelled
+ * away must be refused before this transaction takes a single lock, and the
+ * town it would lock is the table's, never theirs.
+ */
+async function lockedSeat(
+  tx: PluginTx, ctx: PluginCtx, playerId: string, registry: Map<string, TableGameDef>, phase: string,
+): Promise<{ locked: LockedTable; game: TableGameDef; mine: SeatRow }> {
+  const seat = await seatOf(tx, playerId);
+  if (seat === null) throw new PluginError("not_seated", 404);
+  if (await locationOf(tx, playerId) !== seat.locationId) {
+    throw new PluginError("wrong_location", 409);
+  }
+
+  await tx.locks.location(seat.locationId);
+  const locked = await lockTable(tx, ctx, seat.tableId);
+  if (locked === null) throw new PluginError("not_seated", 404);
+  const game = registry.get(locked.table.gameId);
+  if (game === undefined) throw new PluginError("no_such_game", 404);
+  const mine = locked.seats.find((s) => s.playerId === playerId);
+  if (mine === undefined) throw new PluginError("not_seated", 404);
+  if (locked.table.phase !== phase) throw new PluginError("wrong_phase", 409);
+  return { locked, game, mine };
+}
+
+const betRoute = route({
+  method: "POST",
+  path: "/api/casino/table/bet",
+  accessInJail: false,
+  accessInHospital: true,
+  body: z.object({ wager: NonNegativeIntegerString }).strict(),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const wager = BigInt(body.wager);
+    const registry = await buildTableRegistry(ctx, ctx.installedPluginIds);
+
+    return ctx.transaction(async (tx) => {
+      const { locked, game, mine } = await lockedSeat(tx, ctx, player.id, registry, "betting");
+      // One stake per seat per hand. Raising it is the game's business
+      // (`wagerDelta`, mid-hand and bounded), never a second bet.
+      if (mine.wager > 0n) throw new PluginError("already_bet", 409);
+
+      const minBet = readMinBet(ctx.settings);
+      if (wager < minBet) throw new PluginError("wager_below_min", 400);
+      // The FROZEN house's lever (`lockTable` resolved it from the table's own
+      // `property_id`), so a table sold mid-hand keeps the bounds it was
+      // dealt under.
+      if (wager > locked.house.maxBet) throw new PluginError("wager_above_max", 400);
+
+      await assertTableCanCover(
+        tx, locked.house, locked.seats, game.maxPayoutMultiplier,
+        { seat: mine.seatNo, amount: wager },
+      );
+      try {
+        await escrow(tx, locked.house, player.id, wager, locked.table.gameId);
+      } catch (error) {
+        if (error instanceof InsufficientFundsError) throw new PluginError("insufficient_funds", 409);
+        throw error;
+      }
+      // `idle_hands` measures CONSECUTIVE deals sat out (spec §3), so betting
+      // clears it whether or not this bet is the one that deals.
+      await tx.db.update(casinoSeats).set({ wager, idleHands: 0 })
+        .where(eq(casinoSeats.id, mine.id));
+      mine.wager = wager;
+      mine.idleHands = 0;
+
+      // The FIRST bet at a table starts the betting clock; later ones do not
+      // restart it, so one seat cannot hold the table open indefinitely.
+      if (locked.table.deadlineAt === null) {
+        const deadlineAt = new Date(Date.now() + readTableBetSeconds(ctx.settings) * 1000);
+        await tx.db.update(casinoTables).set({ deadlineAt })
+          .where(eq(casinoTables.id, locked.table.id));
+        locked.table.deadlineAt = deadlineAt;
+      }
+
+      // Not forced: this deals only if every non-leaving seat has now bet.
+      // The lapsed-deadline deal is the clock's (Task 11).
+      await dealIfReady(tx, ctx, locked, game, false);
+
+      return renderAfter(tx, ctx, locked.table.id, game, player.id);
+    });
+  },
+});
+
+const actRoute = route({
+  method: "POST",
+  path: "/api/casino/table/act",
+  accessInJail: false,
+  accessInHospital: true,
+  // The envelope only; the game's own `action` schema validates the payload
+  // once the table tells us which game it is (spec §4.2).
+  body: z.object({ action: z.unknown() }).strict(),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const registry = await buildTableRegistry(ctx, ctx.installedPluginIds);
+
+    return ctx.transaction(async (tx) => {
+      const { locked, game, mine } = await lockedSeat(tx, ctx, player.id, registry, "acting");
+      if (locked.table.turnSeat !== mine.seatNo) throw new PluginError("not_your_turn", 409);
+      // Unreachable while `phase` and `state` move together (`applyStep` writes
+      // both, `settleHand` clears both), but the column is nullable and a game
+      // cannot be handed `null` as its state.
+      if (locked.table.state === null) throw new PluginError("wrong_phase", 409);
+
+      const action = parseAction(game.action, body.action);
+      const step = guardGame(locked.table.gameId, "act", () =>
+        game.act(fromStorableState(locked.table.state), mine.seatNo, action));
+      // The acting seat, so a `wagerDelta` from THIS seat (a double) is
+      // allowed and one naming any other seat is refused.
+      await applyStep(tx, ctx, locked, game, step, mine.seatNo);
+
+      return renderAfter(tx, ctx, locked.table.id, game, player.id);
+    });
+  },
+});
+
+export const tableRoutes = [sitRoute, leaveRoute, readRoute, betRoute, actRoute];

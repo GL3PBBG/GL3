@@ -314,6 +314,7 @@ export default defineWorkspace([
         "test/casino-lobby.test.ts",
         "test/casino-rogue-game.test.ts",
         "test/casino-tables.test.ts",
+        "test/casino-table-money.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
         "test/combat-kill-filter.test.ts",

@@ -1,8 +1,14 @@
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { PluginError, type PluginTx } from "@gl3/plugin-sdk";
 import { ownerAt, payOwner, propertiesTable, takeOverFrom } from "@gl3/plugin-properties";
 import type { GameDef } from "./games.js";
-import { casinoSessions } from "./schema.js";
+import { casinoSessions, playerStats } from "./schema.js";
+
+/** A bigint-safe amount on the wire: digits only, never a JSON number
+ *  (money is decimal-string, rule: zod every external boundary). Shared by
+ *  `play`'s body and the table's `bet` body. */
+export const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer string");
 
 export interface House {
   /** Null in a town nobody owns: escrow is a sink and payout a faucet. */
@@ -111,6 +117,60 @@ export function assertHouseCanCover(wager: bigint, multiplier: number, ownerCash
   const exposure = exposureOf(wager, multiplier);
   if (ownerCash === null) return; // unowned house is a faucet — nothing to exhaust
   if (exposure > ownerCash) throw new PluginError("house_cannot_cover", 409);
+}
+
+/** The house owner's cash, or `null` in an unowned town — the figure
+ *  `assertHouseCanCover` (and the table path's `totalExposure` comparison)
+ *  measures exposure against. Read under the player lock the caller has
+ *  already taken. */
+export async function readOwnerCash(tx: PluginTx, ownerId: string | null): Promise<bigint | null> {
+  if (ownerId === null) return null;
+  const [ownerStats] = await tx.db
+    .select({ cash: playerStats.cash })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, ownerId));
+  return ownerStats?.cash ?? 0n;
+}
+
+/**
+ * A game's OWN action schema over the `z.unknown()` envelope `act` accepts.
+ *
+ * The act body schemas can only validate the envelope — the hub cannot know a
+ * game's action shape up front (spec §4.2) — so this is the second half of
+ * the boundary, and a `ZodError` escaping it is a 500 where the repo's rule
+ * says a bad body is a clean 400. Takes the SCHEMA rather than the game so the
+ * solo `GameDef` and the table `TableGameDef` share one 400 contract.
+ */
+export function parseAction(schema: z.ZodType<unknown>, raw: unknown): unknown {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new PluginError("invalid_action", 400);
+  return parsed.data;
+}
+
+/** What the winner is told when the table changes hands. Exported so the page
+ *  and the tests quote the one string rather than three copies of it. */
+export const HOUSE_SEIZED_MESSAGE =
+  "The owner did not have enough cash to pay the bet, you took ownership of the casino.";
+
+/**
+ * Both sides of a bankruptcy takeover, told by NOTIFICATION rather than by a
+ * plugin event: casino publishes no event per hand (one per blackjack hand
+ * floods the feed) and a takeover is still a hand. `tx.notify` also reaches
+ * the OLD owner, who is not the actor and would never see a player-audience
+ * event.
+ *
+ * Called after a settle reported a seizure, inside the same transaction, so
+ * a rollback takes the notification with the handover.
+ */
+export async function notifyTakeover(
+  tx: PluginTx, house: House, winner: { id: string; username: string }, gameName: string,
+): Promise<void> {
+  await tx.notify(winner.id, HOUSE_SEIZED_MESSAGE);
+  if (house.ownerId === null) return;
+  await tx.notify(
+    house.ownerId,
+    `${winner.username} took over your ${gameName} table — you could not cover their winnings.`,
+  );
 }
 
 /**
