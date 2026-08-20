@@ -1,7 +1,8 @@
 import {
-  definePlugin, PluginError, route,
+  definePlugin, on, PluginError, route,
   type PageSchema, type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
+import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -23,6 +24,16 @@ const CommitCrimeParamsSchema = z.object({ crimeId: IdSchema });
 /** V2 shipped a default ladder starting at 35% (spec §1.2 US_crimes default). */
 const DEFAULT_CRIME_CHANCE = "35.00";
 
+/** V2 crimes.hooks.php: ceil(C_cooldown * 0.75) while the membership timer runs. */
+function memberCooldown(base: number, member: boolean): number {
+  return member ? Math.ceil(base * 0.75) : base;
+}
+
+const declareBenefit = on(membershipBenefits, (_ctx, list) => [
+  ...list,
+  { title: "Getaway Driver", description: "All crime cooldowns are reduced by 25%" },
+]);
+
 // ---------------------------------------------------------------------------
 // GET /api/crimes — port of routes.ts:26-47
 // ---------------------------------------------------------------------------
@@ -41,6 +52,7 @@ const listRoute = route({
       const skills = await tx.db.select().from(playerCrimeSkill)
         .where(eq(playerCrimeSkill.playerId, player.id));
       const skillByCrime = new Map(skills.map((s) => [s.crimeId, s.chance]));
+      const member = await isMember(tx, player.id);
       // `crimes` is a CORE table, so its art is core-scoped even though this
       // plugin renders it — the same cross-scope read inventory, travel and
       // ranks all make.
@@ -53,7 +65,7 @@ const listRoute = route({
             id: crime.id,
             name: crime.name,
             description: crime.description,
-            cooldownSeconds: crime.cooldownSeconds,
+            cooldownSeconds: memberCooldown(crime.cooldownSeconds, member),
             minPayout: crime.minPayout.toString(),
             maxPayout: crime.maxPayout.toString(),
             chance: skillByCrime.get(crime.id) ?? DEFAULT_CRIME_CHANCE,
@@ -81,13 +93,14 @@ const commitRoute = route({
     const { crimeId } = params;
 
     // Look the crime up BEFORE claiming the cooldown so a typo costs nothing.
-    const crime = await ctx.transaction(async (tx) => {
+    const pre = await ctx.transaction(async (tx) => {
       const [row] = await tx.db.select().from(crimes).where(eq(crimes.id, crimeId));
-      return row ?? null;
+      return { crime: row ?? null, member: await isMember(tx, player.id) };
     });
+    const crime = pre.crime;
     if (crime === null) throw new PluginError("crime_not_found", 404);
 
-    const won = await ctx.cooldown.acquire("crime", player.id, crime.cooldownSeconds);
+    const won = await ctx.cooldown.acquire("crime", player.id, memberCooldown(crime.cooldownSeconds, pre.member));
     if (!won) {
       const retryAfter = await ctx.cooldown.peek("crime", player.id);
       throw new PluginError(
@@ -407,6 +420,7 @@ export default definePlugin({
   routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
+  filters: [declareBenefit],
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }.
