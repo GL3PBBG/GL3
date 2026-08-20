@@ -45,11 +45,13 @@ describe("core.profileView and core.moneyFormat applied at their real seams", ()
       expect(profileRes.statusCode).toBe(200);
       const body = profileRes.json();
       const parsed = ProfileDtoSchema.parse(body);
-      // `bounties` is a core plugin (always loaded by bootTestServer) and
-      // itself subscribes to core.profileView, contributing an always-on
-      // "Place bounty" link ahead of the test plugins here.
+      // `bounties` and `detectives` are core plugins (always loaded by
+      // bootTestServer) and each subscribes to core.profileView, contributing
+      // an always-on link ahead of the test plugins here, in plugin load
+      // order (core-plugins.ts).
       expect(parsed.extras).toEqual([
         { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/bounties?target=${playerId}` },
+        { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/detectives?target=${playerId}` },
         { kind: "stat", pluginId: "profile-contributor", label: "Contributed", value: "1" },
         { kind: "link", pluginId: "profile-contributor", label: "See more", to: "/profile-contributor" },
       ]);
