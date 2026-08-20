@@ -236,12 +236,22 @@ schema test and a CLI usage string — nothing near casino or the lock helpers.
 `plugins/routes.ts` logs the driver error's `cause` (SQLSTATE, detail, table)
 from this branch on, which is the datum both earlier diagnoses lacked — but
 the third occurrence still didn't capture it: `app.ts:46` sets `logger:
-config.nodeEnv !== "test"`, so the `request.log.error` cause-logging is a
-no-op under the test environment, the one place the flake occurs. Until that
-logging works under test (a silent-by-default pino that still prints error
-level, or a console fallback), the SQLSTATE datum keeps being dropped. Note
-the 3.5x speedup raises concurrency *density*, which is a plausible reason a
+config.nodeEnv !== "test"`, so the `request.log.error` cause-logging was a
+no-op under the test environment, the one place the flake occurs. Note the
+3.5x speedup raises concurrency *density*, which is a plausible reason a
 latent contention bug surfaced when it did.
+
+**That gap is now closed.** Commit `3e3e5d7` (landed on `main` before
+`feat/blackjack-tables` started) added a `console.error` fallback for the
+driver-cause log line, one that survives the silenced test-environment
+logger. `feat/blackjack-tables`' Task 13 is the first proof it works: the
+new `test/casino-table-lock-order.test.ts` deliberate-inversion case
+produced a **real, captured `40P01`** with mutual `ShareLock` detail, not
+the bare 500 this repo had chased four times before. The *solo*
+`casino-lock-order` ABBA flake had not recurred as of that branch, so it is
+still unconfirmed against the fix directly — but the logging path it would
+need is now proven live under test, not theoretical. The next occurrence
+should carry its SQLSTATE.
 **A concurrent session makes a run *void*, not failing** — the
 properties-franchise cluster saw `1307 passed, zero failures, 22 files at
 (0 test)` because another agent shared this machine's Postgres and Redis. Zero
@@ -424,6 +434,40 @@ package stays wherever prior work has left it. `@gl3/plugin-sdk` → **`0.1.10`*
 for `tx.timers`, additive, **unpublished** pending the user's approval after a
 registry check.
 
+**Blackjack tables** has since shipped on `feat/blackjack-tables`: the casino
+gains multiplayer seats, and blackjack moves from the solo `casino.games`
+registry to a second, parallel `casino.tableGames` one built for it (V2 never
+had single-player blackjack). `p_casino_tables` and `p_casino_seats` (casino
+migrations `0003`–`0006`, two unique indexes plus a five-seat `CHECK`, no core
+migration) hold the shared row a hand lives at and a player's chair; both FKs
+cascade and are already held `FOR UPDATE`, so this is the rule-6 non-event
+again. The lock order is one new edge everywhere: `tx.locks.location` on the
+table's town, then ONE sorted `tx.locks.player` over every seated player plus
+the house owner plus any not-yet-seated caller, then the table row `FOR
+UPDATE` (`lockTable`) — up to six player rows where solo `play` locks at most
+two, since every seat can belong to a different table in a different town.
+There is no cron: `advanceTable` lazily deals, auto-stands, or settles on
+every read or write, bounded at 15 passes, and stamps each pass with the
+deadline it just cleared (not "now") so a whole abandoned hand resolves in one
+read; exhaustion by a rogue `autoAct` throws a loud `invalid_turn` 500 rather
+than building refund machinery, matching the install-time trust model.
+`settleHand` pays every in-hand seat and fires the property-board cluster's
+bankruptcy takeover for the first *short-paid* winner (not the first winner),
+latching to the sink for every payout after; it now retains the final hand's
+state rather than clearing it, so the betting-phase view between hands shows
+the just-finished reveal. A wager-0 leave bypasses both the game registry and
+the clock, the one escape hatch a table needs once its game plugin is
+uninstalled. The table view polls every 2.5 seconds rather than subscribing to
+events — a hand can advance with no request in flight to publish from — so
+this cluster adds no new `GameEvent` variant and `eventCopy.ts` /
+`ws/invalidation.ts` stay untouched. With blackjack gone from the solo
+registry, the solo hub's own tests (`casino-play`, `casino-act`,
+`casino-lobby`, `casino-lock-order`) converted to run against FARO, a small
+deterministic synthetic `GameDef` installed via its own test-only plugin.
+`test/casino-table-lock-order.test.ts` is added to rule 6's regression list
+below. `@gl3/shared` → `0.1.18` for the table DTOs, additive, **unpublished**;
+`@gl3/plugin-sdk` is untouched.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime
@@ -548,11 +592,18 @@ unavailable here.
    that calls `payOwner` (bullets, buying from an owned factory) locks both
    the buyer and the owner in the one sorted call rather than two, which
    `test/properties-lock-order.test.ts`'s ABBA case caught for `transfer`
-   independently. Regression tests: `test/gang-lock-order.test.ts`,
+   independently. Casino's table cluster (`feat/blackjack-tables`) widens the
+   same locations-first edge rather than adding a new one: `tx.locks.location`
+   → ONE sorted `tx.locks.player` over every seated player plus the house
+   owner plus any not-yet-seated caller → the table row `FOR UPDATE`
+   (`lockTable`), up to six player rows against solo `play`'s two, since every
+   seat can belong to a different table in a different town at the same
+   instant. Regression tests: `test/gang-lock-order.test.ts`,
    `test/travel-lock-order.test.ts`, `test/combat-lock-order.test.ts`,
    `test/theft-lock-order.test.ts`, `test/properties-lock-order.test.ts`,
    `test/properties-consumer-lock-order.test.ts`,
-   `test/casino-lock-order.test.ts` (`economy/ledger.ts`).
+   `test/casino-lock-order.test.ts`, `test/casino-table-lock-order.test.ts`
+   (`economy/ledger.ts`).
 
    The asset cluster adds **no** lock-order test, because it adds no edge:
    `entity_assets` carries a foreign key only to `assets`, and no gameplay path

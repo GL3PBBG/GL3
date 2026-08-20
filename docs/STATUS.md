@@ -2982,6 +2982,180 @@ this cluster's diff touches casino or the lock helpers; recorded here as
 further evidence the failure is load-dependent rather than tied to any one
 branch's changes.
 
+### Blackjack tables — multiplayer seats, a second registry, one lazy clock
+
+Spec: `docs/superpowers/specs/2026-08-20-blackjack-tables-design.md`. Plan:
+`docs/superpowers/plans/2026-08-20-blackjack-tables.md`. Branch
+`feat/blackjack-tables`. The casino-and-blackjack cluster shipped a house that
+could only ever seat one player against the dealer; this cluster gives it a
+shared table, and blackjack moves house from the solo `casino.games` registry
+to a second, parallel one built for it.
+
+**A second registry, not an extension of the first.** `TableGameDef` is not
+`GameDef` widened — `start`/`act`/`settle`/`view` keep their solo shapes, but a
+table game's `act` returns `{ state, wagerDelta }` against a **seat**, not a
+session, and settle returns a payout per seat rather than one figure. The hub
+collects them through `casino.tableGames`, a second filter point alongside
+`casino.games` — `bounties → combat`'s shape, twice over. Blackjack's solo
+`GameDef` is **deleted**, not deprecated: V2 never had single-player
+blackjack, and the table registry is what a migrated `plugin_id = 'blackjack'`
+property row now lights up against. The solo hub itself is untouched code, but
+its own tests could no longer prove they still worked against real rules once
+blackjack left — see the FARO conversion below.
+
+**Two tables, no core migration.** `p_casino_tables` (migration `0003`) is the
+shared row a hand lives at: `phase`, `turn_seat`, `deadline_at` and `hand_no`
+are hub-owned even though `state` stays opaque game jsonb, because without a
+hub-visible turn the hub could not answer 409 `not_your_turn` without decoding
+a game's own state. `p_casino_seats` (`0004`) is a player's chair, with two
+unique indexes: `(table_id, seat_no)` (`0005`, so a seat can't double-occupy)
+and a **plain** `(player_id)` (`0006`, game-wide, no `WHERE` — a seat row is
+deleted on leave rather than status-flagged, the table-flow sibling of
+`p_casino_sessions_one_open`'s partial index). `seat_no`'s `CHECK (BETWEEN 0
+AND 4)` is the hard five-seat ceiling. Both FKs cascade and both rows are
+already held `FOR UPDATE` by every inserting transaction, so the `FOR KEY
+SHARE` they take conflicts with nothing new — the by-now-familiar rule-6
+non-event. No core migration, so `schema.test.ts`'s FK/index counts are
+untouched by this cluster.
+
+**The lock order — one new edge, everywhere.** Every mutating table route
+(`sit`, `leave`, `bet`, `act`, and the slow-path GET) takes, in this exact
+order: `tx.locks.location` on the table's town, then **one** sorted
+`tx.locks.player` over every seated player plus the frozen house's owner plus
+any caller not yet seated (`sit`), then the table row `FOR UPDATE` —
+`lockTable` (`packages/plugins/casino/src/table-engine.ts:29`) is the single
+place that order is expressed, which is what lets one test file pin all five
+routes. It is not the solo hub's edge re-tested: solo `play` locks at most two
+player rows, the table locks up to six, every one of which can be seated at a
+*different* table in a *different* town at the same instant.
+`apps/server/test/casino-table-lock-order.test.ts` proves it with a
+deliberate-inversion ABBA case (A bets at B's table racing B bets at A's
+table, in two different towns) that went red with a **real captured `40P01`**
+— mutual `ShareLock` detail and all — because `plugins/routes.ts`'s
+driver-cause `console.error` (commit `3e3e5d7`, already on `main` before this
+branch, closed as T11.5 with no diff needed) finally had a flake to catch. See
+the flake note below.
+
+**The clock is lazy, not cron.** `advanceTable` re-derives, on every read or
+write that touches a table, whatever a cron firing on the deadline would have
+produced: deal-if-ready, stand-the-timed-out-seat, or settle, looping until
+the deadline is in the future or the hand settles. Each pass is stamped with
+`clockFrom` set to the deadline it just cleared rather than to "now" — spec
+§5's "repeat until the clock is in the future or the hand settles" read
+literally — which is what makes an abandoned three-seat hand resolve in one
+read instead of needing one poll per seat to clear 30 seconds at a time. The
+loop is bounded at `3 × MAX_TABLE_SEATS` (15) passes; a well-behaved game
+costs at most `1 + MAX_TABLE_SEATS`, so the margin exists purely against a
+rogue `autoAct` that never advances the turn. Exhaustion throws a loud
+`invalid_turn` 500 rather than building refund machinery — a ruling carried
+from T11 into T14: the table stays poisoned (stuck escrow, a permanent 500 on
+every future read including `leave`) until an operator intervenes, which
+matches the install-time trust model `publishCore` already established.
+`casino-rogue-table.test.ts` is the red proof, a hostile `TableGameDef`
+installed through the real filter point.
+
+**Escrow, settle, and the sink.** A bet escrows per seat; `assertTableCanCover`
+sums every live seat's exposure (`wager × game.maxPayoutMultiplier`) against
+the house's own cash before covering a raise, the multi-seat generalisation of
+the solo hub's `assertHouseCanCover`. `settleHand` pays every in-hand seat in
+**ascending seat order** and fires the bankruptcy takeover
+(`@gl3/plugin-properties`'s `takeOverFrom`, the property-board cluster's
+mechanism) for the **first short-paid winner**, not the first winner overall —
+a house that can cover seat 0 but not seat 1 fails at seat 1, and seat 1 is
+who takes the table. `seized` is a latch: once it is set, every payout after
+it comes from the sink instead of `payOwner`, because the debit that tripped
+the latch was already clamped to the old owner's cash, so that owner provably
+holds 0 and a later `payOwner` call on the same property would move nothing —
+routing through the sink is not a shortcut, it is the only path that still
+pays. Every winner is credited in full throughout; the takeover rides on top
+of the money, never in place of it. **`settleHand` retains the final hand's
+state** rather than clearing it — a ruling made at T16, spec §6 amended in
+place: `dealIfReady`'s next deal overwrites it, but between hands the
+betting-phase view shows the just-finished hand's cards rather than nothing,
+which is the only way a multiplayer result is ever visible to the seats that
+were in it (and to a newcomer glancing at the table, which is public
+information anyway).
+
+**The wager-0 leave escape hatch.** `leave` on a seat with `wager == 0` (not
+in the current hand) bypasses the game registry and the clock entirely — a
+deliberate carve-out from T11's original "leave builds a registry" rule, for
+the case where a table's game plugin has since been uninstalled and no
+registry can be built at all. `p_casino_seats`' game-wide `UNIQUE(player_id)`
+makes leave the only way out of a seat, so this is the one path that must
+never depend on the game still being installed. A seat mid-hand has no such
+exit — it needs the registry to resolve `autoAct` for the clock, and is
+accepted operator territory once a table goes rogue.
+
+**The lobby polls; it does not publish.** `GET /api/casino` lists
+`tableGames` alongside the existing solo games, plus remote-town seat counts
+(no usernames — the same privacy stance combat and travel already take on an
+underground town). The table view refreshes by polling every 2.5 seconds
+rather than by event, a deliberate deviation from the rest of GL3's
+event-driven invalidation: a hand can advance on its own, via the lazy clock,
+with no request in flight to publish from, so there is no natural moment to
+fire an event from. This cluster adds **no new `GameEvent` variant** — solo
+casino already shipped with no per-hand events, for the same "one event per
+hand floods the feed" reasoning, and `eventCopy.ts` / `ws/invalidation.ts`
+are untouched, confirmed by diff.
+
+**Blackjack's rules go multi-seat**, and the solo engine is retained rather
+than deleted, because its EV-shaping logic (the hole card, hit/stand/double)
+is exactly what a table hand still runs per seat — `dealIfReady` deals every
+`wager > 0` seat, consuming the table's one stored seed and rotating it, in
+one pass. `blackjack-table-rules.test.ts` covers the multi-seat mechanics
+(turn order, per-seat busts, the dealer settling once against every live
+hand) and `blackjack-table-view.test.ts` covers what a seat sees mid-hand —
+its own cards, other seats' cards, and the dealer's hole card still hidden
+until the dealer's turn, the same concealment bug the solo cluster's final
+review caught, now re-proven at the table.
+
+**The FARO conversion.** With blackjack gone from the solo registry, every
+test that exercised the solo hub through real rules (`casino-play`,
+`casino-act`, `casino-lobby`, `casino-lock-order`) had nothing left to run
+against. `apps/server/test/helpers/faro.ts` is a small deterministic
+synthetic `GameDef` — `wait` (non-settling, blackjack's `hit` stand-in),
+`win`/`lose`/`push` (settling) and `double` (a `wagerDelta` raise) — installed
+via its own `faroPlugin` alongside `CORE_PLUGINS` in each converted file, so
+the solo hub keeps a live game to exercise even with no shipped solo game left
+to test with. `casino-lock-order.test.ts`'s conversion is the one with
+teeth: FARO's deterministic `start`-never-settles shape reproduces the
+original ABBA choreography exactly, so the solo hub's own regression test
+kept its bite. One gap FARO's original action set left open — the non-settling
+branch of `act` — was covered in a follow-up commit adding `wait` before the
+conversion was called done.
+
+**Test inventory.** New files: `casino-tables.test.ts` (sit/leave/read),
+`casino-table-money.test.ts` (bet/deal/act/settle escrow and payout),
+`casino-table-clock.test.ts` (the lazy-advance shapes),
+`casino-table-lock-order.test.ts` (the ABBA/inversion/seat-race regression),
+`casino-rogue-table.test.ts` (the hostile-game red proof),
+`blackjack-table-rules.test.ts`, `blackjack-table-view.test.ts`,
+`packages/shared/test/casino-tables.test.ts` (the new DTOs) and
+`apps/web/test/casino-table-helpers.test.ts`, plus the FARO conversions of
+`casino-play`, `casino-act`, `casino-lobby` and `casino-lock-order`. All are
+registered in `vitest.workspace.ts` (the ninth-site trap).
+
+**Package versions.** `@gl3/shared` `0.1.17` → `0.1.18` for the table DTOs
+(`packages/shared/src/dto/casino.ts`) — additive, **unpublished** pending the
+user's approval after a registry check. `@gl3/plugin-sdk` is untouched: the
+table cluster needed no new SDK surface, so it stays at `0.1.10`.
+
+**The flake, and its first payoff.** `casino-lock-order`'s ABBA case (a bare
+500 on a `FOR UPDATE` acquisition under full-suite load) has recurred four
+times before this cluster with no SQLSTATE ever captured under the test
+logger, despite `plugins/routes.ts` logging the driver error's `cause` since
+the casino-blackjack branch — `app.ts`'s `logger: config.nodeEnv !== "test"`
+made the `request.log.error` call a no-op in exactly the environment the flake
+lives in. That gap closed on `main` before this branch started (commit
+`3e3e5d7`, a `console.error` fallback that survives the silenced test logger,
+verified as already-solved at T11.5 with no diff needed). Task 13's red proof
+for `casino-table-lock-order.test.ts` is the first time that logging has ever
+actually fired on a real deadlock: the deliberate inversion produced a genuine
+`40P01` with mutual `ShareLock` detail in the captured output, not the bare
+500 this repo has chased four times. The next time the *solo* flake fires
+under a full-suite run, it should — for the first time — carry its SQLSTATE
+too.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There
