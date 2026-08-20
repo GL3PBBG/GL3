@@ -4,9 +4,11 @@ import type { Redis as IORedis } from "ioredis";
 import { eq, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import theftPlugin from "@gl3/plugin-theft";
 import { crimes, locations, playerStats } from "../src/db/schema/index.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { theftTiers } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -30,7 +32,7 @@ let closeServer: () => Promise<void>;
 beforeEach(async () => {
   await resetDb(db);
   if (!app) {
-    await runPluginMigrations(db, [membershipPlugin]);
+    await runPluginMigrations(db, [membershipPlugin, theftPlugin]);
     ({ app, close: closeServer, redis } = await bootTestServer());
   }
 });
@@ -196,5 +198,53 @@ describe("travel membership benefit — Frequent Flyer Discount", () => {
     expect(res.statusCode).toBe(200);
     const titles = res.json<{ rows: Array<{ title: string }> }>().rows.map((r) => r.title);
     expect(titles).toContain("Frequent Flyer Discount");
+  });
+});
+
+async function seedTier(successChance: number): Promise<string> {
+  const id = uuidv7();
+  await db.insert(theftTiers).values({
+    id, name: `Tier ${id.slice(0, 8)}`,
+    successChance, maxDamage: 20,
+    minCarValue: 0n, maxCarValue: 100_000n,
+  });
+  return id;
+}
+
+interface TierRow { id: string; successChance: string }
+
+describe("theft membership benefit — Slide Hammer", () => {
+  it("member sees a 10%-boosted successChance in the listing; non-member sees the base chance", async () => {
+    const tierId = await seedTier(50);
+    const member = await registerVerifiedPlayer({ app, redis });
+    const nonMember = await registerVerifiedPlayer({ app, redis });
+    await grantMembership(member.playerId);
+
+    const memberRes = await app.inject({
+      method: "GET", url: "/api/theft/tiers",
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    expect(memberRes.statusCode).toBe(200);
+    const memberTier = memberRes.json<{ rows: TierRow[] }>().rows.find((r) => r.id === tierId);
+    expect(memberTier?.successChance).toBe("55");
+
+    const nonMemberRes = await app.inject({
+      method: "GET", url: "/api/theft/tiers",
+      headers: { authorization: `Bearer ${nonMember.token}` },
+    });
+    expect(nonMemberRes.statusCode).toBe(200);
+    const nonMemberTier = nonMemberRes.json<{ rows: TierRow[] }>().rows.find((r) => r.id === tierId);
+    expect(nonMemberTier?.successChance).toBe("50");
+  });
+
+  it("GET /api/membership/benefits lists Slide Hammer", async () => {
+    const player = await registerVerifiedPlayer({ app, redis });
+    const res = await app.inject({
+      method: "GET", url: "/api/membership/benefits",
+      headers: { authorization: `Bearer ${player.token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const titles = res.json<{ rows: Array<{ title: string }> }>().rows.map((r) => r.title);
+    expect(titles).toContain("Slide Hammer");
   });
 });

@@ -49,6 +49,11 @@ export function bracketWeight(tier: TheftTier, candidates: readonly CatalogueCar
   return inBracket(tier, candidates).reduce((sum, c) => sum + weightOf(c), 0);
 }
 
+/** V2 theft.hooks.php: floor(T_chance * 1.1), capped at 100, while the membership timer runs. */
+export function boostedChance(chance: number, member: boolean): number {
+  return member ? Math.min(100, Math.floor(chance * 1.1)) : chance;
+}
+
 /**
  * Two-stage: roll for success, then (on success) draw a car and damage; on
  * failure, roll the chase. The chase branch is evaluated first because it is
