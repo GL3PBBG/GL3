@@ -1,11 +1,15 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
+import { DEFAULT_MONEY_FORMAT, type MoneyFormat } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
 
 export interface MenuItem { pageId: string; path: string; label: string; order: number }
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
 export interface EventMeta { pluginId: string; name: string; describe: string; invalidates: string[] }
-export interface PluginsPayload { menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[] }
+export interface PluginsPayload {
+  menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[];
+  moneyFormat: MoneyFormat;
+}
 
 /**
  * Pure and called once at boot (spec: Boot sequence step 6) — the payload is
@@ -42,7 +46,9 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
   // Ties break on page id so the order is stable across boots rather than
   // depending on the config's plugin order.
   menu.sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
-  return { menu, pages, events };
+  // Filled with the default for now — a later task replaces this with the
+  // `core.moneyFormat` filter chain applied per request.
+  return { menu, pages, events, moneyFormat: DEFAULT_MONEY_FORMAT };
 }
 
 export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload): void {
