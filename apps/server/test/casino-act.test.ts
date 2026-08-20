@@ -3,8 +3,12 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { games, type GameDef, type GameStep } from "@gl3/plugin-casino";
+import { definePlugin, on, type PluginManifest } from "@gl3/plugin-sdk";
 import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -12,16 +16,19 @@ import { bootTestServer } from "./helpers/server.js";
 /**
  * POST /api/casino/act — wagerDelta, settle, payout.
  *
- * Runs against the real installed `blackjack` game through a bare
- * `bootTestServer()`, exactly `casino-play.test.ts`'s shape.
+ * Runs against FARO, a deterministic synthetic solo game installed via
+ * `bootTestServer({ plugins: [faroPlugin, throwsPlugin] })` — blackjack is a
+ * table game now and no longer lives in the solo `casino.games` registry
+ * (see `test/helpers/faro.ts`). Every action except `wait` settles, so most
+ * hands here are a single `act` call rather than the old hit-then-stand
+ * sequence; `wait` is FARO's one non-settling move, standing in for
+ * blackjack's `hit` so the hub's non-settling `act` branch still has coverage.
  *
  * Every hand here is seeded DIRECTLY into `p_casino_sessions` with a
- * hand-built `BlackjackState` rather than opened through `play` + a real
- * shuffle: `play`'s own test file already proves escrow against the real
- * shoe, and a real shuffle cannot deterministically produce "player hits
- * then stands for a loss" vs. "a natural" vs. "double bankrupts the house"
- * on demand. Seeding is exactly the idiom `casino-play.test.ts`'s "refuses a
- * second play while one is open" test already uses for the same reason.
+ * hand-built `FaroState`, exactly `casino-play.test.ts`'s "refuses a second
+ * play while one is open" idiom: this file is about `act`'s own money
+ * movements (a `wagerDelta` escrow, and `settleSession`'s payout), and a real
+ * FARO `play` has no interesting branches for it to exercise.
  *
  * Money bookkeeping: seeding a session is standing in for a `play` call that
  * already happened, so each test sets the player's and (if any) owner's cash
@@ -77,7 +84,7 @@ const ledgerSumOf = async (id: string): Promise<bigint> => {
 async function seedHouse(locationId: string, ownerId: string, cost: bigint): Promise<string> {
   const id = uuidv7();
   await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost, profit: 0n,
+    id, locationId, pluginId: "faro", ownerPlayerId: ownerId, cost, profit: 0n,
   });
   return id;
 }
@@ -96,17 +103,15 @@ interface Seeded {
   sessionId: string;
 }
 
-/** Inserts an open (or, for test 6, already-settled) session with a
- *  hand-built `BlackjackState` so hit/stand/double outcomes are exact. */
+/** Inserts an open (or, for the `session_closed` test, already-settled)
+ *  session with a hand-built `FaroState` — `{ wager, outcome: "open" }` — so
+ *  `act`'s own decision (the ACTION, not the state) drives the outcome. */
 async function seedSession(opts: {
   playerId: string;
   locationId: string;
   propertyId: string | null;
   wager: bigint;
-  player: string[];
-  dealer: string[];
-  cursor: number;
-  shoe: string[];
+  gameId?: string;
   status?: "open" | "settled";
   createdAt?: Date;
 }): Promise<Seeded> {
@@ -115,18 +120,11 @@ async function seedSession(opts: {
     id: sessionId,
     ...(opts.createdAt === undefined ? {} : { createdAt: opts.createdAt }),
     playerId: opts.playerId,
-    gameId: "blackjack",
+    gameId: opts.gameId ?? "faro",
     locationId: opts.locationId,
     propertyId: opts.propertyId,
     wager: opts.wager,
-    state: {
-      shoe: opts.shoe,
-      cursor: opts.cursor,
-      player: opts.player,
-      dealer: opts.dealer,
-      wager: bi(opts.wager),
-      phase: "player",
-    },
+    state: { wager: bi(opts.wager), outcome: "open" },
     status: opts.status ?? "open",
     seed: "fixture",
   });
@@ -142,32 +140,43 @@ function act(token: string, action: string) {
   });
 }
 
-/**
- * Every card code a response's `view` puts on screen.
- *
- * Walks the JSON the route actually sent rather than the `ViewNode` the game
- * built, because the point of the assertion below is what reaches the PLAYER:
- * a code that never crosses this boundary cannot be read out of the payload,
- * whatever the session row holds. `unknown` + narrowing, never a cast.
- */
-function cardsIn(node: unknown): string[] {
-  if (Array.isArray(node)) return node.flatMap(cardsIn);
-  if (node === null || typeof node !== "object") return [];
-  const obj: Record<string, unknown> = { ...node };
-  if (obj["kind"] === "cards" && Array.isArray(obj["cards"])) {
-    return obj["cards"].filter((c): c is string => typeof c === "string");
-  }
-  return Object.values(obj).flatMap(cardsIn);
-}
-
 async function sessionRow(sessionId: string) {
   const [row] = await db.select().from(casinoSessions).where(eq(casinoSessions.id, sessionId));
   return row;
 }
 
+/**
+ * A synthetic game whose `act` always throws — the 400-not-500 "throwing
+ * game" test used to lean on blackjack's own "can only double on the first
+ * two cards" check; blackjack left the solo registry (Task 5) and none of
+ * FARO's actions refuse, so this test builds its own one-off manifest, the
+ * same shape `casino-rogue-game.test.ts`'s "becomes a clean error from
+ * `act`" describe block already proves — reproduced here over HTTP via
+ * `app.inject` rather than `callPluginRoute`, to match this file's own idiom.
+ */
+const THROWS: GameDef<{ wager: bigint }> = {
+  id: "throws",
+  name: "Throws",
+  maxPayoutMultiplier: 2,
+  action: z.unknown(),
+  start: ({ wager }): GameStep<{ wager: bigint }> => (
+    { state: { wager }, view: { kind: "text", value: "throws: place your call" }, done: false }
+  ),
+  act: (): GameStep<{ wager: bigint }> => { throw new Error("the game refuses this move"); },
+  settle: (_state, wager) => wager * 2n,
+  view: () => ({ kind: "text", value: "throws" }),
+};
+
+const throwsPlugin: PluginManifest = definePlugin({
+  id: "throws",
+  version: "1.0.0",
+  basePaths: ["/api/throws"],
+  filters: [on(games, (_ctx, list) => [...list, THROWS as GameDef])],
+});
+
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [faroPlugin, throwsPlugin] }));
 });
 
 afterAll(async () => {
@@ -176,12 +185,15 @@ afterAll(async () => {
 });
 
 describe("POST /api/casino/act", () => {
-  it("hits then stands: settles, and the player's net across the hand equals payout - wager", async () => {
+  it("a win settles the hand, and the player's net across it equals payout - wager", async () => {
+    // Was "hits then stands...", a two-call hit-then-stand sequence:
+    // blackjack-specific multi-turn play. FARO models the "settling" half of
+    // that sequence with a single `act("win")` — the non-settling half (the
+    // old `hit`) is covered separately below by `act("wait")`.
     const { token, playerId } = await register();
     const { playerId: ownerId } = await register();
     const locationId = await seedLocation();
     const propertyId = await seedHouse(locationId, ownerId, 0n);
-    await placePlayer(playerId, locationId, 1_000_000n);
 
     const wager = 10_000n;
     // Escrow already happened at (a hypothetical) `play`: player is down the
@@ -189,32 +201,16 @@ describe("POST /api/casino/act", () => {
     await placePlayer(ownerId, locationId, 10_000_000n + wager);
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    // player 5 (H2+H3), dealer 16 (H10+H6) — dealer must draw on stand.
-    const { sessionId } = await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["H4", "D9"],
-    });
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId, wager });
 
     const cashBefore = await cashOf(playerId);
     const ownerCashBefore = await cashOf(ownerId);
 
-    const hitRes = await act(token, "hit");
-    expect(hitRes.statusCode).toBe(200);
-    const hitBody = hitRes.json<{ done: boolean; wager: string }>();
-    expect(hitBody.done).toBe(false);
-    // The unfinished branch reports the wager too — an act that does not raise
-    // it still has to say what it is, or the page needs a "no figure this
-    // time" branch that can never be exercised.
-    expect(hitBody.wager).toBe(wager.toString());
-    // player now 9 (H2+H3+H4) — no money moves on a non-settling act.
-    expect(await cashOf(playerId)).toBe(cashBefore);
-
-    const standRes = await act(token, "stand");
-    expect(standRes.statusCode).toBe(200);
-    const standBody = standRes.json<{ done: boolean; payout: string }>();
-    expect(standBody.done).toBe(true);
-    // Dealer draws D9 on 16 -> 25, bust: player wins double.
-    const payout = BigInt(standBody.payout);
+    const res = await act(token, "win");
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ done: boolean; payout: string }>();
+    expect(body.done).toBe(true);
+    const payout = BigInt(body.payout);
     expect(payout).toBe(wager * 2n);
 
     expect(await cashOf(playerId)).toBe(cashBefore + payout);
@@ -225,37 +221,61 @@ describe("POST /api/casino/act", () => {
     expect(row?.settledAt).not.toBeNull();
   });
 
-  it("never sends the dealer's hole card to a player who is still choosing", async () => {
+  it("a non-settling act persists state and moves no money — and the hand still settles afterward", async () => {
+    // `act("wait")` is FARO's stand-in for blackjack's `hit`: the hub's
+    // non-settling branch (`index.ts`'s `done: false` response — state and
+    // wager persisted, no settle) had no coverage anywhere in the tree once
+    // blackjack left the solo registry, since every OTHER FARO action settles
+    // immediately.
     const { token, playerId } = await register();
+    const { playerId: ownerId } = await register();
     const locationId = await seedLocation();
-    await placePlayer(playerId, locationId, 1_000_000n);
+    const propertyId = await seedHouse(locationId, ownerId, 0n);
 
-    // Dealer H10 up, H6 in the hole. Seeing H6 means seeing that the dealer
-    // is on 16 and must draw — the single most valuable fact at the table.
-    await seedSession({
-      playerId, locationId, propertyId: null, wager: 10_000n,
-      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["H4", "D9"],
-    });
+    const wager = 10_000n;
+    await placePlayer(ownerId, locationId, 10_000_000n + wager);
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    const hit = await act(token, "hit");
-    expect(hit.statusCode).toBe(200);
-    const body = hit.json<{ done: boolean; view: unknown }>();
-    expect(body.done).toBe(false);
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId, wager });
 
-    const cards = cardsIn(body.view);
-    expect(cards).toContain("H10");                                  // the up-card
-    expect(cards).not.toContain("H6");                               // the hole card
-    expect(cards.filter((c) => c === "B1" || c === "B2")).toHaveLength(1);
-    // Nor through the total: 16 is what H10+H6 makes.
-    expect(JSON.stringify(body.view)).not.toContain("\"16\"");
+    const cashBefore = await cashOf(playerId);
+    const ownerCashBefore = await cashOf(ownerId);
 
-    // And it is revealed the moment the hand is over.
-    const stand = await act(token, "stand");
-    expect(stand.statusCode).toBe(200);
-    const final = stand.json<{ done: boolean; view: unknown }>();
-    expect(final.done).toBe(true);
-    expect(cardsIn(final.view)).toContain("H6");
+    const waitRes = await act(token, "wait");
+    expect(waitRes.statusCode).toBe(200);
+    const waitBody = waitRes.json<{ done: boolean; wager: string }>();
+    expect(waitBody.done).toBe(false);
+    // The unfinished branch reports the wager too — an act that does not
+    // raise it still has to say what it is.
+    expect(waitBody.wager).toBe(wager.toString());
+    // No money moves on a non-settling act.
+    expect(await cashOf(playerId)).toBe(cashBefore);
+    expect(await cashOf(ownerId)).toBe(ownerCashBefore);
+
+    const waitedRow = await sessionRow(sessionId);
+    expect(waitedRow?.status).toBe("open");
+    expect(waitedRow?.wager).toBe(wager);
+
+    // And the hand is still playable afterward — its state survived the
+    // non-settling step, so a following action settles normally.
+    const winRes = await act(token, "win");
+    expect(winRes.statusCode).toBe(200);
+    const winBody = winRes.json<{ done: boolean; payout: string }>();
+    expect(winBody.done).toBe(true);
+    const payout = BigInt(winBody.payout);
+    expect(payout).toBe(wager * 2n);
+    expect(await cashOf(playerId)).toBe(cashBefore + payout);
+    expect(await cashOf(ownerId)).toBe(ownerCashBefore - payout);
+
+    const finalRow = await sessionRow(sessionId);
+    expect(finalRow?.status).toBe("settled");
   });
+
+  // "never sends the dealer's hole card to a player who is still choosing"
+  // deleted: it proved blackjack's own concealment over HTTP, which FARO
+  // (no hole card, no multi-turn deal) cannot exercise. Superseded by
+  // `casino-tables.test.ts` (Task 10), which re-proves concealment over HTTP
+  // at a table.
 
   it("a push returns exactly the wager (net zero for both sides)", async () => {
     const { token, playerId } = await register();
@@ -267,16 +287,12 @@ describe("POST /api/casino/act", () => {
     await placePlayer(ownerId, locationId, 10_000_000n + wager);
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    // Both 19 already, dealer >= 17 so `stand` settles with no draw needed.
-    await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-    });
+    await seedSession({ playerId, locationId, propertyId, wager });
 
     const cashBefore = await cashOf(playerId);
     const ownerCashBefore = await cashOf(ownerId);
 
-    const res = await act(token, "stand");
+    const res = await act(token, "push");
     expect(res.statusCode).toBe(200);
     const body = res.json<{ done: boolean; payout: string }>();
     expect(body.done).toBe(true);
@@ -286,42 +302,9 @@ describe("POST /api/casino/act", () => {
     expect(await cashOf(ownerId)).toBe(ownerCashBefore - wager);
   });
 
-  it("a natural pays 2.5x and the house is debited 2.5x", async () => {
-    const { token, playerId } = await register();
-    const { playerId: ownerId } = await register();
-    const locationId = await seedLocation();
-    const propertyId = await seedHouse(locationId, ownerId, 0n);
-
-    const wager = 10_000n;
-    await placePlayer(ownerId, locationId, 10_000_000n + wager);
-    await placePlayer(playerId, locationId, 1_000_000n - wager);
-
-    // Player 21 on two cards (natural). Dealer 5, must draw twice to bust —
-    // isNatural(dealer) is false regardless (its final hand is > 2 cards).
-    await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["Ha", "Hk"], dealer: ["H2", "H3"], cursor: 0, shoe: ["H9", "H9"],
-    });
-
-    const cashBefore = await cashOf(playerId);
-    const ownerCashBefore = await cashOf(ownerId);
-    const ledgerBefore = await ledgerSumOf(playerId);
-    const ownerLedgerBefore = await ledgerSumOf(ownerId);
-
-    const res = await act(token, "stand");
-    expect(res.statusCode).toBe(200);
-    const body = res.json<{ done: boolean; payout: string }>();
-    const payout = BigInt(body.payout);
-    expect(payout).toBe((wager * 5n) / 2n); // 2.5x
-
-    expect(await cashOf(playerId)).toBe(cashBefore + payout);
-    expect(await cashOf(ownerId)).toBe(ownerCashBefore - payout);
-
-    // Ledger tracks the movement exactly — sum(ledger) == balance (rule 3),
-    // checked as a delta since setup used direct cash sets.
-    expect((await ledgerSumOf(playerId)) - ledgerBefore).toBe(payout);
-    expect((await ledgerSumOf(ownerId)) - ownerLedgerBefore).toBe(-payout);
-  });
+  // "a natural pays 2.5x and the house is debited 2.5x" deleted: naturals are
+  // a blackjack-specific rule (two-card 21), which FARO has no concept of.
+  // Superseded by blackjack's own unit tests.
 
   it("double debits a second wager AND credits the house before the hand resolves", async () => {
     const { token, playerId } = await register();
@@ -333,12 +316,9 @@ describe("POST /api/casino/act", () => {
     await placePlayer(ownerId, locationId, 10_000_000n + wager);
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    // Player 9 on two cards (double-eligible). Dealer 16, draws once to 25
-    // (bust) on the double's own dealer-play.
-    const { sessionId } = await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H4", "H5"], dealer: ["H10", "H6"], cursor: 0, shoe: ["H2", "D9"],
-    });
+    // FARO's "double" emits `wagerDelta: state.wager` (raising the stake to
+    // 2x) and settles as a win AT the doubled wager — `test/helpers/faro.ts`.
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId, wager });
 
     const cashBefore = await cashOf(playerId);
     const ownerCashBefore = await cashOf(ownerId);
@@ -355,7 +335,7 @@ describe("POST /api/casino/act", () => {
     // client that assumed its own opening stake would show half the truth.
     expect(body.wager).toBe(newWager.toString());
     const payout = BigInt(body.payout);
-    expect(payout).toBe(newWager * 2n); // dealer bust, double win on the new wager
+    expect(payout).toBe(newWager * 2n); // win on the doubled wager
 
     // Net = -(the extra wager) + payout.
     const net = payout - wager;
@@ -373,19 +353,19 @@ describe("POST /api/casino/act", () => {
     const locationId = await seedLocation();
     const propertyId = await seedHouse(locationId, ownerId, 0n);
 
-    const wager = 10_000n;
-    // 20,000 (doubled) x 2.5 = 50,000 exposure > the owner's 40,000 cash.
-    await placePlayer(ownerId, locationId, 40_000n);
+    const wager = 100_000n;
+    // FARO's `maxPayoutMultiplier` is 2.5, same as blackjack's: the opening
+    // exposure is 250,000 and the doubled exposure is 500,000. 300,000 sits
+    // between the two — enough for a hypothetical opening bet, not enough for
+    // the raise — so it is `assertHouseCanCover`'s RECHECK (which runs BEFORE
+    // the delta is escrowed, `engine.ts`) that refuses this, not an opening
+    // check that never ran here: the hand is seeded already open rather than
+    // dealt through `play`.
+    await placePlayer(ownerId, locationId, 300_000n);
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    const preState = {
-      shoe: ["H2", "D9"], cursor: 0, player: ["H4", "H5"], dealer: ["H10", "H6"],
-      wager: bi(wager), phase: "player",
-    };
-    const { sessionId } = await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H4", "H5"], dealer: ["H10", "H6"], cursor: 0, shoe: ["H2", "D9"],
-    });
+    const preState = { wager: bi(wager), outcome: "open" };
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId, wager });
 
     const cashBefore = await cashOf(playerId);
     const ownerCashBefore = await cashOf(ownerId);
@@ -410,12 +390,10 @@ describe("POST /api/casino/act", () => {
     await placePlayer(playerId, locationId, 1_000_000n);
 
     await seedSession({
-      playerId, locationId, propertyId: null, wager: 10_000n,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-      status: "settled",
+      playerId, locationId, propertyId: null, wager: 10_000n, status: "settled",
     });
 
-    const res = await act(token, "stand");
+    const res = await act(token, "win");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("session_closed");
   });
@@ -430,17 +408,12 @@ describe("POST /api/casino/act", () => {
     const wager = 10_000n;
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    // Both 19: `stand` settles as a push with no draw, so the payout is exact
-    // without depending on a shoe.
-    const { sessionId } = await seedSession({
-      playerId, locationId, propertyId: null, wager,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-    });
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId: null, wager });
 
     const cashBefore = await cashOf(playerId);
     const ledgerBefore = await ledgerSumOf(playerId);
 
-    const res = await act(token, "stand");
+    const res = await act(token, "push");
     expect(res.statusCode).toBe(200);
     expect(BigInt(res.json<{ payout: string }>().payout)).toBe(wager);
 
@@ -459,15 +432,12 @@ describe("POST /api/casino/act", () => {
     const locationId = await seedLocation();
     await placePlayer(playerId, locationId, 1_000_000n);
 
-    await seedSession({
-      playerId, locationId, propertyId: null, wager: 10_000n,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-    });
+    await seedSession({ playerId, locationId, propertyId: null, wager: 10_000n });
 
-    // "fold" is not in blackjack's `z.enum(["hit","stand","double"])`. The
+    // "hit" is not in FARO's `z.enum(["win","lose","push","double"])`. The
     // envelope schema cannot catch it — the hub does not know a game's action
     // shape — so this is the boundary the plugin's own schema guards.
-    const res = await act(token, "fold");
+    const res = await act(token, "hit");
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: string }>().error).toBe("invalid_action");
 
@@ -481,21 +451,19 @@ describe("POST /api/casino/act", () => {
     const locationId = await seedLocation();
     await placePlayer(playerId, locationId, 1_000_000n);
 
-    // Three cards, so blackjack's `act` throws "can only double on the first
-    // two cards". A game's own `Error` is not a `PluginError`, and
-    // `routes.ts` re-throws anything else.
+    // `THROWS`, a one-off manifest installed alongside FARO (above): its own
+    // `Error` is not a `PluginError`, and `routes.ts` re-throws anything else.
     await seedSession({
-      playerId, locationId, propertyId: null, wager: 10_000n,
-      player: ["H4", "H5", "H2"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
+      playerId, locationId, propertyId: null, wager: 10_000n, gameId: "throws",
     });
 
     const cashBefore = await cashOf(playerId);
-    const res = await act(token, "double");
+    const res = await act(token, "go");
     expect(res.statusCode).toBe(400);
     const body = res.json<{ error: string; detail?: string; step?: string }>();
     expect(body.error).toBe("game_error");
     // The game's own words survive, so a page can say more than a code.
-    expect(body.detail).toMatch(/double/i);
+    expect(body.detail).toMatch(/refuses/i);
     expect(body.step).toBe("act");
 
     expect(await cashOf(playerId)).toBe(cashBefore);
@@ -516,10 +484,7 @@ describe("POST /api/casino/act", () => {
     await placePlayer(playerId, locationId, 1_000_000n - wager);
     await placePlayer(latecomerId, locationId, 10_000_000n);
 
-    const { sessionId } = await seedSession({
-      playerId, locationId, propertyId: null, wager,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-    });
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId: null, wager });
 
     // ...and someone buys the table while the hand is in play.
     await seedHouse(locationId, latecomerId, 0n);
@@ -527,7 +492,7 @@ describe("POST /api/casino/act", () => {
     const cashBefore = await cashOf(playerId);
     const latecomerBefore = await cashOf(latecomerId);
 
-    const res = await act(token, "stand");
+    const res = await act(token, "push");
     expect(res.statusCode).toBe(200);
     const payout = BigInt(res.json<{ payout: string }>().payout);
     expect(payout).toBe(wager); // push
@@ -552,12 +517,11 @@ describe("POST /api/casino/act", () => {
 
     const { sessionId } = await seedSession({
       playerId, locationId, propertyId: null, wager: 10_000n,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
       createdAt: new Date(Date.now() - 45 * 60_000),   // default expiry is 30m
     });
 
     const cashBefore = await cashOf(playerId);
-    const res = await act(token, "stand");
+    const res = await act(token, "win");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("session_expired");
 
@@ -575,12 +539,9 @@ describe("POST /api/casino/act", () => {
     const locationId = await seedLocation();
     await placePlayer(ownerA, locationId, 1_000_000n);
 
-    await seedSession({
-      playerId: ownerA, locationId, propertyId: null, wager: 10_000n,
-      player: ["H10", "H9"], dealer: ["H9", "H10"], cursor: 0, shoe: [],
-    });
+    await seedSession({ playerId: ownerA, locationId, propertyId: null, wager: 10_000n });
 
-    const res = await act(tokenB, "stand");
+    const res = await act(tokenB, "win");
     expect(res.statusCode).toBe(404);
   });
 
@@ -603,13 +564,9 @@ describe("POST /api/casino/act", () => {
 
     const cashBefore = await cashOf(playerId);
 
-    // Player stands on 5, dealer draws D9 onto 16 and busts: pays 2x.
-    await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
-    });
+    await seedSession({ playerId, locationId, propertyId, wager });
 
-    const res = await act(token, "stand");
+    const res = await act(token, "win");
     expect(res.statusCode).toBe(200);
     const body = res.json<{ done: boolean; payout: string; houseSeized: boolean }>();
     expect(body.done).toBe(true);
@@ -640,12 +597,9 @@ describe("POST /api/casino/act", () => {
     const wager = 10_000n;
     await placePlayer(playerId, locationId, 1_000_000n - wager);
 
-    await seedSession({
-      playerId, locationId, propertyId: null, wager,
-      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
-    });
+    await seedSession({ playerId, locationId, propertyId: null, wager });
 
-    const res = await act(token, "stand");
+    const res = await act(token, "win");
     expect(res.statusCode).toBe(200);
     const body = res.json<{ payout: string; houseSeized: boolean }>();
     expect(BigInt(body.payout)).toBe(wager * 2n);
@@ -661,12 +615,9 @@ describe("POST /api/casino/act", () => {
     // so the clamp can bite while nobody else is involved at all.
     await placePlayer(playerId, locationId, 5_000n);
 
-    await seedSession({
-      playerId, locationId, propertyId, wager,
-      player: ["H2", "H3"], dealer: ["H10", "H6"], cursor: 0, shoe: ["D9"],
-    });
+    await seedSession({ playerId, locationId, propertyId, wager });
 
-    const res = await act(token, "stand");
+    const res = await act(token, "win");
     expect(res.statusCode).toBe(200);
     expect(res.json<{ houseSeized: boolean }>().houseSeized).toBe(false);
 

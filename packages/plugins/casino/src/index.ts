@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import {
@@ -7,23 +7,51 @@ import {
   type PluginCtx, type PluginTx, type ViewNode,
 } from "@gl3/plugin-sdk";
 import {
-  assertHouseCanCover, escrow, frozenHouse, guardGame, resolveHouse, resolvePayout, settleSession,
+  assertHouseCanCover, escrow, frozenHouse, guardGame, notifyTakeover, NonNegativeIntegerString,
+  parseAction, readOwnerCash, resolveHouse, resolvePayout, settleSession,
   type House,
 } from "./engine.js";
-import { buildRegistry, games, type GameDef } from "./games.js";
+import {
+  buildRegistry,
+  buildTableRegistry,
+  games,
+  tableGames,
+  type GameDef,
+  type TableGameDef,
+} from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
-import { casinoSessions, locations, players, playerStats } from "./schema.js";
-import { readExpiryMinutes, readMaxBet, readMinBet } from "./settings.js";
+import { casinoSeats, casinoSessions, casinoTables, locations, players, playerStats } from "./schema.js";
+import {
+  readExpiryMinutes, readMaxBet, readMinBet, readTableBetSeconds, readTableTurnSeconds,
+  readTableIdleKickHands, readTableMaxSeats,
+} from "./settings.js";
 import { fromStorableState, toStorableState } from "./state.js";
+import { tableRoutes } from "./table-routes.js";
 
-export { casinoSessions } from "./schema.js";
-export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
+export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
+// Lives in `engine.ts` (with `notifyTakeover`, its only caller besides the
+// table path) and is re-exported here so the plugin's public surface is
+// unchanged by that move.
+export { HOUSE_SEIZED_MESSAGE } from "./engine.js";
+export { lockTable } from "./table-engine.js";
+export {
+  games,
+  buildRegistry,
+  tableGames,
+  buildTableRegistry,
+  type GameDef,
+  type GameStep,
+  type TableGameDef,
+  type TableStep,
+  type TableSeatInput,
+} from "./games.js";
 // The readers are exported for the same reason `@gl3/plugin-theft` exports
 // `readTheftSettings`: they are pure, and their contract (defaults, the digits
 // guard, the expiry ceiling) is worth pinning in a DB-free unit test.
 export {
-  MAX_SESSION_EXPIRY_MINUTES, readExpiryMinutes, readMaxBet, readMinBet,
+  MAX_SESSION_EXPIRY_MINUTES, MAX_TABLE_SEATS, readExpiryMinutes, readMaxBet, readMinBet,
+  readTableBetSeconds, readTableIdleKickHands, readTableMaxSeats, readTableTurnSeconds,
 } from "./settings.js";
 // Re-exported so a test can assert against the same page object rather than a
 // hand-copied duplicate of its view tree — the properties convention.
@@ -53,20 +81,6 @@ async function lockBothPlayers(tx: PluginTx, playerId: string, ownerId: string |
 }
 
 /**
- * The game's own action schema over the `z.unknown()` envelope `act` accepts.
- *
- * `ActBodySchema` can only validate the envelope — the hub cannot know a
- * game's action shape up front (spec §4.2) — so this is the second half of
- * the boundary, and a `ZodError` escaping it is a 500 where the repo's rule
- * says a bad body is a clean 400.
- */
-function parseAction(game: GameDef, raw: unknown): unknown {
-  const parsed = game.action.safeParse(raw);
-  if (!parsed.success) throw new PluginError("invalid_action", 400);
-  return parsed.data;
-}
-
-/**
  * The lobby's resume view, or `null`.
  *
  * `null` for a game that declares no `view` (spec §3: it resumes viewless
@@ -83,18 +97,6 @@ function safeView(game: GameDef, state: unknown): ViewNode | null {
   } catch {
     return null;
   }
-}
-
-/** The house owner's cash, or `null` in an unowned town — the figure
- *  `assertHouseCanCover` measures the hand's exposure against. Read under the
- *  player lock `lockBothPlayers` has already taken. */
-async function readOwnerCash(tx: PluginTx, ownerId: string | null): Promise<bigint | null> {
-  if (ownerId === null) return null;
-  const [ownerStats] = await tx.db
-    .select({ cash: playerStats.cash })
-    .from(playerStats)
-    .where(eq(playerStats.playerId, ownerId));
-  return ownerStats?.cash ?? 0n;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,10 +125,13 @@ const lobbyRoute = route({
 
     // Request-time and per-request, exactly as `play`/`act` build it — there is
     // deliberately no module-level cache (Task 6: a process-level registry
-    // outlives a test's plugin set).
+    // outlives a test's plugin set). The TABLE registry (Task 12) is built the
+    // same way, alongside the solo one.
     const registry = await buildRegistry(ctx, ctx.installedPluginIds);
+    const tableRegistry = await buildTableRegistry(ctx, ctx.installedPluginIds);
     const fallbackMaxBet = readMaxBet(ctx.settings);
     const expiryMinutes = readExpiryMinutes(ctx.settings);
+    const maxSeats = readTableMaxSeats(ctx.settings);
 
     return ctx.transaction(async (tx) => {
       const [stats] = await tx.db
@@ -151,11 +156,19 @@ const lobbyRoute = route({
       for (const [gameId] of registry) {
         houses.set(gameId, await resolveHouse(tx, gameId, locationId, fallbackMaxBet));
       }
+      // The TABLE registry's houses, same idiom — one `resolveHouse` per
+      // registered table game, sequential on the same connection.
+      const tableHouses = new Map<string, House>();
+      for (const [gameId] of tableRegistry) {
+        tableHouses.set(gameId, await resolveHouse(tx, gameId, locationId, fallbackMaxBet));
+      }
 
       // One query for every house owner in town rather than one per game: the
       // registry is small today, but a lobby is the one route whose cost grows
-      // with the number of installed games.
-      const ownerIds = [...houses.values()]
+      // with the number of installed games. Covers BOTH registries' houses —
+      // a solo game and a table game can be owned by different players in the
+      // same town, and this is the one place either owner's name is looked up.
+      const ownerIds = [...houses.values(), ...tableHouses.values()]
         .map((house) => house.ownerId)
         .filter((id): id is string => id !== null);
       const ownerNames = new Map<string, string>();
@@ -163,7 +176,7 @@ const lobbyRoute = route({
         const rows = await tx.db
           .select({ id: players.id, username: players.username })
           .from(players)
-          .where(inArray(players.id, ownerIds));
+          .where(inArray(players.id, [...new Set(ownerIds)]));
         for (const row of rows) ownerNames.set(row.id, row.username);
       }
 
@@ -180,6 +193,71 @@ const lobbyRoute = route({
           maxBet: (house?.maxBet ?? fallbackMaxBet).toString(),
         };
       });
+
+      // LOCAL tables: every live table in the caller's town, with its seat
+      // count. One grouped query rather than one per game — the `remote`
+      // query below is the same shape for every OTHER town.
+      const localTableRows = await tx.db
+        .select({
+          tableId: casinoTables.id,
+          gameId: casinoTables.gameId,
+          phase: casinoTables.phase,
+          seatsFilled: sql<number>`count(${casinoSeats.id})::int`,
+        })
+        .from(casinoTables)
+        .leftJoin(casinoSeats, eq(casinoSeats.tableId, casinoTables.id))
+        .where(eq(casinoTables.locationId, locationId))
+        .groupBy(casinoTables.id, casinoTables.gameId, casinoTables.phase);
+
+      const tablesByGame = new Map<string, { tableId: string; seatsFilled: number; maxSeats: number; phase: string }[]>();
+      for (const row of localTableRows) {
+        const list = tablesByGame.get(row.gameId) ?? [];
+        list.push({ tableId: row.tableId, seatsFilled: row.seatsFilled, maxSeats, phase: row.phase });
+        tablesByGame.set(row.gameId, list);
+      }
+
+      // EVERY registered table game, with-or-without a live table — a game
+      // that has none still needs to be offered (`tables: []`, spec's "sit
+      // opens a fresh table").
+      const tableGameRows = [...tableRegistry.values()].map((game) => {
+        const house = tableHouses.get(game.id);
+        const ownerId = house?.ownerId ?? null;
+        return {
+          gameId: game.id,
+          name: game.name,
+          ownerName: ownerId === null ? null : (ownerNames.get(ownerId) ?? null),
+          maxBet: (house?.maxBet ?? fallbackMaxBet).toString(),
+          maxSeats,
+          tables: tablesByGame.get(game.id) ?? [],
+        };
+      });
+
+      // REMOTE: every OTHER town with at least one seated player at a
+      // REGISTERED table game — counts only, never a username, so an
+      // underground town's residents stay unidentifiable from here the same
+      // way they already are everywhere else (combat, travel, `/api/online`).
+      const remoteRows = await tx.db
+        .select({
+          locationId: casinoTables.locationId,
+          locationName: locations.name,
+          gameId: casinoTables.gameId,
+          seated: sql<number>`count(*)::int`,
+        })
+        .from(casinoSeats)
+        .innerJoin(casinoTables, eq(casinoTables.id, casinoSeats.tableId))
+        .innerJoin(locations, eq(locations.id, casinoTables.locationId))
+        .where(ne(casinoTables.locationId, locationId))
+        .groupBy(casinoTables.locationId, locations.name, casinoTables.gameId);
+
+      const remote = remoteRows
+        .filter((row) => tableRegistry.has(row.gameId))
+        .map((row) => ({
+          locationId: row.locationId,
+          locationName: row.locationName,
+          gameId: row.gameId,
+          gameName: tableRegistry.get(row.gameId)?.name ?? row.gameId,
+          seated: row.seated,
+        }));
 
       const [open] = await tx.db
         .select({
@@ -209,6 +287,8 @@ const lobbyRoute = route({
           locationName: location?.name ?? "",
           minBet: readMinBet(ctx.settings).toString(),
           games: gameRows,
+          tableGames: tableGameRows,
+          remote,
           session: live === null ? null : {
             sessionId: live.id,
             gameId: live.gameId,
@@ -230,39 +310,9 @@ const lobbyRoute = route({
 // POST /api/casino/play — escrow, house resolution, exposure check.
 // ---------------------------------------------------------------------------
 
-/** A bigint-safe amount on the wire: digits only, never a JSON number
- *  (money is decimal-string, rule: zod every external boundary). */
-const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer string");
-
 /** The house a forfeit settles against: none. See the call site — a forfeit
  *  pays nothing, and `settleSession` reaches `payOwner` only for a payout. */
 const NO_HOUSE: House = { propertyId: null, ownerId: null, maxBet: 0n };
-
-/** What the winner is told when the table changes hands. Exported so the page
- *  and the tests quote the one string rather than three copies of it. */
-export const HOUSE_SEIZED_MESSAGE =
-  "The owner did not have enough cash to pay the bet, you took ownership of the casino.";
-
-/**
- * Both sides of a bankruptcy takeover, told by NOTIFICATION rather than by a
- * plugin event: casino publishes no event per hand (one per blackjack hand
- * floods the feed) and a takeover is still a hand. `tx.notify` also reaches
- * the OLD owner, who is not the actor and would never see a player-audience
- * event.
- *
- * Called after `settleSession` returned true, inside the same transaction, so
- * a rollback takes the notification with the handover.
- */
-async function notifyTakeover(
-  tx: PluginTx, house: House, winner: { id: string; username: string }, gameName: string,
-): Promise<void> {
-  await tx.notify(winner.id, HOUSE_SEIZED_MESSAGE);
-  if (house.ownerId === null) return;
-  await tx.notify(
-    house.ownerId,
-    `${winner.username} took over your ${gameName} table — you could not cover their winnings.`,
-  );
-}
 
 const PlayBodySchema = z.object({
   gameId: z.string().min(1).max(80),
@@ -517,7 +567,7 @@ const actRoute = route({
       // (the hub cannot know a game's action shape up front), so an
       // unparseable action reaching a raw `ZodError` answered 500 where the
       // repo's rule is a clean 400.
-      const action = parseAction(game, body.action);
+      const action = parseAction(game.action, body.action);
       const state = fromStorableState(session.state);
       const step = guardGame(pre.gameId, "act", () => game.act(state, action));
 
@@ -707,11 +757,11 @@ export default definePlugin({
   version: "1.0.0",
   basePaths: ["/api/casino", "/api/admin/casino"],
   migrations: CASINO_MIGRATIONS,
-  tables: { sessions: "p_casino_sessions" },
-  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute],
+  tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
+  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes],
   adminPages: [adminPage],
   // Documentation parity with combat's `provides: [killResolved]`: nothing
   // reads `PluginManifest.provides` today, but this is the point a game
-  // subscribes to via `on(games, ...)`.
-  provides: [games],
+  // subscribes to via `on(games, ...)` or `on(tableGames, ...)`.
+  provides: [games, tableGames],
 });

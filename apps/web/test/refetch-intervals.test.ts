@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SENTENCE_SAFETY_POLL_MS, hospitalRefetchInterval, jailRefetchInterval,
+  SENTENCE_SAFETY_POLL_MS, TABLE_POLL_MS, hospitalRefetchInterval, jailRefetchInterval,
 } from "../src/api/queries.js";
 
 describe("sentence safety polling", () => {
@@ -29,5 +29,16 @@ describe("sentence safety polling", () => {
 
   it("is far slower than the WebSocket it backs up", () => {
     expect(SENTENCE_SAFETY_POLL_MS).toBeGreaterThanOrEqual(30_000);
+  });
+});
+
+describe("the casino table poll", () => {
+  it("is fast, because it is not backing anything up", () => {
+    // Unlike the sentence polls, this one has no WebSocket behind it: casino
+    // publishes no events, and the table's clock only advances when somebody
+    // READS the table (`advanceTable`). So this interval is both the realtime
+    // channel and the clock's heartbeat, and it caps how long a lapsed turn
+    // can sit un-auto-stood at a table nobody is acting at.
+    expect(TABLE_POLL_MS).toBe(2500);
   });
 });

@@ -5,7 +5,8 @@ import {
   AttackResponseSchema, AuthResponseSchema, BailResponseSchema, BankStatusResponseSchema,
   BountyListResponseSchema,
   BulletShopResponseSchema, BustResponseSchema, BuyBulletsResponseSchema, BuyItemResponseSchema,
-  CasinoLobbyResponseSchema, CasinoStepResponseSchema,
+  CasinoLeaveResponseSchema, CasinoLobbyResponseSchema, CasinoSitResponseSchema,
+  CasinoStepResponseSchema, CasinoTableResponseSchema,
   CellBlockListResponseSchema,
   CheckinResponseSchema,
   CombatLogResponseSchema,
@@ -35,7 +36,8 @@ import {
   type BustResponse,
   type BuyBulletsResponse,
   type BuyItemRequest, type BuyItemResponse,
-  type CasinoLobbyResponse, type CasinoStepResponse,
+  type CasinoLeaveResponse, type CasinoLobbyResponse, type CasinoSitResponse,
+  type CasinoStepResponse, type CasinoTableResponse,
   type CellBlockListResponse,
   type CheckinResponse,
   type CombatLogResponse,
@@ -1088,6 +1090,117 @@ export function useCasinoAct() {
       // A double raises the wager and a settle pays out, so cash moves here too.
       void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
+  });
+}
+
+/**
+ * How often a seated player re-reads their table, in milliseconds.
+ *
+ * This poll is not a backstop for anything — casino publishes NO events (a
+ * blackjack hand would flood the feed), so it is the whole realtime channel
+ * AND the lazy clock's heartbeat: the table advances because somebody read it
+ * (`advanceTable`), so 2.5s is also the worst case for a lapsed turn to be
+ * auto-stood at a table nobody is acting at.
+ */
+export const TABLE_POLL_MS = 2500;
+
+/**
+ * The caller's seat, wherever it is. `{ table: null }` when they hold none.
+ *
+ * `seated` gates the POLL, never the query: nothing else on the client knows
+ * whether this player holds a seat — the lobby reports the town's tables, not
+ * the caller's place at one — so the first read is what answers the question,
+ * and the caller feeds the answer back in. Polling unconditionally instead
+ * would hit the server every 2.5s forever to be told `null`, which is exactly
+ * the bug the hospital query shipped (see `hospitalRefetchInterval`).
+ */
+export function useCasinoTable(seated: boolean) {
+  return useQuery<CasinoTableResponse>({
+    queryKey: keys.casinoTable(),
+    queryFn: async () => CasinoTableResponseSchema.parse(await api("/api/casino/table")),
+    refetchInterval: seated ? TABLE_POLL_MS : false,
+  });
+}
+
+/** Takes a seat at a table of `gameId` in the caller's town, opening one if needed. */
+export function useSitCasino() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoSitResponse, Error, string>({
+    mutationFn: async (gameId) =>
+      CasinoSitResponseSchema.parse(
+        await api("/api/casino/table/sit", { method: "POST", body: JSON.stringify({ gameId }) }),
+      ),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.casinoTable() });
+      // The lobby's seat counts moved too — and on a 409 the caller is seated
+      // somewhere they did not expect, which only a refetch can show them.
+      void queryClient.invalidateQueries({ queryKey: keys.casino() });
+    },
+  });
+}
+
+/**
+ * Gives the seat up. `deferred` is true when a stake was still in play: the
+ * seat is marked leaving and frees itself when the hand settles, so the table
+ * query keeps answering until then.
+ */
+export function useLeaveCasino() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoLeaveResponse, Error, void>({
+    mutationFn: async () =>
+      CasinoLeaveResponseSchema.parse(
+        // No body at all — the route declares no schema, and `api` omits the
+        // JSON content-type when there is nothing to send (FST_ERR_CTP_EMPTY_JSON_BODY).
+        await api("/api/casino/table/leave", { method: "POST" }),
+      ),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.casinoTable() });
+      void queryClient.invalidateQueries({ queryKey: keys.casino() });
+      // Leaving can SETTLE the hand on the way out (the clock runs inside
+      // `leave`), which pays out — so cash can move on this route.
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
+    },
+  });
+}
+
+/**
+ * Puts this hand's stake up. Answers the whole table, which is why the
+ * response is written straight into the table query rather than only
+ * invalidating it: the bet may have completed the table and DEALT, and without
+ * the write the player watches the pre-deal table for up to a whole poll.
+ */
+export function useTableBet() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoTableResponse, Error, string>({
+    mutationFn: async (wager) =>
+      CasinoTableResponseSchema.parse(
+        await api("/api/casino/table/bet", { method: "POST", body: JSON.stringify({ wager }) }),
+      ),
+    onSuccess: (table) => { queryClient.setQueryData(keys.casinoTable(), table); },
+    // The escrow left the player's cash. `onSettled` rather than `onSuccess`
+    // for the same reason `usePlayCasino` uses it: a refused bet moves nothing
+    // (the route throws inside the transaction, which rolls the escrow back),
+    // but a refetch on a failure costs one request and removes a whole class
+    // of "did that take my money?" from ever being possible.
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.me() }); },
+  });
+}
+
+/**
+ * Plays the caller's turn. The action is whatever the game's own `action`
+ * schema accepts (blackjack: "hit" | "stand" | "double"); the hub validates
+ * only the envelope, so it stays a string here — `useCasinoAct`'s reasoning.
+ */
+export function useTableAct() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoTableResponse, Error, string>({
+    mutationFn: async (action) =>
+      CasinoTableResponseSchema.parse(
+        await api("/api/casino/table/act", { method: "POST", body: JSON.stringify({ action }) }),
+      ),
+    onSuccess: (table) => { queryClient.setQueryData(keys.casinoTable(), table); },
+    // A double raises the stake and a settle pays out, so cash moves here.
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.me() }); },
   });
 }
 
