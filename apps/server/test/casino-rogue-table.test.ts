@@ -235,14 +235,24 @@ describe("a table game that misdeclares its settle figures", () => {
 
 describe("a table game that raises the wager on the wrong seat, or by a negative amount", () => {
   it("refuses a wagerDelta naming a seat other than the one that acted", async () => {
+    // TWO seats, both real and in-hand: naming seat 1 must be refused because
+    // it is not the ACTOR (seat 0), not merely because seat 1 doesn't exist.
+    // A single-seat fixture here would be vacuous — `applyStep`'s fallback
+    // lookup (`seats.find(...)` returning `undefined`) throws the same code
+    // for a seat that is simply absent, which proves nothing about the
+    // `delta.seat !== actingSeat` clause specifically.
     const manifest = casinoWith(rogueTableGame({
       act: () => ({ state: {}, done: false, turn: 0, wagerDelta: { seat: 1, amount: 5_000n } }),
     }));
-    const { playerId, tableId } = await seatOne(manifest);
-    expect((await bet(manifest, playerId, WAGER)).status).toBe(200);
+    const { a, b, tableId } = await seatTwo(manifest);
+    expect((await bet(manifest, a, WAGER)).status).toBe(200);
+    // B's bet completes the table — the deal fires here, turnSeat lands on
+    // seat 0 (a), and seat 1 (b) is a real, in-hand seat with its own wager.
+    expect((await bet(manifest, b, WAGER)).status).toBe(200);
 
-    await expect(act(manifest, playerId)).rejects.toMatchObject({ code: "invalid_wager_delta" });
-    expect((await seatRow(tableId, playerId))?.wager).toBe(WAGER);
+    await expect(act(manifest, a)).rejects.toMatchObject({ code: "invalid_wager_delta" });
+    expect((await seatRow(tableId, a))?.wager).toBe(WAGER);
+    expect((await seatRow(tableId, b))?.wager).toBe(WAGER);
   });
 
   it("refuses a negative wagerDelta even from the acting seat", async () => {
