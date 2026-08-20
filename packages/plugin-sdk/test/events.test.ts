@@ -80,3 +80,39 @@ describe("PluginEventDecl validation", () => {
       .toThrow(/invalid plugin manifest/);
   });
 });
+
+/**
+ * `silent` suppresses the FEED LINE and nothing else: the event still travels
+ * the bus and still invalidates everything `invalidates` names, so a plugin
+ * whose events are state signals rather than news (casino's table tick, ~10
+ * transitions a hand × 5 seats) can drive the client without flooding it.
+ *
+ * `describe` stays required alongside it. A client that predates the flag
+ * renders the template it already knows how to render — noise, which is what
+ * the feed did before this cluster, rather than a missing field it would have
+ * to cope with.
+ */
+describe("PluginEventDecl silent", () => {
+  it("carries a declared silent flag through definePlugin", () => {
+    const built = definePlugin({ ...valid, events: [{ ...goodDecl, silent: true }] });
+    expect(built.events[0]?.silent).toBe(true);
+  });
+
+  it("leaves silent absent when it is not declared", () => {
+    expect(definePlugin({ ...valid, events: [goodDecl] }).events[0]?.silent).toBeUndefined();
+  });
+
+  it("still requires describe on a silent declaration", () => {
+    const { describe: _dropped, ...noDescribe } = goodDecl;
+    expect(() => definePlugin({ ...valid, events: [{ ...noDescribe, silent: true }] }))
+      .toThrow(/invalid plugin manifest/);
+  });
+
+  it("rejects a non-boolean silent", () => {
+    const result = PluginEventDeclSchema.safeParse({ ...goodDecl, silent: "yes" });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => [i.path.join("."), i.code])).toEqual([
+      ["silent", "invalid_type"],
+    ]);
+  });
+});

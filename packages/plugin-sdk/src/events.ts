@@ -8,6 +8,23 @@ export interface PluginEventDecl {
   describe: string;
   /** React Query key prefixes this event invalidates on the client. */
   invalidates: string[];
+  /**
+   * Suppresses this event's FEED LINE on the client. Absent is false.
+   *
+   * A silent event is otherwise ordinary: it travels the bus, reaches the same
+   * audience and invalidates everything `invalidates` names — it is skipped at
+   * RENDER time only. It exists for events that are state signals rather than
+   * news, where one line per fact would flood the feed: casino's table tick is
+   * ~10 transitions a hand across up to five seats.
+   *
+   * `describe` stays required alongside it, deliberately. A client that
+   * predates this flag renders the template it already knows how to render,
+   * which is noise rather than breakage.
+   *
+   * Trust is install-time, as it is for `publishCore`: a plugin can silence
+   * its own feed lines and there is no runtime guard.
+   */
+  silent?: boolean | undefined;
 }
 
 /**
@@ -42,6 +59,7 @@ export const PluginEventDeclSchema = z
     payload: z.custom<z.ZodTypeAny>(isZodSchema, { message: "payload must be a zod schema" }),
     describe: z.string().min(1),
     invalidates: z.array(z.string().min(1)),
+    silent: z.boolean().optional(),
   })
   .strict();
 
