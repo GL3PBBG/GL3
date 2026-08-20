@@ -1,10 +1,10 @@
 import membershipPlugin from "@gl3/plugin-membership";
 import type { FastifyInstance } from "fastify";
 import type { Redis as IORedis } from "ioredis";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { crimes } from "../src/db/schema/index.js";
+import { crimes, locations, playerStats } from "../src/db/schema/index.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -110,5 +110,91 @@ describe("crimes membership benefit — Getaway Driver", () => {
     expect(res.statusCode).toBe(200);
     const titles = res.json<{ rows: Array<{ title: string }> }>().rows.map((r) => r.title);
     expect(titles).toContain("Getaway Driver");
+  });
+});
+
+async function seedTown(travelCost: bigint, travelCooldownSeconds = 60): Promise<string> {
+  const id = uuidv7();
+  await db.insert(locations).values({
+    id, name: `Town ${id.slice(0, 8)}`,
+    travelCost, travelCooldownSeconds,
+    bulletStock: 0, bulletCost: 0n,
+  });
+  return id;
+}
+
+async function fundPlayer(playerId: string, cash: bigint): Promise<void> {
+  await db.update(playerStats).set({ cash }).where(eq(playerStats.playerId, playerId));
+}
+
+interface LocationRow { id: string; travelCost: string }
+
+describe("travel membership benefit — Frequent Flyer Discount", () => {
+  it("member sees a 75%-discounted travelCost in the listing; non-member sees the full fare", async () => {
+    const destinationId = await seedTown(1000n);
+    const member = await registerVerifiedPlayer({ app, redis });
+    const nonMember = await registerVerifiedPlayer({ app, redis });
+    await grantMembership(member.playerId);
+
+    const memberRes = await app.inject({
+      method: "GET", url: "/api/locations",
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    expect(memberRes.statusCode).toBe(200);
+    const memberLocation = memberRes.json<{ locations: LocationRow[] }>().locations
+      .find((l) => l.id === destinationId);
+    expect(memberLocation?.travelCost).toBe("250");
+
+    const nonMemberRes = await app.inject({
+      method: "GET", url: "/api/locations",
+      headers: { authorization: `Bearer ${nonMember.token}` },
+    });
+    expect(nonMemberRes.statusCode).toBe(200);
+    const nonMemberLocation = nonMemberRes.json<{ locations: LocationRow[] }>().locations
+      .find((l) => l.id === destinationId);
+    expect(nonMemberLocation?.travelCost).toBe("1000");
+  });
+
+  it("member travelling pays exactly the discounted fare", async () => {
+    const destinationId = await seedTown(1000n);
+    const member = await registerVerifiedPlayer({ app, redis });
+    await grantMembership(member.playerId);
+    await fundPlayer(member.playerId, 10_000n);
+
+    const res = await app.inject({
+      method: "POST", url: `/api/travel/${destinationId}`,
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ cash: string }>().cash).toBe("9750");
+
+    const [row] = await db.select({ cash: playerStats.cash }).from(playerStats)
+      .where(eq(playerStats.playerId, member.playerId));
+    expect(row?.cash).toBe(9750n);
+  });
+
+  it("odd fare rounds up: cost 999 -> member pays 250 (ceil(999/4))", async () => {
+    const destinationId = await seedTown(999n);
+    const member = await registerVerifiedPlayer({ app, redis });
+    await grantMembership(member.playerId);
+    await fundPlayer(member.playerId, 10_000n);
+
+    const res = await app.inject({
+      method: "POST", url: `/api/travel/${destinationId}`,
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ cash: string }>().cash).toBe("9750");
+  });
+
+  it("GET /api/membership/benefits lists Frequent Flyer Discount", async () => {
+    const player = await registerVerifiedPlayer({ app, redis });
+    const res = await app.inject({
+      method: "GET", url: "/api/membership/benefits",
+      headers: { authorization: `Bearer ${player.token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const titles = res.json<{ rows: Array<{ title: string }> }>().rows.map((r) => r.title);
+    expect(titles).toContain("Frequent Flyer Discount");
   });
 });
