@@ -1,8 +1,146 @@
-import { definePlugin } from "@gl3/plugin-sdk";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+import { definePlugin, isInsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
 import { MEMBERSHIP_MIGRATIONS } from "./migrations.js";
-import { benefits } from "./api.js";
+import { benefits, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
+import { membershipPackages } from "./schema.js";
 
 export { MEMBERSHIP_TIMER_KEY, benefits, isMember, membershipUntil, type BenefitDecl } from "./api.js";
+
+/** V2's `PM_seconds`-derived display string, largest whole unit only. */
+function formatDuration(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  if (days > 0) return days === 1 ? "1 day" : `${days} days`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours > 0) return hours === 1 ? "1 hour" : `${hours} hours`;
+  const minutes = Math.max(1, Math.floor(seconds / 60));
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
+/**
+ * The live status as a `TableRowsResponse`. A page visit is what drives the
+ * lazy `membershipUntil` expiry — this is the one route every member's
+ * client hits routinely, so an expired row is reliably swept without a cron.
+ */
+const statusRoute = route({
+  method: "GET",
+  path: "/api/membership/status",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const until = await membershipUntil(tx, player.id);
+      return {
+        status: 200,
+        body: {
+          rows: [
+            until === null
+              ? { status: "Not a member", expiresAt: "—" }
+              : { status: "Active", expiresAt: until.toISOString() },
+          ],
+        },
+      };
+    });
+  },
+});
+
+/**
+ * The catalogue as a `TableRowsResponse`, ordered `PM_seconds ASC` (V2
+ * parity) — cheapest/shortest package first. Doubles as the buy form's
+ * `optionsSource`; `id` is its `valueKey` and is never rendered as a column.
+ */
+const packagesRoute = route({
+  method: "GET",
+  path: "/api/membership/packages",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select().from(membershipPackages).orderBy(membershipPackages.durationSeconds),
+    );
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((p) => ({
+          id: p.id,
+          name: p.name,
+          costPoints: p.costPoints.toString(),
+          duration: formatDuration(p.durationSeconds),
+        })),
+      },
+    };
+  },
+});
+
+/**
+ * Empty today — consumers subscribe via `on(benefits, ...)` in Tasks 7–9.
+ * `title`/`description` are already strings, so no shaping is needed here.
+ */
+const benefitsRoute = route({
+  method: "GET",
+  path: "/api/membership/benefits",
+  handler: async (ctx) => {
+    const list = await ctx.filters.apply(benefits, []);
+    return { status: 200, body: { rows: list } };
+  },
+});
+
+/**
+ * Buy or extend membership. Stacking is V2's exact rule: extend from the
+ * live expiry when one exists, else from now.
+ *
+ * `economy.applyBalanceChange` above already holds this player FOR UPDATE,
+ * so the timers upsert's FK (FOR KEY SHARE) nests under it — rule 6, no
+ * separate lock call needed.
+ */
+const buyRoute = route({
+  method: "POST",
+  path: "/api/membership/buy",
+  body: z.object({ packageId: z.string().uuid() }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const [pkg] = await tx.db.select().from(membershipPackages).where(eq(membershipPackages.id, body.packageId));
+      if (pkg === undefined) throw new PluginError("package_not_found", 404);
+
+      try {
+        await tx.economy.applyBalanceChange({
+          playerId: player.id,
+          amount: -pkg.costPoints,
+          kind: "points",
+          reason: "membership.buy",
+          refId: pkg.id,
+        });
+      } catch (error) {
+        if (isInsufficientFundsError(error)) throw new PluginError("insufficient_points", 409);
+        throw error;
+      }
+
+      const current = await tx.timers.get(player.id, MEMBERSHIP_TIMER_KEY);
+      const base = current !== null && current.getTime() > Date.now() ? current.getTime() : Date.now();
+      const until = new Date(base + pkg.durationSeconds * 1000);
+      await tx.timers.set(player.id, MEMBERSHIP_TIMER_KEY, until);
+
+      await tx.events.publish({
+        name: "purchased",
+        actorId: player.id,
+        actorName: player.username,
+        audience: { kind: "player", playerId: player.id },
+        payload: { packageName: pkg.name, until: until.toISOString() },
+      });
+
+      return { status: 200, body: { until: until.toISOString() } };
+    });
+  },
+});
+
+const purchasedEvent = {
+  name: "purchased",
+  payload: z.object({ packageName: z.string(), until: z.string() }),
+  describe: "{actorName} bought {packageName}",
+  invalidates: ["membership", "me"],
+};
 
 export default definePlugin({
   id: "membership",
@@ -10,7 +148,8 @@ export default definePlugin({
   basePaths: ["/api/membership", "/api/admin/membership"],
   tables: { packages: "p_membership_packages" },
   migrations: MEMBERSHIP_MIGRATIONS,
-  routes: [],
+  routes: [statusRoute, packagesRoute, benefitsRoute, buyRoute],
+  events: [purchasedEvent],
   // Documentation parity with casino's `provides: [games]`: nothing reads
   // `PluginManifest.provides` today, but this is the point a consumer
   // subscribes to via `on(benefits, ...)` to add display copy.
