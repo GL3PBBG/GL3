@@ -127,6 +127,10 @@ negative payout refused (500), negative/zero `wagerDelta.amount` refused,
 `wagerDelta.seat` must be the acting seat, non-finite multiplier refused.
 `turn` out of range or pointing at a seat not in the hand → 500
 `invalid_turn` (hub defect guard, same class as `invalid_wager_delta`).
+A rogue `autoAct` that never advances the turn exhausts the clock's bounded
+loop and 500s that table's reads — loud by design; the wager-0 leave path
+still works, and in-hand seats at such a table are operator territory
+(install-time trust, the `publishCore` precedent).
 
 **No `@gl3/plugin-sdk` change**: `GameDef` never lived in the SDK, and
 blackjack already depends on `@gl3/plugin-casino` (existing plugin→plugin
