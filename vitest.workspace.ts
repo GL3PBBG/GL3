@@ -373,6 +373,7 @@ export default defineWorkspace([
         "test/admin-ranks.test.ts",
         "test/admin-inventory.test.ts",
         "test/admin-theft.test.ts",
+        "test/admin-membership.test.ts",
         "test/admin-properties.test.ts",
         "test/admin-rounds.test.ts",
         "test/admin-players.test.ts",

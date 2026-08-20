@@ -1,11 +1,14 @@
 import { eq } from "drizzle-orm";
+import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, isInsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
 import { MEMBERSHIP_MIGRATIONS } from "./migrations.js";
 import { benefits, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
+import { adminPage, membershipPage } from "./pages.js";
 import { membershipPackages, players } from "./schema.js";
 
 export { MEMBERSHIP_TIMER_KEY, benefits, isMember, membershipUntil, type BenefitDecl } from "./api.js";
+export { adminPage, membershipPage } from "./pages.js";
 
 /** V2's `PM_seconds`-derived display string, largest whole unit only. */
 function formatDuration(seconds: number): string {
@@ -191,6 +194,104 @@ const giftRoute = route({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Admin routes
+// ---------------------------------------------------------------------------
+
+const PackageCreateSchema = z.object({
+  name: z.string().min(1).max(255),
+  costPoints: z.coerce.number().int().min(0),
+  durationSeconds: z.coerce.number().int().min(60),
+});
+const PackageUpdateSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(255).optional(),
+  costPoints: z.coerce.number().int().min(0),
+  durationSeconds: z.coerce.number().int().min(60),
+});
+
+/**
+ * The catalogue as a `TableRowsResponse`. `id` is the update form's select
+ * `valueKey` and is never rendered as a column.
+ */
+const adminPackageListRoute = route({
+  method: "GET",
+  path: "/api/admin/membership/packages",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(membershipPackages));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((p) => ({
+          id: p.id,
+          name: p.name,
+          costPoints: p.costPoints.toString(),
+          durationSeconds: String(p.durationSeconds),
+        })),
+      },
+    };
+  },
+});
+
+const adminPackageCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/membership/packages",
+  auth: "admin",
+  body: PackageCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(membershipPackages).values({
+        id,
+        name: body.name,
+        costPoints: BigInt(body.costPoints),
+        durationSeconds: body.durationSeconds,
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminPackageUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/membership/packages/update",
+  auth: "admin",
+  body: PackageUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(membershipPackages)
+        .set({
+          costPoints: BigInt(body.costPoints),
+          durationSeconds: body.durationSeconds,
+          ...(body.name !== undefined && { name: body.name }),
+        })
+        .where(eq(membershipPackages.id, body.id))
+        .returning({ id: membershipPackages.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("package_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminPackageDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/membership/packages/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      const result = await tx.db.delete(membershipPackages)
+        .where(eq(membershipPackages.id, params.id)).returning({ id: membershipPackages.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("package_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 const purchasedEvent = {
   name: "purchased",
   payload: z.object({ packageName: z.string(), until: z.string() }),
@@ -211,10 +312,15 @@ export default definePlugin({
   basePaths: ["/api/membership", "/api/admin/membership"],
   tables: { packages: "p_membership_packages" },
   migrations: MEMBERSHIP_MIGRATIONS,
-  routes: [statusRoute, packagesRoute, benefitsRoute, buyRoute, giftRoute],
+  routes: [
+    statusRoute, packagesRoute, benefitsRoute, buyRoute, giftRoute,
+    adminPackageListRoute, adminPackageCreateRoute, adminPackageUpdateRoute, adminPackageDeleteRoute,
+  ],
   events: [purchasedEvent, giftedEvent],
   // Documentation parity with casino's `provides: [games]`: nothing reads
   // `PluginManifest.provides` today, but this is the point a consumer
   // subscribes to via `on(benefits, ...)` to add display copy.
   provides: [benefits],
+  pages: [membershipPage],
+  adminPages: [adminPage],
 });
