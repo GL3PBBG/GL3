@@ -2,8 +2,9 @@ import { randomInt } from "node:crypto";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, PluginError, route } from "@gl3/plugin-sdk";
-import { bracketWeight, resolveTheft, type CatalogueCar, type TheftTier } from "./resolve.js";
+import { definePlugin, on, PluginError, route } from "@gl3/plugin-sdk";
+import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
+import { boostedChance, bracketWeight, resolveTheft, type CatalogueCar, type TheftTier } from "./resolve.js";
 import { cars, garage, locations, playerStats, theftTiers } from "./schema.js";
 import { THEFT_MIGRATIONS } from "./migrations.js";
 import { readTheftSettings } from "./settings.js";
@@ -23,6 +24,7 @@ export { adminPage, garagePage, theftPage } from "./pages.js";
 // export for this reason.
 export { readTheftSettings, type TheftSettings } from "./settings.js";
 export {
+  boostedChance,
   bracketWeight,
   resolveTheft,
   type CatalogueCar,
@@ -30,6 +32,11 @@ export {
   type TheftRolls,
   type TheftTier,
 } from "./resolve.js";
+
+const declareBenefit = on(membershipBenefits, (_ctx, list) => [
+  ...list,
+  { title: "Slide Hammer", description: "You use a slide hammer to increase your chances of stealing a car by 10%" },
+]);
 
 /**
  * Shaped as a TableRowsResponse (`{ rows: [{...strings}] }`) because it is
@@ -51,6 +58,7 @@ const tiersRoute = route({
     return ctx.transaction(async (tx) => {
       const tiers = await tx.db.select().from(theftTiers).orderBy(theftTiers.minCarValue);
       const art = await ctx.assets.mine(tiers.map((t) => t.id), "tier");
+      const member = await isMember(tx, player.id);
       const rows = [];
       for (const tier of tiers) {
         const [counted] = await tx.db
@@ -60,7 +68,7 @@ const tiersRoute = route({
         rows.push({
           id: tier.id,
           name: tier.name,
-          successChance: String(tier.successChance),
+          successChance: String(boostedChance(tier.successChance, member)),
           maxDamage: String(tier.maxDamage),
           minCarValue: tier.minCarValue.toString(),
           maxCarValue: tier.maxCarValue.toString(),
@@ -152,6 +160,13 @@ const stealRoute = route({
           .where(eq(playerStats.playerId, player.id));
         if (after?.locationId !== locationId) throw new PluginError("wrong_location", 409);
 
+        // Slide Hammer: a member's success chance is boosted here, under the
+        // lock, so the roll below is drawn against the same chance the
+        // listing showed them. `bracketWeight` below keeps the ORIGINAL tier
+        // — the bracket is the value bounds, which the boost never touches.
+        const member = await isMember(tx, player.id);
+        const effectiveTier: TheftTier = { ...tier, successChance: boostedChance(tier.successChance, member) };
+
         const catalogue: CatalogueCar[] = await tx.db
           .select({ id: cars.id, name: cars.name, value: cars.value, theftWeight: cars.theftWeight })
           .from(cars);
@@ -167,7 +182,7 @@ const stealRoute = route({
             damageRoll: randomInt(0, tier.maxDamage + 1),
             escapeRoll: randomInt(0, 100),
           },
-          tier,
+          effectiveTier,
           catalogue,
           config.chase.escapeChance,
         );
@@ -741,6 +756,7 @@ export default definePlugin({
     adminTierDeleteRoute,
   ],
   events: [resolvedEvent, soldEvent],
+  filters: [declareBenefit],
   // One slot: every row in this plugin's cars table may carry art. The loader
   // stamps the scope from this manifest's own id, so `theft:car` is the key and
   // no other plugin can bind to it.

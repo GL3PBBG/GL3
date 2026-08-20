@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bracketWeight, resolveTheft, type CatalogueCar, type TheftRolls, type TheftTier }
+import { boostedChance, bracketWeight, resolveTheft, type CatalogueCar, type TheftRolls, type TheftTier }
   from "@gl3/plugin-theft";
 
 const car = (name: string, value: bigint, theftWeight: number): CatalogueCar =>
@@ -122,5 +122,23 @@ describe("resolveTheft", () => {
     // An empty bracket is only reachable on the SUCCESS branch; a failed
     // theft is a chase regardless of what was on the street.
     expect(resolveTheft(rolls({ successRoll: 99, escapeRoll: 0 }), TIER, [], 40).kind).toBe("escaped");
+  });
+});
+
+describe("boostedChance", () => {
+  it("boosts a member's chance by 10%", () => {
+    expect(boostedChance(50, true)).toBe(55);
+  });
+
+  it("caps a boosted chance at 100", () => {
+    expect(boostedChance(95, true)).toBe(100);
+  });
+
+  it("floors a fractional boost", () => {
+    expect(boostedChance(59, true)).toBe(64); // floor(64.9)
+  });
+
+  it("leaves a non-member's chance untouched", () => {
+    expect(boostedChance(50, false)).toBe(50);
   });
 });
