@@ -146,6 +146,8 @@ validates body/params with zod via `route()`.
 - `POST /leave` — not in hand (wager 0): seat deleted now. In hand: `leaving`
   set true; the hand plays out (their turns auto-stand via the lazy clock), settle pays them normally, seat
   freed at hand end. No money is ever dropped by leaving.
+  A seat that has not bet (wager 0) leaves without consulting the game or the
+  clock — it holds no money, and the clock could only idle-kick it.
 - `POST /bet` `{ wager: /^\d+$/ }` — betting phase only, min/max bet per the
   existing settings + house lever, escrow per §6. First bet at a table stamps
   `deadline_at = now + bet_seconds`. When every non-`leaving` seat has bet,
@@ -184,6 +186,11 @@ in the future or the hand settles. GET takes a **fast path**: a plain
 lock-free SELECT when `deadline_at` is NULL or in the future; only a lapsed
 deadline opens the locking transaction. Precedent: `GET /api/bullets/shop`
 restocks on read; `ensureCurrentRound` settles on read.
+
+Jailed players cannot reach any table route (`accessInJail: false`, like every
+casino route); a jailed in-hand player's turns auto-stand via other players'
+reads, and a lone jailed player's hand freezes harmlessly until release —
+accepted limitation, no money is lost.
 
 ## 6. Money
 
