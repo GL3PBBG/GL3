@@ -10,6 +10,7 @@ export * from "./dto/casino.js";
 export * from "./dto/combat.js";
 export * from "./dto/crime.js";
 export * from "./dto/detectives.js";
+export * from "./dto/extensions.js";
 export * from "./dto/gangs.js";
 export * from "./dto/hospital.js";
 export * from "./dto/inventory.js";

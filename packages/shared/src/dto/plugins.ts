@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MoneySchema } from "../primitives.js";
+import { MoneyFormatSchema } from "./extensions.js";
 
 /**
  * DTO schemas for the `GET /api/plugins` response. The shapes mirror what the
@@ -314,6 +315,8 @@ export const PluginsPayloadSchema = z.object({
   menu: z.array(MenuItemSchema),
   pages: z.array(PagePayloadSchema),
   events: z.array(EventMetaSchema),
+  /** Resolved from the `core.moneyFormat` filter point at boot. */
+  moneyFormat: MoneyFormatSchema,
 }).strict();
 
 export type PluginsPayload = z.infer<typeof PluginsPayloadSchema>;
