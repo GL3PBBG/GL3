@@ -80,7 +80,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
-  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, deps.rateLimitPrefix);
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
   registerThemeRoutes(app, deps.db);
@@ -143,7 +142,11 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     });
   }
 
-  registerPluginsEndpoint(app, loaded.payload);
+  // Moved here (after `loaded` resolves) rather than alongside the other
+  // core routes above: this route applies the `core.profileView` filter
+  // chain, which needs `loaded.coreFilters` — plugins must be loaded first.
+  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix);
+  registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an

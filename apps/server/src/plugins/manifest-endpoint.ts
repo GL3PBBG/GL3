@@ -1,14 +1,17 @@
-import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
-import { DEFAULT_MONEY_FORMAT, type MoneyFormat } from "@gl3/shared";
+import { coreMoneyFormat, type PluginManifest, type ViewNode } from "@gl3/plugin-sdk";
+import { DEFAULT_MONEY_FORMAT } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
+import type { CoreFilters } from "./core-filters.js";
 
 export interface MenuItem { pageId: string; path: string; label: string; order: number }
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
 export interface EventMeta { pluginId: string; name: string; describe: string; invalidates: string[] }
+/** The boot-built payload — static across every request. `moneyFormat` is
+ * resolved per request in `registerPluginsEndpoint` instead, since it flows
+ * through the `core.moneyFormat` filter chain rather than being fixed at boot. */
 export interface PluginsPayload {
   menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[];
-  moneyFormat: MoneyFormat;
 }
 
 /**
@@ -46,11 +49,12 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
   // Ties break on page id so the order is stable across boots rather than
   // depending on the config's plugin order.
   menu.sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
-  // Filled with the default for now — a later task replaces this with the
-  // `core.moneyFormat` filter chain applied per request.
-  return { menu, pages, events, moneyFormat: DEFAULT_MONEY_FORMAT };
+  return { menu, pages, events };
 }
 
-export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload): void {
-  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async () => payload);
+export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload, coreFilters: CoreFilters): void {
+  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async () => ({
+    ...payload,
+    moneyFormat: await coreFilters.apply(coreMoneyFormat, null, DEFAULT_MONEY_FORMAT),
+  }));
 }
