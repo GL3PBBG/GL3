@@ -84,7 +84,27 @@ describe("membership admin", () => {
       expect(await db.select().from(membershipPackages).where(eq(membershipPackages.id, packageId))).toEqual([]);
     });
 
-    it("updates costs and duration without renaming when name is omitted", async () => {
+    it("updates a package with a blank name and keeps the old name", async () => {
+      const packageId = uuidv7();
+      await db.insert(membershipPackages).values({
+        id: packageId, name: "Bronze", costPoints: 100n, durationSeconds: 86400,
+      });
+
+      // The page renderer posts "" for a field the admin left blank
+      // (PageRenderer.tsx's form onSubmit) — theft's own blank-name test
+      // exercises the same shape, and blankable() must normalise it to
+      // "leave the name alone" rather than 400 on min(1).
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/membership/packages/update", headers: auth(),
+        payload: { id: packageId, name: "", costPoints: 250, durationSeconds: 172800 },
+      });
+      expect(res.statusCode).toBe(204);
+
+      const [row] = await db.select().from(membershipPackages).where(eq(membershipPackages.id, packageId));
+      expect(row).toMatchObject({ name: "Bronze", costPoints: 250n, durationSeconds: 172800 });
+    });
+
+    it("updates costs and duration without renaming when name is omitted entirely", async () => {
       const packageId = uuidv7();
       await db.insert(membershipPackages).values({
         id: packageId, name: "Bronze", costPoints: 100n, durationSeconds: 86400,

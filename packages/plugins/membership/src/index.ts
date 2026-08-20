@@ -198,17 +198,28 @@ const giftRoute = route({
 // Admin routes
 // ---------------------------------------------------------------------------
 
+/**
+ * The page renderer posts every field in a form, sending "" for the ones the
+ * admin left blank (`PageRenderer.tsx`'s form `onSubmit`). Blank is
+ * normalised to `undefined` here so an update that only changes cost/duration
+ * leaves the name untouched — theft's admin routes' convention
+ * (`packages/plugins/theft/src/index.ts`), reused rather than reinvented.
+ */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
 const PackageCreateSchema = z.object({
   name: z.string().min(1).max(255),
   costPoints: z.coerce.number().int().min(0),
   durationSeconds: z.coerce.number().int().min(60),
-});
+}).strict();
 const PackageUpdateSchema = z.object({
   id: z.string().uuid(),
-  name: z.string().min(1).max(255).optional(),
+  name: blankable(z.string().min(1).max(255)),
   costPoints: z.coerce.number().int().min(0),
   durationSeconds: z.coerce.number().int().min(60),
-});
+}).strict();
 
 /**
  * The catalogue as a `TableRowsResponse`. `id` is the update form's select
