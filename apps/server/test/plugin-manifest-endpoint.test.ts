@@ -154,6 +154,13 @@ describe("GET /api/plugins", () => {
           name: "transferred",
           describe: "{actorName} transferred the {typeName} in {locationName} to you",
           invalidates: ["properties", "me"],
+        }, {
+          // `membership` is appended last in `CORE_PLUGINS`
+          // (`plugins/core-plugins.ts`), after `properties`.
+          pluginId: "membership",
+          name: "purchased",
+          describe: "{actorName} bought {packageName}",
+          invalidates: ["membership", "me"],
         }],
       });
     } finally {
