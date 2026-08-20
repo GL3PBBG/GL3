@@ -8,7 +8,9 @@ import {
 import type { TableGameDef, TableStep } from "./games.js";
 import { casinoSeats, casinoTables, players } from "./schema.js";
 import { fromStorableState, toStorableState } from "./state.js";
-import { readMaxBet, readTableIdleKickHands, readTableTurnSeconds } from "./settings.js";
+import {
+  MAX_TABLE_SEATS, readMaxBet, readTableIdleKickHands, readTableTurnSeconds,
+} from "./settings.js";
 
 export type TableRow = typeof casinoTables.$inferSelect;
 export type SeatRow = typeof casinoSeats.$inferSelect;
@@ -41,6 +43,30 @@ export async function lockTable(
   if (table === undefined) return null;
   const seats = await tx.db.select().from(casinoSeats)
     .where(eq(casinoSeats.tableId, tableId)).orderBy(asc(casinoSeats.seatNo));
+  return { table, seats, house };
+}
+
+/**
+ * `lockTable`'s READ-ONLY twin: the same `LockedTable` shape, assembled from
+ * plain SELECTs with not one lock taken.
+ *
+ * For RENDERING ONLY, and the name is deliberately not `lockTable`-ish so a
+ * future caller cannot mistake it for one: nothing read here is authoritative
+ * for a write, because any of it can change under a concurrent transaction.
+ * GET's fast path is its only caller — a table whose clock has not lapsed owes
+ * nobody anything, so making every poll (2.5s per seated player, spec §8) take
+ * the location lock, three player locks and the table row `FOR UPDATE` would
+ * serialize a read against every acting player at the table.
+ */
+export async function readTableUnlocked(
+  tx: PluginTx, ctx: PluginCtx, tableId: string,
+): Promise<LockedTable | null> {
+  const [table] = await tx.db.select().from(casinoTables).where(eq(casinoTables.id, tableId));
+  if (table === undefined) return null;
+  const seats = await tx.db.select().from(casinoSeats)
+    .where(eq(casinoSeats.tableId, tableId)).orderBy(asc(casinoSeats.seatNo));
+  // Unlocked by its own contract (`engine.ts`), so it fits here unchanged.
+  const house = await frozenHouse(tx, table.propertyId, readMaxBet(ctx.settings));
   return { table, seats, house };
 }
 
@@ -196,14 +222,20 @@ export async function settleHand(
  * rather than in the routes.
  *
  * `actingSeat` is the seat whose action produced this step, or `null` for a
- * step nobody asked for (the deal, and Task 11's autoAct). A `wagerDelta` is
+ * step nobody asked for (the deal, and the clock's autoAct). A `wagerDelta` is
  * only ever legitimate from the seat that just acted, so a null `actingSeat`
  * refuses every one of them: that is what makes a clock-driven raise
  * impossible.
+ *
+ * `clockFrom` is when this step HAPPENED, which is the same as now for every
+ * step a player asked for and is NOT for one the clock owed: a turn that
+ * lapsed at 12:00 and is auto-stood by a read at 12:05 hands the next seat a
+ * turn that started at 12:00, so its deadline is 12:00:30 and not 12:05:30.
+ * See `advanceTable` for why that equivalence is the whole design.
  */
 export async function applyStep(
   tx: PluginTx, ctx: PluginCtx, locked: LockedTable, game: TableGameDef,
-  step: TableStep<unknown>, actingSeat: number | null,
+  step: TableStep<unknown>, actingSeat: number | null, clockFrom: Date = new Date(),
 ): Promise<void> {
   const { table, seats, house } = locked;
 
@@ -252,7 +284,7 @@ export async function applyStep(
   const state = toStorableState(step.state);
   const deadlineAt = step.done
     ? null
-    : new Date(Date.now() + readTableTurnSeconds(ctx.settings) * 1000);
+    : new Date(clockFrom.getTime() + readTableTurnSeconds(ctx.settings) * 1000);
   await tx.db.update(casinoTables)
     .set({ state, turnSeat: step.done ? null : step.turn, deadlineAt })
     .where(eq(casinoTables.id, table.id));
@@ -273,14 +305,19 @@ export async function applyStep(
  * it is not.
  *
  * Ready means every NON-leaving seat has bet — `force` is the lapsed betting
- * deadline (Task 11), which deals to whoever did. The hand itself includes
- * every seat with a stake, `leaving` ones INCLUDED: an escrowed wager is
- * always dealt in and settles normally (spec §5, "no money is ever dropped by
- * leaving"), so `leaving` matters only to the readiness test above and to the
- * idle sweep below.
+ * deadline (`advanceTable`), which deals to whoever did. The hand itself
+ * includes every seat with a stake, `leaving` ones INCLUDED: an escrowed wager
+ * is always dealt in and settles normally (spec §5, "no money is ever dropped
+ * by leaving"), so `leaving` matters only to the readiness test above and to
+ * the idle sweep below.
+ *
+ * `clockFrom` is when the deal happened — now for a bet that completed the
+ * table, the lapsed betting deadline for a forced one. `applyStep` dates the
+ * first turn from it.
  */
 export async function dealIfReady(
   tx: PluginTx, ctx: PluginCtx, locked: LockedTable, game: TableGameDef, force: boolean,
+  clockFrom: Date = new Date(),
 ): Promise<void> {
   const { table, seats } = locked;
   if (!force && seats.some((s) => !s.leaving && s.wager === 0n)) return;
@@ -335,5 +372,67 @@ export async function dealIfReady(
 
   // `actingSeat: null` — the deal is nobody's action, so a `wagerDelta` on it
   // is refused (`applyStep`).
-  await applyStep(tx, ctx, locked, game, step, null);
+  await applyStep(tx, ctx, locked, game, step, null, clockFrom);
+}
+
+/**
+ * THE LAZY CLOCK. Owes the table every deadline that has already lapsed, then
+ * hands back the table as it now stands — or `null` when settling it emptied
+ * the table and deleted the row.
+ *
+ * There is no cron and no job (`ensureCurrentRound` and bullets' restock are
+ * the precedents): a table advances because somebody READ it. Every mutating
+ * table route calls this immediately after `lockTable`, and GET calls it on
+ * the slow path, so the seated players' 2.5s poll is the heartbeat.
+ *
+ * EAGER EQUIVALENCE is the property to preserve. A lazy clock must leave the
+ * table exactly where a cron firing on the deadline would have left it, so
+ * every deadline this loop settles is passed on as `clockFrom`: an abandoned
+ * hand's seats lapse 30 seconds apart in the PAST and one read plays the hand
+ * out, rather than each auto-stand handing the next seat a fresh 30 seconds
+ * and the table needing one poll per seat to clear. Spec §5 says it directly —
+ * "repeat until the clock is in the future or the hand settles".
+ *
+ * The `null` return is never a stale snapshot: a settle that emptied the table
+ * deleted it, and rendering the pre-settle `LockedTable` would show a table
+ * that no longer exists. Callers answer `{ table: null }` / `not_seated`.
+ */
+export async function advanceTable(
+  tx: PluginTx, ctx: PluginCtx, locked: LockedTable, game: TableGameDef,
+): Promise<LockedTable | null> {
+  let current = locked;
+  // Bounded. Every iteration either deals (once — the next deal needs a bet,
+  // and a bet is not something a clock can make), stands ONE seat, or settles
+  // the hand and clears the deadline, so a well-behaved game costs at most
+  // 1 + MAX_TABLE_SEATS passes. The margin is belt-and-braces against a rogue
+  // game whose `autoAct` never advances the turn.
+  for (let i = 0; i < 3 * MAX_TABLE_SEATS; i += 1) {
+    const { table } = current;
+    const lapsed = table.deadlineAt;
+    if (lapsed === null || lapsed.getTime() > Date.now()) return current;
+
+    if (table.phase === "betting") {
+      await dealIfReady(tx, ctx, current, game, true, lapsed);
+    } else if (table.turnSeat !== null && table.state !== null) {
+      const seat = table.turnSeat;
+      const state = fromStorableState(table.state);
+      // The game's own code, so the same guard `act` uses — a throw becomes a
+      // clean 400 rather than a 500 out of a route nobody asked to act on.
+      const step = guardGame(table.gameId, "act", () => game.autoAct(state, seat));
+      // `actingSeat: null`: the seat did NOT act, it ran out of time, so a
+      // `wagerDelta` here is refused (`applyStep`) — the clock can never raise
+      // an absent player's stake.
+      await applyStep(tx, ctx, current, game, step, null, lapsed);
+    } else {
+      // An acting table with no turn or no state is a hub defect, not a bad
+      // request: `applyStep` writes phase, turn and state together and
+      // `settleHand` clears them together.
+      throw new PluginError("invalid_turn", 500);
+    }
+
+    const reread = await lockTable(tx, ctx, table.id);
+    if (reread === null) return null;
+    current = reread;
+  }
+  throw new PluginError("invalid_turn", 500);
 }
