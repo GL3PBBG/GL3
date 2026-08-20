@@ -1,6 +1,6 @@
 import type { EventMeta, GameEvent } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
-import { describeEvent } from "../src/lib/eventCopy.js";
+import { describeEvent, isSilentEvent } from "../src/lib/eventCopy.js";
 
 const metas: EventMeta[] = [{
   pluginId: "hello", name: "greeted",
@@ -121,5 +121,51 @@ describe("describeEvent", () => {
       type: "round.finished", roundId: "00000000-0000-7000-8000-000000000010",
       roundName: "Summer 2026", winners: [],
     }))).toBe("Round Summer 2026 has finished");
+  });
+});
+
+/**
+ * The render-time half of the silent-event flag: `describeEvent` still words
+ * a silent event (an old client, or a caller that renders one deliberately),
+ * and `isSilentEvent` is what EventFeed consults to skip the line entirely.
+ *
+ * The unknown-meta case is the one that matters most. A client whose cached
+ * manifest predates the declaration cannot know the event is silent, so it
+ * renders it — noisy, and the only alternative would be hiding events the
+ * client knows nothing about, which is how a real fact goes missing.
+ */
+describe("isSilentEvent", () => {
+  const silentMetas: EventMeta[] = [{
+    pluginId: "casino", name: "table", describe: "{actorName} is at the tables",
+    invalidates: ["casino"], silent: true,
+  }];
+
+  it("is true for a plugin event whose meta declares silence", () => {
+    expect(isSilentEvent(pluginEvent({ pluginId: "casino", name: "table" }), silentMetas)).toBe(true);
+  });
+
+  it("is false for a plugin event whose meta says nothing about silence", () => {
+    expect(isSilentEvent(pluginEvent(), metas)).toBe(false);
+  });
+
+  it("is false for a meta that declares silent: false", () => {
+    const loud: EventMeta[] = [{ ...silentMetas[0]!, silent: false }];
+    expect(isSilentEvent(pluginEvent({ pluginId: "casino", name: "table" }), loud)).toBe(false);
+  });
+
+  it("is false when no meta matches — an unknown event still renders", () => {
+    expect(isSilentEvent(pluginEvent({ pluginId: "casino", name: "table" }), metas)).toBe(false);
+    expect(isSilentEvent(pluginEvent(), [])).toBe(false);
+  });
+
+  // Same (pluginId, name) pairing describeEvent uses: two plugins may each
+  // declare a "table", and one's silence must not mute the other's.
+  it("does not take silence from a same-named event of another plugin", () => {
+    const other: EventMeta[] = [{ ...silentMetas[0]!, pluginId: "other" }];
+    expect(isSilentEvent(pluginEvent({ pluginId: "casino", name: "table" }), other)).toBe(false);
+  });
+
+  it("is false for every core event, which has no meta to consult", () => {
+    expect(isSilentEvent(event({ type: "player.released" }), silentMetas)).toBe(false);
   });
 });
