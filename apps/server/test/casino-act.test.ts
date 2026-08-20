@@ -19,10 +19,10 @@ import { bootTestServer } from "./helpers/server.js";
  * Runs against FARO, a deterministic synthetic solo game installed via
  * `bootTestServer({ plugins: [faroPlugin, throwsPlugin] })` — blackjack is a
  * table game now and no longer lives in the solo `casino.games` registry
- * (see `test/helpers/faro.ts`). FARO's `act` always settles — there is no
- * non-settling move in its action enum, unlike blackjack's `hit` — so every
- * hand here is a single `act` call rather than the old hit-then-stand
- * sequence.
+ * (see `test/helpers/faro.ts`). Every action except `wait` settles, so most
+ * hands here are a single `act` call rather than the old hit-then-stand
+ * sequence; `wait` is FARO's one non-settling move, standing in for
+ * blackjack's `hit` so the hub's non-settling `act` branch still has coverage.
  *
  * Every hand here is seeded DIRECTLY into `p_casino_sessions` with a
  * hand-built `FaroState`, exactly `casino-play.test.ts`'s "refuses a second
@@ -187,9 +187,9 @@ afterAll(async () => {
 describe("POST /api/casino/act", () => {
   it("a win settles the hand, and the player's net across it equals payout - wager", async () => {
     // Was "hits then stands...", a two-call hit-then-stand sequence:
-    // blackjack-specific multi-turn play, which FARO does not model (its
-    // `act` always settles). The hub-contract this proved — net accounting
-    // on a settling `act` call — survives as a single `act("win")`.
+    // blackjack-specific multi-turn play. FARO models the "settling" half of
+    // that sequence with a single `act("win")` — the non-settling half (the
+    // old `hit`) is covered separately below by `act("wait")`.
     const { token, playerId } = await register();
     const { playerId: ownerId } = await register();
     const locationId = await seedLocation();
@@ -219,6 +219,56 @@ describe("POST /api/casino/act", () => {
     const row = await sessionRow(sessionId);
     expect(row?.status).toBe("settled");
     expect(row?.settledAt).not.toBeNull();
+  });
+
+  it("a non-settling act persists state and moves no money — and the hand still settles afterward", async () => {
+    // `act("wait")` is FARO's stand-in for blackjack's `hit`: the hub's
+    // non-settling branch (`index.ts`'s `done: false` response — state and
+    // wager persisted, no settle) had no coverage anywhere in the tree once
+    // blackjack left the solo registry, since every OTHER FARO action settles
+    // immediately.
+    const { token, playerId } = await register();
+    const { playerId: ownerId } = await register();
+    const locationId = await seedLocation();
+    const propertyId = await seedHouse(locationId, ownerId, 0n);
+
+    const wager = 10_000n;
+    await placePlayer(ownerId, locationId, 10_000_000n + wager);
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+
+    const { sessionId } = await seedSession({ playerId, locationId, propertyId, wager });
+
+    const cashBefore = await cashOf(playerId);
+    const ownerCashBefore = await cashOf(ownerId);
+
+    const waitRes = await act(token, "wait");
+    expect(waitRes.statusCode).toBe(200);
+    const waitBody = waitRes.json<{ done: boolean; wager: string }>();
+    expect(waitBody.done).toBe(false);
+    // The unfinished branch reports the wager too — an act that does not
+    // raise it still has to say what it is.
+    expect(waitBody.wager).toBe(wager.toString());
+    // No money moves on a non-settling act.
+    expect(await cashOf(playerId)).toBe(cashBefore);
+    expect(await cashOf(ownerId)).toBe(ownerCashBefore);
+
+    const waitedRow = await sessionRow(sessionId);
+    expect(waitedRow?.status).toBe("open");
+    expect(waitedRow?.wager).toBe(wager);
+
+    // And the hand is still playable afterward — its state survived the
+    // non-settling step, so a following action settles normally.
+    const winRes = await act(token, "win");
+    expect(winRes.statusCode).toBe(200);
+    const winBody = winRes.json<{ done: boolean; payout: string }>();
+    expect(winBody.done).toBe(true);
+    const payout = BigInt(winBody.payout);
+    expect(payout).toBe(wager * 2n);
+    expect(await cashOf(playerId)).toBe(cashBefore + payout);
+    expect(await cashOf(ownerId)).toBe(ownerCashBefore - payout);
+
+    const finalRow = await sessionRow(sessionId);
+    expect(finalRow?.status).toBe("settled");
   });
 
   // "never sends the dealer's hole card to a player who is still choosing"

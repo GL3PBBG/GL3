@@ -5,9 +5,14 @@ import { games, type GameDef, type GameStep } from "@gl3/plugin-casino";
 /**
  * A deterministic solo game for the hub's own tests, now that blackjack is a
  * table game. The ACTION decides the outcome, so a test chooses its branch:
- *   win → settles at 2×, lose → 0, push → 1×, double → wagerDelta then 2×.
+ *   win → settles at 2×, lose → 0, push → 1×, double → wagerDelta then 2×,
+ *   wait → stays open, no wagerDelta, no settle.
  * `start` never settles — the "natural at deal" nondeterminism the blackjack
- * fixtures had to net-from-the-body around does not exist here.
+ * fixtures had to net-from-the-body around does not exist here. `wait` is the
+ * one action that doesn't settle either, standing in for blackjack's `hit`:
+ * the hub's non-settling `act` branch (state/wager persisted, `done: false`,
+ * no money moved) otherwise has no coverage once blackjack leaves the solo
+ * registry.
  */
 export interface FaroState { wager: bigint; outcome: "open" | "win" | "lose" | "push" }
 
@@ -15,13 +20,19 @@ export const FARO: GameDef<FaroState> = {
   id: "faro",
   name: "Faro",
   maxPayoutMultiplier: 2.5,
-  action: z.enum(["win", "lose", "push", "double"]),
+  action: z.enum(["win", "lose", "push", "double", "wait"]),
   start: ({ wager }) => ({
     state: { wager, outcome: "open" },
     view: { kind: "text", value: "faro: place your call" },
     done: false,
   }),
   act: (state, action): GameStep<FaroState> => {
+    if (action === "wait") {
+      return {
+        state, done: false,
+        view: { kind: "text", value: "faro: waiting" },
+      };
+    }
     if (action === "double") {
       const next: FaroState = { ...state, wager: state.wager * 2n, outcome: "win" };
       return {
