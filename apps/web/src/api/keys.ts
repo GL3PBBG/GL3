@@ -64,6 +64,11 @@ export const keys = {
   // another page, so the remount refetches it anyway (staleTime is 0). Add it
   // there the day something can move the player without leaving /casino.
   casino: () => ["casino"] as const,
+  // The caller's own seat, wherever it is — `GET /api/casino/table`. Nested
+  // UNDER `casino()`, so invalidating the lobby refetches the table too: the
+  // two always move together (sitting changes both, and a settle changes the
+  // seat counts the lobby lists), and the table poll is a 2.5s query anyway.
+  casinoTable: () => ["casino", "table"] as const,
 
   // Admin sections (grant-gated).
   adminSections: () => ["admin", "sections"] as const,

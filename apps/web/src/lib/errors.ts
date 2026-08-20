@@ -11,10 +11,12 @@ import { ApiError } from "../api/client.js";
  * so a Pass 2 page inherits the copy instead of regressing to raw codes.
  */
 const MESSAGES: Record<string, string> = {
+  already_bet: "Your stake for this hand is already in.",
   already_full: "You're at full health.",
   already_hospitalised: "You're already in hospital.",
   already_in_a_gang: "You're already in a gang.",
   already_jailed: "You're in jail yourself.",
+  already_seated: "You're already sitting at a table.",
   already_there: "You're already in that city.",
   already_verified: "Your email is already verified.",
   amount_must_be_positive: "Enter an amount greater than zero.",
@@ -63,13 +65,16 @@ const MESSAGES: Record<string, string> = {
   no_location: "Travel to a city first.",
   no_session: "You don't have a hand in play.",
   no_such_game: "That game isn't dealt here.",
+  no_such_table: "That table is gone.",
   not_hospitalised: "You're not in hospital.",
   not_injured: "You're already at full health.",
   no_such_target: "No such player.",
   not_a_member: "You're not a member of that gang.",
   not_jailed: "They're not in jail.",
   not_owned: "You don't own that item.",
+  not_seated: "You're not sitting at a table.",
   not_sold_here: "This location doesn't stock that.",
+  not_your_turn: "It's not your turn yet.",
   notification_not_found: "That notification is gone.",
   on_cooldown: "Not ready yet.",
   player_not_found: "No such player.",
@@ -85,6 +90,7 @@ const MESSAGES: Record<string, string> = {
   session_closed: "That hand is already over.",
   session_expired: "That hand timed out — deal a new one.",
   session_open: "Finish the hand you're playing first.",
+  table_full: "Every seat at that table is taken.",
   target_elsewhere: "That player is elsewhere.",
   target_hospitalised: "That player is in hospital.",
   target_jailed: "That player is in jail.",
@@ -98,6 +104,7 @@ const MESSAGES: Record<string, string> = {
   wager_above_max: "That's over the table limit.",
   wager_below_min: "That's under the minimum bet.",
   wrong_location: "They're not in this town.",
+  wrong_phase: "The hand has moved on — that isn't the move now.",
   wrong_slot: "You can't equip that in that slot.",
 };
 
