@@ -403,6 +403,7 @@ export default defineWorkspace([
         "test/properties-routes.test.ts",
         "test/properties-seizure.test.ts",
         "test/membership-plugin.test.ts",
+        "test/membership-gift.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",
