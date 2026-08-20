@@ -1,5 +1,5 @@
 import type {
-  AssetSlot, CoreEventInput, FilterSubscription, JobContext, PlayerSnapshot, PluginCtx,
+  AssetSlot, BoundFilterSubscription, CoreEventInput, JobContext, PlayerSnapshot, PluginCtx,
   PluginEventInput, PluginTx, PropertyTypeDecl,
 } from "@gl3/plugin-sdk";
 import {
@@ -62,7 +62,7 @@ export interface PluginCtxOptions {
   pluginId: string;
   player: PlayerSnapshot | null;
   job: JobContext | null;
-  filters: readonly FilterSubscription[];
+  filters: readonly BoundFilterSubscription[];
   propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
   installedPluginIds: ReadonlySet<string>;
   /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
@@ -81,6 +81,23 @@ type BufferedEvent =
   | { kind: "core"; event: CoreEventInput };
 
 export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions): PluginCtx {
+  // Built once per ctx and memoized, so two filter subscribers owned by the
+  // same plugin (or two calls into the same one) reuse the same sibling ctx
+  // rather than each paying a fresh `createPluginCtx` — and, because the
+  // Map is closed over rather than module-level, siblings never leak across
+  // requests. Self short-circuits to the ctx already under construction
+  // instead of recursing into a second copy of it.
+  const siblings = new Map<string, PluginCtx>();
+  const ctxFor = (ownerId: string): PluginCtx => {
+    if (ownerId === options.pluginId) return ctx;
+    let sibling = siblings.get(ownerId);
+    if (sibling === undefined) {
+      sibling = createPluginCtx(deps, { ...options, pluginId: ownerId });
+      siblings.set(ownerId, sibling);
+    }
+    return sibling;
+  };
+
   const ctx: PluginCtx = {
     pluginId: options.pluginId,
     player: options.player,
@@ -321,7 +338,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     },
 
     filters: {
-      apply: (point, value) => runFilterChain(options.filters, point, ctx, value),
+      apply: (point, value) => runFilterChain(options.filters, point, ctxFor, value),
     },
     settings: {
       get: (key) => deps.settings[`${options.pluginId}.${key}`] ?? null,

@@ -32,7 +32,7 @@ export type { CombatSettings } from "./settings.js";
  * stays open and the next kill claims it.
  */
 export interface KillResolved { killerId: string; victimId: string }
-export const killResolved = filterPoint<KillResolved>("combat.killResolved");
+export const killResolved = filterPoint<KillResolved>("combat.killResolved", "propagate");
 
 /**
  * How long one attacker→target engagement lasts for alert purposes. Events

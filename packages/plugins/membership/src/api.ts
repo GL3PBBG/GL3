@@ -5,7 +5,7 @@ export const MEMBERSHIP_TIMER_KEY = "membership";
 export interface BenefitDecl { title: string; description: string }
 
 /** Consumers subscribe with `on(benefits, ...)` to add display copy (casino.games shape). */
-export const benefits = filterPoint<BenefitDecl[]>("membership.benefits");
+export const benefits = filterPoint<BenefitDecl[]>("membership.benefits", "propagate");
 
 /**
  * The live expiry, or null — and the lazy expiry notifier. An expired row is

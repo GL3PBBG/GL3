@@ -305,7 +305,7 @@ export interface LeverSet {
   playerId: string;
   value: bigint;
 }
-export const leverSet = filterPoint<LeverSet>("properties.leverSet");
+export const leverSet = filterPoint<LeverSet>("properties.leverSet", "propagate");
 
 /** V2's `method_cost`: the owner sets the consumer's local price or limit. */
 const leverRoute = route({

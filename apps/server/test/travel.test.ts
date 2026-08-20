@@ -65,7 +65,9 @@ async function travelWithTransactionHook(
   const deps = { db, redis, queues: new Map(), settings: {}, leaderboardPrefix };
   const player = await loadSnapshot(deps, playerId);
   const ctx = createPluginCtx(deps, {
-    pluginId: travelPlugin.id, player, job: null, filters: travelPlugin.filters, propertyTypes: new Map(),
+    pluginId: travelPlugin.id, player, job: null,
+    filters: travelPlugin.filters.map((subscription) => ({ ownerId: travelPlugin.id, subscription })),
+    propertyTypes: new Map(),
     installedPluginIds: new Set([travelPlugin.id]),
   });
 
