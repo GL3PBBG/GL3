@@ -26,8 +26,10 @@ import {
   readTableIdleKickHands, readTableMaxSeats,
 } from "./settings.js";
 import { fromStorableState, toStorableState } from "./state.js";
+import { tableRoutes } from "./table-routes.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
+export { lockTable } from "./table-engine.js";
 export {
   games,
   buildRegistry,
@@ -729,7 +731,7 @@ export default definePlugin({
   basePaths: ["/api/casino", "/api/admin/casino"],
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
-  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute],
+  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes],
   adminPages: [adminPage],
   // Documentation parity with combat's `provides: [killResolved]`: nothing
   // reads `PluginManifest.provides` today, but this is the point a game
