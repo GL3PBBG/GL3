@@ -389,6 +389,7 @@ export default defineWorkspace([
         "test/plugin-loader.test.ts",
         "test/online.test.ts",
         "test/presence.test.ts",
+        "test/profile-extras-bounties.test.ts",
         "test/profile.test.ts",
         "test/ranks.test.ts",
         "test/rounds-finalize.test.ts",

@@ -1,4 +1,4 @@
-import { definePlugin, InsufficientFundsError, on, PluginError, route } from "@gl3/plugin-sdk";
+import { coreProfileView, definePlugin, InsufficientFundsError, on, PluginError, route } from "@gl3/plugin-sdk";
 import { killResolved } from "@gl3/plugin-combat";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -218,11 +218,32 @@ const claimOnKill = on(killResolved, async (ctx, value) => {
   return value;
 });
 
+/**
+ * core.profileView (spec §2): a plain SELECT, no lock — this runs on a public
+ * read path, same shape as `listRoute` above. The link is always contributed
+ * so any profile has a way in to place a bounty; the stat only appears when
+ * there is something open to report (`total > 0n`).
+ */
+const profileExtras = on(coreProfileView, async (ctx, value) => {
+  const rows = await ctx.transaction(async (tx) => tx.db
+    .select({ amount: bounties.amount })
+    .from(bounties)
+    .where(and(eq(bounties.target, value.targetId), isNull(bounties.claimedBy))));
+  const total = rows.reduce((sum, r) => sum + r.amount, 0n);
+
+  const extras = [...value.extras,
+    { kind: "link" as const, pluginId: ctx.pluginId, label: "Place bounty", to: `/bounties?target=${value.targetId}` }];
+  if (total > 0n) {
+    extras.unshift({ kind: "stat" as const, pluginId: ctx.pluginId, label: "Open bounty", value: `$${total.toString()}` });
+  }
+  return { ...value, extras };
+});
+
 export default definePlugin({
   id: "bounties",
   version: "1.0.0",
   basePaths: ["/api/bounties"],
   migrations: BOUNTIES_MIGRATIONS,
   routes: [placeRoute, listRoute],
-  filters: [claimOnKill],
+  filters: [claimOnKill, profileExtras],
 });

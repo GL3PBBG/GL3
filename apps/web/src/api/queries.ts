@@ -357,10 +357,11 @@ export function useTravel() {
  * `?? ""` placeholder keys out of the cache entirely.
  */
 
-export function useProfile(playerId: string) {
+export function useProfile(playerId: string, enabled = true) {
   return useQuery<ProfileDto>({
     queryKey: keys.profile(playerId),
     queryFn: async () => ProfileDtoSchema.parse(await api(`/api/players/${playerId}/profile`)),
+    enabled,
   });
 }
 
