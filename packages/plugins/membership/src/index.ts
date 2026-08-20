@@ -3,7 +3,7 @@ import { z } from "zod";
 import { definePlugin, isInsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
 import { MEMBERSHIP_MIGRATIONS } from "./migrations.js";
 import { benefits, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
-import { membershipPackages } from "./schema.js";
+import { membershipPackages, players } from "./schema.js";
 
 export { MEMBERSHIP_TIMER_KEY, benefits, isMember, membershipUntil, type BenefitDecl } from "./api.js";
 
@@ -135,10 +135,73 @@ const buyRoute = route({
   },
 });
 
+/**
+ * Gift a package to another player by username. Mirrors `buyRoute`'s
+ * stacking rule, but debits the buyer and extends the RECIPIENT's timer.
+ *
+ * `players` is the read-only mirror (schema.ts) — this is the second
+ * consumer after `combat`'s pattern of locking both sides via one sorted
+ * call before any balance change (rule 6, player↔player edge).
+ */
+const giftRoute = route({
+  method: "POST",
+  path: "/api/membership/gift",
+  body: z.object({ packageId: z.string().uuid(), recipientName: z.string().min(1).max(100) }),
+  handler: async (ctx, { body }) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const [pkg] = await tx.db.select().from(membershipPackages)
+        .where(eq(membershipPackages.id, body.packageId));
+      if (!pkg) throw new PluginError("package_not_found", 404);
+      const [recipient] = await tx.db.select({ id: players.id, username: players.username })
+        .from(players).where(eq(players.username, body.recipientName));
+      if (!recipient) throw new PluginError("player_not_found", 404);
+      if (recipient.id === player.id) throw new PluginError("cannot_gift_self", 400);
+
+      // BOTH players, sorted, in ONE call, BEFORE any balance change — the
+      // player↔player edge combat owns (rule 6). No new lock-order test:
+      // participants share the helper, so a test would prove only the
+      // already-safe case (CLAUDE.md rule-6 corollary).
+      await tx.locks.player([player.id, recipient.id]);
+
+      try {
+        await tx.economy.applyBalanceChange({
+          playerId: player.id, amount: -pkg.costPoints, kind: "points",
+          reason: "membership.gift", refId: recipient.id,
+        });
+      } catch (error) {
+        if (isInsufficientFundsError(error)) throw new PluginError("insufficient_points", 409);
+        throw error;
+      }
+      const current = await tx.timers.get(recipient.id, MEMBERSHIP_TIMER_KEY);
+      const base = current !== null && current.getTime() > Date.now() ? current.getTime() : Date.now();
+      const until = new Date(base + pkg.durationSeconds * 1000);
+      await tx.timers.set(recipient.id, MEMBERSHIP_TIMER_KEY, until);
+      await tx.notify(recipient.id, `${player.username} gifted you ${pkg.name}.`);
+      await tx.events.publish({
+        name: "gifted",
+        actorId: player.id, actorName: player.username,
+        audience: { kind: "player", playerId: player.id },
+        payload: { packageName: pkg.name, recipientName: recipient.username },
+      });
+      return { status: 200, body: { until: until.toISOString() } };
+    });
+  },
+});
+
 const purchasedEvent = {
   name: "purchased",
   payload: z.object({ packageName: z.string(), until: z.string() }),
   describe: "{actorName} bought {packageName}",
+  invalidates: ["membership", "me"],
+};
+
+const giftedEvent = {
+  name: "gifted",
+  payload: z.object({ packageName: z.string(), recipientName: z.string() }),
+  describe: "{actorName} gifted {packageName} to {recipientName}",
   invalidates: ["membership", "me"],
 };
 
@@ -148,8 +211,8 @@ export default definePlugin({
   basePaths: ["/api/membership", "/api/admin/membership"],
   tables: { packages: "p_membership_packages" },
   migrations: MEMBERSHIP_MIGRATIONS,
-  routes: [statusRoute, packagesRoute, benefitsRoute, buyRoute],
-  events: [purchasedEvent],
+  routes: [statusRoute, packagesRoute, benefitsRoute, buyRoute, giftRoute],
+  events: [purchasedEvent, giftedEvent],
   // Documentation parity with casino's `provides: [games]`: nothing reads
   // `PluginManifest.provides` today, but this is the point a consumer
   // subscribes to via `on(benefits, ...)` to add display copy.
