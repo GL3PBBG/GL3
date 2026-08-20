@@ -172,6 +172,7 @@ export function Shell(): JSX.Element {
           <Stat label="Player">{me.data?.username ?? "—"}</Stat>
           <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
           <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
+          <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
           <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
           <Stat label="Exp">{me.data ? <Amount value={me.data.exp} /> : "—"}</Stat>
           <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>

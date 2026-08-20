@@ -150,4 +150,15 @@ describe("GET /api/auth/me", () => {
     const anon = await app.inject({ method: "GET", url: "/api/auth/me" });
     expect(anon.statusCode).toBe(401);
   });
+
+  it("returns the points balance as a decimal string", async () => {
+    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
+    const { token, playerId } = reg.json();
+
+    await db.update(playerStats).set({ points: 1234n }).where(sql`player_id = ${playerId}`);
+
+    const res = await app.inject({ method: "GET", url: "/api/auth/me", headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().points).toBe("1234");
+  });
 });
