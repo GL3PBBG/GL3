@@ -72,4 +72,25 @@ describe("view node vocabulary parity", () => {
     expect(ViewNodeSchema.safeParse(node).success).toBe(true);
     expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
   });
+
+  // The casino table's layout props, and the same property-level gap as
+  // `table.rowActions` above: both are `.strict()`, so a `size`/`caption` the
+  // wire schema lacked would take down the whole payload in the browser while
+  // the hub accepted the page at boot.
+  it("accepts a captioned, sized `cards` hand in both the SDK and on the wire", () => {
+    const node = { kind: "cards", cards: ["Sa", "B1"], size: "sm", caption: "Seat 2 — 17, playing" };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+  });
+
+  it("accepts `panel.layout` in both the SDK and on the wire", () => {
+    const node = {
+      kind: "panel",
+      title: "The other seats",
+      layout: "row",
+      children: [{ kind: "cards", cards: ["Sa"], size: "sm" }],
+    };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+  });
 });

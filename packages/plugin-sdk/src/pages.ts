@@ -226,6 +226,16 @@ const leafOptions = [
     .object({
       kind: z.literal("cards"),
       cards: z.array(z.string().regex(/^([HDCS](a|[2-9]|10|j|q|k)|J[12]|B[12])$/, "card must be a playing-card code")),
+      // How big to draw the hand. Absent is `md`, the size every hand drawn
+      // before this field existed was. A multiplayer table needs the other
+      // sizes: its own hand wants to be read at a glance (`lg`) and four
+      // opponents' hands have to sit side by side in one content column
+      // (`sm`).
+      size: z.enum(["sm", "md", "lg"]).optional(),
+      // A line under the hand saying whose it is — the only way to tell four
+      // hands in a row apart, since a `cards` node carries no title of its own
+      // and a panel per hand would stack them vertically again.
+      caption: z.string().min(1).optional(),
     })
     .strict(),
 ] as const;
@@ -235,7 +245,11 @@ const Leaf = z.discriminatedUnion("kind", [...leafOptions]);
 
 export type ViewNode =
   | z.infer<typeof Leaf>
-  | { kind: "panel"; title: string; children: ViewNode[] }
+  // `| undefined` on the optional member, not a bare `?`: the repo compiles
+  // with `exactOptionalPropertyTypes`, under which zod's own inferred
+  // `.optional()` shape (which does include `undefined`) is not assignable to
+  // a bare optional property.
+  | { kind: "panel"; title: string; children: ViewNode[]; layout?: "row" | undefined }
   | { kind: "list"; items: ViewNode[] };
 
 /**
@@ -262,6 +276,13 @@ export const ViewNodeSchema: z.ZodType<ViewNode> = z.lazy(() =>
         kind: z.literal("panel"),
         title: z.string(),
         children: z.array(ViewNodeSchema),
+        // How the panel's own children are laid out. Absent stacks them, which
+        // is what every panel authored before this field did. `row` lays them
+        // out horizontally and wraps — for a run of LEAF children only, since
+        // the renderer flattens a nested panel to a sibling one and a nested
+        // panel inside a row would break out of it (see PageRenderer's
+        // `PanelGroup` comment).
+        layout: z.literal("row").optional(),
       })
       .strict(),
     z.object({ kind: z.literal("list"), items: z.array(ViewNodeSchema) }).strict(),
