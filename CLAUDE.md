@@ -388,6 +388,42 @@ filed under one. `@gl3/shared` → `0.1.14` and `@gl3/plugin-sdk` → `0.1.7`
 zod field on `route()`, needed because the forum plan never anticipated
 `?page=`) — **neither is published**, pending the user's approval.
 
+**Premium membership** has since shipped on `feat/membership`: V2's
+`membership` module, ported and improved as `@gl3/plugin-membership`, the
+**20th plugin and the 10th to own tables and migrations** — its one table,
+`p_membership_packages`, has no foreign keys, no core migration, and adds no
+lock-graph edge, so `schema.test.ts` is untouched. Status lives in the core
+`player_timers` row keyed `membership` (already migrated from V2 `userTimers`
+verbatim), made live rather than moved. The SDK gains generic per-player
+timers, `tx.timers.get/set/clear`, over that table — `clear` returns a
+deleted-boolean, which is what makes lazy expiry notification (in
+`membershipUntil`, DELETE-as-claim, no cron, no Redis marker) a once-only
+claim rather than check-then-act. Buy keeps V2's stacking rule verbatim,
+`max(now, current expiry) + duration`; gift reuses the existing player↔player
+edge (`tx.locks.player`, sorted) rather than adding one, so per the rule-6
+corollary above there is deliberately no new lock-order test. Benefits are a
+filter point, `membership.benefits` (the `casino.games` shape), with three
+subscribers each a new plugin→plugin dependency edge — the **6th through
+8th**, after `bounties→combat`, `combat→inventory`, `bullets→properties`,
+`bullets→travel` and `combat→detectives`: `crimes→membership` (Getaway
+Driver, `ceil(cooldown × 0.75)`), `travel→membership` (Frequent Flyer,
+`ceil(cost × 0.25)`), `theft→membership` (Slide Hammer, `min(100, floor(chance
+× 1.1))`) — each applied at both its listing route and its acting route.
+Plugin events only, so this cluster adds no `GameEvent` variant and touches
+none of the four places a new one would. Admin is package CRUD via
+`adminPages` with a blankable rename, pushing the `admin-ids-hidden` floor
+from 12 to 13 sections; `/membership` is manifest-declared (the theft
+precedent). M4 gained the `premiumMembership` → `p_membership_packages`
+migrator (ten plugin-owned tables now in the idempotency census) and turned
+up a fixture defect, not a spec or migrator bug — the test fixture DDL had
+named the description column `PM_name` where real V2 uses `PM_desc`, fixed on
+this branch (the `PR_owner` defect class again). `@gl3/shared` is
+**untouched** by this cluster: the membership views are generic
+manifest-table pages with no shaped response DTO to add, so the shared
+package stays wherever prior work has left it. `@gl3/plugin-sdk` → **`0.1.10`**
+for `tx.timers`, additive, **unpublished** pending the user's approval after a
+registry check.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime

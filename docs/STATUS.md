@@ -2892,6 +2892,96 @@ file `admin-detectives.test.ts` is registered in `vitest.workspace.ts` (the
 ninth-site trap). Merge gate: bare `npm run verify` exit 0 from the
 process, 231 files / 1873 passed.
 
+### Premium membership — timed status, benefit registry, gifting
+
+V2's `membership` module, ported and improved, on `feat/membership`.
+`@gl3/plugin-membership` is the **20th plugin and the 10th to own tables and
+migrations**. It owns `p_membership_packages` (plugin migration `0001`:
+`id`, `name`, `cost_points`, `duration_seconds`) with **no foreign keys** —
+like `p_inventory_shop_stock`, it adds no lock-graph edge, so there is no new
+lock-order test, no core migration at all, and `schema.test.ts`'s FK/index
+counts are untouched. Membership *status*, deliberately, is not a plugin
+table: it is the core `player_timers` row keyed `membership`, which M4 has
+migrated verbatim from V2 `userTimers` since M4 shipped — this cluster is
+the money-ranks pattern again, making an already-migrated-but-unread table
+live rather than moving any data.
+
+The SDK gains generic per-player timers, `tx.timers` (`get`/`set`/`clear`
+over `player_timers`), mirroring V2's own open-ended `userTimers` key space
+so a future plugin can carry per-player expiries without owning a table.
+`clear` returns a deleted-boolean, which is what makes the expiry path
+below a once-only claim rather than a check-then-act. Buy is a plain
+points sink with V2's exact stacking rule, `max(now, current expiry) +
+duration` — never wasteful, extends from whichever is later. Lazy expiry
+notification lives in `membershipUntil`'s DELETE-as-claim: an expired timer
+row is deleted and the deletion's row-count, not a prior read, decides
+whether to notify — no cron, no Redis marker, and a second concurrent
+caller deletes zero rows and stays silent. Gift reuses the existing
+player↔player edge — `tx.locks.player([buyer, recipient])`, sorted — rather
+than adding a new one; per the CLAUDE.md rule-6 corollary, a lock-order test
+here would prove only the case the shared helper already makes safe, so
+none was added.
+
+Benefits are declared through a filter point, `membership.benefits` (the
+`casino.games` shape — an extension point costing no SDK surface), and are
+otherwise consumer-owned: the module that owns the affected number applies
+its own effect and its own display copy. Three consumers subscribe, and
+each is a new plugin→plugin dependency edge — the **6th through 8th**,
+after `bounties→combat`, `combat→inventory`, `bullets→properties`,
+`bullets→travel` and `combat→detectives`:
+
+- `crimes → membership` — "Getaway Driver", `cooldownSeconds = ceil(base ×
+  0.75)`, applied at both `ctx.cooldown.acquire` and the listing DTO.
+- `travel → membership` — "Frequent Flyer Discount", `cost = ceil(base ×
+  0.25)` (computed as `(cost + 3n) / 4n` to stay in bigint), applied at
+  charge, the listing DTO, and the purchase event.
+- `theft → membership` — "Slide Hammer", `chance = min(100, floor(base ×
+  1.1))`, applied at steal and in the tier listing.
+
+Every consumer applies its multiplier at both the listing route and the
+acting route, so the page never shows a number the action won't honor.
+Events are plugin events only (`tx.events.publish`) — this cluster adds no
+`GameEvent` variant, so none of the four places a new variant would touch
+(`eventCopy.ts`, `ws/invalidation.ts`, the `CORPUS` guard, the shared-package
+event census) needed changing, the trap the rounds cluster hit head-on.
+Admin is package CRUD via `adminPages`, with a blankable rename field — no
+UUID renders anywhere, so the `admin-ids-hidden` floor rises from 12 to 13
+sections. `/membership` is manifest-declared (the theft precedent, not the
+hand-written properties exception): status, benefits and packages tables,
+a buy form, and a gift form using the existing basic text-field branch of
+`ViewNodeSchema` for the recipient name — no view-vocabulary change.
+
+M4 gained a new migrator: V2 `premiumMembership` → `p_membership_packages`
+in the first content-migration phase, `id_map` UUIDv7 as usual, and
+`KNOWN_TABLES` gains the target — ten plugin-owned tables now covered by the
+idempotency census. Migrating this table surfaced a fixture defect, not a
+migrator or spec bug: `apps/migrate`'s test fixture DDL had declared the
+description column `PM_name`; real V2 names it `PM_desc`. Fixed in
+`apps/migrate/test/fixtures` on this branch — the `PR_owner` defect class,
+same shape as the properties-franchise column-name miss, caught this time
+before shipping rather than after. V2's `membershipLinkName`/
+`membershipName` settings are report-skipped by `migrateSettings` (they fed
+template labels GL3's manifest-static page title has no equivalent for).
+
+No shared-package bump: the membership views are generic manifest tables
+with no shaped response DTO, so `@gl3/shared` is untouched by this cluster
+(see the spec's amended "Shared DTOs and versions" section). `@gl3/plugin-sdk`
+→ **`0.1.10`** for `tx.timers`, additive, **unpublished** pending the user's
+approval (a registry check first — the repo's now-familiar
+another-session-took-the-number risk). New test files
+(`membership-plugin.test.ts`, `membership-gift.test.ts`,
+`admin-membership.test.ts`, `membership-benefits.test.ts`) are registered in
+`vitest.workspace.ts` (the ninth-site trap).
+
+The `casino-lock-order` ABBA flake (`survives A-plays-at-B's-table racing
+B-plays-at-A's-table` — bare 500 on `lockPlayersForUpdate`, no SQLSTATE
+captured under the test logger) fired **once more** during this cluster's
+scoped `verify:related` run — the fourth occurrence on record, same shape as
+the three logged above, green on an immediate standalone re-run. Nothing in
+this cluster's diff touches casino or the lock helpers; recorded here as
+further evidence the failure is load-dependent rather than tied to any one
+branch's changes.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There

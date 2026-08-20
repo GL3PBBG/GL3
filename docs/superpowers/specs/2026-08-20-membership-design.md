@@ -166,13 +166,23 @@ CORPUS, shared census) changes, and `@gl3/shared` needs no event work.
 
 ## Shared DTOs and versions
 
-- `@gl3/shared`: new `dto/membership.ts` —
-  `MembershipStatusSchema`, `MembershipPackageSchema`, `BenefitSchema`,
-  response schemas. Additive → bump `0.1.14` (unpublished, social cluster) to
-  **`0.1.15`**, publish only with user approval after a registry check
-  (another session may have taken numbers — this has happened twice).
-- `@gl3/plugin-sdk`: `tx.timers` → bump `0.1.7` (unpublished) to **`0.1.8`**,
-  same publish protocol.
+**Amended post-planning (drift found during implementation):** no
+`dto/membership.ts` shipped and `@gl3/shared` is **untouched** by this
+cluster. The status/packages/benefits pages are manifest-declared views over
+generic `{ rows }` tables (the theft precedent — a manifest page needs no
+shared response schema unless it is hand-written `apps/web`, and `/membership`
+is not), so there was never a shaped DTO for this cluster to add. By the time
+this cluster landed, `@gl3/shared` had already moved past the `0.1.14`
+baseline this section originally planned against; it stays wherever other
+work has since left it (`0.1.16` at the time of writing) with no bump from
+membership.
+
+- `@gl3/plugin-sdk`: `tx.timers` is the only SDK surface this cluster adds.
+  Bumped `0.1.9` (unpublished, already ahead of this section's original
+  `0.1.7` baseline — other work landed in between) to **`0.1.10`**, additive,
+  unpublished pending the user's approval — publish only after a registry
+  check (`npm view @gl3/plugin-sdk versions --registry https://npm.gl3.dev`),
+  per the repeated another-session-took-the-number incident.
 
 ## M4
 
@@ -182,6 +192,14 @@ New migrator: V2 `premiumMembership` → `p_membership_packages` (id via
 idempotency census gains one target table. The `membership` userTimer rows
 are already handled by the existing timers migrator — no change there. V2's
 `membershipLinkName`/`membershipName` settings are report-skipped.
+
+**Fixture defect found and fixed on this branch** (the `PR_owner` defect
+class — see the properties-franchise cluster): `apps/migrate`'s test fixture
+DDL for `premiumMembership` declared the description column as `PM_name`.
+Real V2 (`modules/installed/membership/*`) names it `PM_desc`, matching what
+this section already specified above. The fixture, not the spec or the
+migrator, was wrong; it is fixed in `apps/migrate/test/fixtures` on this
+branch.
 
 ## Web
 

@@ -60,7 +60,7 @@ Audited from `install/schema.sql`, `install/data.sql`, per-module `schema.sql` f
 | `theft` | Car-theft tiers | `T_chance` %, `T_maxDamage`, `T_worstCar`/`T_bestCar` are **value bounds in cash**, not car ids |
 | `weapons` | Weapon catalog | `W_accuracy` only; damage lives in kill module logic |
 | `items` + `itemEffects` + `itemMeta` | Inventory item defs | EAV pattern: `itemEffects(IE_effect, IE_item, IE_value)` e.g. effect rows for heal/armor; `itemMeta` freeform. GL3: JSONB `effects`/`meta` on `items` |
-| `premiumMembership` | Membership tiers | duration `PM_seconds`, cost in points |
+| `premiumMembership` | Membership tiers | duration `PM_seconds`, cost in points. Migrates to the `membership` plugin's `p_membership_packages` (`feat/membership`) — previously listed here but unmigrated |
 | `settings` | Key-value game config | e.g. `pointsName`, `gangName`, `detectiveReport` — migrate verbatim to `settings(key, value)` |
 
 **Social & economy state**
