@@ -317,6 +317,7 @@ export default defineWorkspace([
         "test/combat-kill-filter.test.ts",
         "test/combat-kill.test.ts",
         "test/combat-lock-order.test.ts",
+        "test/combat-notify.test.ts",
         "test/combat-repair.test.ts",
         "test/combat.test.ts",
         "test/crime-worker-idempotency.test.ts",
