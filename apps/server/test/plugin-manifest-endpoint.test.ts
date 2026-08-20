@@ -1,5 +1,6 @@
 import { definePlugin } from "@gl3/plugin-sdk";
 import { membershipPage } from "@gl3/plugin-membership";
+import { DEFAULT_MONEY_FORMAT } from "@gl3/shared";
 import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
@@ -170,6 +171,10 @@ describe("GET /api/plugins", () => {
           describe: "{actorName} gifted {packageName} to {recipientName}",
           invalidates: ["membership", "me"],
         }],
+        // buildPluginsPayload fills the placeholder default for now — Task 7
+        // replaces this with the `core.moneyFormat` filter chain applied
+        // per request.
+        moneyFormat: DEFAULT_MONEY_FORMAT,
       });
     } finally {
       await close();
