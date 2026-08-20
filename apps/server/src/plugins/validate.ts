@@ -246,6 +246,19 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
       }
       claimedPages.set(page.id, manifest.id);
     }
+
+    for (const point of manifest.provides) {
+      if (point.name === "core" || point.name.startsWith("core.")) {
+        fail(
+          `plugin "${manifest.id}" declares filter point "${point.name}" — the "core." prefix is reserved to the SDK`,
+        );
+      }
+      if (!point.name.startsWith(`${manifest.id}.`)) {
+        fail(
+          `plugin "${manifest.id}" declares filter point "${point.name}", which must start with "${manifest.id}."`,
+        );
+      }
+    }
   }
 
   // Containment runs second: every basePath is known by now, so a route or an
