@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { definePlugin, isInsufficientFundsError, PluginError, route } from "@gl3/plugin-sdk";
+import { coreHud, coreProfileView, definePlugin, isInsufficientFundsError, on, PluginError, route } from "@gl3/plugin-sdk";
 import { MEMBERSHIP_MIGRATIONS } from "./migrations.js";
-import { benefits, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
+import { benefits, isMember, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
 import { adminPage, membershipPage } from "./pages.js";
 import { membershipPackages, players } from "./schema.js";
 
@@ -313,6 +313,33 @@ const adminPackageDeleteRoute = route({
   },
 });
 
+// ---------------------------------------------------------------------------
+// core.hud / core.profileView (bounties'/detectives' subscriber shape).
+// Both read `membershipUntil`/`isMember` — its lazy expiry-notification
+// DELETE-as-claim is DESIGNED to be called from hot reads like these, so a
+// caller's HUD load is what reliably sweeps their own expired timer with no
+// cron. Never swap it for a raw select (api.ts).
+// ---------------------------------------------------------------------------
+
+const hudCountdown = on(coreHud, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+  const until = await ctx.transaction(async (tx) => membershipUntil(tx, player.id));
+  if (until === null) return value;
+  return [...value, {
+    pluginId: ctx.pluginId, label: "Membership", value: "Member", countdownTo: until.toISOString(),
+  }];
+});
+
+const profileMemberStat = on(coreProfileView, async (ctx, value) => {
+  const member = await ctx.transaction(async (tx) => isMember(tx, value.targetId));
+  if (!member) return value;
+  return {
+    ...value,
+    extras: [...value.extras, { kind: "stat" as const, pluginId: ctx.pluginId, label: "Membership", value: "Member" }],
+  };
+});
+
 const purchasedEvent = {
   name: "purchased",
   payload: z.object({ packageName: z.string(), until: z.string() }),
@@ -338,6 +365,7 @@ export default definePlugin({
     adminPackageListRoute, adminPackageCreateRoute, adminPackageUpdateRoute, adminPackageDeleteRoute,
   ],
   events: [purchasedEvent, giftedEvent],
+  filters: [hudCountdown, profileMemberStat],
   // Documentation parity with casino's `provides: [games]`: nothing reads
   // `PluginManifest.provides` today, but this is the point a consumer
   // subscribes to via `on(benefits, ...)` to add display copy.
