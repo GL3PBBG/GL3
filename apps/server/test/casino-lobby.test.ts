@@ -11,6 +11,7 @@ import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { FARO, faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -20,8 +21,10 @@ import { bootTestServer } from "./helpers/server.js";
  * GET /api/casino (the lobby), the lazy forfeit of an abandoned hand, and the
  * casino's admin section.
  *
- * Runs against the real installed `blackjack` game through a bare
- * `bootTestServer()`, the shape `casino-play.test.ts` established.
+ * Runs against FARO, a deterministic synthetic solo game installed via
+ * `bootTestServer({ plugins: [faroPlugin] })` — blackjack is a table game now
+ * and no longer lives in the solo `casino.games` registry (see
+ * `test/helpers/faro.ts`), the shape `casino-play.test.ts` established.
  *
  * The lobby is read-only and takes no locks; the forfeit is a write and lives
  * inside `play`'s transaction, taking the session row FOR UPDATE as the third
@@ -69,7 +72,7 @@ async function seedHouse(
 ): Promise<string> {
   const id = uuidv7();
   await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost, profit,
+    id, locationId, pluginId: "faro", ownerPlayerId: ownerId, cost, profit,
   });
   return id;
 }
@@ -110,28 +113,22 @@ interface LobbyBody {
 }
 
 /**
- * Plays until a hand STAYS open, and answers what `play` returned for it.
- *
- * Blackjack's `start` settles immediately on a natural dealt from a real
- * `node:crypto` shoe (either side, roughly one hand in eleven), and a settled
- * hand blocks nothing — so retrying is sound and keeps the session's `state`
- * a real one written by the real route rather than a hand-built fixture. The
- * cap is not a flake budget: eleven consecutive naturals is a shuffle bug, not
- * bad luck (`casino-play.test.ts`'s "flaky means broken" note).
+ * Plays and answers what `play` returned for it. FARO's `start` never
+ * settles, so — unlike the old blackjack-backed retry loop this replaces —
+ * one call always leaves the hand open; the session's `state` is still real,
+ * written by the real route.
  */
 async function openHand(token: string, wager: string): Promise<{ sessionId: string; view: unknown }> {
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const res = await play(token, "blackjack", wager);
-    expect(res.statusCode, `play body: ${res.body}`).toBe(200);
-    const body = res.json<{ sessionId: string; view: unknown; done: boolean }>();
-    if (!body.done) return { sessionId: body.sessionId, view: body.view };
-  }
-  throw new Error("25 hands in a row settled at deal — that is a shuffle bug, not a flake");
+  const res = await play(token, "faro", wager);
+  expect(res.statusCode, `play body: ${res.body}`).toBe(200);
+  const body = res.json<{ sessionId: string; view: unknown; done: boolean }>();
+  expect(body.done).toBe(false);
+  return { sessionId: body.sessionId, view: body.view };
 }
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer } = await bootTestServer());
+  ({ app, close: closeServer } = await bootTestServer({ plugins: [faroPlugin] }));
   // FIRST registration in this file, so this is the Administrator.
   const founder = await register();
   adminToken = founder.token;
@@ -160,11 +157,11 @@ describe("GET /api/casino", () => {
     expect(body.locationId).toBe(locationId);
     expect(body.locationName).toMatch(/^city-/);
     expect(body.minBet).toBe("100"); // the default min_bet
-    // Every game the registry holds, which on this branch is exactly one.
-    expect(body.games.map((game) => game.gameId)).toEqual(["blackjack"]);
+    // Every game the registry holds, which under faroPlugin is exactly one.
+    expect(body.games.map((game) => game.gameId)).toEqual(["faro"]);
     expect(body.games[0]).toEqual({
-      gameId: "blackjack",
-      name: "Blackjack",
+      gameId: "faro",
+      name: "Faro",
       ownerName: owner.username,
       // The owner's lever IS the maximum bet (V2 blackjack.inc.php:276), and
       // money crosses the wire as a decimal string.
@@ -208,22 +205,23 @@ describe("GET /api/casino", () => {
     const session = res.json<LobbyBody>().session;
     expect(session).not.toBeNull();
     expect(session?.sessionId).toBe(hand.sessionId);
-    expect(session?.gameId).toBe("blackjack");
-    expect(session?.gameName).toBe("Blackjack");
+    expect(session?.gameId).toBe("faro");
+    expect(session?.gameName).toBe("Faro");
     expect(session?.wager).toBe("100000");
-    // The SAME view `play` answered with, re-rendered from the stored state by
-    // the game's own `view`. Equality is the assertion that matters: a resume
-    // that draws a different hand from the one dealt is the bug this catches.
-    expect(session?.view).toEqual(hand.view);
-    // A view the player can actually be shown — cards, not an empty node.
-    expect(JSON.stringify(session?.view)).toContain("\"cards\"");
+    // The lobby re-renders from the STORED state via the game's own `view`,
+    // not the view `play` answered with at `start` — FARO's two differ by
+    // design ("place your call" vs. "open"), which is exactly why this
+    // asserts against `FARO.view` itself rather than `hand.view`.
+    expect(session?.view).toEqual(FARO.view?.({ wager: 100_000n, outcome: "open" }));
+    // A view the player can actually be shown — a real `text` node.
+    expect(session?.view).toMatchObject({ kind: "text" });
     expect(new Date(session?.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now());
   });
 
   it("resumes viewless when the game declares no `view`", async () => {
     // `GameDef.view` is OPTIONAL: a game that omits it must resume with
     // `view: null` rather than an empty node or an error. Nothing exercises
-    // that branch by accident — blackjack, the only installed game, declares
+    // that branch by accident — faro, the only installed game, declares
     // one — so it is driven here through `callPluginRoute` against a manifest
     // whose filter contributes a viewless game.
     //
@@ -292,8 +290,8 @@ describe("GET /api/casino", () => {
     // is what a clamped century does.
     //
     // Driven through `callPluginRoute` because settings load once at boot, with
-    // a deterministic stand-in game: blackjack can settle at deal, and this
-    // test needs a hand that is certainly OPEN when the second play arrives.
+    // its own deterministic stand-in game — this test needs a hand that is
+    // certainly OPEN when the second play arrives.
     const NEVER_SETTLES: GameDef = {
       id: "casino",
       name: "Endless hand",
@@ -375,7 +373,7 @@ describe("the lazy forfeit", () => {
     await db.insert(casinoSessions).values({
       id: staleId,
       playerId: punter.playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId,
       wager: STALE_WAGER,
@@ -392,10 +390,12 @@ describe("the lazy forfeit", () => {
     const punterCashBefore = await cashOf(punter.playerId);
     const ownerCashBefore = await cashOf(owner.playerId);
 
-    const res = await play(punter.token, "blackjack", "100000");
+    const res = await play(punter.token, "faro", "100000");
     expect(res.statusCode, `play body: ${res.body}`).toBe(200);
     const body = res.json<{ sessionId: string; done: boolean; payout?: string }>();
     expect(body.sessionId).not.toBe(staleId);
+    // FARO's `start` never settles.
+    expect(body.done).toBe(false);
 
     // The stale hand is settled, and settled is all it is: its wager is
     // untouched, because a forfeit moves no money — the wager left the player
@@ -405,10 +405,8 @@ describe("the lazy forfeit", () => {
     expect(stale?.settledAt).not.toBeNull();
     expect(stale?.wager).toBe(STALE_WAGER);
 
-    // The ONLY money that moved is the new hand's own escrow (and its payout,
-    // if `start` dealt a natural — `casino-play.test.ts`'s net-from-the-body
-    // idiom, which keeps this deterministic against a real shuffle).
-    const net = body.done ? BigInt(body.payout ?? "0") - 100_000n : -100_000n;
+    // The ONLY money that moved is the new hand's own escrow.
+    const net = -100_000n;
     expect(await cashOf(punter.playerId)).toBe(punterCashBefore + net);
     expect(await cashOf(owner.playerId)).toBe(ownerCashBefore - net);
     // Not `STALE_WAGER - net + something`: the forfeited wager stays on the
@@ -419,9 +417,8 @@ describe("the lazy forfeit", () => {
     const rows = await db.select().from(casinoSessions).where(eq(casinoSessions.playerId, punter.playerId));
     expect(rows).toHaveLength(2);
     const open = rows.filter((row) => row.status === "open");
-    // Zero when the new hand dealt a natural and settled inside `play`.
-    expect(open).toHaveLength(body.done ? 0 : 1);
-    if (!body.done) expect(open[0]?.id).toBe(body.sessionId);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).toBe(body.sessionId);
   });
 
   it("still refuses a second play while a hand is live", async () => {
@@ -434,7 +431,7 @@ describe("the lazy forfeit", () => {
     await db.insert(casinoSessions).values({
       id: uuidv7(),
       playerId: punter.playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId: null,
       wager: 50_000n,
@@ -444,7 +441,7 @@ describe("the lazy forfeit", () => {
       createdAt: new Date(Date.now() - 60_000),
     });
 
-    const res = await play(punter.token, "blackjack", "50000");
+    const res = await play(punter.token, "faro", "50000");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("session_open");
   });
@@ -627,7 +624,7 @@ describe("the casino admin section", () => {
     await db.insert(casinoSessions).values({
       id: uuidv7(),
       playerId: punter.playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId: null,
       wager: 111_000n,
@@ -661,7 +658,7 @@ describe("the casino admin section", () => {
     await db.insert(casinoSessions).values({
       id: uuidv7(),
       playerId: punter.playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId: null,
       wager: 123_000n,
@@ -678,7 +675,7 @@ describe("the casino admin section", () => {
     const mine = rows.find((row) => row.player === punter.username);
     expect(mine).toBeDefined();
     expect(mine).toMatchObject({
-      game: "Blackjack",     // the registry's display name, not the raw id
+      game: "Faro", // the registry's display name, not the raw id
       wager: "123000",       // a decimal string, never a JSON number
       stale: "yes",
     });
@@ -689,7 +686,7 @@ describe("the casino admin section", () => {
     await db.insert(casinoSessions).values({
       id: settledId,
       playerId: punter.playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId: null,
       wager: 999_000n,

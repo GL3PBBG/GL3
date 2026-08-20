@@ -5,6 +5,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -12,19 +13,16 @@ import { bootTestServer } from "./helpers/server.js";
 /**
  * POST /api/casino/play — escrow, house resolution, exposure check.
  *
- * Runs against the real installed `blackjack` game (a CORE_PLUGIN, like
- * `casino` itself — casino-boot.test.ts's precedent), through a bare
- * `bootTestServer()`, exactly the shape `properties-routes.test.ts` uses.
+ * Runs against FARO, a deterministic synthetic solo game installed via
+ * `bootTestServer({ plugins: [faroPlugin] })` — blackjack is a table game now
+ * and no longer lives in the solo `casino.games` registry (see
+ * `test/helpers/faro.ts`).
  *
  * Every check exercised here (min/max bet, insufficient funds, house
  * exposure, unknown game, an already-open session) is decided BEFORE
- * `game.start` runs, so none of it depends on the real shuffle. Only the
- * "escrows the wager" test reaches `game.start`, and blackjack's `start` can
- * settle immediately on a natural dealt from a real `node:crypto` shoe — so
- * that test computes its expected deltas from the response body's
- * `done`/`payout` fields rather than assuming the hand stays open, which
- * keeps it deterministic regardless of the deal (CLAUDE.md: "flaky means
- * broken").
+ * `game.start` runs. FARO's `start` never settles, so the "escrows the
+ * wager" test can assert the hand stays open rather than netting from the
+ * response body the way the old blackjack-backed version had to.
  */
 const { db, sql: conn } = testDb();
 
@@ -61,7 +59,7 @@ const cashOf = async (id: string): Promise<bigint> => {
 };
 
 /**
- * Seeds a blackjack house directly, bypassing `properties/buy` — this file
+ * Seeds a FARO house directly, bypassing `properties/buy` — this file
  * is about the casino's own escrow/exposure logic, not property acquisition.
  * `cost` is the owner's lever (V2 blackjack.inc.php:276): 0n means "unset",
  * which falls back to the `max_bet` setting.
@@ -69,7 +67,7 @@ const cashOf = async (id: string): Promise<bigint> => {
 async function seedHouse(locationId: string, ownerId: string, cost: bigint): Promise<string> {
   const id = uuidv7();
   await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost, profit: 0n,
+    id, locationId, pluginId: "faro", ownerPlayerId: ownerId, cost, profit: 0n,
   });
   return id;
 }
@@ -89,7 +87,7 @@ function play(token: string, gameId: string, wager: string) {
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [faroPlugin] }));
 });
 
 afterAll(async () => {
@@ -104,7 +102,7 @@ describe("POST /api/casino/play", () => {
     await placePlayer(playerId, locationId, 1_000_000n);
 
     // Default min_bet is 100.
-    const res = await play(token, "blackjack", "50");
+    const res = await play(token, "faro", "50");
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: string }>().error).toBe("wager_below_min");
   });
@@ -116,7 +114,7 @@ describe("POST /api/casino/play", () => {
     await seedHouse(locationId, ownerId, 50_000n); // lever: max bet 50,000
     await placePlayer(playerId, locationId, 1_000_000n);
 
-    const res = await play(token, "blackjack", "100000");
+    const res = await play(token, "faro", "100000");
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: string }>().error).toBe("wager_above_max");
   });
@@ -136,7 +134,7 @@ describe("POST /api/casino/play", () => {
     const locationId = await seedLocation();
     await placePlayer(playerId, locationId, 0n);
 
-    const res = await play(token, "blackjack", "20000");
+    const res = await play(token, "faro", "20000");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("insufficient_funds");
   });
@@ -150,7 +148,7 @@ describe("POST /api/casino/play", () => {
     await placePlayer(ownerId, locationId, 100_000n);
 
     // 60,000 * 2.5 = 150,000 > the owner's 100,000 cash.
-    const res = await play(token, "blackjack", "60000");
+    const res = await play(token, "faro", "60000");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("house_cannot_cover");
   });
@@ -166,7 +164,7 @@ describe("POST /api/casino/play", () => {
     const cashBefore = await cashOf(playerId);
     const ownerCashBefore = await cashOf(ownerId);
 
-    const res = await play(token, "blackjack", "100000");
+    const res = await play(token, "faro", "100000");
     expect(res.statusCode).toBe(200);
     const body = res.json<{ done: boolean; wager: string; payout?: string }>();
 
@@ -176,10 +174,10 @@ describe("POST /api/casino/play", () => {
     // need not be (`BigInt("007").toString()` is `"7"`).
     expect(body.wager).toBe("100000");
 
-    // The wager is always escrowed. If `start` also settled the hand (a
-    // natural), the payout moves back on top of it in the same call — so the
-    // net to the player is `payout - wager` when done, else just `-wager`.
-    const net = body.done ? BigInt(body.payout ?? "0") - 100_000n : -100_000n;
+    // FARO's `start` never settles: the wager is escrowed and nothing else
+    // moves in the same call.
+    expect(body.done).toBe(false);
+    const net = -100_000n;
 
     expect(await cashOf(playerId)).toBe(cashBefore + net);
     expect(await cashOf(ownerId)).toBe(ownerCashBefore - net);
@@ -194,13 +192,12 @@ describe("POST /api/casino/play", () => {
     const locationId = await seedLocation();
     await placePlayer(playerId, locationId, 1_000_000n);
 
-    // Seeded directly rather than left open by a real hand: blackjack can
-    // settle at `start` on a natural, which would make this flaky if it
-    // depended on the first play staying open.
+    // Seeded directly rather than left open by a real play: simpler than
+    // driving `play` first, and FARO's `start` never settles anyway.
     await db.insert(casinoSessions).values({
       id: uuidv7(),
       playerId,
-      gameId: "blackjack",
+      gameId: "faro",
       locationId,
       propertyId: null,
       wager: 50_000n,
@@ -209,7 +206,7 @@ describe("POST /api/casino/play", () => {
       seed: "x",
     });
 
-    const res = await play(token, "blackjack", "50000");
+    const res = await play(token, "faro", "50000");
     expect(res.statusCode).toBe(409);
     expect(res.json<{ error: string }>().error).toBe("session_open");
   });
@@ -220,7 +217,7 @@ describe("POST /api/casino/play", () => {
     await placePlayer(playerId, locationId, 1_000_000n);
 
     // Within the default max_bet (10,000,000) and no house at all.
-    const ok = await play(token, "blackjack", "50000");
+    const ok = await play(token, "faro", "50000");
     expect(ok.statusCode).toBe(200);
 
     // A second, unrelated player so the wager-cap check below isn't shadowed
@@ -228,7 +225,7 @@ describe("POST /api/casino/play", () => {
     const { token: token2, playerId: playerId2 } = await register();
     await placePlayer(playerId2, locationId, 1_000_000n);
 
-    const overCap = await play(token2, "blackjack", "20000000");
+    const overCap = await play(token2, "faro", "20000000");
     expect(overCap.statusCode).toBe(400);
     expect(overCap.json<{ error: string }>().error).toBe("wager_above_max");
   });

@@ -1,16 +1,6 @@
 import { createHash } from "node:crypto";
 
 export type Card = string;                      // a @letele/playing-cards code
-export type Phase = "player" | "done";
-
-export interface BlackjackState {
-  shoe: Card[];
-  cursor: number;
-  player: Card[];
-  dealer: Card[];
-  wager: bigint;
-  phase: Phase;
-}
 
 const SUITS = ["H", "D", "C", "S"] as const;
 const RANKS = ["a", "2", "3", "4", "5", "6", "7", "8", "9", "10", "j", "q", "k"] as const;
@@ -60,12 +50,4 @@ export function handValue(hand: readonly Card[]): number {
 
 export function isNatural(hand: readonly Card[]): boolean {
   return hand.length === 2 && handValue(hand) === 21;
-}
-
-/** Dealer stands on all 17. Mutates a copy, never its argument. */
-export function playDealer(state: BlackjackState): BlackjackState {
-  const dealer = [...state.dealer];
-  let cursor = state.cursor;
-  while (handValue(dealer) < 17) dealer.push(state.shoe[cursor++]!);
-  return { ...state, dealer, cursor, phase: "done" };
 }

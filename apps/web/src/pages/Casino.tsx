@@ -1,14 +1,22 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client.js";
-import { useCasino, useCasinoAct, useJail, useMe, usePlayCasino } from "../api/queries.js";
+import {
+  useCasino, useCasinoAct, useCasinoTable, useJail, useLeaveCasino, useMe, usePlayCasino,
+  useSitCasino, useTableAct, useTableBet,
+} from "../api/queries.js";
 import { canAfford } from "../lib/money.js";
+import { secondsLeft } from "../lib/countdown.js";
+import { describeError } from "../lib/errors.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { PropertyPanel } from "../components/PropertyPanel.js";
 import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
-import type { CasinoGame, CasinoSessionView, CasinoStepResponse } from "@gl3/shared";
+import type {
+  CasinoGame, CasinoRemoteTables, CasinoSessionView, CasinoStepResponse,
+  CasinoTableGame, CasinoTableSeat, CasinoTableView,
+} from "@gl3/shared";
 import { SlotImage } from "../components/GameImage.js";
 
 /**
@@ -59,6 +67,63 @@ export type HandAction = "hit" | "stand" | "double";
  */
 export function handActions(actsTaken: number): readonly HandAction[] {
   return actsTaken === 0 ? ["hit", "stand", "double"] : ["hit", "stand"];
+}
+
+/**
+ * Which controls a SEAT at a shared table offers, and — when none — why.
+ *
+ * This is about the seat's standing in the hand, never about the amount the
+ * player typed: `checkWager` still runs on that separately, because it changes
+ * on every keystroke and this does not. The one thing `myCash` decides here is
+ * whether the seat can bet AT ALL: a player who cannot cover `minBet` has no
+ * legal bet to type, so offering the field is offering a refusal.
+ *
+ * `canDouble` equals `canAct` on purpose. A double is legal only on a hand's
+ * opening two cards, and the page cannot count them — the table's `view` is an
+ * opaque `ViewNode` it walks but does not interpret. The server answers an
+ * illegal double with a clean 400 the page shows like any other refusal, which
+ * is exactly the reasoning `handActions` records for the solo resumed hand.
+ * The field stays separate so a game whose double IS knowable can diverge.
+ */
+export interface TableActions {
+  readonly canBet: boolean;
+  readonly canAct: boolean;
+  readonly canDouble: boolean;
+  /** One sentence for why nothing is on offer, or null when something is. */
+  readonly reason: string | null;
+}
+
+export function tableActions(view: CasinoTableView, myCash: string): TableActions {
+  const none = { canBet: false, canAct: false, canDouble: false } as const;
+  const mine = view.mySeat === null
+    ? undefined
+    : view.seats.find((seat) => seat.seat === view.mySeat);
+  // A spectator read. `GET /api/casino/table` allows one; `bet` and `act` do
+  // not, so every control is withheld rather than left to 404.
+  if (mine === undefined) return { ...none, reason: "You're watching this table, not playing it." };
+
+  if (view.phase === "betting") {
+    if (BigInt(mine.wager) > 0n) {
+      return { ...none, reason: "Your stake is in — waiting on the other seats." };
+    }
+    // Against the MINIMUM, not against anything typed: this asks whether a
+    // legal bet exists for this player, and the cheapest one is the test.
+    if (checkWager(view.minBet, view.minBet, view.maxBet, myCash).kind !== "ok") {
+      return { ...none, reason: "You can't cover the minimum bet at this table." };
+    }
+    return { canBet: true, canAct: false, canDouble: false, reason: null };
+  }
+
+  if (BigInt(mine.wager) === 0n) return { ...none, reason: "You sat this hand out." };
+  if (view.turnSeat !== view.mySeat) {
+    return {
+      ...none,
+      reason: view.turnSeat === null
+        ? "The hand is being dealt."
+        : `Waiting on seat ${String(view.turnSeat + 1)}.`,
+    };
+  }
+  return { canBet: false, canAct: true, canDouble: true, reason: null };
 }
 
 /**
@@ -188,12 +253,343 @@ function GameRow({ game, wager, cash, minBet, disabled, onPlay }: {
   );
 }
 
+/**
+ * Re-renders once a second while `active`, and returns the current wall clock.
+ *
+ * Deliberately NOT a per-second decrement: `lib/countdown.ts` records why
+ * (throttled background tabs and a suspended laptop drop ticks, and a counter
+ * that subtracts one per tick never recovers). The deadline is absolute and the
+ * seconds are re-derived from `Date.now()` on every render, so a missed tick
+ * costs display latency and never correctness.
+ */
+function useSecondTicker(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => { setNow(Date.now()); }, 1000);
+    return () => { window.clearInterval(timer); };
+  }, [active]);
+  return now;
+}
+
+/**
+ * The clock on the table, in the one place the player looks for it.
+ *
+ * Crossing zero fires no fetch: the 2.5s table poll is what actually advances
+ * the table (`advanceTable` runs lazily, on a read), so the deadline reaching
+ * zero and the table moving are the same event arriving a beat apart. A
+ * "settling…" line rather than a frozen 0s says so.
+ */
+function TableClock({ deadlineAt, phase }: {
+  deadlineAt: string; phase: "betting" | "acting";
+}): JSX.Element {
+  const now = useSecondTicker(true);
+  const left = secondsLeft(new Date(deadlineAt).getTime(), now);
+  if (left === 0) return <span className={styles.meta}>settling…</span>;
+  return (
+    <span className={styles.meta}>
+      {phase === "betting" ? "betting closes in " : "turn ends in "}{left}s
+    </span>
+  );
+}
+
+/** One occupied seat, with everything a player watching the table wants. */
+function SeatRow({ seat, view }: {
+  seat: CasinoTableSeat; view: CasinoTableView;
+}): JSX.Element {
+  const isMine = seat.seat === view.mySeat;
+  const isTurn = seat.seat === view.turnSeat;
+  const staked = BigInt(seat.wager) > 0n;
+  return (
+    <li className={isTurn ? `${styles.row} ${styles.rowCurrent}` : styles.row}>
+      <span className={styles.rowStack}>
+        <span className={isMine ? styles.self : undefined}>
+          Seat {seat.seat + 1} — {seat.username}{isMine ? " (you)" : ""}
+        </span>
+        <span className={styles.meta}>
+          {staked ? <>stake <Money value={seat.wager} /></> : "no stake"}
+          {/* Both badges are facts the player needs to read the table: a
+              leaving seat is gone after this hand, and an idle count is how
+              close a seat is to being swept out of it. */}
+          {seat.leaving ? " · leaving" : null}
+          {seat.idleHands > 0 ? ` · idle ${seat.idleHands}` : null}
+        </span>
+      </span>
+      {isTurn ? <span className={styles.ok}>to act</span> : null}
+    </li>
+  );
+}
+
+/**
+ * The seated screen: one table, everyone at it, and whatever this seat may do.
+ *
+ * There is no event feed behind any of this — casino publishes none, so
+ * `useCasinoTable`'s 2.5s poll is both the realtime channel and the lazy
+ * clock's heartbeat. Every mutation here answers the whole table, and the
+ * hooks write that answer straight into the query, so an action's own result
+ * never waits for the next tick.
+ */
+function TableScreen({ view, cash, jailed }: {
+  view: CasinoTableView; cash: string; jailed: boolean;
+}): JSX.Element {
+  const bet = useTableBet();
+  const act = useTableAct();
+  const leave = useLeaveCasino();
+  const [wager, setWager] = useState("");
+  // Leaving mid-hand does not drop the stake — the seat is marked and frees
+  // itself at settle — but it does forfeit every remaining choice in the hand
+  // to the auto-stand, so the first click asks. Two-step in place, never
+  // `window.confirm`: the property board's idiom, and nothing else in this app
+  // opens a native dialog.
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
+
+  // Swapping Leave for Confirm/Cancel unmounts the focused button, which dumps
+  // keyboard focus to <body>. Follow the swap both ways (PropertyPanel's).
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const leaveRef = useRef<HTMLButtonElement | null>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirmingLeave) confirmRef.current?.focus();
+    else if (wasConfirming.current) leaveRef.current?.focus();
+    wasConfirming.current = confirmingLeave;
+  }, [confirmingLeave]);
+
+  const actions = tableActions(view, cash);
+  const mine = view.mySeat === null
+    ? undefined
+    : view.seats.find((seat) => seat.seat === view.mySeat);
+  const inHand = mine !== undefined && BigInt(mine.wager) > 0n;
+  const check = checkWager(wager, view.minBet, view.maxBet, cash);
+  const busy = jailed || bet.isPending || act.isPending || leave.isPending;
+  // `handActions`' shape, decided per seat rather than per hand: the table
+  // records no act count, so `canDouble` is the only gate there is.
+  const moves: readonly HandAction[] = actions.canDouble
+    ? ["hit", "stand", "double"]
+    : ["hit", "stand"];
+
+  return (
+    <Panel title={`${view.gameName} — ${view.locationName}`}>
+      <p className={styles.meta}>
+        {view.handNo === 0 ? "No hand dealt yet" : `Hand #${String(view.handNo)}`}
+        {" · "}{view.phase === "betting" ? "taking bets" : "in play"}
+        {" · min "}<Money value={view.minBet} />
+        {" · max "}<Money value={view.maxBet} />
+        {" · you hold "}<Money value={cash} />
+        {view.deadlineAt !== null ? (
+          <> · <TableClock deadlineAt={view.deadlineAt} phase={view.phase} /></>
+        ) : null}
+      </p>
+
+      <ul className={styles.rows}>
+        {view.seats.map((seat) => <SeatRow key={seat.seat} seat={seat} view={view} />)}
+      </ul>
+
+      {/* The game draws itself. Between hands this is the hand that just
+          finished — `settleHand` keeps the final state on the row, so the
+          dealer's hole card is face up here until the next deal. */}
+      {view.view === null ? (
+        <p className={styles.muted}>No hand on the table yet.</p>
+      ) : (
+        <PageRenderer instructions={renderNode(view.view, {})} />
+      )}
+
+      {actions.canBet ? (
+        <>
+          <div className={styles.form}>
+            <label>
+              <span className={styles.meta}>Wager </span>
+              <input
+                inputMode="numeric"
+                value={wager}
+                aria-label="Wager"
+                onChange={(event) => { setWager(event.target.value.trim()); }}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || check.kind !== "ok"}
+              onClick={() => { bet.mutate(wager, { onSuccess: () => { setWager(""); } }); }}
+            >
+              Bet
+            </button>
+          </div>
+          {check.kind === "notAnAmount" && wager !== "" ? (
+            <p role="alert" className={styles.bad}>Whole numbers only.</p>
+          ) : null}
+          {check.kind === "belowMin" ? (
+            <p role="alert" className={styles.bad}>
+              The minimum bet is <Money value={view.minBet} />.
+            </p>
+          ) : null}
+          {check.kind === "aboveMax" ? (
+            <p role="alert" className={styles.bad}>
+              This table takes at most <Money value={view.maxBet} />.
+            </p>
+          ) : null}
+          {check.kind === "tooPoor" ? (
+            <p role="alert" className={styles.bad}>You don&apos;t have that much on you.</p>
+          ) : null}
+        </>
+      ) : null}
+
+      {actions.canAct ? (
+        <div className={styles.actions}>
+          {moves.map((action) => (
+            <button
+              key={action}
+              type="button"
+              disabled={busy}
+              onClick={() => { act.mutate(action); }}
+            >
+              {ACTION_LABELS[action]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {actions.reason !== null ? <p className={styles.meta}>{actions.reason}</p> : null}
+
+      <div className={styles.actions}>
+        {confirmingLeave ? (
+          <>
+            <span className={styles.meta} role="alert">
+              Leave mid-hand? Your stake stays in and settles normally, but the
+              rest of your turns are stood automatically.
+            </span>
+            <button
+              ref={confirmRef}
+              type="button"
+              disabled={leave.isPending}
+              onClick={() => {
+                leave.mutate(undefined, { onSettled: () => { setConfirmingLeave(false); } });
+              }}
+            >
+              Confirm leave
+            </button>
+            <button type="button" onClick={() => { setConfirmingLeave(false); }}>Cancel</button>
+          </>
+        ) : (
+          <button
+            ref={leaveRef}
+            type="button"
+            disabled={leave.isPending}
+            onClick={() => {
+              // Only an in-hand leave costs anything, so only that one asks.
+              if (inHand) setConfirmingLeave(true);
+              else leave.mutate();
+            }}
+          >
+            Leave table
+          </button>
+        )}
+      </div>
+
+      {jailed ? <p className={styles.bad}>No playing from a cell.</p> : null}
+      <TableError error={bet.error ?? act.error ?? leave.error} />
+    </Panel>
+  );
+}
+
+/**
+ * `ErrorText` with the two codes whose shared copy is written for a different
+ * page. `wrong_location` is combat's ("They're not in this town") and here it
+ * is about the CALLER, who travelled away from their own table; `no_such_game`
+ * reads as a lobby refusal and here means the game plugin went away underneath
+ * a live seat. Everything else comes from `lib/errors.ts`, which is where a
+ * server code's sentence belongs.
+ */
+function TableError({ error }: { error: unknown }): JSX.Element | null {
+  if (error === null || error === undefined) return null;
+  if (error instanceof ApiError && error.code === "wrong_location") {
+    return (
+      <p role="alert" className={styles.bad}>
+        Your table is in another town. <Link to="/travel">Travel back</Link>, or leave your seat.
+      </p>
+    );
+  }
+  if (error instanceof ApiError && error.code === "no_such_game") {
+    return <p role="alert" className={styles.bad}>This game is no longer installed — leave the table.</p>;
+  }
+  return <p role="alert" className={styles.bad}>{describeError(error)}</p>;
+}
+
+/** One registered TABLE game in the lobby: its house, its tables, and a Sit. */
+function TableGameRow({ game, disabled, onSit }: {
+  game: CasinoTableGame; disabled: boolean; onSit: (gameId: string) => void;
+}): JSX.Element {
+  return (
+    <li className={styles.row}>
+      <SlotImage scope={game.gameId} slot="table" alt={game.name} size="md" />
+      <span className={styles.rowStack}>
+        <span>{game.name}</span>
+        <span className={styles.meta}>
+          {game.ownerName === null ? "House: the town" : `House: ${game.ownerName}`}
+          {" · max "}<Money value={game.maxBet} />
+          {" · "}{game.maxSeats} seats
+        </span>
+        {game.tables.length === 0 ? (
+          <span className={styles.meta}>No table open — sitting opens one.</span>
+        ) : (
+          game.tables.map((table, index) => (
+            <span key={table.tableId} className={styles.meta}>
+              Table {index + 1}: {table.seatsFilled}/{table.maxSeats}
+              {" · "}{table.phase === "betting" ? "taking bets" : "in play"}
+            </span>
+          ))
+        )}
+      </span>
+      <span className={styles.actions}>
+        {/* ONE Sit per GAME, not per table: `POST /api/casino/table/sit` takes
+            a gameId and picks the oldest table with a free seat itself, so a
+            per-table button would seat you somewhere other than the one you
+            clicked. The list above is occupancy, not a chooser. */}
+        <button type="button" disabled={disabled} onClick={() => { onSit(game.gameId); }}>
+          Sit
+        </button>
+      </span>
+    </li>
+  );
+}
+
+/** Where the tables are busy, for a player standing somewhere else. */
+function RemoteTables({ remote }: { remote: readonly CasinoRemoteTables[] }): JSX.Element {
+  return (
+    <>
+      <h3 className={styles.meta}>Elsewhere</h3>
+      {/* Counts, never usernames — the lobby route reports it that way so an
+          underground town's residents stay unidentifiable from here. No
+          buttons either: you have to go there. */}
+      <ul className={`${styles.rows} ${styles.remote}`}>
+        {remote.map((row) => (
+          <li key={`${row.locationId}:${row.gameId}`} className={styles.row}>
+            <span className={styles.meta}>
+              {row.locationName}: {row.seated} at the {row.gameName} tables
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className={styles.meta}><Link to="/travel">Travel</Link> to join them.</p>
+    </>
+  );
+}
+
 export function Casino(): JSX.Element {
   const lobby = useCasino();
   const me = useMe();
   const jail = useJail();
   const play = usePlayCasino();
   const act = useCasinoAct();
+  const sit = useSitCasino();
+
+  // The table query bootstraps its own poll. Nothing else on the client knows
+  // whether this player holds a seat — the lobby reports the town's tables,
+  // not the caller's place at one — so the first read answers the question and
+  // only then does the 2.5s interval start. Leaving turns it off again.
+  const [seated, setSeated] = useState(false);
+  const tableQuery = useCasinoTable(seated);
+  useEffect(() => {
+    if (tableQuery.data !== undefined) setSeated(tableQuery.data.table !== null);
+  }, [tableQuery.data]);
 
   // Page-local UI state only — the server data all lives in react-query.
   const [wager, setWager] = useState("");
@@ -208,6 +604,22 @@ export function Casino(): JSX.Element {
   // flight resurrects it from the stale `session` — with Hit and Stand buttons
   // that can only answer `session_closed`.
   const [dismissed, setDismissed] = useState<string | null>(null);
+
+  const jailed = jail.data?.jailed === true;
+
+  // THE SEAT OUTRANKS THE LOBBY, and is checked before it. A seated player's
+  // table is in the town the table is in, which need not be the town they are
+  // standing in — the lobby can be erroring with `no_location` while the seat
+  // is perfectly real, and the way out of that is the Leave button on the
+  // table screen. Waiting for BOTH queries is what stops the lobby flashing up
+  // for a beat before the table replaces it.
+  if (tableQuery.isLoading || me.isLoading) return <Loading what="the casino" />;
+  // A failed table read is not a failed page: the lobby is still worth
+  // drawing, and the poll retries. Treated as "no seat".
+  const table = tableQuery.data?.table ?? null;
+  if (table !== null && me.data !== undefined) {
+    return <TableScreen view={table} cash={me.data.cash} jailed={jailed} />;
+  }
 
   if (lobby.isLoading) return <Loading what="the casino" />;
 
@@ -224,12 +636,11 @@ export function Casino(): JSX.Element {
   }
   if (!lobby.data || !me.data) return <Loading what="the casino" />;
 
-  const { locationName, minBet, games, session } = lobby.data;
+  const { locationName, minBet, games, tableGames, remote, session } = lobby.data;
   const resumable = session === null || session.sessionId === dismissed
     ? null
     : resumedHand(session);
   const active = hand ?? resumable;
-  const jailed = jail.data?.jailed === true;
   const cash = me.data.cash;
 
   function onPlay(game: CasinoGame): void {
@@ -319,10 +730,36 @@ export function Casino(): JSX.Element {
         Minimum bet <Money value={minBet} /> · you hold <Money value={cash} />
       </p>
 
-      {games.length === 0 ? (
+      {games.length === 0 && tableGames.length === 0 ? (
         <p className={styles.muted}>No games are installed.</p>
-      ) : (
+      ) : null}
+
+      {/* THE TABLES, first: a table game is the shared, multiplayer kind, and
+          `sit` is the only way in. The wager is not asked for here — it is
+          asked for at the table, once per hand, against that table's own
+          bounds. */}
+      {tableGames.length > 0 ? (
         <>
+          <h3 className={styles.meta}>Tables</h3>
+          <ul className={styles.rows}>
+            {tableGames.map((game) => (
+              <TableGameRow
+                key={game.gameId}
+                game={game}
+                disabled={jailed || sit.isPending}
+                onSit={(gameId) => { sit.mutate(gameId); }}
+              />
+            ))}
+          </ul>
+          <ErrorText error={sit.error} />
+        </>
+      ) : null}
+
+      {remote.length > 0 ? <RemoteTables remote={remote} /> : null}
+
+      {games.length === 0 ? null : (
+        <>
+          <h3 className={styles.meta}>Solo games</h3>
           <div className={styles.form}>
             <label>
               <span className={styles.meta}>Wager </span>
@@ -366,14 +803,18 @@ export function Casino(): JSX.Element {
             ))}
           </ul>
 
-          {/* The tables themselves — each game's property row for this town,
-              buyable when the town still holds it, with the owner tools when
-              it's yours. This replaced the /properties tab. */}
-          {games.map((game) => (
-            <PropertyPanel key={game.gameId} pluginId={game.gameId} />
-          ))}
         </>
       )}
+
+      {/* The houses themselves — each game's property row for this town,
+          buyable when the town still holds it, with the owner tools when it's
+          yours. This replaced the /properties tab. Table games declare a
+          property type too (that is what `providesProperties` on the game
+          plugin is for), so both lists contribute; deduped because a plugin
+          could in principle register in both registries. */}
+      {[...new Set([...tableGames, ...games].map((game) => game.gameId))].map((gameId) => (
+        <PropertyPanel key={gameId} pluginId={gameId} />
+      ))}
 
       {jailed ? <p className={styles.bad}>No playing from a cell.</p> : null}
       <ErrorText error={play.error} />

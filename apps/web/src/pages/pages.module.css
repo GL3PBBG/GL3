@@ -85,3 +85,8 @@
 .field textarea { min-height: 6rem; resize: vertical; font: inherit; }
 .ok { color: var(--success); }
 .bad { color: var(--danger); }
+
+/* A list of things the player can SEE but not act on from here — the casino's
+   other towns. Dimmed rather than hidden: knowing where the action is is the
+   point, and the only control offered is the Travel link beside the list. */
+.remote { opacity: 0.55; }
