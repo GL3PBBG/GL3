@@ -1,4 +1,5 @@
 import { definePlugin } from "@gl3/plugin-sdk";
+import { membershipPage } from "@gl3/plugin-membership";
 import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
@@ -75,10 +76,10 @@ describe("GET /api/plugins", () => {
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
       // `bootTestServer` always merges CORE_PLUGINS (`withCorePlugins`) under
-      // `alpha`/`beta`, so `theft`'s two menu entries ride along here too —
-      // sorted by `order` with everyone else's.
+      // `alpha`/`beta`, so `theft`'s two menu entries and `membership`'s one
+      // ride along here too — sorted by `order` with everyone else's.
       expect(res.json().menu.map((m: { label: string }) => m.label)).toEqual([
-        "Beta", "Alpha", "Car theft", "Garage",
+        "Beta", "Alpha", "Car theft", "Garage", "Membership",
       ]);
     } finally {
       await close();
@@ -107,12 +108,14 @@ describe("GET /api/plugins", () => {
         menu: [
           { pageId: "theft.index", path: "/theft", label: "Car theft", order: 40 },
           { pageId: "theft.garage", path: "/garage", label: "Garage", order: 41 },
+          { pageId: "membership.index", path: "/membership", label: "Membership", order: 60 },
         ],
         // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
         // only in the top-level `menu` array, not duplicated onto each page.
-        pages: [theftPage, garagePage].map((p) => ({
-          pluginId: "theft", id: p.id, path: p.path, view: p.view,
-        })),
+        pages: [
+          ...[theftPage, garagePage].map((p) => ({ pluginId: "theft", id: p.id, path: p.path, view: p.view })),
+          { pluginId: "membership", id: membershipPage.id, path: membershipPage.path, view: membershipPage.view },
+        ],
         events: [{
           pluginId: "inventory",
           name: "purchased",
@@ -160,6 +163,11 @@ describe("GET /api/plugins", () => {
           pluginId: "membership",
           name: "purchased",
           describe: "{actorName} bought {packageName}",
+          invalidates: ["membership", "me"],
+        }, {
+          pluginId: "membership",
+          name: "gifted",
+          describe: "{actorName} gifted {packageName} to {recipientName}",
           invalidates: ["membership", "me"],
         }],
       });

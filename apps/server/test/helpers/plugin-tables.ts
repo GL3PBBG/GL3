@@ -121,6 +121,14 @@ export const theftGarage = pgTable("p_theft_garage", {
   locationId: uuid("location_id"),
 });
 
+/** Mirrors `packages/plugins/membership/src/migrations.ts` `0001_packages`. */
+export const membershipPackages = pgTable("p_membership_packages", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  costPoints: bigint("cost_points", { mode: "bigint" }).notNull(),
+  durationSeconds: integer("duration_seconds").notNull(),
+});
+
 /** Mirrors `packages/plugins/forum/src/migrations.ts` `0001_forums`. */
 export const forumForums = pgTable("p_forum_forums", {
   id: uuid("id").primaryKey(),
