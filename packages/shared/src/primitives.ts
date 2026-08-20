@@ -16,6 +16,27 @@ export const TimestampSchema = z.string().datetime();
 export type Timestamp = z.infer<typeof TimestampSchema>;
 
 /**
+ * Lives here rather than in `dto/extensions.ts` (where every other
+ * extension-surface fragment schema lives) because `dto/plugins.ts` needs it
+ * for `PluginsPayloadSchema.moneyFormat`, and `dto/extensions.ts` needs
+ * `dto/plugins.ts`'s `ViewNodeDtoSchema` for `DashboardWidgetSchema.view` —
+ * two files importing a value from each other is a real ESM circular
+ * dependency, not just an inconvenience: whichever file's module body
+ * happens to run first (order depends on the CALLER's import graph, not
+ * source order) captures the other side's still-uninitialized export as
+ * `undefined` at that instant, freezing it into a schema shape rather than
+ * a live reference. `primitives.ts` has no dependents among the `dto/*`
+ * files, so both sides can import from here with no back-edge.
+ */
+export const MoneyFormatSchema = z.object({
+  symbol: z.string().min(1).max(8),
+  position: z.enum(["prefix", "suffix"]),
+  thousandsSep: z.string().max(3),
+}).strict();
+export type MoneyFormat = z.infer<typeof MoneyFormatSchema>;
+export const DEFAULT_MONEY_FORMAT: MoneyFormat = { symbol: "$", position: "prefix", thousandsSep: "," };
+
+/**
  * Postgres `text` rejects an embedded NUL byte outright (SQLSTATE 22021,
  * "invalid byte sequence for encoding UTF8") — `z.string()` alone has no
  * opinion on it. A NUL anywhere in an inbound field that gets persisted
