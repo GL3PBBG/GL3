@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { locations, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -67,7 +68,7 @@ let app: FastifyInstance;
 let redis: Redis;
 let closeServer: () => Promise<void>;
 
-/** Every wager in this file. 100,000 * blackjack's 2.5 = 250,000 exposure. */
+/** Every wager in this file. 100,000 * FARO's 2.5 = 250,000 exposure. */
 const WAGER = "100000";
 const HOUSE_CASH = 10_000_000n;
 const PLAYER_CASH = 1_000_000n;
@@ -101,7 +102,7 @@ async function seedLocation(): Promise<string> {
 async function seedHouse(locationId: string, ownerId: string): Promise<string> {
   const id = uuidv7();
   await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost: 0n, profit: 0n,
+    id, locationId, pluginId: "faro", ownerPlayerId: ownerId, cost: 0n, profit: 0n,
   });
   return id;
 }
@@ -131,7 +132,7 @@ const play = (token: string): InjectOptions => ({
   method: "POST",
   url: "/api/casino/play",
   headers: { authorization: `Bearer ${token}` },
-  payload: { gameId: "blackjack", wager: WAGER },
+  payload: { gameId: "faro", wager: WAGER },
 });
 
 function fire(opts: InjectOptions): Promise<LightMyRequestResponse> {
@@ -208,7 +209,7 @@ async function raceTwoPlays(
 
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [faroPlugin] }));
 });
 
 afterAll(async () => {
@@ -299,67 +300,39 @@ describe("casino lock ordering", () => {
     // Unowned town, so the lock set is exactly {locations[L], player_stats[P]}
     // and no house owner is involved.
     //
-    // RETRIED, and not as a flake budget: blackjack's `start` settles a natural
-    // immediately (either side, ~1 hand in 11), and a winner who settles at
-    // deal leaves NO open hand, so the loser legitimately gets a second 200.
-    // That outcome is correct behaviour, not the case under test, so the race
-    // is re-run with fresh players until the winner's hand stays open.
-    let saw409 = false;
-    for (let attempt = 0; attempt < 15 && !saw409; attempt += 1) {
-      const player = await register();
-      const locationId = await seedLocation();
-      await placePlayer(player.playerId, locationId, PLAYER_CASH);
+    // A SINGLE ATTEMPT, not a retry loop: FARO's `start` never settles (unlike
+    // blackjack's natural-at-deal), so the winner's hand always stays open and
+    // the loser's re-read always finds it. There is no "both won" branch to
+    // discard and re-run — exactly one 200 and one 409, every time.
+    const player = await register();
+    const locationId = await seedLocation();
+    await placePlayer(player.playerId, locationId, PLAYER_CASH);
 
-      const [first, second] = await raceTwoPlays(
-        { token: player.token, id: player.playerId },
-        { token: player.token, id: player.playerId },
-      );
-      const statuses = [first.statusCode, second.statusCode];
+    const [first, second] = await raceTwoPlays(
+      { token: player.token, id: player.playerId },
+      { token: player.token, id: player.playerId },
+    );
+    const statuses = [first.statusCode, second.statusCode];
 
-      // THE ASSERTION. A 23505 escaping as a 500 lands here.
-      expect(statuses, `bodies: ${first.body} | ${second.body}`).not.toContain(500);
+    // THE ASSERTION. A 23505 escaping as a 500 lands here.
+    expect(statuses, `bodies: ${first.body} | ${second.body}`).not.toContain(500);
 
-      // CHECKED ON EVERY ATTEMPT, INCLUDING THE DISCARDED ONES, because all
-      // three hold in both outcomes — a 200 does NOT mean the hand settled,
-      // `play` answers 200 for an open hand too, so the discarded branch must
-      // not assume anything about how many rows are open. It asks the
-      // responses instead: each 200 wrote exactly one row, an open row is
-      // exactly a `done: false` body, and two open hands is the rule itself
-      // breaking.
-      const won = [first, second].filter((res) => res.statusCode === 200);
-      const wonBodies = won.map((res) => res.json<{ done: boolean }>());
-      const rows = await db.select().from(casinoSessions)
-        .where(eq(casinoSessions.playerId, player.playerId));
-      const open = rows.filter((row) => row.status === "open");
+    // Exactly one winner and one clean refusal, order-independent — without
+    // the re-read at the third lock-order step, the loser would instead reach
+    // its INSERT and the p_casino_sessions_one_open partial index would
+    // reject it as an uncaught 23505.
+    expect([...statuses].sort(), `bodies: ${first.body} | ${second.body}`).toEqual([200, 409]);
 
-      expect(rows, `bodies: ${first.body} | ${second.body}`).toHaveLength(won.length);
-      expect(open, `bodies: ${first.body} | ${second.body}`)
-        .toHaveLength(wonBodies.filter((body) => !body.done).length);
-      expect(open.length).toBeLessThanOrEqual(1);
+    const refused = [first, second].find((res) => res.statusCode === 409);
+    expect(refused?.json<{ error: string }>().error).toBe("session_open");
 
-      const refused = [first, second].filter((res) => res.statusCode === 409);
-      if (refused.length === 0) {
-        // Both won, which can only mean the winner settled at deal — its row
-        // freed the table before the loser's re-read. The loser's OWN hand may
-        // then be open or settled, which is why nothing above assumes.
-        expect(statuses).toEqual([200, 200]);
-        continue;
-      }
-
-      saw409 = true;
-      // Exactly one of each, and the refusal is the route's own clean error.
-      expect(statuses.filter((code) => code === 200)).toHaveLength(1);
-      expect(refused).toHaveLength(1);
-      expect(refused[0]?.json<{ error: string }>().error).toBe("session_open");
-
-      // And the invariant the 409 protects: one hand, open, on the table.
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.status).toBe("open");
-    }
-    if (!saw409) {
-      throw new Error("15 races in a row had the winner settle at deal — a shuffle bug, not a flake");
-    }
-  }, 60_000);
+    // The invariant the 409 protects: one hand, open, on the table.
+    const rows = await db.select().from(casinoSessions)
+      .where(eq(casinoSessions.playerId, player.playerId));
+    const open = rows.filter((row) => row.status === "open");
+    expect(rows, `bodies: ${first.body} | ${second.body}`).toHaveLength(1);
+    expect(open, `bodies: ${first.body} | ${second.body}`).toHaveLength(1);
+  }, 30_000);
 
   it("deadlocks when a caller takes the player lock before the location lock", async () => {
     const player = await register();
@@ -520,10 +493,10 @@ describe("casino lock ordering", () => {
     expect(res.statusCode, `play body: ${res.body}`).toBe(200);
     const body = res.json<{ sessionId: string; done: boolean; payout?: string }>();
 
-    // Same net-from-the-body idiom `casino-play.test.ts` uses: blackjack's
-    // `start` can settle a natural off a real `node:crypto` shoe, and a payout
-    // in that case rides back on top of the wager in the same call.
-    const net = body.done ? BigInt(body.payout ?? "0") - BigInt(WAGER) : -BigInt(WAGER);
+    // FARO's `start` never settles (unlike blackjack's natural-at-deal), so
+    // there is no payout to net from the body here: the wager is the only
+    // movement.
+    const net = -BigInt(WAGER);
     expect(await cashOf(player.playerId)).toBe(playerCashBefore + net);
 
     // Nobody was credited: the seized owner's cash and the row's lifetime
