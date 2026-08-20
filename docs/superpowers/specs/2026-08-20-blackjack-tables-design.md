@@ -53,6 +53,7 @@ migrations, so the migrations-declaring plugin census (10 of 20) is unchanged.
 | `location_id` | uuid NOT NULL, FK → `locations(id)` ON DELETE CASCADE | |
 | `property_id` | uuid NULL, **no FK** | house frozen at table creation; pins the row, not the person — transfer/`takeOverFrom` hands the position over, same semantics as today's per-hand freeze |
 | `phase` | text NOT NULL | `'betting'` \| `'acting'` |
+| `turn_seat` | smallint NULL | the seat whose turn it is, persisted from the last `TableStep.turn`; the hub cannot answer 409 `not_your_turn` from opaque jsonb without it |
 | `deadline_at` | timestamptz NULL | lazy clock; NULL = no pending deadline (betting phase with no bets yet) |
 | `hand_no` | int NOT NULL DEFAULT 0 | increments at each deal |
 | `state` | jsonb NULL | opaque game state via the hub's bigint-tagging codec (`state.ts`); NULL between hands |
@@ -143,15 +144,15 @@ validates body/params with zod via `route()`.
   still plays (existing sink rule) — there is no `casino_closed` error.
   Returns `{ tableId, seat }`.
 - `POST /leave` — not in hand (wager 0): seat deleted now. In hand: `leaving`
-  set true; the hand plays out (their turns auto-stand via the lazy clock or
-  immediately if it is currently their turn), settle pays them normally, seat
+  set true; the hand plays out (their turns auto-stand via the lazy clock), settle pays them normally, seat
   freed at hand end. No money is ever dropped by leaving.
 - `POST /bet` `{ wager: /^\d+$/ }` — betting phase only, min/max bet per the
   existing settings + house lever, escrow per §6. First bet at a table stamps
   `deadline_at = now + bet_seconds`. When every non-`leaving` seat has bet,
   deal immediately; otherwise the deal fires when the deadline lapses (lazy),
-  with bettors only. Non-bettors get `idle_hands + 1`; at
-  `idle_kick_hands` the seat is freed. A lone bettor plays solo — same table
+  with bettors only. Non-bettors' `idle_hands` increments AT DEAL TIME (a deadline exists only
+  once someone bet, so a wholly idle table accrues nothing and just sits);
+  at `table_idle_kick_hands` the seat is freed at that deal. A lone bettor plays solo — same table
   machinery, no special case.
 - `POST /act` `{ action }` — acting phase, caller's seat must equal the
   current `turn`, else 409 `not_your_turn`. Applies `game.act`, handles
@@ -160,9 +161,14 @@ validates body/params with zod via `route()`.
 - `GET /` — the caller's table view: seats (usernames, seat_no, wager,
   leaving flag), phase, `deadlineAt`, `handNo`, whose turn, and
   `game.view(state, callerSeat)` rendered ViewNode (or null between hands).
-  **Location mismatch** (caller travelled away while seated) → same treatment
-  on every table route: seat marked `leaving` under the §7 locks, then the
-  route answers as if they had left (GET returns `{ table: null }`).
+  **Travelling away while seated**: `bet` and `act` compare the caller's
+  current location to the table's and answer 409 `wrong_location` without
+  acting. `sit` answers 409 `already_seated` while any seat exists anywhere —
+  the player frees it with `leave`, which needs no location match because it
+  locks the SEAT'S table's location, not the caller's town. No route ever
+  composes two location locks in one transaction. An abandoned in-hand seat
+  auto-stands on the turn clock, settles normally, and is freed at hand end
+  by the `leaving` flag `leave` sets.
 - Lobby `GET /api/casino` extended: per game, the local tables
   `{ tableId, seatsFilled, phase }`, plus `remote:
   [{ locationId, locationName, gameId, seated }]` for every other location
@@ -171,8 +177,8 @@ validates body/params with zod via `route()`.
 
 **Lazy clock** — the single `advanceTable(tx, table)` helper, called first
 inside every mutating table route and by GET's slow path: while
-`deadline_at` is in the past — betting: deal to bettors (or, with zero
-bettors, `idle_hands++` sweep/kicks and clear `deadline_at`); acting:
+`deadline_at` is in the past — betting: deal to bettors (a lapse with zero
+bettors just clears `deadline_at` — the idle sweep runs only at a real deal, per the amended betting bullet); acting:
 `game.autoAct(state, turn)` for the timed-out seat, repeat until the clock is
 in the future or the hand settles. GET takes a **fast path**: a plain
 lock-free SELECT when `deadline_at` is NULL or in the future; only a lapsed
@@ -184,8 +190,8 @@ restocks on read; `ensureCurrentRound` settles on read.
 Identical primitives to solo, per seat; every movement through
 `applyBalanceChange` (ledger invariant untouched).
 
-- **Bet / double**: `assertHouseCanCover` first — house cash + the incoming
-  wager must cover the **sum over all in-hand seats** of
+- **Bet / double**: `assertHouseCanCover` first — the house owner's cash (read
+  live, so already-escrowed wagers count toward it) must cover the **sum over all in-hand seats** of
   `exposureOf(seatWager, maxPayoutMultiplier)` (including the bet being
   placed). Then debit the player, `payOwner(house, wager,
   "casino.<gameId>.wager")` with the return discarded (unowned town = sink,
@@ -222,18 +228,18 @@ green sorted-call case. Test waits on `pg_stat_activity`, never sleeps
 
 ## 8. Realtime + web
 
-- After commit, the hub publishes one **plugin event** per seated player
-  (audience `{kind: "player"}`, ≤ 5 sends) on every table transition
-  (sit/leave/bet/deal/act/auto-act/settle/kick), declared with
-  `invalidates: ["casino"]` so seated clients refetch. No global audience, no
-  new audience kind, no per-hand core event (feed-flood rule stands).
+- No events. Every plugin event renders in the game feed through its
+  `describe` template, so per-transition events to five players would flood
+  five feeds per hand — the exact reason casino has never published an event
+  per hand. Instead the table page POLLS: `useCasinoTable` sets
+  `refetchInterval: 2500` while the caller is seated. Polling doubles as the
+  lazy clock's heartbeat — any read past `deadline_at` advances the table.
 - `apps/web` `Casino.tsx` reworked (stays hand-written): lobby with local
   table cards + greyed remote list; table screen with seat arc, per-seat
   cards from the existing `cards` ViewNode leaf, turn highlight, countdown
   to `deadlineAt` (client re-fetches when the countdown lapses — that read
   is what fires the lazy clock if no one acted), bet box, hit/stand/double,
-  leave. `keys.casino()` invalidation arrives via the plugin-event
-  invalidation path (`pluginInvalidationKeys`) that already exists.
+  leave.
 - `@gl3/shared`: new `dto/casino` table schemas (`CasinoTableViewSchema`,
   lobby extensions). Additive **patch bump**; exact number chosen at publish
   time after a registry check (`0.1.14` collision trap is on record), publish
