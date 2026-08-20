@@ -443,7 +443,9 @@ expect(formatMoney("1234567", { symbol: " kr", position: "suffix", thousandsSep:
 - [ ] **Step 3: Implement the context, hooks, keys, invalidation entries.** `npm run typecheck` and run the `@gl3/web` project tests.
 - [ ] **Step 4: Commit.** `git commit -am "feat(web): plugin-driven money format and extension query plumbing"`
 
----### Task 10: Web — render extras, widgets, HUD entries, badges
+---
+
+### Task 10: Web — render extras, widgets, HUD entries, badges
 
 **Files:**
 - Modify: `apps/web/src/components/ProfileCard.tsx` — render `profile.extras ?? []`: `stat` entries as additional rows in whatever row structure the card already uses; `link` entries as react-router `<Link>`s in an actions area.
