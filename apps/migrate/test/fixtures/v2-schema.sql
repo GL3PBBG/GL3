@@ -157,12 +157,13 @@ CREATE TABLE itemMeta (
   KEY IM_item (IM_item)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
--- Recognised V2 core table, deliberately NOT migrated in v1 (SPEC §5: no
--- membership table in the GL3 §2.5 schema). Present here so the preflight
--- test (Task 9) can assert it is reported as a known-but-unsupported table.
+-- Recognised V2 core table, migrated into p_membership_packages by the
+-- `membership` plugin (Task 10). PM_desc, not PM_name -- verified against
+-- install/schema.sql of ChristopherDay/Gangster-Legends-V2@master; this
+-- fixture had it wrong (the PR_owner defect class again).
 CREATE TABLE premiumMembership (
   PM_id INT(11) NOT NULL AUTO_INCREMENT,
-  PM_name VARCHAR(100) NOT NULL,
+  PM_desc VARCHAR(100) NOT NULL,
   PM_seconds INT(11) NOT NULL,
   PM_cost INT(11) NOT NULL,
   PRIMARY KEY (PM_id)
@@ -326,9 +327,8 @@ CREATE TABLE posts (
 
 -- A genuine third-party/custom module table (e.g. a casino sub-module),
 -- present in a real dump but never core V2. Preflight (Task 9) must report
--- this the same way it reports premiumMembership: "custom module table, not
--- migrated" — the migrator does not distinguish "unsupported core" from
--- "truly custom", by design (see "Known unknowns" preamble above Task 9).
+-- this as "custom module table, not migrated" — the only KNOWN_TABLES entry
+-- left in that bucket now that premiumMembership migrates (Task 10).
 CREATE TABLE blackjackHands (
   BJ_id INT(11) NOT NULL AUTO_INCREMENT,
   BJ_user INT(11) NOT NULL,

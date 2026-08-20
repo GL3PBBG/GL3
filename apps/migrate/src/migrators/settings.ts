@@ -12,7 +12,8 @@ interface SettingRow { S_key: string; S_value: string | null; }
  * unreadable and silently revert the game to the built-in defaults — a
  * failure with no error anywhere. These nine are the only keys any GL3 plugin
  * reads today; everything else in the table is still core's or unread, and
- * keeps its V2 name.
+ * keeps its V2 name — except the two `SKIPPED_KEYS` below, which are
+ * reported "skipped" rather than migrated under any name.
  */
 const RENAMES: Readonly<Record<string, string>> = {
   bulletsStockMinPerHour: "bullets.stock_min_per_hour",
@@ -32,6 +33,16 @@ const RENAMES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * V2's flat display keys for the premium-membership feature (a nav link
+ * label and a feature name). `premiumMembership` itself now migrates as
+ * content (Task 10, `p_membership_packages`), but nothing in GL3's
+ * `membership` plugin reads either of these two settings keys — the page
+ * name and link text are hardcoded, not admin-configurable — so, unlike the
+ * nine renamed above, these are dead and simply skipped.
+ */
+const SKIPPED_KEYS = new Set(["membershipLinkName", "membershipName"]);
+
+/**
  * No id_map here: settings.key is a natural key, identical on both sides for
  * every key but the six renamed above. ON CONFLICT (key) DO UPDATE alone gives
  * idempotency — see Global Constraints, "Not every table needs id_map" — and
@@ -42,6 +53,10 @@ export async function migrateSettings(pool: mysql.Pool, exec: Executor, report: 
   const [rows] = await pool.query<(SettingRow & mysql.RowDataPacket)[]>("SELECT S_key, S_value FROM settings");
   for (const row of rows) {
     bumpTable(report, "settings", "read");
+    if (SKIPPED_KEYS.has(row.S_key)) {
+      bumpTable(report, "settings", "skipped");
+      continue;
+    }
     const key = RENAMES[row.S_key] ?? row.S_key;
     await exec.insert(settings).values({ key, value: row.S_value ?? "" })
       .onConflictDoUpdate({ target: settings.key, set: { value: row.S_value ?? "" } });

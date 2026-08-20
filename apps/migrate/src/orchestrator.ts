@@ -20,6 +20,7 @@ import { migrateProperties } from "./migrators/properties.js";
 import { migrateSocial } from "./migrators/social.js";
 import { migrateBountiesAndDetectives } from "./migrators/bounties-detectives.js";
 import { migrateForum } from "./migrators/forum.js";
+import { migrateMembership } from "./migrators/membership.js";
 import { migrateSettings } from "./migrators/settings.js";
 
 export interface RunMigrationOptions {
@@ -31,7 +32,8 @@ export interface RunMigrationOptions {
 }
 
 /**
- * SPEC §4.2 item 2's exact dependency order: roles -> rounds -> content ->
+ * SPEC §4.2 item 2's exact dependency order: roles -> rounds -> content
+ * (ranks/locations/cars/weapons/items/crimes/membership packages) ->
  * players(+stats,timers,crime-skill) -> gangs(+members,permissions,invites,
  * logs) -> inventory/garage/properties -> social(mail,notifications,news,
  * bounties,detectives) -> forum -> settings. One Postgres transaction per
@@ -55,6 +57,7 @@ export async function runMigration(
     await migrateWeapons(pool, tx, report);
     await migrateItems(pool, tx, report);
     await migrateCrimes(pool, tx, report);
+    await migrateMembership(pool, tx, report);
   });
 
   await runPhase(db, dryRun, async (tx) => {
