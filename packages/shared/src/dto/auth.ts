@@ -57,6 +57,7 @@ export const MeResponseSchema = z.object({
   username: z.string(),
   cash: z.string(),
   bank: z.string(),
+  points: z.string(),
   bullets: z.string(),
   exp: z.string(),
   grants: z.array(z.string()),
