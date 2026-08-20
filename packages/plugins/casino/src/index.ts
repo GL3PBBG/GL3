@@ -7,7 +7,8 @@ import {
   type PluginCtx, type PluginTx, type ViewNode,
 } from "@gl3/plugin-sdk";
 import {
-  assertHouseCanCover, escrow, frozenHouse, guardGame, resolveHouse, resolvePayout, settleSession,
+  assertHouseCanCover, escrow, frozenHouse, guardGame, notifyTakeover, NonNegativeIntegerString,
+  parseAction, readOwnerCash, resolveHouse, resolvePayout, settleSession,
   type House,
 } from "./engine.js";
 import {
@@ -29,6 +30,10 @@ import { fromStorableState, toStorableState } from "./state.js";
 import { tableRoutes } from "./table-routes.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
+// Lives in `engine.ts` (with `notifyTakeover`, its only caller besides the
+// table path) and is re-exported here so the plugin's public surface is
+// unchanged by that move.
+export { HOUSE_SEIZED_MESSAGE } from "./engine.js";
 export { lockTable } from "./table-engine.js";
 export {
   games,
@@ -76,20 +81,6 @@ async function lockBothPlayers(tx: PluginTx, playerId: string, ownerId: string |
 }
 
 /**
- * The game's own action schema over the `z.unknown()` envelope `act` accepts.
- *
- * `ActBodySchema` can only validate the envelope — the hub cannot know a
- * game's action shape up front (spec §4.2) — so this is the second half of
- * the boundary, and a `ZodError` escaping it is a 500 where the repo's rule
- * says a bad body is a clean 400.
- */
-function parseAction(game: GameDef, raw: unknown): unknown {
-  const parsed = game.action.safeParse(raw);
-  if (!parsed.success) throw new PluginError("invalid_action", 400);
-  return parsed.data;
-}
-
-/**
  * The lobby's resume view, or `null`.
  *
  * `null` for a game that declares no `view` (spec §3: it resumes viewless
@@ -106,18 +97,6 @@ function safeView(game: GameDef, state: unknown): ViewNode | null {
   } catch {
     return null;
   }
-}
-
-/** The house owner's cash, or `null` in an unowned town — the figure
- *  `assertHouseCanCover` measures the hand's exposure against. Read under the
- *  player lock `lockBothPlayers` has already taken. */
-async function readOwnerCash(tx: PluginTx, ownerId: string | null): Promise<bigint | null> {
-  if (ownerId === null) return null;
-  const [ownerStats] = await tx.db
-    .select({ cash: playerStats.cash })
-    .from(playerStats)
-    .where(eq(playerStats.playerId, ownerId));
-  return ownerStats?.cash ?? 0n;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,39 +232,9 @@ const lobbyRoute = route({
 // POST /api/casino/play — escrow, house resolution, exposure check.
 // ---------------------------------------------------------------------------
 
-/** A bigint-safe amount on the wire: digits only, never a JSON number
- *  (money is decimal-string, rule: zod every external boundary). */
-const NonNegativeIntegerString = z.string().regex(/^\d+$/, "nonnegative integer string");
-
 /** The house a forfeit settles against: none. See the call site — a forfeit
  *  pays nothing, and `settleSession` reaches `payOwner` only for a payout. */
 const NO_HOUSE: House = { propertyId: null, ownerId: null, maxBet: 0n };
-
-/** What the winner is told when the table changes hands. Exported so the page
- *  and the tests quote the one string rather than three copies of it. */
-export const HOUSE_SEIZED_MESSAGE =
-  "The owner did not have enough cash to pay the bet, you took ownership of the casino.";
-
-/**
- * Both sides of a bankruptcy takeover, told by NOTIFICATION rather than by a
- * plugin event: casino publishes no event per hand (one per blackjack hand
- * floods the feed) and a takeover is still a hand. `tx.notify` also reaches
- * the OLD owner, who is not the actor and would never see a player-audience
- * event.
- *
- * Called after `settleSession` returned true, inside the same transaction, so
- * a rollback takes the notification with the handover.
- */
-async function notifyTakeover(
-  tx: PluginTx, house: House, winner: { id: string; username: string }, gameName: string,
-): Promise<void> {
-  await tx.notify(winner.id, HOUSE_SEIZED_MESSAGE);
-  if (house.ownerId === null) return;
-  await tx.notify(
-    house.ownerId,
-    `${winner.username} took over your ${gameName} table — you could not cover their winnings.`,
-  );
-}
 
 const PlayBodySchema = z.object({
   gameId: z.string().min(1).max(80),
@@ -540,7 +489,7 @@ const actRoute = route({
       // (the hub cannot know a game's action shape up front), so an
       // unparseable action reaching a raw `ZodError` answered 500 where the
       // repo's rule is a clean 400.
-      const action = parseAction(game, body.action);
+      const action = parseAction(game.action, body.action);
       const state = fromStorableState(session.state);
       const step = guardGame(pre.gameId, "act", () => game.act(state, action));
 
