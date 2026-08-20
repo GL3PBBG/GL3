@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
-import { useJail, useLocations, useMe, useRanks } from "../api/queries.js";
+import { useDashboardWidgets, useJail, useLocations, useMe, useRanks } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatAmount } from "../lib/money.js";
 import { formatDuration } from "../lib/errors.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
+import { PageRenderer } from "../plugins/PageRenderer.js";
+import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 
 export function Dashboard(): JSX.Element {
@@ -12,6 +14,7 @@ export function Dashboard(): JSX.Element {
   const jail = useJail();
   const ranks = useRanks();
   const locations = useLocations();
+  const widgets = useDashboardWidgets();
   // Above the early return: hooks cannot be called conditionally.
   const jailSeconds = useSentenceCountdown(
     "jail", jail.data?.jailed === true ? jail.data.remainingSeconds : undefined,
@@ -80,6 +83,17 @@ export function Dashboard(): JSX.Element {
           </p>
         </Panel>
       )}
+
+      {/* Plugin-contributed panels via `dashboard.widgets` (core.ts applier).
+          Same renderNode + PageRenderer shape as PluginPage.tsx, keyed on
+          pluginId + title so two widgets sharing a title from different
+          plugins don't collide and a re-fetch doesn't drop form state across
+          widgets. */}
+      {(widgets.data?.widgets ?? []).map((widget) => (
+        <Panel key={`${widget.pluginId}:${widget.title}`} title={widget.title}>
+          <PageRenderer instructions={renderNode(widget.view, {})} />
+        </Panel>
+      ))}
     </>
   );
 }
