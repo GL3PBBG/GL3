@@ -52,9 +52,13 @@ describe("hud extras, menu badges and dashboard widget routes", () => {
       });
       expect(widgetsRes.statusCode).toBe(200);
       const widgets = DashboardWidgetsResponseSchema.parse(widgetsRes.json());
-      expect(widgets.widgets).toEqual([
+      // toContainEqual, not toEqual: bootTestServer always loads the CORE_PLUGINS
+      // alongside `contributorPlugin`, and crimes (a core plugin) now contributes
+      // its own dashboard widget unconditionally for any authenticated player —
+      // see the crimes dashboard-widget retrofit.
+      expect(widgets.widgets).toContainEqual(
         { pluginId: "extras-contributor", title: "pid", view: { kind: "text", value: playerId } },
-      ]);
+      );
     } finally {
       await close();
     }
