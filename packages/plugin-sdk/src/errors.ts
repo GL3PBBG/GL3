@@ -15,8 +15,9 @@ import type { PluginBalanceChange, PluginGangBalanceChange } from "./ctx.js";
  * The SDK already reached for duck-typing over `instanceof` for this exact
  * reason on zod schemas (`events.ts`); this states it once, structurally.
  *
- * Each guard also accepts a legacy `name`+shape match, because every plugin
- * published against `0.1.0`-`0.1.8` carries no brand and must keep working.
+ * Each guard accepts ONLY the brand — no pre-brand duck-type fallback. The
+ * compatibility regime allows deletion of that arm; no plugin published against
+ * `0.1.0`-`0.1.8` will be installed after this SDK version.
  */
 const PLUGIN_ERROR = Symbol.for("gl3.plugin-sdk.PluginError");
 const INSUFFICIENT_FUNDS = Symbol.for("gl3.plugin-sdk.InsufficientFundsError");
@@ -26,11 +27,6 @@ const JOB_ALREADY_APPLIED = Symbol.for("gl3.plugin-sdk.JobAlreadyAppliedError");
 /** True when `value` carries `brand` as an own property set to `true`. */
 function branded(value: unknown, brand: symbol): boolean {
   return typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[brand] === true;
-}
-
-/** The pre-brand fallback: an Error whose `name` matches and whose fields fit. */
-function named(value: unknown, name: string): value is Error & Record<string, unknown> {
-  return value instanceof Error && value.name === name;
 }
 
 /**
@@ -125,27 +121,20 @@ export class InsufficientGangFundsError extends Error {
  * Identifies a `PluginError` thrown by ANY instance of this package. Use this
  * rather than `instanceof` anywhere an error crosses the plugin/core boundary
  * — which is every route handler and every job.
- *
- * The legacy arm additionally checks `code`/`status`, the two fields the
- * caller goes on to read; `name` alone would let an unrelated error named
- * `PluginError` through and produce a `reply.code(undefined)`.
  */
 export function isPluginError(value: unknown): value is PluginError {
-  if (branded(value, PLUGIN_ERROR)) return true;
-  return named(value, "PluginError")
-    && typeof value["code"] === "string"
-    && typeof value["status"] === "number";
+  return branded(value, PLUGIN_ERROR);
 }
 
 /** The gang-side and player-side fund guards, and the job-retry guard. */
 export function isInsufficientFundsError(value: unknown): value is InsufficientFundsError {
-  return branded(value, INSUFFICIENT_FUNDS) || named(value, "InsufficientFundsError");
+  return branded(value, INSUFFICIENT_FUNDS);
 }
 
 export function isInsufficientGangFundsError(value: unknown): value is InsufficientGangFundsError {
-  return branded(value, INSUFFICIENT_GANG_FUNDS) || named(value, "InsufficientGangFundsError");
+  return branded(value, INSUFFICIENT_GANG_FUNDS);
 }
 
 export function isJobAlreadyAppliedError(value: unknown): value is JobAlreadyAppliedError {
-  return branded(value, JOB_ALREADY_APPLIED) || named(value, "JobAlreadyAppliedError");
+  return branded(value, JOB_ALREADY_APPLIED);
 }
