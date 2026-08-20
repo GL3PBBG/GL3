@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_SESSION_EXPIRY_MINUTES, readExpiryMinutes, readMaxBet, readMinBet,
+  MAX_SESSION_EXPIRY_MINUTES, MAX_TABLE_SEATS, readExpiryMinutes, readMaxBet, readMinBet,
+  readTableBetSeconds, readTableIdleKickHands, readTableMaxSeats, readTableTurnSeconds,
 } from "@gl3/plugin-casino";
 
 /**
@@ -104,5 +105,37 @@ describe("readExpiryMinutes", () => {
     const expiry = new Date(Date.now() + minutes * 60_000);
     expect(Number.isNaN(expiry.getTime())).toBe(false);
     expect(expiry.getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("table settings", () => {
+  it("defaults: 20s betting, 30s turns, 3 idle hands, 5 seats", () => {
+    const s = from({});
+    expect(readTableBetSeconds(s)).toBe(20);
+    expect(readTableTurnSeconds(s)).toBe(30);
+    expect(readTableIdleKickHands(s)).toBe(3);
+    expect(readTableMaxSeats(s)).toBe(5);
+  });
+
+  it("reads configured values", () => {
+    const s = from({
+      table_bet_seconds: "45", table_turn_seconds: "10",
+      table_idle_kick_hands: "1", table_max_seats: "3",
+    });
+    expect(readTableBetSeconds(s)).toBe(45);
+    expect(readTableTurnSeconds(s)).toBe(10);
+    expect(readTableIdleKickHands(s)).toBe(1);
+    expect(readTableMaxSeats(s)).toBe(3);
+  });
+
+  it("clamps max seats to the hard ceiling and floors it at 1", () => {
+    expect(readTableMaxSeats(from({ table_max_seats: "9" }))).toBe(MAX_TABLE_SEATS);
+    expect(readTableMaxSeats(from({ table_max_seats: "0" }))).toBe(5);
+  });
+
+  it("falls back on malformed and non-positive values", () => {
+    expect(readTableBetSeconds(from({ table_bet_seconds: "1.5" }))).toBe(20);
+    expect(readTableTurnSeconds(from({ table_turn_seconds: "0" }))).toBe(30);
+    expect(readTableIdleKickHands(from({ table_idle_kick_hands: "-2" }))).toBe(3);
   });
 });

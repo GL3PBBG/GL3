@@ -14,7 +14,10 @@ import { buildRegistry, games, type GameDef } from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { casinoSessions, locations, players, playerStats } from "./schema.js";
-import { readExpiryMinutes, readMaxBet, readMinBet } from "./settings.js";
+import {
+  readExpiryMinutes, readMaxBet, readMinBet, readTableBetSeconds, readTableTurnSeconds,
+  readTableIdleKickHands, readTableMaxSeats,
+} from "./settings.js";
 import { fromStorableState, toStorableState } from "./state.js";
 
 export { casinoSessions } from "./schema.js";
@@ -23,7 +26,8 @@ export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
 // `readTheftSettings`: they are pure, and their contract (defaults, the digits
 // guard, the expiry ceiling) is worth pinning in a DB-free unit test.
 export {
-  MAX_SESSION_EXPIRY_MINUTES, readExpiryMinutes, readMaxBet, readMinBet,
+  MAX_SESSION_EXPIRY_MINUTES, MAX_TABLE_SEATS, readExpiryMinutes, readMaxBet, readMinBet,
+  readTableBetSeconds, readTableIdleKickHands, readTableMaxSeats, readTableTurnSeconds,
 } from "./settings.js";
 // Re-exported so a test can assert against the same page object rather than a
 // hand-copied duplicate of its view tree — the properties convention.

@@ -51,3 +51,32 @@ export function readExpiryMinutes(s: SettingsReader): number {
   // rather than on a value no date arithmetic can survive.
   return Math.min(parsed, MAX_SESSION_EXPIRY_MINUTES);
 }
+
+export const DEFAULT_TABLE_BET_SECONDS = 20;
+export const DEFAULT_TABLE_TURN_SECONDS = 30;
+export const DEFAULT_TABLE_IDLE_KICK_HANDS = 3;
+/** Hard ceiling; also the CHECK constraint's bound in migration 0003. */
+export const MAX_TABLE_SEATS = 5;
+
+function readPositiveInt(s: SettingsReader, key: string, fallback: number): number {
+  const raw = s.get(key);
+  if (raw === null || !/^\d+$/.test(raw)) return fallback;
+  const parsed = Number(raw);
+  if (!(parsed > 0)) return fallback;
+  return parsed;
+}
+
+export function readTableBetSeconds(s: SettingsReader): number {
+  return readPositiveInt(s, "table_bet_seconds", DEFAULT_TABLE_BET_SECONDS);
+}
+export function readTableTurnSeconds(s: SettingsReader): number {
+  return readPositiveInt(s, "table_turn_seconds", DEFAULT_TABLE_TURN_SECONDS);
+}
+export function readTableIdleKickHands(s: SettingsReader): number {
+  return readPositiveInt(s, "table_idle_kick_hands", DEFAULT_TABLE_IDLE_KICK_HANDS);
+}
+/** Clamped into [1, MAX_TABLE_SEATS]: the seat_no CHECK is the backstop. */
+export function readTableMaxSeats(s: SettingsReader): number {
+  const parsed = readPositiveInt(s, "table_max_seats", MAX_TABLE_SEATS);
+  return Math.min(parsed, MAX_TABLE_SEATS);
+}
