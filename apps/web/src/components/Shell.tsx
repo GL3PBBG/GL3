@@ -6,6 +6,7 @@ import {
 } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
+import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
@@ -164,89 +165,91 @@ export function Shell(): JSX.Element {
   };
 
   return (
-    <div className={styles.shell}>
-      <a href="#main" className={styles.skipLink}>Skip to content</a>
-      <header className={styles.header}>
-        <h1 className={styles.brand}>GL3</h1>
-        <div className={styles.hud}>
-          <Stat label="Player">{me.data?.username ?? "—"}</Stat>
-          <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
-          <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
-          <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
-          <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
-          <Stat label="Exp">{me.data ? <Amount value={me.data.exp} /> : "—"}</Stat>
-          <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
-          <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
-          <button type="button" disabled={logout.isPending} onClick={() => { logout.mutate(); }}>
-            Log out
-          </button>
-        </div>
-      </header>
+    <FormatProvider>
+      <div className={styles.shell}>
+        <a href="#main" className={styles.skipLink}>Skip to content</a>
+        <header className={styles.header}>
+          <h1 className={styles.brand}>GL3</h1>
+          <div className={styles.hud}>
+            <Stat label="Player">{me.data?.username ?? "—"}</Stat>
+            <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
+            <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
+            <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
+            <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
+            <Stat label="Exp">{me.data ? <Amount value={me.data.exp} /> : "—"}</Stat>
+            <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
+            <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
+            <button type="button" disabled={logout.isPending} onClick={() => { logout.mutate(); }}>
+              Log out
+            </button>
+          </div>
+        </header>
 
-      <nav className={styles.nav}>
-        {LINKS.map(([to, label]) => {
-          const unread = badges[to] ?? 0;
-          return (
+        <nav className={styles.nav}>
+          {LINKS.map(([to, label]) => {
+            const unread = badges[to] ?? 0;
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={to === "/"}
+                className={({ isActive }) =>
+                  isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+                }
+              >
+                {label}
+                {unread > 0 ? (
+                  <span className={styles.badge}>
+                    {unread}<span className={styles.srOnly}> unread</span>
+                  </span>
+                ) : null}
+              </NavLink>
+            );
+          })}
+          {/*
+            Plugin entries sit below the core links and carry no badge: a badge is
+            a count the shell polls for, and nothing in the manifest supplies one.
+            The link target is the namespaced route, not the entry's declared
+            `path` — see the routing note in App.tsx. `pageId` is only constrained
+            to be non-empty, so it is encoded rather than trusted as a path segment.
+          */}
+          {me.data && me.data.grants.length > 0 ? (
             <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
+              to="/admin"
               className={({ isActive }) =>
                 isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
               }
             >
-              {label}
-              {unread > 0 ? (
-                <span className={styles.badge}>
-                  {unread}<span className={styles.srOnly}> unread</span>
-                </span>
-              ) : null}
+              Admin
             </NavLink>
-          );
-        })}
-        {/*
-          Plugin entries sit below the core links and carry no badge: a badge is
-          a count the shell polls for, and nothing in the manifest supplies one.
-          The link target is the namespaced route, not the entry's declared
-          `path` — see the routing note in App.tsx. `pageId` is only constrained
-          to be non-empty, so it is encoded rather than trusted as a path segment.
-        */}
-        {me.data && me.data.grants.length > 0 ? (
-          <NavLink
-            to="/admin"
-            className={({ isActive }) =>
-              isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-            }
-          >
-            Admin
-          </NavLink>
+          ) : null}
+          {pluginLinks.map((entry) => (
+            <NavLink
+              key={entry.pageId}
+              to={`/plugins/${encodeURIComponent(entry.pageId)}`}
+              className={({ isActive }) =>
+                isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+              }
+            >
+              {entry.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        {jail.data?.jailed === true ? (
+          <p className={styles.jailBanner} role="status">
+            In jail — {formatDuration(jailSeconds)} remaining.
+          </p>
         ) : null}
-        {pluginLinks.map((entry) => (
-          <NavLink
-            key={entry.pageId}
-            to={`/plugins/${encodeURIComponent(entry.pageId)}`}
-            className={({ isActive }) =>
-              isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-            }
-          >
-            {entry.label}
-          </NavLink>
-        ))}
-      </nav>
 
-      {jail.data?.jailed === true ? (
-        <p className={styles.jailBanner} role="status">
-          In jail — {formatDuration(jailSeconds)} remaining.
-        </p>
-      ) : null}
-
-      <div className={styles.body}>
-        <main id="main" className={styles.content}>
-          <PageBanner />
-          <Outlet />
-        </main>
-        <EventFeed />
+        <div className={styles.body}>
+          <main id="main" className={styles.content}>
+            <PageBanner />
+            <Outlet />
+          </main>
+          <EventFeed />
+        </div>
       </div>
-    </div>
+    </FormatProvider>
   );
 }

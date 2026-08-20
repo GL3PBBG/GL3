@@ -10,14 +10,17 @@ import {
   CheckinResponseSchema,
   CombatLogResponseSchema,
   CombatTargetListResponseSchema, CommitCrimeResponseSchema, CrimeListResponseSchema,
+  DashboardWidgetsResponseSchema,
   DetectiveListResponseSchema, DischargePlayerResponseSchema, DischargeResponseSchema,
   EquipResponseSchema, ForumListResponseSchema, ForumTopicListResponseSchema,
   ForumTopicViewResponseSchema, GangBankResponseSchema,
   GangDtoSchema, GangInviteListResponseSchema, GangLogListResponseSchema,
   GangMemberListResponseSchema, HireDetectivesResponseSchema, HospitalStatusSchema,
+  HudExtrasResponseSchema,
   InventoryResponseSchema, JailStatusSchema,
   LeaderboardResponseSchema,
   LocationListResponseSchema, MailDtoSchema, MailListResponseSchema, MeResponseSchema,
+  MenuBadgesResponseSchema,
   NewsListResponseSchema, NotificationListResponseSchema, OcCashResponseSchema,
   OcCreateResponseSchema, OcStateResponseSchema, OnlineListResponseSchema, PlaceBountyResponseSchema,
   PluginsPayloadSchema,
@@ -42,15 +45,17 @@ import {
   type CombatTargetListResponse, type CreateGangRequest,
   type CreatePostRequest, type CreateTopicRequest,
   type CrimeListResponse,
+  type DashboardWidgetsResponse,
   type DetectiveListResponse, type DischargePlayerResponse, type DischargeResponse,
   type EquipRequest, type EquipResponse,
   type ForumListResponse, type ForumTopicListResponse, type ForumTopicViewResponse,
   type GangBankResponse, type GangDto, type GangInviteListResponse,
   type GangLogListResponse, type GangMemberListResponse, type GangPermission,
   type HireDetectivesRequest, type HireDetectivesResponse,
-  type HospitalStatus, type InventoryResponse,
+  type HospitalStatus, type HudExtrasResponse, type InventoryResponse,
   type JailStatus, type LeaderboardKind, type LeaderboardResponse,
   type LocationListResponse, type MailDto, type MailListResponse, type MeResponse,
+  type MenuBadgesResponse,
   type NewsListResponse, type NotificationListResponse,
   type OcCashResponse, type OcCreateResponse, type OcStateResponse, type OnlineListResponse,
   type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
@@ -614,6 +619,31 @@ export function usePlugins() {
   return useQuery<PluginsPayload>({
     queryKey: keys.plugins(),
     queryFn: async () => PluginsPayloadSchema.parse(await api("/api/plugins")),
+  });
+}
+
+/** Extra chrome the loaded plugins contribute to the HUD, via `hud.extras`. */
+export function useHudExtras() {
+  return useQuery<HudExtrasResponse>({
+    queryKey: keys.hudExtras(),
+    queryFn: async () => HudExtrasResponseSchema.parse(await api("/api/hud/extras")),
+  });
+}
+
+/** Nav-link counts a plugin wants shown, keyed by the link's own path — see
+ *  `menu.badges`. */
+export function useMenuBadges() {
+  return useQuery<MenuBadgesResponse>({
+    queryKey: keys.menuBadges(),
+    queryFn: async () => MenuBadgesResponseSchema.parse(await api("/api/menu/badges")),
+  });
+}
+
+/** Panels a plugin contributes to the dashboard, via `dashboard.widgets`. */
+export function useDashboardWidgets() {
+  return useQuery<DashboardWidgetsResponse>({
+    queryKey: keys.dashboardWidgets(),
+    queryFn: async () => DashboardWidgetsResponseSchema.parse(await api("/api/dashboard/widgets")),
   });
 }
 

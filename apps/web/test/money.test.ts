@@ -42,6 +42,20 @@ describe("formatMoney", () => {
   it("puts the minus in front of the currency, not after", () => {
     expect(formatMoney("-1500")).toBe("-$1,500");
   });
+
+  it("defaults identically to the built-in $ format when no format is given", () => {
+    expect(formatMoney("1234567")).toBe("$1,234,567");
+  });
+
+  it("honours a plugin-supplied prefix format with a custom separator", () => {
+    expect(formatMoney("1234567", { symbol: "£", position: "prefix", thousandsSep: "." }))
+      .toBe("£1.234.567");
+  });
+
+  it("honours a plugin-supplied suffix format with a custom separator", () => {
+    expect(formatMoney("1234567", { symbol: " kr", position: "suffix", thousandsSep: " " }))
+      .toBe("1 234 567 kr");
+  });
 });
 
 describe("multiplyMoney", () => {

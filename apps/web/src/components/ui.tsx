@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { formatAmount, formatMoney } from "../lib/money.js";
 import { describeError } from "../lib/errors.js";
+import { useMoneyFormat } from "../lib/formatContext.js";
 import styles from "./ui.module.css";
 
 /** A titled block. Every page is a stack of these. */
@@ -13,14 +14,20 @@ export function Panel({ title, children }: { title?: string; children: ReactNode
   );
 }
 
-/** A money string rendered as `$1,234`. Never converts to Number — see lib/money.ts. */
+/** A money string rendered as `$1,234` — or whatever `moneyFormat` the loaded
+ *  plugins declare (lib/formatContext.tsx). Never converts to Number — see
+ *  lib/money.ts. */
 export function Money({ value }: { value: string }): JSX.Element {
-  return <span className={styles.money}>{formatMoney(value)}</span>;
+  const format = useMoneyFormat();
+  return <span className={styles.money}>{formatMoney(value, format)}</span>;
 }
 
-/** A bigint-string count (bullets, exp) with thousands separators and no `$`. */
+/** A bigint-string count (bullets, exp) with thousands separators and no `$`
+ *  — the separator still follows `moneyFormat`, since it's a display detail
+ *  shared with plain amounts. */
 export function Amount({ value }: { value: string }): JSX.Element {
-  return <span className={styles.money}>{formatAmount(value)}</span>;
+  const format = useMoneyFormat();
+  return <span className={styles.money}>{formatAmount(value, format)}</span>;
 }
 
 /**
