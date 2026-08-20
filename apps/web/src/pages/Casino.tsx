@@ -393,95 +393,100 @@ function TableScreen({ view, cash, jailed }: {
         <PageRenderer instructions={renderNode(view.view, {})} />
       )}
 
-      {actions.canBet ? (
-        <>
-          <div className={styles.form}>
-            <label>
-              <span className={styles.meta}>Wager </span>
-              <input
-                inputMode="numeric"
-                value={wager}
-                aria-label="Wager"
-                onChange={(event) => { setWager(event.target.value.trim()); }}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={busy || check.kind !== "ok"}
-              onClick={() => { bet.mutate(wager, { onSuccess: () => { setWager(""); } }); }}
-            >
-              Bet
-            </button>
-          </div>
-          {check.kind === "notAnAmount" && wager !== "" ? (
-            <p role="alert" className={styles.bad}>Whole numbers only.</p>
-          ) : null}
-          {check.kind === "belowMin" ? (
-            <p role="alert" className={styles.bad}>
-              The minimum bet is <Money value={view.minBet} />.
-            </p>
-          ) : null}
-          {check.kind === "aboveMax" ? (
-            <p role="alert" className={styles.bad}>
-              This table takes at most <Money value={view.maxBet} />.
-            </p>
-          ) : null}
-          {check.kind === "tooPoor" ? (
-            <p role="alert" className={styles.bad}>You don&apos;t have that much on you.</p>
-          ) : null}
-        </>
-      ) : null}
-
-      {actions.canAct ? (
-        <div className={styles.actions}>
-          {moves.map((action) => (
-            <button
-              key={action}
-              type="button"
-              disabled={busy}
-              onClick={() => { act.mutate(action); }}
-            >
-              {ACTION_LABELS[action]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {actions.reason !== null ? <p className={styles.meta}>{actions.reason}</p> : null}
-
-      <div className={styles.actions}>
-        {confirmingLeave ? (
+      {/* One stack for every control on the table, so the bet row, the hand
+          actions and Leave are spaced from each other and from the cards
+          above — `Panel` puts no gap between its own children. */}
+      <div className={styles.controls}>
+        {actions.canBet ? (
           <>
-            <span className={styles.meta} role="alert">
-              Leave mid-hand? Your stake stays in and settles normally, but the
-              rest of your turns are stood automatically.
-            </span>
+            <div className={styles.form}>
+              <label>
+                <span className={styles.meta}>Wager </span>
+                <input
+                  inputMode="numeric"
+                  value={wager}
+                  aria-label="Wager"
+                  onChange={(event) => { setWager(event.target.value.trim()); }}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={busy || check.kind !== "ok"}
+                onClick={() => { bet.mutate(wager, { onSuccess: () => { setWager(""); } }); }}
+              >
+                Bet
+              </button>
+            </div>
+            {check.kind === "notAnAmount" && wager !== "" ? (
+              <p role="alert" className={styles.bad}>Whole numbers only.</p>
+            ) : null}
+            {check.kind === "belowMin" ? (
+              <p role="alert" className={styles.bad}>
+                The minimum bet is <Money value={view.minBet} />.
+              </p>
+            ) : null}
+            {check.kind === "aboveMax" ? (
+              <p role="alert" className={styles.bad}>
+                This table takes at most <Money value={view.maxBet} />.
+              </p>
+            ) : null}
+            {check.kind === "tooPoor" ? (
+              <p role="alert" className={styles.bad}>You don&apos;t have that much on you.</p>
+            ) : null}
+          </>
+        ) : null}
+  
+        {actions.canAct ? (
+          <div className={styles.actions}>
+            {moves.map((action) => (
+              <button
+                key={action}
+                type="button"
+                disabled={busy}
+                onClick={() => { act.mutate(action); }}
+              >
+                {ACTION_LABELS[action]}
+              </button>
+            ))}
+          </div>
+        ) : null}
+  
+        {actions.reason !== null ? <p className={styles.meta}>{actions.reason}</p> : null}
+  
+        <div className={styles.actions}>
+          {confirmingLeave ? (
+            <>
+              <span className={styles.meta} role="alert">
+                Leave mid-hand? Your stake stays in and settles normally, but the
+                rest of your turns are stood automatically.
+              </span>
+              <button
+                ref={confirmRef}
+                type="button"
+                disabled={leave.isPending}
+                onClick={() => {
+                  leave.mutate(undefined, { onSettled: () => { setConfirmingLeave(false); } });
+                }}
+              >
+                Confirm leave
+              </button>
+              <button type="button" onClick={() => { setConfirmingLeave(false); }}>Cancel</button>
+            </>
+          ) : (
             <button
-              ref={confirmRef}
+              ref={leaveRef}
               type="button"
               disabled={leave.isPending}
               onClick={() => {
-                leave.mutate(undefined, { onSettled: () => { setConfirmingLeave(false); } });
+                // Only an in-hand leave costs anything, so only that one asks.
+                if (inHand) setConfirmingLeave(true);
+                else leave.mutate();
               }}
             >
-              Confirm leave
+              Leave table
             </button>
-            <button type="button" onClick={() => { setConfirmingLeave(false); }}>Cancel</button>
-          </>
-        ) : (
-          <button
-            ref={leaveRef}
-            type="button"
-            disabled={leave.isPending}
-            onClick={() => {
-              // Only an in-hand leave costs anything, so only that one asks.
-              if (inHand) setConfirmingLeave(true);
-              else leave.mutate();
-            }}
-          >
-            Leave table
-          </button>
-        )}
+          )}
+        </div>
       </div>
 
       {jailed ? <p className={styles.bad}>No playing from a cell.</p> : null}
@@ -676,39 +681,43 @@ export function Casino(): JSX.Element {
           <PageRenderer instructions={renderNode(active.view, {})} />
         )}
 
-        {active.done ? (
-          <>
-            <p className={styles.big}>
-              {active.payout === null || active.payout === "0"
-                ? "The house takes it."
-                : <>Paid out <Money value={active.payout} /></>}
-            </p>
-            {active.houseSeized ? (
-              <p className={styles.big}>{HOUSE_SEIZED_MESSAGE}</p>
-            ) : null}
+        {/* The solo hand's controls get the same stack as the table's, for the
+            same reason: they sat flush against the cards above them. */}
+        <div className={styles.controls}>
+          {active.done ? (
+            <>
+              <p className={styles.big}>
+                {active.payout === null || active.payout === "0"
+                  ? "The house takes it."
+                  : <>Paid out <Money value={active.payout} /></>}
+              </p>
+              {active.houseSeized ? (
+                <p className={styles.big}>{HOUSE_SEIZED_MESSAGE}</p>
+              ) : null}
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  onClick={() => { setDismissed(active.sessionId); setHand(null); }}
+                >
+                  Back to the tables
+                </button>
+              </div>
+            </>
+          ) : (
             <div className={styles.actions}>
-              <button
-                type="button"
-                onClick={() => { setDismissed(active.sessionId); setHand(null); }}
-              >
-                Back to the tables
-              </button>
+              {handActions(active.actsTaken).map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  disabled={jailed || act.isPending}
+                  onClick={() => { onAct(active, action); }}
+                >
+                  {ACTION_LABELS[action]}
+                </button>
+              ))}
             </div>
-          </>
-        ) : (
-          <div className={styles.actions}>
-            {handActions(active.actsTaken).map((action) => (
-              <button
-                key={action}
-                type="button"
-                disabled={jailed || act.isPending}
-                onClick={() => { onAct(active, action); }}
-              >
-                {ACTION_LABELS[action]}
-              </button>
-            ))}
-          </div>
-        )}
+          )}
+        </div>
 
         {jailed ? <p className={styles.bad}>No playing from a cell.</p> : null}
         <ErrorText error={act.error} />
