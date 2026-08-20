@@ -414,6 +414,7 @@ export default defineWorkspace([
         "test/membership-benefits.test.ts",
         "test/membership-plugin.test.ts",
         "test/membership-gift.test.ts",
+        "test/membership-extras.test.ts",
         "test/theft-chase.test.ts",
         "test/theft-lock-order.test.ts",
         "test/theft-routes.test.ts",
