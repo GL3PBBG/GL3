@@ -5,6 +5,10 @@ import { handValue, isNatural, playDealer, shuffle, type BlackjackState } from "
 import { renderState } from "./view.js";
 
 export { handValue, shuffle, type BlackjackState } from "./rules.js";
+export {
+  dealTable, actSeat, settleTable,
+  type BjTableState, type BjSeatHand, type SeatPhase,
+} from "./multi.js";
 
 const ActionSchema = z.enum(["hit", "stand", "double"]);
 
