@@ -485,8 +485,12 @@ unavailable here.
 - Spare databases `gl3_a`..`gl3_d` exist for concurrent agents, but are **only
   migrated through `0002`** — anything touching an M3 table fails there with
   `42703 column "gang_id" does not exist`. Migrate one before relying on it.
-- **This box has 32 CPUs but only ~3.8 GB RAM.** `maxWorkers` is capped at 6 in
-  `vitest.config.ts` for that reason. Do not raise it.
+- **This box has 32 CPUs and 8 GB RAM** (raised from ~3.8 GB on 2026-08-20).
+  `maxWorkers` in `vitest.config.ts` is still capped at 6 from the 3.8 GB era;
+  raising it is now allowed but treat it as an experiment — run the full
+  `npm run verify` after changing it, and remember higher concurrency density
+  has previously surfaced latent contention bugs (the `casino-lock-order`
+  flake).
 - **Never run two full test suites at once** — including your own verification run
   alongside an agent's. Overlapping runs produce hook timeouts and cross-talk that
   look exactly like real regressions and have twice sent people chasing ghosts.
