@@ -9,6 +9,8 @@ export {
   type FilterPoint,
   type FilterFn,
   type FilterSubscription,
+  type FilterPolicy,
+  type BoundFilterSubscription,
 } from "./filters.js";
 export type {
   CoreEventInput,

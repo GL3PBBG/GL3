@@ -20,7 +20,13 @@ import type { PluginCtx } from "./ctx.js";
  * it makes the phantom's behaviour independent of `strictFunctionTypes` and of
  * property-vs-method declaration quirks.
  */
-export interface FilterPoint<T> { readonly name: string; readonly _type?: (value: never) => T }
+export type FilterPolicy = "propagate" | "collect";
+
+export interface FilterPoint<T> {
+  readonly name: string;
+  readonly policy: FilterPolicy;
+  readonly _type?: (value: never) => T;
+}
 
 // Compile-time guards for the phantom's variance (see `_type` above). These
 // are types only — nothing is emitted. Both are verified to fail, each on a
@@ -46,10 +52,10 @@ export interface FilterSubscription {
 
 const declared = new Set<string>();
 
-export function filterPoint<T>(name: string): FilterPoint<T> {
+export function filterPoint<T>(name: string, policy: FilterPolicy): FilterPoint<T> {
   if (declared.has(name)) throw new Error(`filter point "${name}" already declared`);
   declared.add(name);
-  return { name };
+  return { name, policy };
 }
 
 /** `order` defaults to 100 so a subscriber can sort before or after the norm. */
@@ -76,21 +82,53 @@ export function on<T>(point: FilterPoint<T>, fn: FilterFn<T>, order = 100): Filt
 }
 
 /**
+ * A subscription paired with the plugin id that owns it, so
+ * `runFilterChain` can hand each subscriber its own plugin's ctx rather
+ * than the ctx of whichever plugin applied the filter.
+ */
+export interface BoundFilterSubscription {
+  readonly ownerId: string;
+  readonly subscription: FilterSubscription;
+}
+
+/**
  * Filters run outside any transaction (spec: Filters) — a filter cannot
  * participate in the caller's write, so a slow subscriber cannot hold a row
  * lock open.
+ *
+ * `ctxFor` is called once per subscriber, keyed by the subscriber's owning
+ * plugin id — never the applier's — which is what makes a subscriber's
+ * `ctx.pluginId`, permission checks and event publishes attribute to the
+ * plugin that declared the subscription rather than the plugin that
+ * triggered the chain.
+ *
+ * `point.policy` governs error handling: `"propagate"` rethrows a
+ * subscriber's error, aborting the chain (the default shape prior points
+ * had); `"collect"` logs and drops a throwing subscriber's contribution,
+ * carrying the previous value forward to the next subscriber instead.
  */
 export async function runFilterChain<T>(
-  subscriptions: readonly FilterSubscription[],
+  bound: readonly BoundFilterSubscription[],
   point: FilterPoint<T>,
-  ctx: PluginCtx,
+  ctxFor: (ownerId: string) => PluginCtx,
   value: T,
 ): Promise<T> {
-  const chain = subscriptions
-    .filter((s) => s.pointName === point.name)
-    .sort((a, b) => a.order - b.order);
+  const chain = bound
+    .filter((b) => b.subscription.pointName === point.name)
+    .sort((a, b) => a.subscription.order - b.subscription.order);
   let current: unknown = value;
-  for (const subscription of chain) current = await subscription.run(ctx, current);
+  for (const { ownerId, subscription } of chain) {
+    const ctx = ctxFor(ownerId);
+    if (point.policy === "collect") {
+      try {
+        current = await subscription.run(ctx, current);
+      } catch (error) {
+        ctx.log.error(`filter subscriber for "${point.name}" dropped`, { ownerId, error });
+      }
+    } else {
+      current = await subscription.run(ctx, current);
+    }
+  }
   // Same cast, same backing as `on`'s above: a subscriber for this point is
   // typed to return `T`, so the threaded value is still `T` — given the
   // constructor discipline described there, and no stronger than it.
