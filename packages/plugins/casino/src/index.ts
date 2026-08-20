@@ -20,7 +20,7 @@ import {
 } from "./settings.js";
 import { fromStorableState, toStorableState } from "./state.js";
 
-export { casinoSessions } from "./schema.js";
+export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
 export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
 // The readers are exported for the same reason `@gl3/plugin-theft` exports
 // `readTheftSettings`: they are pure, and their contract (defaults, the digits
@@ -711,7 +711,7 @@ export default definePlugin({
   version: "1.0.0",
   basePaths: ["/api/casino", "/api/admin/casino"],
   migrations: CASINO_MIGRATIONS,
-  tables: { sessions: "p_casino_sessions" },
+  tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
   routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute],
   adminPages: [adminPage],
   // Documentation parity with combat's `provides: [killResolved]`: nothing
