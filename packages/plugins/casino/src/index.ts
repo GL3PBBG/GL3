@@ -10,7 +10,14 @@ import {
   assertHouseCanCover, escrow, frozenHouse, guardGame, resolveHouse, resolvePayout, settleSession,
   type House,
 } from "./engine.js";
-import { buildRegistry, games, type GameDef } from "./games.js";
+import {
+  buildRegistry,
+  buildTableRegistry,
+  games,
+  tableGames,
+  type GameDef,
+  type TableGameDef,
+} from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { casinoSessions, locations, players, playerStats } from "./schema.js";
@@ -21,7 +28,17 @@ import {
 import { fromStorableState, toStorableState } from "./state.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
-export { games, buildRegistry, type GameDef, type GameStep } from "./games.js";
+export {
+  games,
+  buildRegistry,
+  tableGames,
+  buildTableRegistry,
+  type GameDef,
+  type GameStep,
+  type TableGameDef,
+  type TableStep,
+  type TableSeatInput,
+} from "./games.js";
 // The readers are exported for the same reason `@gl3/plugin-theft` exports
 // `readTheftSettings`: they are pure, and their contract (defaults, the digits
 // guard, the expiry ceiling) is worth pinning in a DB-free unit test.
@@ -716,6 +733,6 @@ export default definePlugin({
   adminPages: [adminPage],
   // Documentation parity with combat's `provides: [killResolved]`: nothing
   // reads `PluginManifest.provides` today, but this is the point a game
-  // subscribes to via `on(games, ...)`.
-  provides: [games],
+  // subscribes to via `on(games, ...)` or `on(tableGames, ...)`.
+  provides: [games, tableGames],
 });

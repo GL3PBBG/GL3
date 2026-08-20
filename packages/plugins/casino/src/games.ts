@@ -14,6 +14,20 @@ export interface GameStep<S> {
   wagerDelta?: bigint;
 }
 
+export interface TableSeatInput {
+  seat: number;
+  wager: bigint;
+}
+
+export interface TableStep<S> {
+  state: S;
+  done: boolean;
+  /** The seat whose turn it now is; null when the hand is done. */
+  turn: number | null;
+  /** A raise (double). `seat` must be the seat that just acted; `amount` > 0. */
+  wagerDelta?: { seat: number; amount: bigint };
+}
+
 /**
  * The whole contract a casino game implements. `start`, `act` and `settle` are
  * PURE — no database, no ctx, no clock, no randomness, no io. That is what
@@ -54,7 +68,31 @@ export interface GameDef<S = unknown> {
   view?(state: S): ViewNode;
 }
 
+export interface TableGameDef<S = unknown> {
+  /** Must equal the declaring plugin's id — checked in `buildTableRegistry`. */
+  id: string;
+  name: string;
+  /**
+   * The most a player can be returned per unit of the CURRENT wager. Blackjack
+   * is 2.5 (a natural pays 3:2). A doubled hand has twice the wager and is
+   * still 2.5 of it, which is why the exposure check re-runs on `wagerDelta`
+   * rather than predicting a maximum up front.
+   */
+  maxPayoutMultiplier: number;
+  /** Validates the act body's `action`. Rule: zod every external boundary. */
+  action: z.ZodType<unknown>;
+  deal(input: { seats: TableSeatInput[]; seed: string }): TableStep<S>;
+  act(state: S, seat: number, action: unknown): TableStep<S>;
+  /** What happens to a seat whose turn timer lapsed. Pure, like the rest. */
+  autoAct(state: S, seat: number): TableStep<S>;
+  /** Per-seat render. `viewer` null = a seated spectator not in this hand. */
+  view(state: S, viewer: number | null): ViewNode;
+  /** TOTAL returned per seat. A seat absent from the array is paid 0. */
+  settle(state: S): { seat: number; payout: bigint }[];
+}
+
 export const games = filterPoint<GameDef[]>("casino.games");
+export const tableGames = filterPoint<TableGameDef[]>("casino.tableGames");
 
 /**
  * Built on first use and memoised by the caller. Request-time rather than
@@ -72,6 +110,27 @@ export async function buildRegistry(
       throw new Error(`casino game "${game.id}" is not an installed plugin id`);
     }
     if (registry.has(game.id)) throw new Error(`duplicate casino game id "${game.id}"`);
+    registry.set(game.id, game);
+  }
+  return registry;
+}
+
+/**
+ * Built on first use and memoised by the caller. Request-time rather than
+ * boot-time, because a TableGameDef arrives inside a filter subscription and
+ * `definePlugin` cannot see it — the tradeoff spec §3 records.
+ */
+export async function buildTableRegistry(
+  ctx: Pick<PluginCtx, "filters">,
+  installedPluginIds: ReadonlySet<string>,
+): Promise<Map<string, TableGameDef>> {
+  const declared = await ctx.filters.apply(tableGames, []);
+  const registry = new Map<string, TableGameDef>();
+  for (const game of declared) {
+    if (!installedPluginIds.has(game.id)) {
+      throw new Error(`casino table game "${game.id}" is not an installed plugin id`);
+    }
+    if (registry.has(game.id)) throw new Error(`duplicate casino table game id "${game.id}"`);
     registry.set(game.id, game);
   }
   return registry;
