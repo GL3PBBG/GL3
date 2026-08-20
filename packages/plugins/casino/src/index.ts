@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import {
@@ -21,7 +21,7 @@ import {
 } from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
-import { casinoSessions, locations, players, playerStats } from "./schema.js";
+import { casinoSeats, casinoSessions, casinoTables, locations, players, playerStats } from "./schema.js";
 import {
   readExpiryMinutes, readMaxBet, readMinBet, readTableBetSeconds, readTableTurnSeconds,
   readTableIdleKickHands, readTableMaxSeats,
@@ -125,10 +125,13 @@ const lobbyRoute = route({
 
     // Request-time and per-request, exactly as `play`/`act` build it — there is
     // deliberately no module-level cache (Task 6: a process-level registry
-    // outlives a test's plugin set).
+    // outlives a test's plugin set). The TABLE registry (Task 12) is built the
+    // same way, alongside the solo one.
     const registry = await buildRegistry(ctx, ctx.installedPluginIds);
+    const tableRegistry = await buildTableRegistry(ctx, ctx.installedPluginIds);
     const fallbackMaxBet = readMaxBet(ctx.settings);
     const expiryMinutes = readExpiryMinutes(ctx.settings);
+    const maxSeats = readTableMaxSeats(ctx.settings);
 
     return ctx.transaction(async (tx) => {
       const [stats] = await tx.db
@@ -153,11 +156,19 @@ const lobbyRoute = route({
       for (const [gameId] of registry) {
         houses.set(gameId, await resolveHouse(tx, gameId, locationId, fallbackMaxBet));
       }
+      // The TABLE registry's houses, same idiom — one `resolveHouse` per
+      // registered table game, sequential on the same connection.
+      const tableHouses = new Map<string, House>();
+      for (const [gameId] of tableRegistry) {
+        tableHouses.set(gameId, await resolveHouse(tx, gameId, locationId, fallbackMaxBet));
+      }
 
       // One query for every house owner in town rather than one per game: the
       // registry is small today, but a lobby is the one route whose cost grows
-      // with the number of installed games.
-      const ownerIds = [...houses.values()]
+      // with the number of installed games. Covers BOTH registries' houses —
+      // a solo game and a table game can be owned by different players in the
+      // same town, and this is the one place either owner's name is looked up.
+      const ownerIds = [...houses.values(), ...tableHouses.values()]
         .map((house) => house.ownerId)
         .filter((id): id is string => id !== null);
       const ownerNames = new Map<string, string>();
@@ -165,7 +176,7 @@ const lobbyRoute = route({
         const rows = await tx.db
           .select({ id: players.id, username: players.username })
           .from(players)
-          .where(inArray(players.id, ownerIds));
+          .where(inArray(players.id, [...new Set(ownerIds)]));
         for (const row of rows) ownerNames.set(row.id, row.username);
       }
 
@@ -182,6 +193,71 @@ const lobbyRoute = route({
           maxBet: (house?.maxBet ?? fallbackMaxBet).toString(),
         };
       });
+
+      // LOCAL tables: every live table in the caller's town, with its seat
+      // count. One grouped query rather than one per game — the `remote`
+      // query below is the same shape for every OTHER town.
+      const localTableRows = await tx.db
+        .select({
+          tableId: casinoTables.id,
+          gameId: casinoTables.gameId,
+          phase: casinoTables.phase,
+          seatsFilled: sql<number>`count(${casinoSeats.id})::int`,
+        })
+        .from(casinoTables)
+        .leftJoin(casinoSeats, eq(casinoSeats.tableId, casinoTables.id))
+        .where(eq(casinoTables.locationId, locationId))
+        .groupBy(casinoTables.id, casinoTables.gameId, casinoTables.phase);
+
+      const tablesByGame = new Map<string, { tableId: string; seatsFilled: number; maxSeats: number; phase: string }[]>();
+      for (const row of localTableRows) {
+        const list = tablesByGame.get(row.gameId) ?? [];
+        list.push({ tableId: row.tableId, seatsFilled: row.seatsFilled, maxSeats, phase: row.phase });
+        tablesByGame.set(row.gameId, list);
+      }
+
+      // EVERY registered table game, with-or-without a live table — a game
+      // that has none still needs to be offered (`tables: []`, spec's "sit
+      // opens a fresh table").
+      const tableGameRows = [...tableRegistry.values()].map((game) => {
+        const house = tableHouses.get(game.id);
+        const ownerId = house?.ownerId ?? null;
+        return {
+          gameId: game.id,
+          name: game.name,
+          ownerName: ownerId === null ? null : (ownerNames.get(ownerId) ?? null),
+          maxBet: (house?.maxBet ?? fallbackMaxBet).toString(),
+          maxSeats,
+          tables: tablesByGame.get(game.id) ?? [],
+        };
+      });
+
+      // REMOTE: every OTHER town with at least one seated player at a
+      // REGISTERED table game — counts only, never a username, so an
+      // underground town's residents stay unidentifiable from here the same
+      // way they already are everywhere else (combat, travel, `/api/online`).
+      const remoteRows = await tx.db
+        .select({
+          locationId: casinoTables.locationId,
+          locationName: locations.name,
+          gameId: casinoTables.gameId,
+          seated: sql<number>`count(*)::int`,
+        })
+        .from(casinoSeats)
+        .innerJoin(casinoTables, eq(casinoTables.id, casinoSeats.tableId))
+        .innerJoin(locations, eq(locations.id, casinoTables.locationId))
+        .where(ne(casinoTables.locationId, locationId))
+        .groupBy(casinoTables.locationId, locations.name, casinoTables.gameId);
+
+      const remote = remoteRows
+        .filter((row) => tableRegistry.has(row.gameId))
+        .map((row) => ({
+          locationId: row.locationId,
+          locationName: row.locationName,
+          gameId: row.gameId,
+          gameName: tableRegistry.get(row.gameId)?.name ?? row.gameId,
+          seated: row.seated,
+        }));
 
       const [open] = await tx.db
         .select({
@@ -211,6 +287,8 @@ const lobbyRoute = route({
           locationName: location?.name ?? "",
           minBet: readMinBet(ctx.settings).toString(),
           games: gameRows,
+          tableGames: tableGameRows,
+          remote,
           session: live === null ? null : {
             sessionId: live.id,
             gameId: live.gameId,

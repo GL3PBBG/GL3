@@ -2,7 +2,10 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
+import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { definePlugin, on, type PluginManifest } from "@gl3/plugin-sdk";
+import { tableGames, type TableGameDef } from "@gl3/plugin-casino";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSeats, casinoTables, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
@@ -10,13 +13,42 @@ import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
- * POST/GET /api/casino/table/* — the hub's sit/leave/read routes.
+ * A second table game, installed ALONGSIDE blackjack for this file only, so
+ * the lobby's `tableGames` listing has something to show with no live table
+ * — blackjack itself always has at least the sitters a given test seats.
+ * Its three action methods are unreachable: nothing in this file ever sits
+ * at it.
+ */
+const KENO_TABLE: TableGameDef = {
+  id: "keno",
+  name: "Keno",
+  maxPayoutMultiplier: 2,
+  action: z.unknown(),
+  deal() { throw new Error("KENO_TABLE.deal must not be reached"); },
+  act() { throw new Error("KENO_TABLE.act must not be reached"); },
+  autoAct() { throw new Error("KENO_TABLE.autoAct must not be reached"); },
+  view: () => ({ kind: "text", value: "keno" }),
+  settle: () => [],
+};
+
+const kenoPlugin: PluginManifest = definePlugin({
+  id: "keno",
+  version: "1.0.0",
+  basePaths: ["/api/keno"],
+  filters: [on(tableGames, (_ctx, list) => [...list, KENO_TABLE])],
+});
+
+/**
+ * POST/GET /api/casino/table/* — the hub's sit/leave/read routes — plus the
+ * lobby's table listings (`GET /api/casino`, Task 12).
  *
- * Runs against a bare `bootTestServer()`: `casino` and `blackjack` are both
- * CORE_PLUGIN entries (`core-plugins.ts`), and blackjack is now a table game
- * (`BLACKJACK_TABLE`, registered via the `casino.tableGames` filter point),
- * so no explicit plugin list or migration call is needed here — the same
- * shape as `casino-boot.test.ts`.
+ * Runs against `bootTestServer({ plugins: [kenoPlugin] })`: `casino` and
+ * `blackjack` are both CORE_PLUGIN entries (`core-plugins.ts`), and
+ * blackjack is now a table game (`BLACKJACK_TABLE`, registered via the
+ * `casino.tableGames` filter point), so no explicit plugin list or migration
+ * call is needed for either — the same shape as `casino-boot.test.ts`. `keno`
+ * is added on top so the lobby has a second registered table game to show
+ * empty.
  */
 const { db, sql: conn } = testDb();
 
@@ -81,9 +113,26 @@ function tableView(token: string) {
   });
 }
 
+function lobby(token: string) {
+  return app.inject({
+    method: "GET", url: "/api/casino",
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+
+interface LobbyTableRow { tableId: string; seatsFilled: number; maxSeats: number; phase: string }
+interface LobbyTableGame {
+  gameId: string; name: string; ownerName: string | null; maxBet: string;
+  maxSeats: number; tables: LobbyTableRow[];
+}
+interface LobbyRemoteRow {
+  locationId: string; locationName: string; gameId: string; gameName: string; seated: number;
+}
+interface LobbyBody { tableGames: LobbyTableGame[]; remote: LobbyRemoteRow[] }
+
 beforeAll(async () => {
   await resetDb(db);
-  ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [kenoPlugin] }));
 });
 
 afterAll(async () => {
@@ -293,5 +342,88 @@ describe("GET /api/casino/table", () => {
     expect(body.table?.seats).toHaveLength(2);
     const usernames = body.table?.seats.map((s) => s.username).sort();
     expect(usernames).toEqual([usernameA, usernameB].sort());
+  });
+});
+
+describe("GET /api/casino table listings", () => {
+  it("lists the town's tables with fill counts and the game's house", async () => {
+    const locationId = await seedLocation();
+    const { playerId: ownerId, username: ownerName } = await register();
+    await seedHouse(locationId, ownerId, 50_000n);
+
+    const { token: tokenA, playerId: idA } = await register();
+    const { token: tokenB, playerId: idB } = await register();
+    await placePlayer(idA, locationId, 1_000_000n);
+    await placePlayer(idB, locationId, 1_000_000n);
+    const sitA = await sit(tokenA);
+    const { tableId } = sitA.json<{ tableId: string }>();
+    await sit(tokenB);
+
+    const { token: callerToken, playerId: callerId } = await register();
+    await placePlayer(callerId, locationId, 1_000_000n);
+
+    const res = await lobby(callerToken);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<LobbyBody>();
+
+    const blackjackRow = body.tableGames.find((g) => g.gameId === "blackjack");
+    expect(blackjackRow).toBeDefined();
+    expect(blackjackRow?.ownerName).toBe(ownerName);
+    // The owner's lever IS the maximum bet (V2 blackjack.inc.php:276).
+    expect(blackjackRow?.maxBet).toBe("50000");
+    expect(blackjackRow?.maxSeats).toBe(5);
+    expect(blackjackRow?.tables).toEqual([
+      { tableId, seatsFilled: 2, maxSeats: 5, phase: "betting" },
+    ]);
+
+    // A registered table game with NO live table still appears, tables: [].
+    const kenoRow = body.tableGames.find((g) => g.gameId === "keno");
+    expect(kenoRow).toBeDefined();
+    expect(kenoRow?.name).toBe("Keno");
+    expect(kenoRow?.tables).toEqual([]);
+  });
+
+  it("lists a remote town's tables as counts only — no usernames", async () => {
+    const townA = await seedLocation();
+    const townB = await seedLocation();
+    const { token: callerToken, playerId: callerId } = await register();
+    await placePlayer(callerId, townA, 1_000_000n);
+
+    const { token: tokenX, playerId: idX, username: usernameX } = await register();
+    const { token: tokenY, playerId: idY, username: usernameY } = await register();
+    await placePlayer(idX, townB, 1_000_000n);
+    await placePlayer(idY, townB, 1_000_000n);
+    await sit(tokenX);
+    await sit(tokenY);
+
+    const res = await lobby(callerToken);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<LobbyBody>();
+
+    expect(body.remote).toContainEqual(expect.objectContaining({
+      locationId: townB, gameId: "blackjack", seated: 2,
+    }));
+
+    // Counts only — no usernames anywhere in the remote branch.
+    const remoteJson = JSON.stringify(body.remote);
+    expect(remoteJson).not.toContain(usernameX);
+    expect(remoteJson).not.toContain(usernameY);
+  });
+
+  it("omits empty remote towns", async () => {
+    const townA = await seedLocation();
+    const townC = await seedLocation();
+    const { playerId: ownerId } = await register();
+    await seedHouse(townC, ownerId, 25_000n);
+
+    const { token: callerToken, playerId: callerId } = await register();
+    await placePlayer(callerId, townA, 1_000_000n);
+
+    const res = await lobby(callerToken);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<LobbyBody>();
+
+    // A house with no seats is not a remote table — nobody is playing there.
+    expect(body.remote.some((row) => row.locationId === townC)).toBe(false);
   });
 });
