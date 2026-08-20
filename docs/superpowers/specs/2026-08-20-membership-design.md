@@ -72,10 +72,14 @@ used arbitrary keys, and those rows are already migrated), so any future
 plugin gets per-player timers without owning a table.
 
 **Rule-6 note:** the `player_timers` upsert takes `FOR KEY SHARE` on the
-`players` row via its FK. Every write path in this cluster locks the affected
-player `FOR UPDATE` first (buy: `applyBalanceChange`'s internal lock; gift:
-`tx.locks.player([buyer, recipient])`), so the KEY SHARE nests under an
-already-held stronger lock and no new edge appears.
+`players` row via its FK. That adds no new lock-graph edge because nothing in
+the tree ever takes `FOR UPDATE` on a `players` row — gameplay locks are all
+on `player_stats`, a different table — so the KEY SHARE conflicts with
+nothing. Every write path in this cluster still locks the affected player
+`FOR UPDATE` first (buy: `applyBalanceChange`'s internal lock; gift:
+`tx.locks.player([buyer, recipient])`) before touching the timers row — good
+hygiene for notification-insert ordering, even though it isn't what makes
+this safe.
 
 ## Routes
 
@@ -101,8 +105,9 @@ All under `/api/membership`, all `auth: "user"` unless noted.
   to both audiences, `invalidates: ["membership", "me"]`.
 
 Admin (loader tier `auth: "admin"`, `hasPermission("membership")`):
-`GET /api/admin/membership/packages`, `POST .../packages/create`,
-`POST .../packages/update`, `POST .../packages/delete`. Declared as
+`GET /api/admin/membership/packages`, `POST .../packages` (create),
+`POST .../packages/update`, `DELETE .../packages/:id` (delete) — theft's
+established idiom. Declared as
 `adminPages` table + forms; **no UUID rendered** (ids travel only as select
 `valueKey`s — `admin-ids-hidden` floor rises by one section).
 

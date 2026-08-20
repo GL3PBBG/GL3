@@ -4,12 +4,16 @@ import type { Redis as IORedis } from "ioredis";
 import { sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
+import { createSubscriber } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 
 const { db } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
 async function notificationCount(playerId: string): Promise<number> {
   const rows = await db.execute(sql`
@@ -37,6 +41,7 @@ describe("membership gift route", () => {
 
   afterAll(async () => {
     await closeServer?.();
+    subscriber.disconnect();
   });
 
   async function register(): Promise<{ id: string; token: string; username: string }> {
@@ -93,6 +98,48 @@ describe("membership gift route", () => {
     expect(await notificationCount(recipient.id)).toBe(1);
     const message = await latestNotification(recipient.id);
     expect(message).toContain(buyer.username);
+  });
+
+  it("publishes membership.gifted to both the buyer's and the recipient's audience", async () => {
+    const packageId = await seedPackage(300, 7200, "Bronze");
+    const buyer = await register();
+    const recipient = await register();
+    await seedPoints(buyer.id, 1000);
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+
+    // Rule 4: filter by the buyer's own actorId — both events are published
+    // with actorId = buyer (the actor is who acted), so audience is what
+    // distinguishes the buyer's copy from the recipient's.
+    const events = await new Promise<{ audience: unknown }[]>((resolve, reject) => {
+      const collected: { audience: unknown }[] = [];
+      const onMessage = (channel: string, raw: string): void => {
+        if (channel !== GAME_EVENTS_CHANNEL) return;
+        const frame: Record<string, unknown> = JSON.parse(raw);
+        if (frame.actorId !== buyer.id) return;
+        if (frame.type !== "plugin.event" || frame.pluginId !== "membership" || frame.name !== "gifted") return;
+        collected.push({ audience: frame.audience });
+        if (collected.length === 2) {
+          clearTimeout(timer);
+          subscriber.off("message", onMessage);
+          resolve(collected);
+        }
+      };
+      const timer = setTimeout(() => {
+        subscriber.off("message", onMessage);
+        reject(new Error(`expected 2 membership.gifted events, saw ${collected.length}`));
+      }, 5000);
+      subscriber.on("message", onMessage);
+      void app.inject({
+        method: "POST",
+        url: "/api/membership/gift",
+        headers: { authorization: `Bearer ${buyer.token}` },
+        payload: { packageId, recipientName: recipient.username },
+      });
+    });
+
+    const audiences = events.map((e) => e.audience);
+    expect(audiences).toContainEqual({ kind: "player", playerId: buyer.id });
+    expect(audiences).toContainEqual({ kind: "player", playerId: recipient.id });
   });
 
   it("gifting to your own username -> 400 cannot_gift_self, points unchanged", async () => {

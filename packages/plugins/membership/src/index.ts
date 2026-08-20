@@ -183,10 +183,20 @@ const giftRoute = route({
       const until = new Date(base + pkg.durationSeconds * 1000);
       await tx.timers.set(recipient.id, MEMBERSHIP_TIMER_KEY, until);
       await tx.notify(recipient.id, `${player.username} gifted you ${pkg.name}.`);
+      // Spec: "Plugin event membership.gifted to both audiences" — actorId/
+      // actorName stay the buyer on both (the actor is who acted), but each
+      // publish carries a different audience so both clients' ["membership",
+      // "me"] invalidation fires, not just the buyer's.
       await tx.events.publish({
         name: "gifted",
         actorId: player.id, actorName: player.username,
         audience: { kind: "player", playerId: player.id },
+        payload: { packageName: pkg.name, recipientName: recipient.username },
+      });
+      await tx.events.publish({
+        name: "gifted",
+        actorId: player.id, actorName: player.username,
+        audience: { kind: "player", playerId: recipient.id },
         payload: { packageName: pkg.name, recipientName: recipient.username },
       });
       return { status: 200, body: { until: until.toISOString() } };
