@@ -16,7 +16,14 @@ export const ProfileExtraSchema = z.discriminatedUnion("kind", [
 export type ProfileExtra = z.infer<typeof ProfileExtraSchema>;
 
 export const DashboardWidgetSchema = z.object({
-  pluginId: z.string().min(1), title: z.string().min(1), view: ViewNodeDtoSchema,
+  // `z.lazy(...)`, not the bare import: `plugins.ts` and this file import
+  // each other (`ViewNodeDtoSchema` here, `MoneyFormatSchema` there), and
+  // whichever file's module body runs first captures the OTHER file's
+  // still-uninitialized binding as `undefined` at that instant — a schema
+  // shape entry frozen at module-eval time, not a live reference. Deferring
+  // the dereference into a `z.lazy` thunk means it only runs at parse time,
+  // by which point both modules have finished loading either way.
+  pluginId: z.string().min(1), title: z.string().min(1), view: z.lazy(() => ViewNodeDtoSchema),
 }).strict();
 export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>;
 
