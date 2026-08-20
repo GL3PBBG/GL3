@@ -33,8 +33,8 @@ export type RenderInstruction =
       columns: { key: string; label: string; render: "image" | null; imageSize: "sm" | "md" | "lg" }[];
       rowActions: { label: string; action: string; confirm: string | null }[];
     }
-  | { kind: "cards"; cards: string[] }
-  | { kind: "panelHeader"; title: string };
+  | { kind: "cards"; cards: string[]; size: "sm" | "md" | "lg"; caption: string | null }
+  | { kind: "panelHeader"; title: string; layout: "row" | null };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -117,7 +117,15 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     return [{ kind: "form", action: String(node.action), submitLabel: String(node.submitLabel), fields }];
   }
   if (isNode(node, "cards")) {
-    return [{ kind: "cards", cards: childArray(node.cards).map(String) }];
+    return [{
+      kind: "cards",
+      cards: childArray(node.cards).map(String),
+      // Normalised to required values here, like `image.size` below and
+      // `allowEmpty` above: the renderer never re-derives the DTO's
+      // optionality at the point of drawing.
+      size: isSize(node.size) ? node.size : "md",
+      caption: node.caption === undefined ? null : String(node.caption),
+    }];
   }
   if (isNode(node, "image")) {
     return [{
@@ -174,7 +182,14 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     return [{ kind: "table", source: String(node.source), columns, rowActions }];
   }
   if (isNode(node, "panel")) {
-    const out: RenderInstruction[] = [{ kind: "panelHeader", title: String(node.title) }];
+    const out: RenderInstruction[] = [{
+      kind: "panelHeader",
+      title: String(node.title),
+      // The header carries the layout because flattening is what the panel
+      // becomes: `groupIntoPanels` reads it back off the header to decide how
+      // to lay out the run of instructions that follows.
+      layout: node.layout === "row" ? "row" : null,
+    }];
     for (const child of childArray(node.children)) out.push(...renderNode(child, _handlers));
     return out;
   }

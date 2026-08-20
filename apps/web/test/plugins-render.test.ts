@@ -20,7 +20,9 @@ describe("renderNode", () => {
     };
     const out = renderNode(node, {});
     expect(out).toHaveLength(3); // header + 2 children
-    expect(out[0]).toEqual({ kind: "panelHeader", title: "P" });
+    // `layout` is normalised to a required value, like every other optional
+    // field this transform sees; null is the stacked default.
+    expect(out[0]).toEqual({ kind: "panelHeader", title: "P", layout: null });
     expect(out[1]).toEqual({ kind: "text", value: "a" });
     expect(out[2]).toEqual({ kind: "text", value: "b" });
   });
@@ -219,8 +221,27 @@ describe("renderNode", () => {
   it("maps a cards node to a cards instruction, codes intact", () => {
     const out = renderNode({ kind: "cards", cards: ["Sa", "H10", "J1"] }, {});
     expect(out).toEqual<RenderInstruction[]>([
-      { kind: "cards", cards: ["Sa", "H10", "J1"] },
+      { kind: "cards", cards: ["Sa", "H10", "J1"], size: "md", caption: null },
     ]);
+  });
+
+  // The casino table's row of opponents: each hand carries how big to draw it
+  // and whose it is, because a row has no panel titles to say either.
+  it("carries a cards node's size and caption through", () => {
+    const out = renderNode(
+      { kind: "cards", cards: ["Sa", "B1"], size: "sm", caption: "Seat 2 — 17, playing" }, {},
+    );
+    expect(out).toEqual<RenderInstruction[]>([
+      { kind: "cards", cards: ["Sa", "B1"], size: "sm", caption: "Seat 2 — 17, playing" },
+    ]);
+  });
+
+  it("carries a panel's row layout through on its header", () => {
+    const out = renderNode({
+      kind: "panel", title: "The other seats", layout: "row",
+      children: [{ kind: "cards", cards: ["Sa"], size: "sm", caption: "Seat 1" }],
+    }, {});
+    expect(out[0]).toEqual({ kind: "panelHeader", title: "The other seats", layout: "row" });
   });
 
   it("nests arbitrarily deep panels", () => {

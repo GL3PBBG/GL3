@@ -32,6 +32,12 @@ const Hand = lazy(() =>
  */
 interface PanelGroup {
   readonly title: string | null;
+  /**
+   * `row` lays the run out horizontally, wrapping — the casino table's row of
+   * opponents' hands. It rides on the panel header for the same reason the
+   * title does: once flattened, the header is all that is left of the panel.
+   */
+  readonly layout: "row" | null;
   readonly items: readonly { readonly index: number; readonly inst: RenderInstruction }[];
 }
 
@@ -43,17 +49,19 @@ interface PanelGroup {
 function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup[] {
   const groups: PanelGroup[] = [];
   let title: string | null = null;
+  let layout: "row" | null = null;
   let items: { index: number; inst: RenderInstruction }[] = [];
 
   const flush = (): void => {
     // Drops only the leading empty run; an empty panel still renders its header.
-    if (title !== null || items.length > 0) groups.push({ title, items });
+    if (title !== null || items.length > 0) groups.push({ title, layout, items });
   };
 
   instructions.forEach((inst, index) => {
     if (inst.kind === "panelHeader") {
       flush();
       title = inst.title;
+      layout = inst.layout;
       items = [];
       return;
     }
@@ -626,12 +634,19 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             refetchSignal={refetchSignal}
           />
         );
-      case "cards":
+      case "cards": {
+        // The wrapper is what carries `--card-w`, the one knob the card CSS
+        // reads (theme.css), so a hand's size is set by a class on an ancestor
+        // rather than by touching PlayingCard. It is also the single flex item
+        // a `layout: "row"` panel needs per hand — a bare `.hand` would let the
+        // row break between two cards of the SAME hand.
+        const sizeClass = inst.size === "sm"
+          ? styles.handSm
+          : inst.size === "lg" ? styles.handLg : styles.handMd;
         // Fallback mirrors Hand's markup card-for-card so the deck chunk
         // arriving does not shift the layout under a pending Hit button.
-        return (
+        const hand = (
           <Suspense
-            key={index}
             fallback={
               <span className="hand" role="group" aria-busy="true" aria-label={`${inst.cards.length} cards`}>
                 {inst.cards.map((code, i) => (
@@ -643,23 +658,34 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
             <Hand codes={inst.cards} />
           </Suspense>
         );
+        if (inst.caption === null) {
+          return <div key={index} className={sizeClass}>{hand}</div>;
+        }
+        // figure/figcaption rather than a div and a span: the caption names
+        // whose hand this is, and the association is exactly what a screen
+        // reader needs to tell four hands in a row apart.
+        return (
+          <figure key={index} className={`${styles.handFigure} ${sizeClass}`}>
+            {hand}
+            <figcaption className={styles.meta}>{inst.caption}</figcaption>
+          </figure>
+        );
+      }
     }
   }
 
   return (
     <div className={styles.stack}>
       <ErrorText error={error} />
-      {groupIntoPanels(instructions).map((group, groupIndex) =>
-        group.title === null ? (
-          <Fragment key={groupIndex}>
-            {group.items.map(({ index, inst }) => renderInstruction(index, inst))}
-          </Fragment>
+      {groupIntoPanels(instructions).map((group, groupIndex) => {
+        const body = group.items.map(({ index, inst }) => renderInstruction(index, inst));
+        const laidOut = group.layout === "row" ? <div className={styles.handRow}>{body}</div> : body;
+        return group.title === null ? (
+          <Fragment key={groupIndex}>{laidOut}</Fragment>
         ) : (
-          <Panel key={groupIndex} title={group.title}>
-            {group.items.map(({ index, inst }) => renderInstruction(index, inst))}
-          </Panel>
-        ),
-      )}
+          <Panel key={groupIndex} title={group.title}>{laidOut}</Panel>
+        );
+      })}
     </div>
   );
 }

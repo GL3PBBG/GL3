@@ -63,7 +63,17 @@
 
 .stack { display: grid; gap: 1rem; }
 .rowStack { display: grid; gap: 0.25rem; min-width: 0; }
-.actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+/* 0.5rem, not the 0.35rem this shipped with: at that gap a run of buttons with
+   theme.css's solid accent fill reads as one wide button with seams, which is
+   what the casino table's Hit/Stand/Double row was reported as. Shared with
+   every other page's action run, all of which were the same 0.35rem. */
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+/* A vertical run of control groups. `Panel` puts no space between its
+   children, so the casino table's bet row, hand actions and Leave button sat
+   flush against each other and against the cards above them — the vertical
+   half of the same report. `justify-items: start` keeps each group its own
+   width rather than stretching a lone button across the panel. */
+.controls { display: grid; gap: 0.75rem; justify-items: start; margin-top: 0.75rem; }
 .chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 /* Also worn by <button> for the editable permission chips, so it has to undo
    theme.css's solid-accent button fill — muted text on that fill is unreadable
@@ -85,6 +95,28 @@
 .field textarea { min-height: 6rem; resize: vertical; font: inherit; }
 .ok { color: var(--success); }
 .bad { color: var(--danger); }
+
+/*
+ * A row of hands, side by side — the casino table's other seats. `--card-w` is
+ * the single knob the card CSS reads (theme.css); setting it on the wrapper is
+ * what shrinks a whole hand without touching PlayingCard.
+ *
+ * The sizes are chosen so four opponents fit on ONE line. The content column is
+ * 803px inside a Panel on the default top-nav layout (1180 shell − 2rem padding
+ * = 1148; minus the 1.5rem body gap and the sidebar's quarter share = 843;
+ * minus the panel's 1.25rem side padding twice), and 642px under the left-nav
+ * sidebar. A `handSm` hand of five cards is 5×32 + 4×4 = 176px, so four of them
+ * plus three 0.75rem gaps is 740px — inside 803. Four four-card hands are 596px,
+ * inside 642 as well. A fifth seat, or five cards each in sidebar mode, wraps to
+ * a second line rather than overflowing.
+ */
+.handRow { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; }
+.handFigure { display: grid; gap: 0.25rem; justify-items: start; margin: 0; }
+.handSm { --card-w: 32px; }
+/* The value in theme.css's :root — restated so `md` is an explicit choice and
+   not "whatever the page happens to inherit". */
+.handMd { --card-w: 56px; }
+.handLg { --card-w: 76px; }
 
 /* A list of things the player can SEE but not act on from here — the casino's
    other towns. Dimmed rather than hidden: knowing where the action is is the
