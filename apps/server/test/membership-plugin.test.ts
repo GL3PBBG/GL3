@@ -214,7 +214,12 @@ describe("membership routes", () => {
     expect(await notificationCount(player.id)).toBe(1);
   });
 
-  it("GET /api/membership/benefits returns an empty list for now", async () => {
+  it("GET /api/membership/benefits lists every consumer's declared row", async () => {
+    // Not empty any more: crimes (Getaway Driver), travel (Frequent Flyer
+    // Discount) and theft (Slide Hammer) each subscribe to the benefits
+    // filter point via `on(membershipBenefits, ...)`. Order-insensitive —
+    // the filter chain's run order across plugins is not part of the
+    // contract, only membership of the set is.
     const player = await register();
     const res = await app.inject({
       method: "GET",
@@ -222,7 +227,22 @@ describe("membership routes", () => {
       headers: { authorization: `Bearer ${player.token}` },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ rows: [] });
+    const rows = res.json<{ rows: Array<{ title: string; description: string }> }>().rows;
+    expect(rows).toHaveLength(3);
+    expect(rows.sort((a, b) => a.title.localeCompare(b.title))).toEqual([
+      {
+        title: "Frequent Flyer Discount",
+        description: "All travel costs are reduced by 75%",
+      },
+      {
+        title: "Getaway Driver",
+        description: "All crime cooldowns are reduced by 25%",
+      },
+      {
+        title: "Slide Hammer",
+        description: "You use a slide hammer to increase your chances of stealing a car by 10%",
+      },
+    ]);
   });
 
   it("POST /api/membership/buy debits points and sets the timer", async () => {
