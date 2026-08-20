@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_MONEY_FORMAT,
   DashboardWidgetSchema,
   DashboardWidgetsResponseSchema,
   HudEntrySchema,
@@ -8,10 +7,14 @@ import {
   ItemActionSchema,
   MenuBadgeSchema,
   MenuBadgesResponseSchema,
-  MoneyFormatSchema,
   ProfileExtraSchema,
   ProfileViewValueSchema,
 } from "../src/dto/extensions.js";
+// MoneyFormatSchema/DEFAULT_MONEY_FORMAT moved to primitives.ts — see the
+// comment on MoneyFormatSchema there — so they're no longer exports of
+// dto/extensions.js itself, even though @gl3/shared's barrel still re-exports
+// both from the package root.
+import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema } from "../src/primitives.js";
 
 describe("ProfileExtraSchema", () => {
   it("accepts a valid stat extra", () => {

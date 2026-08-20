@@ -16,14 +16,7 @@ export const ProfileExtraSchema = z.discriminatedUnion("kind", [
 export type ProfileExtra = z.infer<typeof ProfileExtraSchema>;
 
 export const DashboardWidgetSchema = z.object({
-  // `z.lazy(...)`, not the bare import: `plugins.ts` and this file import
-  // each other (`ViewNodeDtoSchema` here, `MoneyFormatSchema` there), and
-  // whichever file's module body runs first captures the OTHER file's
-  // still-uninitialized binding as `undefined` at that instant — a schema
-  // shape entry frozen at module-eval time, not a live reference. Deferring
-  // the dereference into a `z.lazy` thunk means it only runs at parse time,
-  // by which point both modules have finished loading either way.
-  pluginId: z.string().min(1), title: z.string().min(1), view: z.lazy(() => ViewNodeDtoSchema),
+  pluginId: z.string().min(1), title: z.string().min(1), view: ViewNodeDtoSchema,
 }).strict();
 export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>;
 
@@ -37,14 +30,6 @@ export const MenuBadgeSchema = z.object({
   path: z.string().startsWith("/"), count: z.number().int().nonnegative(),
 }).strict();
 export type MenuBadge = z.infer<typeof MenuBadgeSchema>;
-
-export const MoneyFormatSchema = z.object({
-  symbol: z.string().min(1).max(8),
-  position: z.enum(["prefix", "suffix"]),
-  thousandsSep: z.string().max(3),
-}).strict();
-export type MoneyFormat = z.infer<typeof MoneyFormatSchema>;
-export const DEFAULT_MONEY_FORMAT: MoneyFormat = { symbol: "$", position: "prefix", thousandsSep: "," };
 
 export const ItemActionSchema = z.object({
   pluginId: z.string().min(1), label: z.string().min(1), to: z.string().min(1),
