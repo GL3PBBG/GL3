@@ -15,7 +15,8 @@ import {
   readMaxBet, readMinBet, readTableBetSeconds, readTableMaxSeats,
 } from "./settings.js";
 import {
-  applyStep, assertTableCanCover, dealIfReady, lockTable, type LockedTable, type SeatRow,
+  advanceTable, applyStep, assertTableCanCover, dealIfReady, lockTable, readTableUnlocked,
+  type LockedTable, type SeatRow,
 } from "./table-engine.js";
 
 /** The caller's current town, `play`'s idiom: 409 when nowhere. */
@@ -95,9 +96,24 @@ const sitRoute = route({
 
       const locked = await lockTable(tx, ctx, target, [player.id]);
       if (locked === null) throw new PluginError("no_such_table", 404);
+      // THE CLOCK BEFORE THE SEAT ROW EXISTS. A lapsed betting deadline deals
+      // to whoever bet and bumps the idle count of whoever did not, and a
+      // newcomer who was not at the table when that deadline ran must not be
+      // counted among them — today the sweep iterates the snapshot `lockTable`
+      // took, so the INSERT would have to move above a re-read before it could
+      // do that damage, but the ordering is what makes it true rather than
+      // incidental. What it decides OUTRIGHT is the three lines below: the
+      // sweep and the settle both free seats, so a table that reads full
+      // before the clock runs can have a place at it after, and the seat
+      // number handed out has to come from the post-advance seat set.
+      const advanced = await advanceTable(tx, ctx, locked, game);
+      // The hand it just settled emptied the table, which deleted the row.
+      // 404 rather than silently opening a new table: `sit` picked THIS one,
+      // and a retry lands on the fresh-table branch above.
+      if (advanced === null) throw new PluginError("no_such_table", 404);
       if (await seatOf(tx, player.id) !== null) throw new PluginError("already_seated", 409);
-      if (locked.seats.length >= maxSeats) throw new PluginError("table_full", 409);
-      const taken = new Set(locked.seats.map((s) => s.seatNo));
+      if (advanced.seats.length >= maxSeats) throw new PluginError("table_full", 409);
+      const taken = new Set(advanced.seats.map((s) => s.seatNo));
       let seatNo = 0;
       while (taken.has(seatNo)) seatNo += 1;
       await tx.db.insert(casinoSeats).values({
@@ -116,6 +132,10 @@ const leaveRoute = route({
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    // `bet`'s registry, for the same reason: the clock below plays the game's
+    // own `autoAct`, so leaving a table needs the game as much as acting at
+    // one does.
+    const registry = await buildTableRegistry(ctx, ctx.installedPluginIds);
     return ctx.transaction(async (tx) => {
       const seat = await seatOf(tx, player.id);
       if (seat === null) throw new PluginError("not_seated", 404);
@@ -125,7 +145,18 @@ const leaveRoute = route({
       await tx.locks.location(seat.locationId);
       const locked = await lockTable(tx, ctx, seat.tableId);
       if (locked === null) throw new PluginError("not_seated", 404);
-      const mine = locked.seats.find((s) => s.playerId === player.id);
+      const game = registry.get(locked.table.gameId);
+      if (game === undefined) throw new PluginError("no_such_game", 404);
+      // The clock FIRST, so a leaver is deferred only by a hand that is
+      // genuinely still live. A table everybody walked away from settles here
+      // and frees the seat in this same request — without it, leaving a hand
+      // whose deadlines all lapsed would set `leaving` and wait for a read
+      // that may never come.
+      const advanced = await advanceTable(tx, ctx, locked, game);
+      // The settle emptied the table and deleted it, taking the seat with it:
+      // the caller is, accurately, no longer seated anywhere.
+      if (advanced === null) throw new PluginError("not_seated", 404);
+      const mine = advanced.seats.find((s) => s.playerId === player.id);
       if (mine === undefined) throw new PluginError("not_seated", 404);
 
       if (mine.wager > 0n) {
@@ -139,8 +170,8 @@ const leaveRoute = route({
         return { status: 200, body: { left: true, deferred: true } };
       }
       await tx.db.delete(casinoSeats).where(eq(casinoSeats.id, mine.id));
-      if (locked.seats.length === 1) {
-        await tx.db.delete(casinoTables).where(eq(casinoTables.id, locked.table.id));
+      if (advanced.seats.length === 1) {
+        await tx.db.delete(casinoTables).where(eq(casinoTables.id, advanced.table.id));
       }
       return { status: 200, body: { left: true, deferred: false } };
     });
@@ -203,14 +234,39 @@ const readRoute = route({
     return ctx.transaction(async (tx) => {
       const seat = await seatOf(tx, player.id);
       if (seat === null) return { status: 200, body: { table: null } };
-      // Fast path: no lapsed deadline → plain reads, zero locks. Task 11
-      // replaces this comment with the advance-then-render slow path.
+
+      // THE FAST PATH. Every seated player polls this route every 2.5 seconds
+      // (spec §8) and almost every one of those reads owes the table nothing,
+      // so a table whose clock has not lapsed is rendered from plain SELECTs
+      // with ZERO locks taken — no location lock, no player locks, no `FOR
+      // UPDATE` on the table row. Making a poll queue behind the player who is
+      // acting would be a self-inflicted lock convoy at exactly the moment the
+      // table is busiest.
+      const unlocked = await readTableUnlocked(tx, ctx, seat.tableId);
+      if (unlocked === null) return { status: 200, body: { table: null } };
+      const game = registry.get(unlocked.table.gameId);
+      if (game === undefined) throw new PluginError("no_such_game", 404);
+      const deadline = unlocked.table.deadlineAt;
+      if (deadline === null || deadline.getTime() > Date.now()) {
+        return {
+          status: 200,
+          body: { table: await renderTablePayload(tx, ctx, unlocked, game, player.id) },
+        };
+      }
+
+      // THE SLOW PATH: this read owes the table a deal, an auto-stand or a
+      // settle, so it takes the full lock order and pays it. The unlocked read
+      // above is discarded — it is a snapshot of a table that is about to
+      // move, and `advanceTable` returns the authoritative one.
       await tx.locks.location(seat.locationId);
       const locked = await lockTable(tx, ctx, seat.tableId);
       if (locked === null) return { status: 200, body: { table: null } };
-      const game = registry.get(locked.table.gameId);
-      if (game === undefined) throw new PluginError("no_such_game", 404);
-      return { status: 200, body: { table: await renderTablePayload(tx, ctx, locked, game, player.id) } };
+      const advanced = await advanceTable(tx, ctx, locked, game);
+      if (advanced === null) return { status: 200, body: { table: null } };
+      return {
+        status: 200,
+        body: { table: await renderTablePayload(tx, ctx, advanced, game, player.id) },
+      };
     });
   },
 });
@@ -256,10 +312,20 @@ async function lockedSeat(
   if (locked === null) throw new PluginError("not_seated", 404);
   const game = registry.get(locked.table.gameId);
   if (game === undefined) throw new PluginError("no_such_game", 404);
-  const mine = locked.seats.find((s) => s.playerId === playerId);
+  // THE CLOCK, before a single check below reads the table. A deadline can
+  // lapse while the request queues on the location lock, and everything the
+  // two routes decide — phase, whose turn it is, whether the caller still has
+  // a seat — has to be decided against the table the clock leaves behind.
+  // The refusals it produces are the right ones: a bet arriving after the
+  // betting deadline dealt without the caller gets `wrong_phase`, an act
+  // arriving after the caller's turn was auto-stood gets `not_your_turn`, and
+  // a swept-or-settled seat gets `not_seated`.
+  const advanced = await advanceTable(tx, ctx, locked, game);
+  if (advanced === null) throw new PluginError("not_seated", 404);
+  const mine = advanced.seats.find((s) => s.playerId === playerId);
   if (mine === undefined) throw new PluginError("not_seated", 404);
-  if (locked.table.phase !== phase) throw new PluginError("wrong_phase", 409);
-  return { locked, game, mine };
+  if (advanced.table.phase !== phase) throw new PluginError("wrong_phase", 409);
+  return { locked: advanced, game, mine };
 }
 
 const betRoute = route({
