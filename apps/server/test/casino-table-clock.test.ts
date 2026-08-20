@@ -496,6 +496,43 @@ describe("the clock in sit and leave", () => {
   });
 });
 
+describe("leaving a seat that holds no stake", () => {
+  it("needs neither the game nor the clock, so an uninstalled game cannot strand a player", async () => {
+    // A table whose game plugin is NOT installed — the state an operator
+    // leaves behind by uninstalling a game with players still seated. Seeded
+    // directly because no route can produce it: `sit` refuses an unknown game.
+    const locationId = await seedLocation();
+    const { token, playerId } = await register();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    const goneTableId = uuidv7();
+    await db.insert(casinoTables).values({
+      id: goneTableId, gameId: "gone", locationId, propertyId: null, seed: "deadbeef",
+    });
+    await db.insert(casinoSeats).values({
+      id: uuidv7(), tableId: goneTableId, playerId, seatNo: 0,
+    });
+
+    // `p_casino_seats`' UNIQUE(player_id) is game-wide, so until this seat is
+    // freed the player cannot sit ANYWHERE.
+    const blocked = await sit(token);
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json<{ error: string }>().error).toBe("already_seated");
+
+    const res = await leave(token);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ left: boolean; deferred: boolean }>()).toEqual({ left: true, deferred: false });
+
+    expect(await seatRow(goneTableId, playerId)).toBeUndefined();
+    expect(await tableRow(goneTableId)).toBeUndefined();
+
+    // And the player is playing again.
+    const again = await sit(token);
+    expect(again.statusCode).toBe(200);
+    expect(again.json<{ seat: number }>().seat).toBe(0);
+  });
+});
+
 describe("the read fast path", () => {
   it("takes no row locks when no deadline has lapsed", async () => {
     const { tableId, ownerId, players } = await seatTable(2);
@@ -535,7 +572,10 @@ describe("the read fast path", () => {
       await blocker.end();
     }
 
-    // Released before asserting, so a regression fails rather than hangs.
+    // Released before asserting, so a regression fails rather than hangs. The
+    // null guard matters: a `BEGIN` that failed would leave `pending` unset,
+    // and the infra error should surface instead of a TypeError on top of it.
+    expect(pending).not.toBeNull();
     const res = await pending!;
     expect(raced).not.toBe("TIMEOUT");
     expect(res.statusCode).toBe(200);

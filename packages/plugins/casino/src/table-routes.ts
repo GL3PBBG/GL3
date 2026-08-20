@@ -124,6 +124,21 @@ const sitRoute = route({
   },
 });
 
+/**
+ * Frees a seat that holds no stake, and the table with it when it was the
+ * last one. Both of `leave`'s non-deferred exits end here, so "an emptied
+ * table is deleted" is stated once.
+ */
+async function freeSeat(
+  tx: PluginTx, locked: LockedTable, mine: SeatRow,
+): Promise<{ status: 200; body: { left: boolean; deferred: boolean } }> {
+  await tx.db.delete(casinoSeats).where(eq(casinoSeats.id, mine.id));
+  if (locked.seats.length === 1) {
+    await tx.db.delete(casinoTables).where(eq(casinoTables.id, locked.table.id));
+  }
+  return { status: 200, body: { left: true, deferred: false } };
+}
+
 const leaveRoute = route({
   method: "POST",
   path: "/api/casino/table/leave",
@@ -132,9 +147,10 @@ const leaveRoute = route({
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    // `bet`'s registry, for the same reason: the clock below plays the game's
-    // own `autoAct`, so leaving a table needs the game as much as acting at
-    // one does.
+    // Built where `bet` and `act` build it — outside the transaction, so no
+    // filter chain ever runs while this request holds a lock (`properties`'
+    // `leverSet` splits a route in two for that reason). It is CONSULTED only
+    // on the in-hand path below.
     const registry = await buildTableRegistry(ctx, ctx.installedPluginIds);
     return ctx.transaction(async (tx) => {
       const seat = await seatOf(tx, player.id);
@@ -145,6 +161,24 @@ const leaveRoute = route({
       await tx.locks.location(seat.locationId);
       const locked = await lockTable(tx, ctx, seat.tableId);
       if (locked === null) throw new PluginError("not_seated", 404);
+      const mine = locked.seats.find((s) => s.playerId === player.id);
+      if (mine === undefined) throw new PluginError("not_seated", 404);
+
+      if (mine.wager === 0n) {
+        // THE WAGER-0 FAST EXIT, and it is a safety property rather than an
+        // optimisation. `leave` is the ONLY way out of a seat and
+        // `p_casino_seats`' UNIQUE(player_id) is game-wide, so a leave that
+        // cannot complete strands the player at every table in the game.
+        // Consulting the game would make that outcome reachable three ways —
+        // the plugin uninstalled (404 `no_such_game`), an `autoAct` that
+        // throws (400 `game_error`), one that never advances the turn (500
+        // `invalid_turn`) — and a seat with no stake needs none of it: it
+        // holds no money, it is in no hand, and the only thing the clock could
+        // ever do to it is idle-kick it, which deletes the row this branch is
+        // about to delete anyway. So: no registry lookup, no `advanceTable`.
+        return freeSeat(tx, locked, mine);
+      }
+
       const game = registry.get(locked.table.gameId);
       if (game === undefined) throw new PluginError("no_such_game", 404);
       // The clock FIRST, so a leaver is deferred only by a hand that is
@@ -156,24 +190,22 @@ const leaveRoute = route({
       // The settle emptied the table and deleted it, taking the seat with it:
       // the caller is, accurately, no longer seated anywhere.
       if (advanced === null) throw new PluginError("not_seated", 404);
-      const mine = advanced.seats.find((s) => s.playerId === player.id);
-      if (mine === undefined) throw new PluginError("not_seated", 404);
+      const post = advanced.seats.find((s) => s.playerId === player.id);
+      if (post === undefined) throw new PluginError("not_seated", 404);
 
-      if (mine.wager > 0n) {
-        // In hand — wager escrowed, whether the deal has fired (acting) or is
-        // still pending (betting): the stake stays in play, spec §5's "no
-        // money is ever dropped by leaving". Mark leaving; the deal includes
-        // this seat, the turn clock auto-stands its turns, and Task 10's
-        // settle pays it normally and frees the seat at hand end. The
-        // wager-0 test is the spec's in-hand definition — NEVER phase.
-        await tx.db.update(casinoSeats).set({ leaving: true }).where(eq(casinoSeats.id, mine.id));
+      if (post.wager > 0n) {
+        // Still in hand — wager escrowed, whether the deal has fired (acting)
+        // or is still pending (betting): the stake stays in play, spec §5's
+        // "no money is ever dropped by leaving". Mark leaving; the deal
+        // includes this seat, the turn clock auto-stands its turns, and the
+        // settle pays it normally and frees the seat at hand end. The wager-0
+        // test is the spec's in-hand definition — NEVER phase.
+        await tx.db.update(casinoSeats).set({ leaving: true }).where(eq(casinoSeats.id, post.id));
         return { status: 200, body: { left: true, deferred: true } };
       }
-      await tx.db.delete(casinoSeats).where(eq(casinoSeats.id, mine.id));
-      if (advanced.seats.length === 1) {
-        await tx.db.delete(casinoTables).where(eq(casinoTables.id, advanced.table.id));
-      }
-      return { status: 200, body: { left: true, deferred: false } };
+      // The clock settled the hand on the way through, so the stake is paid
+      // out and the seat frees NOW rather than at some later read.
+      return freeSeat(tx, advanced, post);
     });
   },
 });
@@ -242,6 +274,15 @@ const readRoute = route({
       // UPDATE` on the table row. Making a poll queue behind the player who is
       // acting would be a self-inflicted lock convoy at exactly the moment the
       // table is busiest.
+      //
+      // The price, stated plainly: these are three SEPARATE statements under
+      // READ COMMITTED, so they are not one consistent snapshot — a hand that
+      // commits between them can be rendered with the new table row and the
+      // old seat wagers. Nothing is decided from it (every write re-reads
+      // under `lockTable`), it is a view a player looks at for 2.5 seconds,
+      // and the next poll corrects it. A `REPEATABLE READ` transaction would
+      // close the window at the cost of serialization failures on a route
+      // that must never fail.
       const unlocked = await readTableUnlocked(tx, ctx, seat.tableId);
       if (unlocked === null) return { status: 200, body: { table: null } };
       const game = registry.get(unlocked.table.gameId);
