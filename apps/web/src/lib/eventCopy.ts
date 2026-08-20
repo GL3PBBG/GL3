@@ -20,6 +20,28 @@ import { formatMoney } from "./money.js";
  * `plugin.event` case below carries two properties worth pinning: the
  * (pluginId, name) match and the actorName-shadowing guard.
  */
+/**
+ * Whether this event's manifest declares it feed-suppressed — true only for a
+ * `plugin.event` whose (pluginId, name) meta carries `silent: true`.
+ *
+ * The feed is the ONLY thing that consults this: `pluginInvalidationKeys` and
+ * `ws/invalidation.ts` are deliberately untouched, so a silent event still
+ * refreshes exactly the queries it declares. That split is the whole point —
+ * casino's table tick fires ~10 times a hand across up to five seats, which
+ * is the right amount of cache invalidation and far too many feed lines.
+ *
+ * A core event is never silent (it has no meta), and neither is a plugin event
+ * this client has no metadata for: a manifest that predates the declaration
+ * cannot know, and rendering an unknown event is a better failure than hiding
+ * a real fact. Pure and threaded through EventFeed the same way
+ * `describeEvent`'s metas are — a hook call inside a `.map` is not an option.
+ */
+export function isSilentEvent(event: GameEvent, eventMetas: readonly EventMeta[]): boolean {
+  if (event.type !== "plugin.event") return false;
+  const meta = eventMetas.find((m) => m.pluginId === event.pluginId && m.name === event.name);
+  return meta?.silent === true;
+}
+
 export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[] = []): string {
   switch (event.type) {
     case "crime.resolved":

@@ -33,12 +33,16 @@ describe("sentence safety polling", () => {
 });
 
 describe("the casino table poll", () => {
-  it("is fast, because it is not backing anything up", () => {
-    // Unlike the sentence polls, this one has no WebSocket behind it: casino
-    // publishes no events, and the table's clock only advances when somebody
-    // READS the table (`advanceTable`). So this interval is both the realtime
-    // channel and the clock's heartbeat, and it caps how long a lapsed turn
-    // can sit un-auto-stood at a table nobody is acting at.
-    expect(TABLE_POLL_MS).toBe(2500);
+  it("is a backstop now that the table has a WebSocket behind it", () => {
+    // It used to be 2500, because casino published nothing and the poll was
+    // both the realtime channel and the clock's heartbeat. The hub now
+    // publishes a SILENT `table` event to every seat at the end of each
+    // mutating table transaction, which invalidates this query the moment
+    // anything happens — so the poll is left with the one job WS cannot do.
+    // The table's clock (`advanceTable`) only runs when somebody READS the
+    // table, and a table nobody is acting at produces no request to publish
+    // from, so this interval caps how long a lapsed turn can sit
+    // un-auto-stood.
+    expect(TABLE_POLL_MS).toBe(15_000);
   });
 });

@@ -1096,13 +1096,20 @@ export function useCasinoAct() {
 /**
  * How often a seated player re-reads their table, in milliseconds.
  *
- * This poll is not a backstop for anything — casino publishes NO events (a
- * blackjack hand would flood the feed), so it is the whole realtime channel
- * AND the lazy clock's heartbeat: the table advances because somebody read it
- * (`advanceTable`), so 2.5s is also the worst case for a lapsed turn to be
- * auto-stood at a table nobody is acting at.
+ * WS invalidation is the fast path: the hub publishes a SILENT `table` event
+ * to every seat at the end of each mutating table transaction, and
+ * `invalidates: ["casino"]` refreshes this query the moment anything at the
+ * table moves. Silent because a blackjack hand is ~10 transitions across up
+ * to five seats, which is the right amount of cache invalidation and far too
+ * many feed lines — the flag is what made this possible at all.
+ *
+ * The poll stays as the LAZY CLOCK'S BACKSTOP, and that is now its only job:
+ * the table advances because somebody read it (`advanceTable`), so a table
+ * nobody is acting at produces no request for the server to publish from.
+ * This interval is the worst case for a lapsed turn to be auto-stood there.
+ * It was 2500 when it was also the realtime channel.
  */
-export const TABLE_POLL_MS = 2500;
+export const TABLE_POLL_MS = 15_000;
 
 /**
  * The caller's seat, wherever it is. `{ table: null }` when they hold none.
@@ -1111,8 +1118,8 @@ export const TABLE_POLL_MS = 2500;
  * whether this player holds a seat — the lobby reports the town's tables, not
  * the caller's place at one — so the first read is what answers the question,
  * and the caller feeds the answer back in. Polling unconditionally instead
- * would hit the server every 2.5s forever to be told `null`, which is exactly
- * the bug the hospital query shipped (see `hospitalRefetchInterval`).
+ * would hit the server forever to be told `null`, which is exactly the bug
+ * the hospital query shipped (see `hospitalRefetchInterval`).
  */
 export function useCasinoTable(seated: boolean) {
   return useQuery<CasinoTableResponse>({
