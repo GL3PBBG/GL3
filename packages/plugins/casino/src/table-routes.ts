@@ -3,7 +3,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import {
-  InsufficientFundsError, PluginError, route, type PluginCtx, type PluginTx,
+  isInsufficientFundsError, PluginError, route, type PluginCtx, type PluginTx,
 } from "@gl3/plugin-sdk";
 import {
   escrow, guardGame, NonNegativeIntegerString, parseAction, resolveHouse,
@@ -242,7 +242,8 @@ async function renderAfter(
  * town it would lock is the table's, never theirs.
  */
 async function lockedSeat(
-  tx: PluginTx, ctx: PluginCtx, playerId: string, registry: Map<string, TableGameDef>, phase: string,
+  tx: PluginTx, ctx: PluginCtx, playerId: string, registry: Map<string, TableGameDef>,
+  phase: "betting" | "acting",
 ): Promise<{ locked: LockedTable; game: TableGameDef; mine: SeatRow }> {
   const seat = await seatOf(tx, playerId);
   if (seat === null) throw new PluginError("not_seated", 404);
@@ -293,7 +294,8 @@ const betRoute = route({
       try {
         await escrow(tx, locked.house, player.id, wager, locked.table.gameId);
       } catch (error) {
-        if (error instanceof InsufficientFundsError) throw new PluginError("insufficient_funds", 409);
+        // The GUARD, never `instanceof` — see `applyStep`'s twin.
+        if (isInsufficientFundsError(error)) throw new PluginError("insufficient_funds", 409);
         throw error;
       }
       // `idle_hands` measures CONSECUTIVE deals sat out (spec §3), so betting

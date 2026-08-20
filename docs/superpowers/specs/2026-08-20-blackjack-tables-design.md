@@ -199,7 +199,10 @@ Identical primitives to solo, per seat; every movement through
 - **Settle**: for each seat figure (clamped per §4), `payOwner(-payout)`;
   if the house comes up short, `takeOverFrom(tx, propertyId, ownerId,
   winnerId)` hands the table property to the **first short-paid winner in
-  seat order**; every winner is still credited in full from the sink. Both
+  seat order**; every winner is still credited in full from the sink. After a
+  takeover, the remaining seats' payouts in the same settle are paid from the
+  sink — the seized old owner provably has 0 cash, and the seizing winner is
+  never debited for other winners. Both
   sides notified via `tx.notify` (existing `notifyTakeover` shape). Seats'
   `wager` reset to 0, `state` set NULL, `phase` back to `'betting'`,
   `deadline_at` NULL, `leaving` seats deleted, empty table deleted.
