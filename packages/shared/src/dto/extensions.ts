@@ -42,5 +42,8 @@ export const ProfileViewValueSchema = z.object({
 export type ProfileViewValue = z.infer<typeof ProfileViewValueSchema>;
 
 export const HudExtrasResponseSchema = z.object({ entries: z.array(HudEntrySchema) }).strict();
+export type HudExtrasResponse = z.infer<typeof HudExtrasResponseSchema>;
 export const MenuBadgesResponseSchema = z.object({ badges: z.array(MenuBadgeSchema) }).strict();
+export type MenuBadgesResponse = z.infer<typeof MenuBadgesResponseSchema>;
 export const DashboardWidgetsResponseSchema = z.object({ widgets: z.array(DashboardWidgetSchema) }).strict();
+export type DashboardWidgetsResponse = z.infer<typeof DashboardWidgetsResponseSchema>;
