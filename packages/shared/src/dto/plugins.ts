@@ -325,6 +325,17 @@ export const EventMetaSchema = z.object({
   name: z.string().min(1),
   describe: z.string().min(1),
   invalidates: z.array(z.string().min(1)),
+  /**
+   * Feed suppression, the SDK's `PluginEventDecl.silent` carried through the
+   * manifest endpoint. Optional and omitted when absent, so every payload
+   * built before the flag existed parses unchanged — which matters more here
+   * than in the SDK, since `PluginsPayloadSchema.parse` is all-or-nothing and
+   * one unparsable meta takes the WHOLE plugin payload down in the browser.
+   *
+   * `describe` is required either way: silence is a rendering decision the
+   * client makes, and a client too old to make it renders the line.
+   */
+  silent: z.boolean().optional(),
 }).strict();
 
 export const PluginsPayloadSchema = z.object({

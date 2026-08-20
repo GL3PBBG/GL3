@@ -28,6 +28,33 @@ describe("PluginsPayloadSchema", () => {
     expect(() => PluginsPayloadSchema.parse(bad)).toThrow();
   });
 
+  /**
+   * The feed-suppression flag (`silent`), which the client reads to decide
+   * whether an event renders a line. Optional and omitted when absent, so
+   * every manifest written before it existed parses unchanged — the assertion
+   * above, which round-trips an event carrying no `silent`, is what pins that.
+   */
+  it("round-trips an event meta that declares itself silent", () => {
+    const payload = {
+      menu: [], pages: [],
+      events: [{
+        pluginId: "casino", name: "table", describe: "{actorName} is at the tables",
+        invalidates: ["casino"], silent: true,
+      }],
+    };
+    expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
+  });
+
+  it("rejects a silent that is not a boolean", () => {
+    const bad = {
+      menu: [], pages: [],
+      events: [{
+        pluginId: "casino", name: "table", describe: "x", invalidates: ["casino"], silent: "yes",
+      }],
+    };
+    expect(() => PluginsPayloadSchema.parse(bad)).toThrow();
+  });
+
   it("rejects an order that is not an integer", () => {
     const bad = {
       pages: [], events: [],

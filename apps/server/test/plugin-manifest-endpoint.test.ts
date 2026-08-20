@@ -57,6 +57,25 @@ describe("buildPluginsPayload", () => {
       { pluginId: "alpha", name: "pinged", describe: "{actorName} pinged", invalidates: ["alpha"] },
     ]);
   });
+
+  // `toEqual` above is the other half of this pair: it fails if a `silent`
+  // key appears on a declaration that never asked for one, which is what
+  // keeps a pre-flag manifest's payload byte-for-byte what it was.
+  it("carries the silent flag through for a declaration that sets it", () => {
+    const quiet = definePlugin({
+      id: "quiet", version: "1.0.0", basePaths: ["/api/quiet"],
+      events: [{
+        name: "ticked", payload: z.object({}), describe: "{actorName} ticked",
+        invalidates: ["quiet"], silent: true,
+      }],
+    });
+    expect(buildPluginsPayload([quiet]).events).toEqual([
+      {
+        pluginId: "quiet", name: "ticked", describe: "{actorName} ticked",
+        invalidates: ["quiet"], silent: true,
+      },
+    ]);
+  });
 });
 
 describe("GET /api/plugins", () => {

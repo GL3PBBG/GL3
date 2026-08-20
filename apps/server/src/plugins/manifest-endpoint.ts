@@ -4,7 +4,11 @@ import { stampAssetBinderScope } from "./asset-slots.js";
 
 export interface MenuItem { pageId: string; path: string; label: string; order: number }
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
-export interface EventMeta { pluginId: string; name: string; describe: string; invalidates: string[] }
+export interface EventMeta {
+  pluginId: string; name: string; describe: string; invalidates: string[];
+  /** Feed suppression (`PluginEventDecl.silent`). Omitted, never `false`. */
+  silent?: boolean;
+}
 export interface PluginsPayload { menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[] }
 
 /**
@@ -35,6 +39,12 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
       events.push({
         pluginId: manifest.id, name: event.name,
         describe: event.describe, invalidates: event.invalidates,
+        // Spread rather than assigned, so a declaration that says nothing
+        // about silence produces no `silent` key at all. `EventMetaSchema`
+        // has it `.optional()` inside a `.strict()` object, and the payload
+        // every plugin written before the flag existed builds is byte-for-byte
+        // what it was.
+        ...(event.silent === true ? { silent: true } : {}),
       });
     }
   }
