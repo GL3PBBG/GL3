@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { ProfileDto } from "@gl3/shared";
 import { Amount, Avatar, Panel, When } from "./ui.js";
 import styles from "../pages/pages.module.css";
@@ -10,6 +11,13 @@ import styles from "../pages/pages.module.css";
  * `/gang` only ever shows the *viewer's* own gang.
  */
 export function ProfileCard({ profile }: { profile: ProfileDto }): JSX.Element {
+  // `extras` is optional so a cached response from before this cluster shipped
+  // still renders — no plugin subscribed to `core.profileView` is the common
+  // case, not the exception, on a fresh install.
+  const extras = profile.extras ?? [];
+  const statExtras = extras.filter((extra) => extra.kind === "stat");
+  const linkExtras = extras.filter((extra) => extra.kind === "link");
+
   return (
     <Panel title={profile.username}>
       <div className={styles.form}>
@@ -24,6 +32,11 @@ export function ProfileCard({ profile }: { profile: ProfileDto }): JSX.Element {
             {profile.gangName ?? "No gang"} · joined <When iso={profile.createdAt} />
           </span>
           <span className={styles.meta}>Backfires · {profile.backfire}</span>
+          {statExtras.map((extra) => (
+            <span key={`${extra.pluginId}:${extra.label}`} className={styles.meta}>
+              {extra.label} · {extra.value}
+            </span>
+          ))}
         </div>
       </div>
       {profile.bio === null || profile.bio === "" ? (
@@ -31,6 +44,13 @@ export function ProfileCard({ profile }: { profile: ProfileDto }): JSX.Element {
       ) : (
         <p className={styles.prose}>{profile.bio}</p>
       )}
+      {linkExtras.length > 0 ? (
+        <div className={styles.actions}>
+          {linkExtras.map((extra) => (
+            <Link key={`${extra.pluginId}:${extra.label}`} to={extra.to}>{extra.label}</Link>
+          ))}
+        </div>
+      ) : null}
     </Panel>
   );
 }

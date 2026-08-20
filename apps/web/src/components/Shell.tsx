@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  useJail, useLocations, useLogout, useMail, useMe, useNotifications, usePlugins, useRanks,
+  useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges,
+  useNotifications, usePlugins, useRanks,
 } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
+import { secondsLeft } from "../lib/countdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
@@ -48,6 +50,24 @@ function Stat({ label, children }: { label: string; children: ReactNode }): JSX.
       {children}
     </span>
   );
+}
+
+/**
+ * A live "Xs" / "Xm YYs" for a plugin-supplied HUD entry's `countdownTo`.
+ *
+ * Unlike `useSentenceCountdown`, `countdownTo` already arrives as an absolute
+ * ISO timestamp rather than a relative-seconds snapshot needing an anchor, so
+ * there is no shared deadline map to seed here — a plain 1s interval
+ * recomputing from `Date.now()` is the whole hook.
+ */
+function CountdownValue({ to }: { to: string }): JSX.Element {
+  const deadline = new Date(to).getTime();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = window.setInterval(() => { setNow(Date.now()); }, 1000);
+    return () => window.clearInterval(tick);
+  }, []);
+  return <>{formatDuration(secondsLeft(deadline, now))}</>;
 }
 
 
@@ -132,6 +152,8 @@ export function Shell(): JSX.Element {
   const mail = useMail();
   const notifications = useNotifications();
   const plugins = usePlugins();
+  const hudExtras = useHudExtras();
+  const menuBadges = useMenuBadges();
 
   // The banner is on screen on every page, so it is the countdown a player
   // watches most — it has to tick between anchors like /jail does.
@@ -158,7 +180,17 @@ export function Shell(): JSX.Element {
   // held by the shell rather than the pages so a badge moves on the WS
   // invalidation while the player is somewhere else entirely — which is the
   // only reason to have a badge at all.
+  //
+  // Plugin-supplied counts (`menu.badges` / core.ts applier) are keyed by the
+  // literal path a subscriber wrote — `/plugins/<pageId>` for a plugin page —
+  // so they merge into the same lookup the core LINKS use, and spread first:
+  // the two core paths above are the ones this shell actually computes, and
+  // keep that meaning even if a plugin ever collided on one of them.
+  const pluginBadges: Readonly<Record<string, number>> = Object.fromEntries(
+    (menuBadges.data?.badges ?? []).map((badge) => [badge.path, badge.count]),
+  );
   const badges: Readonly<Record<string, number>> = {
+    ...pluginBadges,
     "/mail": unreadCount(mail.data?.mail ?? []),
     "/notifications": (notifications.data?.notifications ?? [])
       .filter((notification) => notification.readAt === null).length,
@@ -179,6 +211,13 @@ export function Shell(): JSX.Element {
             <Stat label="Exp">{me.data ? <Amount value={me.data.exp} /> : "—"}</Stat>
             <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
             <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
+            {(hudExtras.data?.entries ?? []).map((entry) => (
+              <Stat key={`${entry.pluginId}:${entry.label}`} label={entry.label}>
+                {entry.countdownTo !== undefined
+                  ? <CountdownValue to={entry.countdownTo} />
+                  : entry.value}
+              </Stat>
+            ))}
             <button type="button" disabled={logout.isPending} onClick={() => { logout.mutate(); }}>
               Log out
             </button>
@@ -207,11 +246,12 @@ export function Shell(): JSX.Element {
             );
           })}
           {/*
-            Plugin entries sit below the core links and carry no badge: a badge is
-            a count the shell polls for, and nothing in the manifest supplies one.
-            The link target is the namespaced route, not the entry's declared
-            `path` — see the routing note in App.tsx. `pageId` is only constrained
-            to be non-empty, so it is encoded rather than trusted as a path segment.
+            Plugin entries sit below the core links. The link target is the
+            namespaced route, not the entry's declared `path` — see the routing
+            note in App.tsx. `pageId` is only constrained to be non-empty, so it
+            is encoded rather than trusted as a path segment. The badge lookup
+            below still uses the literal `/plugins/<pageId>` path, because that
+            is what a `menu.badges` subscriber writes (queries.ts, useMenuBadges).
           */}
           {me.data && me.data.grants.length > 0 ? (
             <NavLink
@@ -223,17 +263,26 @@ export function Shell(): JSX.Element {
               Admin
             </NavLink>
           ) : null}
-          {pluginLinks.map((entry) => (
-            <NavLink
-              key={entry.pageId}
-              to={`/plugins/${encodeURIComponent(entry.pageId)}`}
-              className={({ isActive }) =>
-                isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-              }
-            >
-              {entry.label}
-            </NavLink>
-          ))}
+          {pluginLinks.map((entry) => {
+            const path = `/plugins/${entry.pageId}`;
+            const unread = badges[path] ?? 0;
+            return (
+              <NavLink
+                key={entry.pageId}
+                to={`/plugins/${encodeURIComponent(entry.pageId)}`}
+                className={({ isActive }) =>
+                  isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
+                }
+              >
+                {entry.label}
+                {unread > 0 ? (
+                  <span className={styles.badge}>
+                    {unread}<span className={styles.srOnly}> unread</span>
+                  </span>
+                ) : null}
+              </NavLink>
+            );
+          })}
         </nav>
 
         {jail.data?.jailed === true ? (
