@@ -352,6 +352,7 @@ export default defineWorkspace([
         "test/hospital-concurrency.test.ts",
         "test/hospital-discharge-player.test.ts",
         "test/inventory.test.ts",
+        "test/inventory-item-actions.test.ts",
         "test/jail.test.ts",
         "test/jail-bail-bust.test.ts",
         "test/jail-escape.test.ts",
