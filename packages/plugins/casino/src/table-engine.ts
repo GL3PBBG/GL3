@@ -211,8 +211,15 @@ export async function settleHand(
     await tx.db.delete(casinoTables).where(eq(casinoTables.id, table.id));
     return;
   }
+  // `state` is deliberately NOT cleared. It is the finished hand — dealer's
+  // hole card turned up, every seat's total final — and clearing it here would
+  // destroy the only copy in the same transaction that produced it: the table
+  // has no per-hand log, and the 2.5s poll would show an empty table where the
+  // result should be. `renderTablePayload` renders `view` from whatever state
+  // is on the row, so the table shows the last hand until `dealIfReady`
+  // overwrites it with the next one.
   await tx.db.update(casinoTables)
-    .set({ phase: "betting", state: null, turnSeat: null, deadlineAt: null })
+    .set({ phase: "betting", turnSeat: null, deadlineAt: null })
     .where(eq(casinoTables.id, table.id));
 }
 
