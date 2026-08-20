@@ -1,7 +1,8 @@
 import {
-  definePlugin, filterPoint, InsufficientFundsError, newId, PluginError, route,
+  definePlugin, filterPoint, InsufficientFundsError, newId, on, PluginError, route,
   type PageSchema, type PlayerSnapshot, type PluginCtx, type RouteResult,
 } from "@gl3/plugin-sdk";
+import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { locations, playerStats } from "./schema.js";
@@ -52,6 +53,16 @@ function parseCombatMode(raw: string | undefined): "open" | "underground" | unde
 /** Max attempts before a caller who keeps moving gets a clean 409. */
 const MAX_ATTEMPTS = 3;
 
+/** V2 travel.hooks.php: ceil(L_cost * 0.25) while the membership timer runs — ceiling division in bigint. */
+function memberFare(cost: bigint, member: boolean): bigint {
+  return member ? (cost + 3n) / 4n : cost;
+}
+
+const declareBenefit = on(membershipBenefits, (_ctx, list) => [
+  ...list,
+  { title: "Frequent Flyer Discount", description: "All travel costs are reduced by 75%" },
+]);
+
 /**
  * Internal, never reaches the loader: the unlocked pre-read that chose which
  * `locations` rows to lock turned out to be stale, so the transaction is
@@ -97,7 +108,7 @@ const listRoute = route({
 
     const cooldownRemaining = await ctx.cooldown.peek("travel", player.id);
 
-    const { rows, currentLocationId } = await ctx.transaction(async (tx) => {
+    const { rows, currentLocationId, member } = await ctx.transaction(async (tx) => {
       const [stats] = await tx.db
         .select({ locationId: playerStats.locationId })
         .from(playerStats)
@@ -105,6 +116,7 @@ const listRoute = route({
       return {
         rows: await tx.db.select().from(locations),
         currentLocationId: stats?.locationId ?? null,
+        member: await isMember(tx, player.id),
       };
     });
 
@@ -134,7 +146,7 @@ const listRoute = route({
         locations: listed.map((l) => ({
           id: l.id,
           name: l.name,
-          travelCost: l.travelCost.toString(),
+          travelCost: memberFare(l.travelCost, member).toString(),
           travelCooldownSeconds: l.travelCooldownSeconds,
           bulletCost: l.bulletCost.toString(),
           bulletStock: l.bulletStock,
@@ -288,11 +300,14 @@ async function attemptTravel(
       .where(eq(locations.id, toLocationId));
     if (!destination) throw new PluginError("location_not_found", 404);
 
-    if (destination.travelCost > 0n) {
+    const member = await isMember(tx, player.id);
+    const fare = memberFare(destination.travelCost, member);
+
+    if (fare > 0n) {
       try {
         await tx.economy.applyBalanceChange({
           playerId: player.id,
-          amount: -destination.travelCost,
+          amount: -fare,
           kind: "cash",
           reason: "travel.cost",
           refId: destination.id,
@@ -327,7 +342,7 @@ async function attemptTravel(
       audience: { kind: "player", playerId: player.id },
       fromLocationId: actualFrom,
       toLocationId: destination.id,
-      cost: destination.travelCost.toString(),
+      cost: fare.toString(),
     });
 
     return { status: 200, body: { locationId: destination.id, cash: fresh.cash.toString() } };
@@ -521,6 +536,7 @@ export default definePlugin({
   basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],
   routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
+  filters: [declareBenefit],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot if
