@@ -326,6 +326,7 @@ export function registerAuthRoutes(
     const [row] = await db.select({
       username: players.username,
       cash: playerStats.cash, bank: playerStats.bank,
+      points: playerStats.points,
       bullets: playerStats.bullets, exp: playerStats.exp,
     }).from(players)
       .innerJoin(playerStats, eq(playerStats.playerId, players.id))
@@ -337,6 +338,7 @@ export function registerAuthRoutes(
     return reply.send({
       playerId, username: row.username,
       cash: row.cash.toString(), bank: row.bank.toString(),
+      points: row.points.toString(),
       bullets: row.bullets.toString(), exp: row.exp.toString(),
       grants,
     });
