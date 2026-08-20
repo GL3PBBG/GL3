@@ -12,6 +12,13 @@ export {
   type FilterPolicy,
   type BoundFilterSubscription,
 } from "./filters.js";
+export {
+  coreProfileView,
+  coreDashboard,
+  coreHud,
+  coreMenuBadges,
+  coreMoneyFormat,
+} from "./core-points.js";
 export type {
   CoreEventInput,
   GangLogEntry,

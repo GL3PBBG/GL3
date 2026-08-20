@@ -1,5 +1,6 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { Queue, Worker } from "bullmq";
+import { buildCoreFilters, type CoreFilters } from "./core-filters.js";
 import { buildPluginsPayload, type PluginsPayload } from "./manifest-endpoint.js";
 import { createPluginQueues, createPluginWorkers } from "./jobs.js";
 import { runPluginMigrations } from "./migrate.js";
@@ -11,6 +12,10 @@ export interface LoadedPlugins {
   payload: PluginsPayload;
   queues: Map<string, Queue>;
   workers: Worker[];
+  /** Core routes' one applier for the five core-owned filter points
+   *  (`core.profileView`, `core.dashboard`, `core.hud`, `core.menuBadges`,
+   *  `core.moneyFormat`) — Tasks 7-8 call it; a plugin route never sees it. */
+  coreFilters: CoreFilters;
 }
 
 /**
@@ -44,5 +49,9 @@ export async function loadPlugins(
     manifests,
     queuePrefix,
   );
-  return { manifests, payload: buildPluginsPayload(manifests), queues, workers };
+  // Built last, after queues/workers exist: a core-owned filter point's
+  // subscriber ctx needs `ctx.jobs.enqueue`, same as any plugin route's ctx,
+  // which is only wireable once `queues` is populated.
+  const coreFilters = buildCoreFilters({ ...deps, queues }, manifests);
+  return { manifests, payload: buildPluginsPayload(manifests), queues, workers, coreFilters };
 }
