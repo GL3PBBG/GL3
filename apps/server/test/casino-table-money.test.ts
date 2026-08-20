@@ -340,6 +340,31 @@ describe("betting", () => {
     expect(row?.state).toBeNull();
   });
 
+  it("answers 409 insufficient_funds for a bet the player cannot afford", async () => {
+    const locationId = await seedLocation();
+    const { playerId: ownerId } = await register();
+    await seedHouse(locationId, ownerId, 200_000n);
+    await placePlayer(ownerId, locationId, 10_000_000n);
+
+    const { token, playerId } = await register();
+    await placePlayer(playerId, locationId, 5_000n);
+    const sitRes = await sit(token);
+    const { tableId } = sitRes.json<{ tableId: string }>();
+
+    const ownerCashBefore = await cashOf(ownerId);
+    // The house can cover it (10,000 × 2.5 ≤ its cash) — the player cannot pay
+    // it, which is the `InsufficientFundsError` the escrow raises.
+    const res = await bet(token, "10000");
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("insufficient_funds");
+
+    // Rolled back whole: no partial escrow on either leg.
+    expect(await cashOf(playerId)).toBe(5_000n);
+    expect(await cashOf(ownerId)).toBe(ownerCashBefore);
+    expect((await seatRow(tableId, playerId))?.wager).toBe(0n);
+    expect((await tableRow(tableId))?.deadlineAt).toBeNull();
+  });
+
   it("answers 409 wrong_location for a seated player who travelled away", async () => {
     const locationId = await seedLocation();
     const { token, playerId } = await register();
@@ -589,6 +614,78 @@ describe("acting and settling", () => {
     const seatZeroNotes = await db.select().from(notifications)
       .where(eq(notifications.playerId, a.playerId));
     expect(seatZeroNotes.some((n) => n.body.includes("you took ownership of the casino"))).toBe(false);
+  });
+
+  it("never debits the seizing winner for the seats settled after them", async () => {
+    const W = 10_000n;
+    const locationId = await seedLocation();
+    const owner = await register();
+    const propertyId = await seedHouse(locationId, owner.playerId, 200_000n);
+    await placePlayer(owner.playerId, locationId, 10_000_000n);
+
+    const seated: { token: string; playerId: string }[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const p = await register();
+      await placePlayer(p.playerId, locationId, 1_000_000n);
+      seated.push(p);
+    }
+    const sitRes = await sit(seated[0]!.token);
+    const { tableId } = sitRes.json<{ tableId: string }>();
+    await sit(seated[1]!.token);
+    await sit(seated[2]!.token);
+
+    const bettors = [0, 1, 2].map((seat) => ({ seat, wager: W }));
+    const standAll = (start: BjTableState): BjTableState =>
+      actSeat(actSeat(actSeat(start, 0, "stand").state, 1, "stand").state, 2, "stand").state;
+    // Three winners, so the house owes three payouts and can be made to come
+    // up short on the SECOND — leaving a third to settle after the handover.
+    const seed = probeSeed(bettors, (s) => {
+      if (!s.hands.every((h) => h.phase === "playing")) return false;
+      return settleTable(standAll(s)).every((p) => p.payout > 0n);
+    }, "three-winners");
+    const payouts = new Map(settleTable(standAll(dealTable(bettors, seed))).map((p) => [p.seat, p.payout]));
+    const [p0, p1, p2] = [payouts.get(0)!, payouts.get(1)!, payouts.get(2)!];
+
+    expect((await bet(seated[0]!.token, W)).statusCode).toBe(200);
+    expect((await bet(seated[1]!.token, W)).statusCode).toBe(200);
+    await setSeed(tableId, seed);
+    expect((await bet(seated[2]!.token, W)).statusCode).toBe(200);
+
+    // Enough for seat 0 in full, short at seat 1 — so seat 1 takes the table
+    // and seat 2 settles against a house that has already changed hands.
+    const houseCash = p0 + p1 / 2n;
+    await db.update(playerStats).set({ cash: houseCash })
+      .where(eq(playerStats.playerId, owner.playerId));
+
+    const cashBefore = await Promise.all(seated.map((p) => cashOf(p.playerId)));
+    const ledgerBefore = await Promise.all(seated.map((p) => ledgerCashOf(p.playerId)));
+
+    expect((await tableAct(seated[0]!.token, "stand")).statusCode).toBe(200);
+    expect((await tableAct(seated[1]!.token, "stand")).statusCode).toBe(200);
+    expect((await tableAct(seated[2]!.token, "stand")).statusCode).toBe(200);
+
+    // Seat 1 seized the table — and is credited their OWN winnings and nothing
+    // less. Debiting the new owner for seat 2's payout would show up here.
+    expect(await cashOf(seated[1]!.playerId)).toBe(cashBefore[1]! + p1);
+    expect(await cashOf(seated[0]!.playerId)).toBe(cashBefore[0]! + p0);
+    expect(await cashOf(seated[2]!.playerId)).toBe(cashBefore[2]! + p2);
+    // Every movement is a ledger row, on all three legs (rule 3).
+    expect(await ledgerCashOf(seated[0]!.playerId)).toBe(ledgerBefore[0]! + p0);
+    expect(await ledgerCashOf(seated[1]!.playerId)).toBe(ledgerBefore[1]! + p1);
+    expect(await ledgerCashOf(seated[2]!.playerId)).toBe(ledgerBefore[2]! + p2);
+    // The bankrupt house paid every cent it had and nothing more.
+    expect(await cashOf(owner.playerId)).toBe(0n);
+
+    const [prop] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
+    expect(prop?.ownerPlayerId).toBe(seated[1]!.playerId);
+
+    const winnerNotes = await db.select().from(notifications)
+      .where(eq(notifications.playerId, seated[1]!.playerId));
+    expect(winnerNotes.some((n) => n.body.includes("you took ownership of the casino"))).toBe(true);
+    // The latch holds: seat 2 was short-paid by nobody and seized nothing.
+    const lastNotes = await db.select().from(notifications)
+      .where(eq(notifications.playerId, seated[2]!.playerId));
+    expect(lastNotes.some((n) => n.body.includes("you took ownership of the casino"))).toBe(false);
   });
 
   it("answers 409 wrong_location on act, and leave works from another town", async () => {

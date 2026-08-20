@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
-import { InsufficientFundsError, PluginError, type PluginCtx, type PluginTx } from "@gl3/plugin-sdk";
+import { isInsufficientFundsError, PluginError, type PluginCtx, type PluginTx } from "@gl3/plugin-sdk";
 import { payOwner, takeOverFrom } from "@gl3/plugin-properties";
 import {
   escrow, exposureOf, frozenHouse, guardGame, notifyTakeover, readOwnerCash, type House,
@@ -122,10 +122,10 @@ export function resolveTablePayouts(
  * `settleSession`'s shape, seat by seat in ASCENDING seat order, with one
  * table-only rule: the takeover fires for the FIRST SHORT-PAID winner, not
  * the first winner. A house with enough cash for seat 0 and not for seat 1
- * failed seat 1, and seat 1 is who takes it; `seized` is a latch, so a third
- * short-paid seat is still paid in full but does not take a table that has
- * already changed hands. Every winner is credited in full either way — the
- * takeover is on top of the money, never instead of it.
+ * failed seat 1, and seat 1 is who takes it; `seized` is a latch, so every
+ * seat after it is paid from the sink and none of them can take a table that
+ * has already changed hands. Every winner is credited in full throughout —
+ * the takeover is on top of the money, never instead of it.
  */
 export async function settleHand(
   tx: PluginTx, ctx: PluginCtx, locked: LockedTable, game: TableGameDef,
@@ -139,13 +139,21 @@ export async function settleHand(
     if (seat.wager <= 0n) continue;
     const payout = payouts.get(seat.id) ?? 0n;
     if (payout <= 0n) continue;
-    if (house.propertyId !== null) {
+    // `!seized` is load-bearing, not an optimisation. `takeOverFrom` moved
+    // `owner_player_id` to the winner who was short-paid, so a later
+    // `payOwner` on this same property would debit THEM — the seizing winner
+    // would fund the rest of the table out of the winnings they just took the
+    // house for. Once the latch is set, the remaining payouts come from the
+    // sink instead, which is not a shortcut: the debit that tripped the latch
+    // was clamped to the old owner's cash, so that owner provably holds 0 and
+    // freezing the debit target on them would move nothing anyway.
+    if (house.propertyId !== null && !seized) {
       // The return value is READ, as `settleSession` reads it: `payOwner`
       // clamps a debit to the owner's cash, so a smaller `moved` is the only
       // signal that this winner was short-paid.
       const moved = await payOwner(tx, house.propertyId, -payout, `casino.${table.gameId}.payout`);
       const shortfall = payout + moved; // `moved` is <= 0n
-      if (!seized && shortfall > 0n && house.ownerId !== null) {
+      if (shortfall > 0n && house.ownerId !== null) {
         seized = await takeOverFrom(tx, house.propertyId, house.ownerId, seat.playerId);
         if (seized) {
           const [winner] = await tx.db.select({ username: players.username })
@@ -218,7 +226,10 @@ export async function applyStep(
     try {
       await escrow(tx, house, seat.playerId, delta.amount, table.gameId);
     } catch (error) {
-      if (error instanceof InsufficientFundsError) throw new PluginError("insufficient_funds", 409);
+      // The GUARD, never `instanceof`: a dynamically loaded plugin brings its
+      // own copy of the SDK, so the error class here need not be the class the
+      // throw site used (NOTES.md, the plugin/core boundary).
+      if (isInsufficientFundsError(error)) throw new PluginError("insufficient_funds", 409);
       throw error;
     }
     seat.wager += delta.amount;
