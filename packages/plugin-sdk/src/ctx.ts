@@ -179,8 +179,13 @@ export interface PluginTx {
    * expiry notification) instead of a check-then-act.
    *
    * Rule-6 note: the upsert's FK takes FOR KEY SHARE on the players row.
-   * Every write path must already hold that player FOR UPDATE (via
-   * `economy.applyBalanceChange` or `locks.player`) before calling `set`.
+   * That adds no new lock-graph edge because nothing in the tree ever takes
+   * FOR UPDATE on a `players` row (gameplay locks are all on `player_stats`,
+   * a different table), so the KEY SHARE conflicts with nothing. Every write
+   * path still locks the affected player FOR UPDATE first (via
+   * `economy.applyBalanceChange` or `locks.player`) before calling `set` —
+   * good hygiene for notification-insert ordering even though it isn't what
+   * makes this safe.
    */
   readonly timers: {
     get(playerId: string, key: string): Promise<Date | null>;
