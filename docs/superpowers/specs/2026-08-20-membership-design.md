@@ -63,7 +63,7 @@ New on `PluginTx`, additive:
 readonly timers: {
   get(playerId: string, key: string): Promise<Date | null>;
   set(playerId: string, key: string, expiresAt: Date): Promise<void>;  // upsert
-  clear(playerId: string, key: string): Promise<void>;
+  clear(playerId: string, key: string): Promise<boolean>;  // true iff a row was deleted
 };
 ```
 
