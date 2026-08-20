@@ -54,7 +54,7 @@ export interface GameDef<S = unknown> {
   view?(state: S): ViewNode;
 }
 
-export const games = filterPoint<GameDef[]>("casino.games");
+export const games = filterPoint<GameDef[]>("casino.games", "propagate");
 
 /**
  * Built on first use and memoised by the caller. Request-time rather than

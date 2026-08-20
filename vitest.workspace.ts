@@ -327,6 +327,7 @@ export default defineWorkspace([
         "test/economy-invariant.test.ts",
         "test/facility-concurrency.test.ts",
         "test/facility-rosters.test.ts",
+        "test/filter-subscriber-ctx.test.ts",
         "test/first-admin.test.ts",
         "test/forum-mod.test.ts",
         "test/forum-write.test.ts",

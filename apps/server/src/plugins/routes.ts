@@ -143,7 +143,7 @@ export function registerPluginRoutes(
 }
 
 function collectFilters(manifests: readonly PluginManifest[]) {
-  return manifests.flatMap((m) => m.filters);
+  return manifests.flatMap((m) => m.filters.map((subscription) => ({ ownerId: m.id, subscription })));
 }
 
 /**

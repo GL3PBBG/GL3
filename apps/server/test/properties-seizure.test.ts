@@ -35,7 +35,7 @@ const opts = {
   pluginId: "combat",
   player: null,
   job: null,
-  filters: propertiesPlugin.filters,
+  filters: propertiesPlugin.filters.map((subscription) => ({ ownerId: propertiesPlugin.id, subscription })),
   propertyTypes: new Map(),
   installedPluginIds: new Set(["combat"]),
 };

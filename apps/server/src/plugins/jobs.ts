@@ -70,7 +70,7 @@ export async function runPluginJob(
     pluginId: manifest.id,
     player: null,
     job: { id: jobId, seed, rng: createRng(seed) },
-    filters: manifest.filters,
+    filters: manifest.filters.map((subscription) => ({ ownerId: manifest.id, subscription })),
     // `runPluginJob` receives one manifest, not the set — the same narrowing
     // `filters` above already has. No job reads the registry today; if one
     // ever needs a type another plugin declares, this signature is what has
