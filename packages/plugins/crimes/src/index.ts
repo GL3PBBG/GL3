@@ -1,5 +1,5 @@
 import {
-  definePlugin, on, PluginError, route,
+  coreDashboard, definePlugin, on, PluginError, route,
   type PageSchema, type PluginCtx, type RankUpResult,
 } from "@gl3/plugin-sdk";
 import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
@@ -33,6 +33,31 @@ const declareBenefit = on(membershipBenefits, (_ctx, list) => [
   ...list,
   { title: "Getaway Driver", description: "All crime cooldowns are reduced by 25%" },
 ]);
+
+/**
+ * Under per-subscriber binding the ctx handed here is crimes' OWN — so
+ * `ctx.cooldown.peek("crime", ...)` reads the exact scope the commit route
+ * (`commitRoute` above) arms, not a sibling plugin's namespace.
+ */
+const dashboardWidget = on(coreDashboard, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+  const remaining = await ctx.cooldown.peek("crime", player.id);
+  return [...value, {
+    pluginId: ctx.pluginId,
+    title: "Crimes",
+    view: {
+      kind: "panel" as const, title: "Crimes",
+      children: [
+        {
+          kind: "text" as const,
+          value: remaining > 0 ? `Next crime ready in ${remaining}s` : "A crime is ready.",
+        },
+        { kind: "link" as const, label: "Go to crimes", to: "/crimes" },
+      ],
+    },
+  }];
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/crimes — port of routes.ts:26-47
@@ -420,7 +445,7 @@ export default definePlugin({
   routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
-  filters: [declareBenefit],
+  filters: [declareBenefit, dashboardWidget],
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }.
