@@ -315,8 +315,12 @@ export const PluginsPayloadSchema = z.object({
   menu: z.array(MenuItemSchema),
   pages: z.array(PagePayloadSchema),
   events: z.array(EventMetaSchema),
+  // `z.lazy(...)`, not the bare import — see the matching comment on
+  // `DashboardWidgetSchema.view` in `extensions.ts`: this file and that one
+  // import each other, and module-eval-time order decides which side's
+  // import is still `undefined` when the OTHER file's schema literal runs.
   /** Resolved from the `core.moneyFormat` filter point at boot. */
-  moneyFormat: MoneyFormatSchema,
+  moneyFormat: z.lazy(() => MoneyFormatSchema),
 }).strict();
 
 export type PluginsPayload = z.infer<typeof PluginsPayloadSchema>;

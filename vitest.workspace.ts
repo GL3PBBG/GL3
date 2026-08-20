@@ -328,6 +328,7 @@ export default defineWorkspace([
         "test/detectives-worker.test.ts",
         "test/detectives.test.ts",
         "test/economy-invariant.test.ts",
+        "test/extension-routes.test.ts",
         "test/facility-concurrency.test.ts",
         "test/facility-rosters.test.ts",
         "test/filter-subscriber-ctx.test.ts",

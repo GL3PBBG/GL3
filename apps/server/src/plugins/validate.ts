@@ -8,6 +8,11 @@ export const RESERVED_BASE_PATHS = [
   // Core admin shell endpoints. Deliberately NOT "/api/admin": plugins claim
   // /api/admin/<their-id> for their own admin routes.
   "/api/admin/plugins", "/api/admin/roles", "/api/admin/rounds",
+  // Core extension-surface routes (apps/server/src/plugins/extension-routes.ts)
+  // apply the core.hud/core.menuBadges/core.dashboard filter chains against the
+  // caller's own snapshot — a plugin claiming one of these bases would shadow
+  // that read rather than contribute to it via the filter point.
+  "/api/hud", "/api/menu", "/api/dashboard",
   // "/api/rounds" is deliberately NOT reserved: it is a gameplay path, and a
   // plugin replacing one is the strangler seam working as designed. A plugin
   // that claims it anyway does not shadow core — an exact duplicate is

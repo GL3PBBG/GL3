@@ -5,6 +5,7 @@ import { registerAssetRoutes } from "./assets/routes.js";
 import { createStorageDriver } from "./assets/factory.js";
 import type { StorageDriver } from "./assets/driver.js";
 import { registerAuthRoutes } from "./auth/routes.js";
+import { registerExtensionRoutes } from "./plugins/extension-routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { createMailDriver } from "./mail/driver.js";
@@ -122,14 +123,15 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     ownsLoadedPlugins = true;
   }
 
-  registerPluginRoutes(app, loaded.manifests, {
+  const pluginCtxDeps = {
     db: deps.db,
     redis: deps.redis,
     queues: loaded.queues,
     settings: loadedSettings,
     leaderboardPrefix,
     assetDriver,
-  });
+  };
+  registerPluginRoutes(app, loaded.manifests, pluginCtxDeps);
 
   // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`
   // is owned by that caller (e.g. bootTestServer's own `close()`), and closing
@@ -147,6 +149,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // chain, which needs `loaded.coreFilters` — plugins must be loaded first.
   registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix);
   registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
+  registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an
