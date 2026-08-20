@@ -238,7 +238,7 @@ export default defineWorkspace([
         "test/casino-settings.test.ts",
         "test/blackjack-rules.test.ts",
         "test/blackjack-table-rules.test.ts",
-        "test/blackjack-view.test.ts",
+        "test/blackjack-table-view.test.ts",
         "test/asset-driver-contract.test.ts",
         "test/asset-image-parse.test.ts",
         "test/asset-slots.test.ts",
