@@ -392,14 +392,17 @@ describe("the turn deadline", () => {
     expect(res.statusCode).toBe(200);
     const payload = payloadOf(res.body);
     expect(payload?.phase).toBe("betting");
-    expect(payload?.view).toBeNull();
+    // The settled hand is still on screen — `settleHand` retains `state`
+    // (spec §6) so the read that owed the table two auto-stands SHOWS the
+    // result it just produced rather than an empty table.
+    expect(payload?.view).not.toBeNull();
     expect(payload?.turnSeat).toBeNull();
     expect(payload?.deadlineAt).toBeNull();
     expect(payload?.seats.map((s) => s.wager)).toEqual(["0", "0"]);
 
     const row = await tableRow(tableId);
     expect(row?.phase).toBe("betting");
-    expect(row?.state).toBeNull();
+    expect(row?.state).not.toBeNull();
     expect(row?.handNo).toBe(1);
     expect(row?.deadlineAt).toBeNull();
 
@@ -452,7 +455,9 @@ describe("the clock in sit and leave", () => {
     expect(await seatRow(tableId, b.playerId)).toBeDefined();
     const row = await tableRow(tableId);
     expect(row?.phase).toBe("betting");
-    expect(row?.state).toBeNull();
+    // Retained (spec §6): B, who is still at the table, sees the hand A's
+    // leave settled on the next poll.
+    expect(row?.state).not.toBeNull();
     expect(row?.handNo).toBe(1);
 
     // The hand it settled on the way out paid both seats in full.

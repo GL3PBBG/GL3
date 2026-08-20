@@ -433,18 +433,35 @@ describe("acting and settling", () => {
     const last = await tableAct(b.token, "stand");
     expect(last.statusCode).toBe(200);
 
-    // The hand settled: the row is reset, the seats keep their places.
+    // The hand settled: the row is reset for the next one and the seats keep
+    // their places — but `state` is RETAINED (spec §6). Clearing it would
+    // destroy the finished hand in the same transaction that produced it, and
+    // the table has no per-hand log to recover it from.
     const row = await tableRow(tableId);
     expect(row?.phase).toBe("betting");
-    expect(row?.state).toBeNull();
+    expect(row?.state).not.toBeNull();
     expect(row?.turnSeat).toBeNull();
     expect(row?.deadlineAt).toBeNull();
     expect(row?.handNo).toBe(1);
 
     const payload = payloadOf(last.body);
     expect(payload?.phase).toBe("betting");
-    expect(payload?.view).toBeNull();
     expect(payload?.seats).toHaveLength(2);
+    // The DEALER IS REVEALED: a settled state renders with no face-down card,
+    // which is the whole point of keeping it.
+    const settledCards = cardsIn(payload?.view);
+    expect(settledCards).not.toContain("B1");
+    for (const card of finalState.dealer) expect(settledCards).toContain(card);
+
+    // ...and a plain GET shows the same finished hand, which is how every seat
+    // that did NOT act last (here: seat 0) ever sees the result — the 2.5s
+    // poll is the only channel, casino publishes no events.
+    const polled = payloadOf((await tableView(a.token)).body);
+    expect(polled?.phase).toBe("betting");
+    expect(polled?.mySeat).toBe(0);
+    const polledCards = cardsIn(polled?.view);
+    expect(polledCards).not.toContain("B1");
+    for (const card of finalState.dealer) expect(polledCards).toContain(card);
 
     expect((await seatRow(tableId, a.playerId))?.wager).toBe(0n);
     expect((await seatRow(tableId, b.playerId))?.wager).toBe(0n);
@@ -463,8 +480,23 @@ describe("acting and settling", () => {
     const [prop] = await db.select().from(propertiesTable).where(eq(propertiesTable.id, propertyId));
     expect(prop?.profit).toBe(houseNet);
 
-    // The table survives for the next hand.
+    // The table survives for the next hand — and the NEXT DEAL overwrites the
+    // retained state, so the finished hand is shown until then and never
+    // after. Re-using the same seed makes the replacement deterministic: it
+    // deals the SAME hand again, which is live rather than settled, so the
+    // hole card is face-down once more.
+    const stateBeforeNextDeal = row?.state;
     expect((await bet(a.token, W)).statusCode).toBe(200);
+    await setSeed(tableId, seed);
+    expect((await bet(b.token, W)).statusCode).toBe(200);
+
+    const dealt = await tableRow(tableId);
+    expect(dealt?.phase).toBe("acting");
+    expect(dealt?.handNo).toBe(2);
+    expect(dealt?.state).not.toEqual(stateBeforeNextDeal);
+    const freshCards = cardsIn(payloadOf((await tableView(a.token)).body)?.view);
+    expect(freshCards.filter((c) => c === "B1")).toHaveLength(1);
+    expect(freshCards).toContain(dealtState.dealer[0]!);
   });
 
   it("double escrows the delta, re-checks cover, and refuses when the house cannot cover the raise", async () => {
@@ -839,6 +871,8 @@ describe("acting and settling", () => {
     expect(bSeat?.wager).toBe(0n);
     const row = await tableRow(tableId);
     expect(row?.phase).toBe("betting");
-    expect(row?.state).toBeNull();
+    // Retained, not cleared: the settled hand stays on the row for the table
+    // to show until the next deal (spec §6).
+    expect(row?.state).not.toBeNull();
   });
 });

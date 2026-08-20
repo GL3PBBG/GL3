@@ -215,8 +215,14 @@ Identical primitives to solo, per seat; every movement through
   sink — the seized old owner provably has 0 cash, and the seizing winner is
   never debited for other winners. Both
   sides notified via `tx.notify` (existing `notifyTakeover` shape). Seats'
-  `wager` reset to 0, `state` set NULL, `phase` back to `'betting'`,
-  `deadline_at` NULL, `leaving` seats deleted, empty table deleted.
+  `wager` reset to 0, `phase` back to `'betting'`,
+  `turn_seat` NULL, `deadline_at` NULL, `leaving` seats deleted, empty table
+  deleted. **`state` is RETAINED**, not cleared: it is the finished hand
+  (dealer's hole card up, every total final), and the table has no per-hand
+  log, so clearing it would destroy the result in the same transaction that
+  produced it. The table therefore shows the last hand — rendered with
+  `viewer: null`, since no seat is in-hand between deals — until the next
+  deal overwrites it.
 
 ## 7. Locks (rule 6)
 
