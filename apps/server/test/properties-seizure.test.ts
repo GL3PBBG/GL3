@@ -27,10 +27,13 @@ const subscriber = createSubscriber(redisUrl);
 
 const leaderboardPrefix = `properties-seizure-test-${uuidv7()}`;
 const deps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix });
-// pluginId "combat": production reality. It is combat's route that calls
-// `ctx.filters.apply(killResolved, ...)` after a kill, and `runFilterChain`
-// (SDK) hands a subscriber the APPLYING plugin's ctx — so the ctx a real
-// seizeOnKill run sees always has pluginId "combat", never "properties".
+// pluginId "combat": production reality — it is combat's route that calls
+// `ctx.filters.apply(killResolved, ...)` after a kill. This ctx is the
+// APPLYING plugin's, used only to build the filter chain and reach
+// `ctx.filters.apply`. `runFilterChain` (SDK) then binds `seizeOnKill` to a
+// SEPARATE sibling ctx built for its own owner ("properties"), so the ctx
+// the subscriber body actually runs under has `pluginId: "properties"`,
+// never "combat".
 const opts = {
   pluginId: "combat",
   player: null,
@@ -129,15 +132,16 @@ describe("seizure on death", () => {
 
   /**
    * Ruling from task-8-brief.md's amendment: no `seized` plugin event is
-   * published (a subscriber's ctx belongs to the APPLYING plugin — combat —
-   * not to properties, so `tx.events.publish` here would be mislabeled on
-   * the wire as a combat event for a name combat never declared). The
-   * subscriber instead calls `tx.notify(...)`, which always publishes the
-   * core `notification.created` event regardless of which plugin's ctx
-   * invoked it. Asserted two ways: the event on the wire (proves the
-   * player-facing channel actually fires) and the stored row (proves the
-   * notification survives independently of anyone listening at the moment
-   * it was sent).
+   * published. The subscriber's own ctx is correctly labelled "properties"
+   * (each filter subscriber is bound to its own plugin's ctx), so a
+   * `tx.events.publish` here would be a legitimate properties event — but
+   * there is no declared name or client-side invalidation wiring for it, and
+   * this fact has exactly one audience: the victim. `tx.notify(...)` is the
+   * chosen fit instead, since it always publishes the core
+   * `notification.created` event, which every client already renders.
+   * Asserted two ways: the event on the wire (proves the player-facing
+   * channel actually fires) and the stored row (proves the notification
+   * survives independently of anyone listening at the moment it was sent).
    */
   it("notifies the victim, once, with a count of what was seized", async () => {
     const event = awaitOwnEvent(subscriber, victimId);
