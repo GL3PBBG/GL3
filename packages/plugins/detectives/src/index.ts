@@ -1,8 +1,8 @@
 import {
-  definePlugin, InsufficientFundsError, PluginError, route,
+  coreMenuBadges, coreProfileView, definePlugin, InsufficientFundsError, on, PluginError, route,
   type PageSchema, type PluginCtx,
 } from "@gl3/plugin-sdk";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { DETECTIVES_MIGRATIONS } from "./migrations.js";
@@ -331,6 +331,40 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
   });
 }
 
+// ---------------------------------------------------------------------------
+// core.profileView / core.menuBadges (spec deviation record above's shape,
+// bounties' subscriber is the reference): an unconditional "Hire detective"
+// link on any profile, and a nav badge counting the caller's OWN
+// time-gated-reveal reports that are ready but not yet stale — same
+// pending/failed/succeeded-expired/succeeded-active state machine listRoute
+// computes, collapsed to "is there a live reveal waiting".
+// ---------------------------------------------------------------------------
+
+const profileExtras = on(coreProfileView, async (ctx, value) => ({
+  ...value,
+  extras: [...value.extras,
+    { kind: "link" as const, pluginId: ctx.pluginId, label: "Hire detective", to: `/detectives?target=${value.targetId}` }],
+}));
+
+const menuBadge = on(coreMenuBadges, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+
+  const now = new Date();
+  const ready = await ctx.transaction(async (tx) => {
+    const rows = await tx.db.select({ id: detectiveSearches.id })
+      .from(detectiveSearches)
+      .where(and(
+        eq(detectiveSearches.playerId, player.id),
+        lte(detectiveSearches.endsAt, now),
+        or(isNull(detectiveSearches.expiresAt), gt(detectiveSearches.expiresAt, now)),
+      ));
+    return rows.length;
+  });
+
+  return ready > 0 ? [...value, { path: "/detectives", count: ready }] : value;
+});
+
 export default definePlugin({
   id: "detectives",
   version: "1.0.0",
@@ -339,4 +373,5 @@ export default definePlugin({
   routes: [hireRoute, listRoute, removeRoute, adminSettingsListRoute, adminSettingsWriteRoute],
   adminPages: [adminPage],
   jobs: { resolve: resolveJob },
+  filters: [profileExtras, menuBadge],
 });

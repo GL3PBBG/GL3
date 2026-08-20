@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import type { DetectiveSearchRow } from "@gl3/shared";
-import { useDetectives, useHireDetectives, useRemoveDetectiveSearch } from "../api/queries.js";
+import { useDetectives, useHireDetectives, useProfile, useRemoveDetectiveSearch } from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -73,9 +73,20 @@ function SearchRow({ row }: { row: DetectiveSearchRow }): JSX.Element {
 export function Detectives(): JSX.Element {
   const detectives = useDetectives();
   const hire = useHireDetectives();
+  const [searchParams] = useSearchParams();
   const [targetUsername, setTargetUsername] = useState("");
   const [dets, setDets] = useState(1);
   const [hours, setHours] = useState(1);
+
+  // `?target=<playerId>` arrives from a profile's "Hire detective" link
+  // (core.profileView, detectives' contribution). The form takes a
+  // username, not an id, so resolve it once the profile fetch settles
+  // rather than stuffing a UUID into the input (Bounties.tsx's pattern).
+  const targetPlayerId = searchParams.get("target");
+  const targetProfile = useProfile(targetPlayerId ?? "", targetPlayerId !== null);
+  useEffect(() => {
+    if (targetPlayerId && targetProfile.data) setTargetUsername(targetProfile.data.username);
+  }, [targetPlayerId, targetProfile.data]);
 
   if (detectives.isLoading) return <Loading what="detectives" />;
   if (detectives.error) return <ErrorText error={detectives.error} />;
