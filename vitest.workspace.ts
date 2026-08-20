@@ -321,6 +321,7 @@ export default defineWorkspace([
         "test/combat-notify.test.ts",
         "test/combat-repair.test.ts",
         "test/combat.test.ts",
+        "test/core-filters.test.ts",
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
         "test/detectives-worker.test.ts",
