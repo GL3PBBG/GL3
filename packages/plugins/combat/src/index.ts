@@ -1,5 +1,5 @@
 import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
-import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
 import { itemPriceAt } from "@gl3/plugin-inventory";
@@ -33,6 +33,17 @@ export type { CombatSettings } from "./settings.js";
  */
 export interface KillResolved { killerId: string; victimId: string }
 export const killResolved = filterPoint<KillResolved>("combat.killResolved");
+
+/**
+ * How long one attacker→target engagement lasts for alert purposes. Events
+ * over the WS are ephemeral (Redis pubsub drops them for an offline victim),
+ * so the opening shot of an engagement and a death each write a persistent
+ * notification via `tx.notify` — and ONLY those two, because combat is
+ * multi-shot whittling and per-shot alerts would bury the feed the combat
+ * log already serves. A quiet hour against the same target starts a new
+ * engagement and alerts again.
+ */
+const ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
 
 /**
  * One player's elapsed sentence, cleared inside the caller's lock. Duplicates
@@ -294,6 +305,20 @@ const attackRoute = route({
         }
       }
 
+      // Plain SELECT on a table this transaction inserts into anyway — no
+      // lock, no new edge. Read BEFORE this shot's own log row goes in, so
+      // the shot cannot see itself as a prior engagement.
+      const [priorShot] = await tx.db
+        .select({ id: combatLog.id })
+        .from(combatLog)
+        .where(and(
+          eq(combatLog.attackerId, player.id),
+          eq(combatLog.targetId, params.targetId),
+          gt(combatLog.createdAt, new Date(now - ENGAGEMENT_WINDOW_MS)),
+        ))
+        .limit(1);
+      const opensEngagement = priorShot === undefined;
+
       // Read once, used three times: to scale backfire chance, to compute the
       // value written back after the shot, and to answer the response. `now`
       // is captured once so the decay a shot observes and the decay it writes
@@ -368,6 +393,16 @@ const attackRoute = route({
           weaponItemId: attacker.weaponItemId,
           payout: 0n,
         });
+
+        // The log row above answers "who shot at me", so the opening-shot
+        // alert carries that same fact and nothing more — the jam stays the
+        // attacker's secret (the backfired EVENT below is attacker-only).
+        if (opensEngagement) {
+          await tx.notify(
+            params.targetId,
+            `${player.username} attacked you — check your combat log for details.`,
+          );
+        }
 
         // Attacker only. The target has no way of knowing your gun jammed,
         // and telling them is information the attacker did not choose to give.
@@ -493,6 +528,21 @@ const attackRoute = route({
             victimName: targetName,
           });
         }
+      }
+
+      // Persistent, unlike everything published above: pubsub reaches only
+      // live sockets, and the player most in need of these is offline. Death
+      // supersedes the opening-shot alert — a one-shot kill sends ONE row.
+      if (killed) {
+        await tx.notify(
+          params.targetId,
+          `You were killed by ${player.username} and taken to hospital — check your combat log for details.`,
+        );
+      } else if (opensEngagement) {
+        await tx.notify(
+          params.targetId,
+          `${player.username} attacked you — check your combat log for details.`,
+        );
       }
 
       return {
