@@ -3166,13 +3166,23 @@ The missing primitive was never "an event casino could publish" — it was a
 declaration that says *do not render this*. `PluginEventDecl` gains
 `silent?: boolean` (absent = false, schema still `.strict()`), carried by
 `buildPluginsPayload` into `EventMetaSchema` and read by exactly one place on
-the client: a new pure `isSilentEvent` in `apps/web/src/lib/eventCopy.ts`,
-which `EventFeed.tsx` filters on **before** mapping. `ws/invalidation.ts` and
-`plugins/invalidation.ts` are **untouched, confirmed by diff** — a silent
-event still invalidates precisely what it declares. Silence is a *rendering*
-decision, and it is per-declaration rather than per-publish, so the trust
-class is `publishCore`'s: install-time, no runtime guard, a plugin can
-silence only its own lines.
+the client: a new pure `isSilentEvent` in `apps/web/src/lib/eventCopy.ts`.
+
+**The enforcement point is the STORE, not the renderer**, and the first cut had
+this wrong. `store/events.ts` is a 50-entry ring buffer, so a silent event that
+is stored and then filtered at render time still takes a slot and pushes a real
+fact out the back — two hands at a full table is ~100 ticks, the whole buffer,
+and the feed would read "Nothing yet" while a crime, a kill and a bounty were
+evicted behind it. A silent event therefore never enters the store at all:
+`recordEvent(event, metas)` is the socket's only way in, and
+`ws/useGameEvents.ts` reads the manifest from cache BEFORE the store write
+rather than after it. `EventFeed.tsx` filters too, for the events already in a
+long-lived tab's store when a manifest first loads.
+`ws/invalidation.ts` and `plugins/invalidation.ts` are **untouched, confirmed
+by diff** — a silent event still invalidates precisely what it declares.
+Silence is per-declaration rather than per-publish, so the trust class is
+`publishCore`'s: install-time, no runtime guard, a plugin can silence only its
+own lines.
 
 **`describe` stays required.** A client whose cached manifest predates the
 flag renders the template it already knows — noise, which is what the feed
@@ -3210,6 +3220,15 @@ heartbeat: `advanceTable` runs because somebody READ the table, and a table
 nobody is acting at generates no request to publish from. Unseated stays
 `false`.
 
+**`usePlugins` gained `staleTime: Infinity`**, which is a consequence of the
+tick rather than a tidy-up. `pluginInvalidationKeys` prepends `keys.plugins()`
+to EVERY plugin event on purpose (an unknown event is exactly when the manifest
+is most likely stale), so without it each seated client would refetch the whole
+manifest — every page and view tree included — several times a hand. The
+payload is built once at boot and is identical for every player for the life of
+the process, so marking it permanently fresh makes that invalidation harmless
+without touching the invalidation rule.
+
 This cluster adds **no migration, no lock-graph edge and no `GameEvent`
 variant** — a `plugin.event` envelope is not a new variant, so none of the
 four places a core variant touches is involved, and every publish sits inside
@@ -3217,7 +3236,12 @@ a transaction that already holds the full table lock order.
 `apps/server/test/casino-table-events.test.ts` (registered in
 `vitest.workspace.ts`, the ninth-site trap) covers the manifest flag through
 `GET /api/plugins`, the recipient set for a bet, the leaver's own tick, the
-sit case, and a player at another table receiving nothing. **`@gl3/shared`
+sit case, and a player at another table receiving nothing; its collector is
+count-driven (resolve at N ticks, a 5s deadline as the failure path) rather
+than window-driven, because a fixed window opened before a request is a bet on
+how long that request takes under load. `apps/web/test/event-store.test.ts`
+pins the ring-buffer rule, including a 60-tick flood that must not evict the
+one real event behind it. **`@gl3/shared`
 `0.1.19` → `0.1.20` and `@gl3/plugin-sdk` `0.1.11` → `0.1.12`** (its
 `@gl3/shared` range tightened to `^0.1.20`), both additive patches,
 **unpublished** pending the user's approval after a registry check.

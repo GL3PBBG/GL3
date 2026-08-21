@@ -468,6 +468,34 @@ deterministic synthetic `GameDef` installed via its own test-only plugin.
 below. `@gl3/shared` → `0.1.18` for the table DTOs, additive, **unpublished**;
 `@gl3/plugin-sdk` is untouched.
 
+**Silent events** have since shipped on `feat/silent-events`, closing the one
+deviation from event-driven invalidation the table cluster above left behind.
+`PluginEventDecl` gains `silent?: boolean` (absent = false), carried through
+`buildPluginsPayload` into `EventMetaSchema` and read by exactly one place on
+the client — `isSilentEvent` in `apps/web/src/lib/eventCopy.ts`. The
+**store**, not the renderer, is where it is enforced: the feed is a 50-entry
+ring buffer, so a silent event that is stored and hidden at render time still
+evicts a real fact, and two hands at a full table would empty the feed. It
+therefore never enters the store (`recordEvent`), and `ws/invalidation.ts` /
+`plugins/invalidation.ts` are **untouched** — a silent event invalidates
+exactly what it declares. `describe` stays required (an old client renders it;
+noise, not breakage), and the flag is `publishCore`'s trust class: per
+declaration, install-time, no runtime guard. Casino declares its first event —
+`table`, `silent: true`, `invalidates: ["casino"]` — published to every seat at
+the end of each mutating table transaction AND from **GET's slow path**, gated
+on `clockLapsed` so a read that advanced nothing publishes nothing. Recipients
+are the seat set before the change UNIONED with the set after it, because the
+seat a transaction FREED (leave, idle sweep, a settle that deleted the table)
+is the one client nothing else will correct — which is why the pre-set must be
+**copied at `lockTable` time**: `dealIfReady` swaps `locked.seats` for a
+filtered array, so a later read has already lost the kicked seats.
+`TABLE_POLL_MS` relaxes 2500 → 15000 (WS is the fast path; the poll is only the
+lazy clock's backstop), and `usePlugins` gained `staleTime: Infinity` because
+every plugin event invalidates `keys.plugins()` by design and the payload is
+fixed for the life of the process. No migration, no lock-graph edge, no
+`GameEvent` variant. `@gl3/shared` → `0.1.20`, `@gl3/plugin-sdk` → `0.1.12`,
+both additive, **unpublished**.
+
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
 wire as `plugin.event`. Trust is granted at install time; there is no runtime
