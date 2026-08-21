@@ -35,7 +35,13 @@ export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
 // table path) and is re-exported here so the plugin's public surface is
 // unchanged by that move.
 export { HOUSE_SEIZED_MESSAGE } from "./engine.js";
-export { lockTable, publishTableTick, tableTickEvent } from "./table-engine.js";
+// `publishTableTick` is deliberately NOT exported. It reads `ctx.player` for
+// the actor and publishes under the CALLING plugin's ctx, so another plugin
+// invoking it would stamp its own id on a `casino.table` event — the same
+// mislabelling trap `properties`' seizure subscriber documents for
+// `tx.events.publish` inside a filter chain. The declaration is exported
+// (it is inert data a test can assert against); the publisher stays internal.
+export { lockTable, tableTickEvent } from "./table-engine.js";
 export {
   games,
   buildRegistry,
