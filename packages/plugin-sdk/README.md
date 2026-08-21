@@ -281,7 +281,7 @@ A filter point is a typed token the owning plugin exports; subscribers import it
 ```ts
 // owner
 import { filterPoint } from "@gl3/plugin-sdk";
-export const beforeResolve = filterPoint<Crime>("crimes.beforeResolve");
+export const beforeResolve = filterPoint<Crime>("crimes.beforeResolve", "propagate");
 
 // subscriber
 import { on } from "@gl3/plugin-sdk";
@@ -295,7 +295,58 @@ declared `order` (default 100), each returning the next value. Filters may be
 async but **run outside any transaction** — a filter cannot participate in the
 caller's write, so a slow subscriber cannot hold a row lock open.
 
+A point you `provide` must be named `<your-plugin-id>.<rest>` — the loader's
+`validatePlugins` rejects any other prefix at boot, and rejects `"core"` or a
+`"core."`-prefixed name outright, since that prefix is reserved to the SDK's
+own core-owned points (below).
+
 This is V2's `alterModuleData` pattern, generalised.
+
+`filterPoint(name, policy)` takes a **policy on the point itself**, not on
+each subscription: `"propagate"` rethrows a subscriber's error and aborts the
+whole chain (the shape every point had before this policy existed); `"collect"`
+logs and drops a throwing subscriber's contribution, carrying the previous
+value forward instead. A point's owner picks the policy once, at declaration —
+a UI seam that should degrade rather than break wants `"collect"`; a point
+whose subscribers must all succeed or none should wants `"propagate"`.
+
+`"collect"` isolates a subscriber's *throw*, not its *mutation* — a subscriber
+that mutates the threaded value in place instead of returning a copy is
+unguarded, whatever it returns or whichever later subscriber throws. Treat the
+incoming value as read-only and return a copy, the way every shipped
+subscriber does.
+
+Each subscriber runs against **its own plugin's ctx**, not the ctx of
+whichever plugin triggered the chain: `runFilterChain` looks up a
+`BoundFilterSubscription`'s `ownerId` and calls `ctxFor(ownerId)` per
+subscriber, so `ctx.pluginId`, `ctx.filters`, `ctx.settings` and any event a
+subscriber publishes all attribute to the subscription's owner. This is what
+makes a subscriber's own settings namespace and its own event identity
+reachable from inside someone else's filter chain — a subscriber is never
+handed the applying plugin's ctx by mistake.
+
+### Core-owned points
+
+The SDK itself owns five filter points over core's UI surfaces (`core-points.ts`),
+all `"collect"`:
+
+| Point | Type | Surface |
+|---|---|---|
+| `core.profileView` | `ProfileViewValue` | A player's public profile page — `extras: ProfileExtra[]` |
+| `core.dashboard` | `DashboardWidget[]` | The logged-in landing page |
+| `core.hud` | `HudEntry[]` | The persistent status bar (supports `countdownTo` for a ticking value) |
+| `core.menuBadges` | `MenuBadge[]` | Unread-style counts on nav entries |
+| `core.moneyFormat` | `MoneyFormat` | How money renders — resolved **per request**, not cached at boot |
+
+Subscriber conventions for all five: attribute every contributed entry with
+`ctx.pluginId` (never a hardcoded string — it's always your own plugin's id,
+per the per-subscriber ctx binding above); write a `"link"` entry's label as
+the action verb ("Hire detective", "Place bounty"), not a noun phrase; and for
+`core.menuBadges`, set `path` to the literal, unencoded nav path the badge
+attaches to (`"/detectives"` for a core or plugin top-level page,
+`"/plugins/<pageId>"` for a plugin page addressed by its raw page id) — the
+client matches badges to nav entries by exact string equality against that
+convention, not by decoding or normalising either side.
 
 ## Boot
 

@@ -244,14 +244,37 @@ latent contention bug surfaced when it did.
 **That gap is now closed.** Commit `3e3e5d7` (landed on `main` before
 `feat/blackjack-tables` started) added a `console.error` fallback for the
 driver-cause log line, one that survives the silenced test-environment
-logger. `feat/blackjack-tables`' Task 13 is the first proof it works: the
+logger. `feat/blackjack-tables`' Task 13 was the first proof it works: the
 new `test/casino-table-lock-order.test.ts` deliberate-inversion case
-produced a **real, captured `40P01`** with mutual `ShareLock` detail, not
-the bare 500 this repo had chased four times before. The *solo*
-`casino-lock-order` ABBA flake had not recurred as of that branch, so it is
-still unconfirmed against the fix directly — but the logging path it would
-need is now proven live under test, not theoretical. The next occurrence
-should carry its SQLSTATE.
+produced a real, captured `40P01` with mutual `ShareLock` detail, not the
+bare 500 this repo had chased four times before.
+**The solo flake's own datum was then captured on 2026-08-20**, a fourth
+occurrence during `feat/extension-surface`'s Task 4 sweep
+(`npm run test:related` over `plugins/validate.ts`, `casino-lock-order`'s
+same ABBA case, `survives A-plays-at-B's-table racing B-plays-at-A's-table`)
+— that branch carries `3e3e5d7`'s fallback, so the cause block the
+test-mode silent logger had dropped three times over finally printed:
+```
+{
+  plugin: 'casino',
+  pgCode: '40P01',
+  pgDetail: 'Process 771354 waits for ShareLock on transaction 2258544; blocked by process 772735.\n' +
+    'Process 772735 waits for ShareLock on transaction 2258545; blocked by process 771354.',
+  pgTable: undefined,
+  pgMessage: undefined
+} plugin route failed with a driver error
+```
+So the flake is confirmed a **real `40P01` deadlock**, not a phantom or a
+logging artifact. Read the detail precisely: "waits for ShareLock on
+transaction `<xid>`" is a wait on the other transaction's **id**, the
+classic row-lock signature — each transaction blocked on a row the other
+holds locked (`FOR UPDATE`, or `FOR KEY SHARE` via an FK — rule 6) — and
+`pgTable: undefined` means Postgres never named the relation, so which rows
+is still unknown. The next step is finding which two statements in casino's
+`play`/`act` path lock rows in opposite orders under contention — an
+**open, confirmed** lock-order bug awaiting its own investigation branch
+(recorded in memory as `casino-abba-flake-is-real-deadlock`; both gate runs
+on `feat/extension-surface` after the capture ran the ABBA case clean).
 **A concurrent session makes a run *void*, not failing** — the
 properties-franchise cluster saw `1307 passed, zero failures, 22 files at
 (0 test)` because another agent shared this machine's Postgres and Redis. Zero
@@ -495,6 +518,61 @@ every plugin event invalidates `keys.plugins()` by design and the payload is
 fixed for the life of the process. No migration, no lock-graph edge, no
 `GameEvent` variant. `@gl3/shared` → `0.1.20`, `@gl3/plugin-sdk` → `0.1.12`,
 both additive, **unpublished**.
+
+**The extension surface** has since shipped on `feat/extension-surface`: the
+filter-point count grows from 5 (all plugin-owned) to 11 — five new
+**core-owned** points (`core.profileView`, `core.dashboard`, `core.hud`,
+`core.menuBadges`, `core.moneyFormat`, in the SDK's new `core-points.ts`)
+plus one plugin-owned point, `inventory.itemActions`. `filterPoint(name,
+policy)` now takes its error-handling policy on the point itself rather than
+per subscription — `"propagate"` (every prior point's shape: a subscriber's
+throw aborts the chain) or `"collect"` (log-and-drop a throwing subscriber,
+carry the previous value forward); all five core points are `"collect"`, so
+one misbehaving plugin degrades a UI seam instead of 500ing someone else's
+page. **The applier-ctx trap is fixed, not merely worked around, for new
+code**: `runFilterChain` now takes `BoundFilterSubscription[]` plus a
+`ctxFor(ownerId)` factory, so every subscriber runs against its own owning
+plugin's ctx — the two recorded workarounds (bullets-restock's
+`properties.leverSet` subscriber unable to read its own settings namespace,
+and properties-franchise's seizure path using `tx.notify` instead of
+`tx.events.publish` to dodge event mislabelling) stay in the code as
+working precedent but are no longer necessary for anything written from
+here on. Error guards (`isPluginError` and siblings) are now brand-only —
+the pre-brand duck-typed fallback arm is deleted. `validatePlugins` enforces
+that a plugin's `provides` entries are named `<its-own-id>.<rest>` and
+separately reserves the `"core."` prefix to the SDK. Three new core routes
+(`GET /api/hud/extras`, `/api/menu/badges`, `/api/dashboard/widgets`) read
+through the five core points, and `GET /api/plugins` now carries a
+`moneyFormat` field resolved **per request**, not cached at boot. Five
+retrofits each add one subscriber with no new plugin→plugin dependency edge
+(subscribing to a core-owned point doesn't create one) — `bounties` and
+`detectives` and `membership` onto `core.profileView`, `detectives` and
+`membership` onto `core.hud`/`core.menuBadges`, `crimes` onto
+`core.dashboard`, and `combat` onto inventory's own `inventory.itemActions`
+for a gunsmith repair link. Zero new tables, migrations, lock-graph edges,
+or `GameEvent` variants. This cluster's plan also states the repo's **compat
+regime** explicitly for the first time: breaking changes to `@gl3/shared`
+and `@gl3/plugin-sdk` (here, `filterPoint`'s new required argument and
+`runFilterChain`'s reshaped signature) are authorized for as long as every
+consumer of both packages lives in this workspace — the regime's end
+condition is **the first third-party plugin author**, not the first `npm
+publish` (which has already happened repeatedly with no external consumer
+to break). Once someone outside this repo depends on a published version,
+the additive-only, version-bump-per-change discipline documented earlier in
+this file re-arms. `@gl3/shared` → `0.1.21`, `@gl3/plugin-sdk` → `0.1.13`
+(tightening its own `"@gl3/shared"` range to `^0.1.21`), both **unpublished**
+pending the user's approval — see `docs/STATUS.md`'s extension-surface
+section for the registry check and for how far this branch has drifted from
+`main`, which had independently advanced both packages past these numbers
+before this cluster's version stamps were chosen. **These numbers were
+bumped once already**, from `0.1.20`/`0.1.12` to `0.1.21`/`0.1.13`: the
+review that approved this cluster's docs also checked `main` and the
+registry a day later and found both had by then reached `0.1.20`/`0.1.12`
+themselves, with unrelated content — an exact version collision, not just
+the divergent-content-at-old-numbers case the first check had flagged. The
+re-bump clears both the registry's and `main`'s maxima as of that second
+check; re-check again before publishing, since `main` is moving faster than
+this branch.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the

@@ -1,8 +1,8 @@
-import { definePlugin, filterPoint, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
+import { definePlugin, filterPoint, on, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
 import { and, desc, eq, gt, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
-import { itemPriceAt } from "@gl3/plugin-inventory";
+import { itemActions, itemPriceAt } from "@gl3/plugin-inventory";
 import { activeReportTargetIds } from "@gl3/plugin-detectives";
 import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 import { cooldownSecondsFor } from "./cooldown.js";
@@ -32,7 +32,7 @@ export type { CombatSettings } from "./settings.js";
  * stays open and the next kill claims it.
  */
 export interface KillResolved { killerId: string; victimId: string }
-export const killResolved = filterPoint<KillResolved>("combat.killResolved");
+export const killResolved = filterPoint<KillResolved>("combat.killResolved", "propagate");
 
 /**
  * How long one attacker→target engagement lasts for alert purposes. Events
@@ -896,6 +896,22 @@ const repairRoute = route({
   },
 });
 
+/**
+ * Makes the gunsmith discoverable from `/inventory` rather than only from
+ * `/combat` itself. `item.itemType` comes straight off inventory's `items`
+ * row (the DTO's own literal), compared against combat's own `ITEM_TYPE_WEAPON`
+ * — combat already reads that table this way (`loadWeapon` above), and never
+ * imports inventory's `effects.js`, which is internal to that package.
+ */
+const gunsmithLink = on(itemActions, (ctx, value) => ({
+  ...value,
+  actions: [...value.actions, ...value.items
+    .filter((item) => item.itemType === ITEM_TYPE_WEAPON)
+    .map((item) => ({
+      itemId: item.itemId, pluginId: ctx.pluginId, label: "Repair at gunsmith", to: "/combat",
+    }))],
+}));
+
 export default definePlugin({
   id: "combat",
   version: "1.0.0",
@@ -903,4 +919,5 @@ export default definePlugin({
   migrations: COMBAT_MIGRATIONS,
   routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute],
   provides: [killResolved],
+  filters: [gunsmithLink],
 });

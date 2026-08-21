@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { useBounties, useMe, usePlaceBounty } from "../api/queries.js";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useBounties, useMe, usePlaceBounty, useProfile } from "../api/queries.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -8,8 +9,19 @@ export function Bounties(): JSX.Element {
   const bounties = useBounties();
   const me = useMe();
   const placeBounty = usePlaceBounty();
+  const [searchParams] = useSearchParams();
   const [targetUsername, setTargetUsername] = useState("");
   const [amount, setAmount] = useState("");
+
+  // `?target=<playerId>` arrives from a profile's "Place bounty" link
+  // (core.profileView, bounties' contribution). The form takes a username,
+  // not an id, so resolve it once the profile fetch settles rather than
+  // stuffing a UUID into the input.
+  const targetPlayerId = searchParams.get("target");
+  const targetProfile = useProfile(targetPlayerId ?? "", targetPlayerId !== null);
+  useEffect(() => {
+    if (targetPlayerId && targetProfile.data) setTargetUsername(targetProfile.data.username);
+  }, [targetPlayerId, targetProfile.data]);
 
   if (bounties.isLoading) return <Loading what="bounties" />;
   if (bounties.error) return <ErrorText error={bounties.error} />;

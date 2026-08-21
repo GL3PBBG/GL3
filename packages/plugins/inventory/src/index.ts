@@ -1,7 +1,8 @@
 import {
-  definePlugin, newId, PluginError, route,
+  definePlugin, filterPoint, newId, PluginError, route,
   type PageSchema,
 } from "@gl3/plugin-sdk";
+import { ItemActionSchema } from "@gl3/shared";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -18,6 +19,18 @@ import { items, locations, playerItems, playerStats, ranks } from "./schema.js";
 import { purchasedEvent, shopBuyRoute, shopListRoute } from "./shop.js";
 import { shopStock } from "./shop-schema.js";
 
+/**
+ * Lets another plugin attach a link to an inventory row (combat's gunsmith
+ * repair on a weapon, the first subscriber). `"collect"`: a throwing
+ * subscriber loses only its own contribution, never the listing itself —
+ * this point mirrors `core.dashboard`'s shape, not `combat.killResolved`'s.
+ */
+export interface ItemActionsValue {
+  items: { itemId: string; itemType: string }[];
+  actions: { itemId: string; pluginId: string; label: string; to: string }[];
+}
+export const itemActions = filterPoint<ItemActionsValue>("inventory.itemActions", "collect");
+
 const listRoute = route({
   method: "GET",
   path: "/api/inventory",
@@ -25,7 +38,7 @@ const listRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    return ctx.transaction(async (tx) => {
+    const { owned, stats } = await ctx.transaction(async (tx) => {
       const owned = await tx.db
         .select({
           itemId: items.id,
@@ -46,25 +59,56 @@ const listRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
 
-      // One lookup for the whole inventory, not one per row. `items` is a core
-      // table, hence the `core` scope rather than this plugin's own.
-      const art = await ctx.assets.resolve("core", owned.map((row) => row.itemId), "item");
+      return { owned, stats };
+    });
 
-      return {
-        status: 200,
-        body: {
-          items: owned.map((row) => ({
+    // One lookup for the whole inventory, not one per row. `items` is a core
+    // table, hence the `core` scope rather than this plugin's own.
+    const art = await ctx.assets.resolve("core", owned.map((row) => row.itemId), "item");
+
+    // Filters run outside any transaction (spec: Filters) — this must run
+    // after `ctx.transaction` above returns, not inside it.
+    const acted = await ctx.filters.apply(itemActions, {
+      items: owned.map((row) => ({ itemId: row.itemId, itemType: row.itemType })),
+      actions: [],
+    });
+
+    return {
+      status: 200,
+      body: {
+        items: owned.map((row) => {
+          // The shared `ItemActionSchema` is `.strict()` on `{ pluginId, label,
+          // to }` — `itemId` is implicit from which item's array it lives in,
+          // so it is dropped here rather than carried onto the wire twice.
+          // Then re-validated per-action against that same schema: a
+          // `"collect"`-policy subscriber's malformed action (a
+          // `PLUGIN_PACKAGES`-loaded plugin is never typechecked against it)
+          // must lose only its own entry, not the whole inventory row.
+          const rowActions = acted.actions
+            .filter((a) => a.itemId === row.itemId)
+            .map(({ pluginId, label, to }) => ({ pluginId, label, to }))
+            .filter((action) => {
+              const parsed = ItemActionSchema.safeParse(action);
+              if (!parsed.success) {
+                ctx.log.warn("dropped a malformed item action", {
+                  pointName: itemActions.name, itemId: row.itemId, action, issues: parsed.error.issues,
+                });
+              }
+              return parsed.success;
+            });
+          return {
             ...row,
             effects: readEffects(row.itemType, row.effects),
             ...(art.has(row.itemId) ? { imageUrl: art.get(row.itemId) as string } : {}),
-          })),
-          equipped: {
-            weaponItemId: stats?.weaponItemId ?? null,
-            armorItemId: stats?.armorItemId ?? null,
-          },
+            ...(rowActions.length > 0 ? { actions: rowActions } : {}),
+          };
+        }),
+        equipped: {
+          weaponItemId: stats?.weaponItemId ?? null,
+          armorItemId: stats?.armorItemId ?? null,
         },
-      };
-    });
+      },
+    };
   },
 });
 
@@ -739,6 +783,7 @@ export default definePlugin({
     adminLocationListRoute,
   ],
   events: [purchasedEvent],
+  provides: [itemActions],
   // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts
   // a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a

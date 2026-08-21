@@ -1,6 +1,8 @@
-import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
+import { coreMoneyFormat, type PluginManifest, type ViewNode } from "@gl3/plugin-sdk";
+import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
+import type { CoreFilters } from "./core-filters.js";
 
 export interface MenuItem { pageId: string; path: string; label: string; order: number }
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
@@ -9,7 +11,12 @@ export interface EventMeta {
   /** Feed suppression (`PluginEventDecl.silent`). Omitted, never `false`. */
   silent?: boolean;
 }
-export interface PluginsPayload { menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[] }
+/** The boot-built payload — static across every request. `moneyFormat` is
+ * resolved per request in `registerPluginsEndpoint` instead, since it flows
+ * through the `core.moneyFormat` filter chain rather than being fixed at boot. */
+export interface PluginsPayload {
+  menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[];
+}
 
 /**
  * Pure and called once at boot (spec: Boot sequence step 6) — the payload is
@@ -55,6 +62,21 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
   return { menu, pages, events };
 }
 
-export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload): void {
-  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async () => payload);
+export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload, coreFilters: CoreFilters): void {
+  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async (request) => {
+    const applied = await coreFilters.apply(coreMoneyFormat, null, DEFAULT_MONEY_FORMAT);
+    // `PluginsPayloadSchema` is `.strict()` and parsed all-or-nothing on the
+    // client — a malformed `coreMoneyFormat` return would take down the WHOLE
+    // plugin payload (nav, pages, events), the same defect class the casino
+    // cluster's `cards`-leaf parity bug fixed at 0.1.6. Fall back to the
+    // default rather than let one bad subscriber blank the entire client.
+    const parsed = MoneyFormatSchema.safeParse(applied);
+    if (!parsed.success) {
+      request.log.warn(
+        { pointName: coreMoneyFormat.name, value: applied, issues: parsed.error.issues },
+        "dropped a malformed core.moneyFormat contribution; falling back to the default",
+      );
+    }
+    return { ...payload, moneyFormat: parsed.success ? parsed.data : DEFAULT_MONEY_FORMAT };
+  });
 }

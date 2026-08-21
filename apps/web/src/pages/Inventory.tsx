@@ -1,4 +1,5 @@
 import type { InventoryItem } from "@gl3/shared";
+import { Link } from "react-router-dom";
 import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
 import { numericEffect, weaponStatLine } from "../lib/effects.js";
@@ -14,6 +15,19 @@ import { GameImage } from "../components/GameImage.js";
 const WEAPON = "weapon";
 const ARMOR = "armor";
 const CONSUMABLE = "consumable";
+
+/** Plugin-contributed links from `inventory.itemActions` (e.g. combat's gunsmith repair). */
+function ItemActions({ item }: { item: InventoryItem }): JSX.Element | null {
+  const actions = item.actions ?? [];
+  if (actions.length === 0) return null;
+  return (
+    <span className={styles.actions}>
+      {actions.map((action) => (
+        <Link key={`${action.pluginId}:${action.label}`} to={action.to}>{action.label}</Link>
+      ))}
+    </span>
+  );
+}
 
 function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
   if (item.itemType === WEAPON) {
@@ -119,6 +133,7 @@ export function Inventory(): JSX.Element {
                     <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
+                  <ItemActions item={item} />
                   <button
                     type="button"
                     disabled={equip.isPending || item.itemId === equipped.weaponItemId}
@@ -142,6 +157,7 @@ export function Inventory(): JSX.Element {
                     <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
+                  <ItemActions item={item} />
                   <button
                     type="button"
                     disabled={equip.isPending || item.itemId === equipped.armorItemId}
@@ -166,6 +182,7 @@ export function Inventory(): JSX.Element {
                     <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
+                  <ItemActions item={item} />
                   <button
                     type="button"
                     disabled={useItem.isPending || full}
@@ -189,6 +206,7 @@ export function Inventory(): JSX.Element {
                     <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
                     {item.name} ×<Amount value={String(item.qty)} />
                   </span>
+                  <ItemActions item={item} />
                 </li>
               ))}
             </ul>

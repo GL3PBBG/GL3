@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IdSchema, MoneySchema, noNulByte, TimestampSchema } from "../primitives.js";
+import { ProfileExtraSchema } from "./extensions.js";
 
 /**
  * avatarUrl is attacker-controlled, persisted server-side, and served to
@@ -88,5 +89,11 @@ export const ProfileDtoSchema = z.object({
   backfire: z.number().int().nonnegative(),
   createdAt: TimestampSchema,
   lastSeenAt: z.string().nullable().optional(),
+  /**
+   * Plugin-contributed fragments from the `core.profileView` filter point.
+   * Optional rather than a bare array so a server that predates the
+   * extension surface still parses.
+   */
+  extras: z.array(ProfileExtraSchema).optional(),
 });
 export type ProfileDto = z.infer<typeof ProfileDtoSchema>;

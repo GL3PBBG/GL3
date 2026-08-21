@@ -96,7 +96,7 @@ export interface LocationListing {
  * price its shop actually charges (franchise lever, `max_cost` clamp) so the
  * board never quotes a number the shop would not honour.
  */
-export const locationsListed = filterPoint<LocationListing[]>("travel.locationsListed");
+export const locationsListed = filterPoint<LocationListing[]>("travel.locationsListed", "propagate");
 
 const listRoute = route({
   method: "GET",

@@ -142,8 +142,11 @@ export function registerPluginRoutes(
   }
 }
 
-function collectFilters(manifests: readonly PluginManifest[]) {
-  return manifests.flatMap((m) => m.filters);
+/** Exported so `core-filters.ts`'s `buildCoreFilters` can reuse this exact
+ *  collection rather than re-deriving it — the same bound-subscription shape
+ *  every plugin ctx factory needs. */
+export function collectFilters(manifests: readonly PluginManifest[]) {
+  return manifests.flatMap((m) => m.filters.map((subscription) => ({ ownerId: m.id, subscription })));
 }
 
 /**

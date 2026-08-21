@@ -86,4 +86,14 @@ export const keys = {
   forumTopic: (topicId: string, page: number) => ["forum", "topics", topicId, page] as const,
   /** Prefix over every page of one topic's posts — for invalidation. */
   forumTopicAll: (topicId: string) => ["forum", "topics", topicId] as const,
+
+  // Extension surface. Plugin subscribers name these three prefixes
+  // ("hudExtras", "menuBadges", "dashboardWidgets") in their EventMeta
+  // `invalidates` lists — pluginInvalidationKeys (plugins/invalidation.ts)
+  // wraps a declared prefix into a single-element tuple, which is exactly
+  // what these keys already are, so no change to ws/invalidation.ts's
+  // generic plugin.event path is needed for them to resolve.
+  hudExtras: () => ["hudExtras"] as const,
+  menuBadges: () => ["menuBadges"] as const,
+  dashboardWidgets: () => ["dashboardWidgets"] as const,
 };
