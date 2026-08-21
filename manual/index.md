@@ -30,7 +30,7 @@ features:
 
 ## How GL3 compares to V2
 
-[**Two Gangster Engines**](/gl3-vs-v2.html) - a comparison of this engine against
+<a href="/gl3-vs-v2.html" target="_self"><strong>Two Gangster Engines</strong></a> - a comparison of this engine against
 [Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2), the PHP 5.6-era
 script it reimplements. Measured by reading both source trees rather than either project's
 documentation: what each is better at, what reached parity, and the three places GL3
