@@ -26,11 +26,17 @@ import { awaitOwnEvent } from "./helpers/events.js";
  * feed would render a line per transition per seat, which is exactly why the
  * table shipped on a poll and no events at all.
  *
+ * Recipients are the seat set before the change UNIONED with the seat set
+ * after it, which the leave case below is the point of: a freed seat appears
+ * in neither the response nor the post-change set, and is the client with the
+ * stalest cache.
+ *
  * RULE 4 THROUGHOUT: `game:events` is one global channel shared by every test
  * file in the run, so every assertion here filters by the ACTING player's own
  * id. That filter is also what makes the recipient set assertable — every tick
- * a bet produces carries the bettor as actor and one seat as audience, so
- * collecting the actor's own traffic yields exactly the table's seats.
+ * one transaction produces carries the caller as actor and one seat as
+ * audience, so collecting the actor's own traffic yields exactly that table's
+ * recipients.
  */
 const { db, sql: conn } = testDb();
 const redisUrl = loadConfig(process.env).redisUrl;
@@ -89,6 +95,13 @@ function bet(token: string, wager: bigint) {
   return app.inject({
     method: "POST", url: "/api/casino/table/bet",
     headers: { authorization: `Bearer ${token}` }, payload: { wager: String(wager) },
+  });
+}
+
+function leave(token: string) {
+  return app.inject({
+    method: "POST", url: "/api/casino/table/leave",
+    headers: { authorization: `Bearer ${token}` }, payload: {},
   });
 }
 
@@ -235,6 +248,37 @@ describe("POST /api/casino/table/bet", () => {
     await first;
 
     expect(tickedPlayerIds(await collected)).not.toContain(outsider.playerId);
+  });
+});
+
+describe("POST /api/casino/table/leave", () => {
+  /**
+   * The union half of the recipient set, and the case that decides it. The
+   * seat this transaction FREED is not in the post-change set at all, and it
+   * is the client whose cache is now most wrong — it still holds a
+   * `casinoTable` entry for a table the player has left. Recipients are
+   * therefore pre ∪ post, so the leaver hears about their own leave.
+   */
+  it("ticks the leaver as well as the seats they left behind", async () => {
+    const { tableId, players } = await seatTable(2);
+    const [a, b] = players as [typeof players[0], typeof players[0]];
+
+    const collected = collectOwnEvents(b.playerId, 1000);
+    const first = awaitOwnEvent(subscriber, b.playerId);
+
+    // No stake anywhere, so this is the wager-0 fast exit: the seat is freed
+    // in this request rather than deferred to a settle.
+    const res = await leave(b.token);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ left: boolean; deferred: boolean }>()).toEqual({ left: true, deferred: false });
+    await first;
+
+    const ticks = (await collected).filter(isTableTick);
+    expect(tickedPlayerIds(ticks)).toEqual([a.playerId, b.playerId].sort());
+    for (const tick of ticks) {
+      expect(tick.actorId).toBe(b.playerId);
+      expect(tick.payload).toEqual({ tableId });
+    }
   });
 });
 
