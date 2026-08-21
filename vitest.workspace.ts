@@ -185,9 +185,10 @@ export default defineWorkspace([
     // Mostly pure client modules — money/rank/error formatting and the
     // event→cache-key map — which run in node and need no DOM. A file that
     // renders (hooks via @testing-library/react) opts into a DOM per file
-    // with a `// @vitest-environment happy-dom` docblock; see
-    // use-countdowns-ticker.test.ts. Full component walkthroughs remain
-    // manual.
+    // with a `// @vitest-environment jsdom` docblock; see
+    // use-countdowns-ticker.test.ts. jsdom, not happy-dom, because DOMPurify
+    // misbehaves under happy-dom's parser (markdown.test.ts explains). Full
+    // component walkthroughs remain manual.
     test: {
       name: "@gl3/web",
       root: "./apps/web",

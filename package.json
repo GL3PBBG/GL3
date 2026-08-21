@@ -2,8 +2,15 @@
   "name": "gl3",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "workspaces": ["apps/*", "packages/*", "packages/plugins/*", "examples/*"],
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/plugins/*",
+    "examples/*"
+  ],
   "scripts": {
     "typecheck": "tsc --build --force",
     "test": "vitest run",
@@ -18,8 +25,9 @@
     "db:down": "docker compose down -v"
   },
   "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8",
-    "@types/node": "^22.9.0"
+    "vitest": "^2.1.8"
   }
 }

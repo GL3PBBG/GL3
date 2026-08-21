@@ -1,4 +1,5 @@
 import { useNews } from "../api/queries.js";
+import { Markdown } from "../components/Markdown.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -29,7 +30,7 @@ export function News(): JSX.Element {
                 : "The management"}
               {" · "}<When iso={item.createdAt} />
             </p>
-            <p className={styles.prose}>{item.body}</p>
+            <Markdown text={item.body} />
           </article>
         ))}
       </div>
