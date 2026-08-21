@@ -178,6 +178,18 @@ describe("GET /api/plugins", () => {
           describe: "{actorName} transferred the {typeName} in {locationName} to you",
           invalidates: ["properties", "me"],
         }, {
+          // `casino` sits between `properties` and `membership` in
+          // `CORE_PLUGINS`. This entry was MISSED when the silent-events
+          // cluster declared casino's first event (`table-engine.ts`,
+          // commit 3b52cf3) — the census failed on every full-suite run
+          // since, twice misdiagnosed as cross-session cross-talk before a
+          // baseline worktree run proved it deterministic on main.
+          pluginId: "casino",
+          name: "table",
+          describe: "{actorName} is at the tables",
+          invalidates: ["casino"],
+          silent: true,
+        }, {
           // `membership` is appended last in `CORE_PLUGINS`
           // (`plugins/core-plugins.ts`), after `properties`.
           pluginId: "membership",
