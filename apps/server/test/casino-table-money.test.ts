@@ -454,8 +454,9 @@ describe("acting and settling", () => {
     for (const card of finalState.dealer) expect(settledCards).toContain(card);
 
     // ...and a plain GET shows the same finished hand, which is how every seat
-    // that did NOT act last (here: seat 0) ever sees the result — the 2.5s
-    // poll is the only channel, casino publishes no events.
+    // that did NOT act last (here: seat 0) reads the result. The silent
+    // `table` tick tells that seat's client to come and do this read; the read
+    // itself is still the only thing that carries the hand.
     const polled = payloadOf((await tableView(a.token)).body);
     expect(polled?.phase).toBe("betting");
     expect(polled?.mySeat).toBe(0);
