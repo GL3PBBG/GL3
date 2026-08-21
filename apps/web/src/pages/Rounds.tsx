@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { LeaderboardKind, RoundDto } from "@gl3/shared";
 import { useMe, useRoundStandings, useRounds } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [
@@ -84,7 +85,7 @@ function StandingsTable({ roundId, kind }: { roundId: string; kind: LeaderboardK
               className={entry.playerId === me.data?.playerId ? styles.self : undefined}
             >
               <td>{entry.rank}</td>
-              <td>{entry.username}</td>
+              <td><PlayerLink playerId={entry.playerId} username={entry.username} /></td>
               <td><ScoreCell kind={kind} value={entry.score} /></td>
             </tr>
           ))}

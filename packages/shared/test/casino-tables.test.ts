@@ -9,7 +9,8 @@ const TABLE_ID = "018f0000-0000-7000-8000-000000000010";
 const LOCATION_ID = "018f0000-0000-7000-8000-000000000020";
 
 const SEAT_FIXTURE = {
-  seat: 0, username: "Vic", wager: "500", leaving: false, idleHands: 0,
+  seat: 0, playerId: "018f0000-0000-7000-8000-000000000031", username: "Vic",
+  wager: "500", leaving: false, idleHands: 0,
 };
 
 const TABLE_VIEW_FIXTURE = {

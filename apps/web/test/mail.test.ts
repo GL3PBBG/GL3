@@ -26,6 +26,7 @@ describe("groupThreads", () => {
       threadId: "t1",
       subject: "Business",
       withName: "Vito",
+      withId: "sender",
       lastAt: "2026-01-02T00:00:00.000Z",
       unread: 1,
     });
@@ -38,13 +39,14 @@ describe("groupThreads", () => {
   // The inbox arrives newest-first today, but a summary that only holds
   // whichever message it saw first would silently depend on that.
   it("takes the subject and sender from the newest message, whatever the input order", () => {
-    const oldest = message({ id: "1", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z", subject: "First", senderName: "Vito" });
-    const newest = message({ id: "2", threadId: "t1", createdAt: "2026-03-01T00:00:00.000Z", subject: "Re: First", senderName: "Sonny" });
+    const oldest = message({ id: "1", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z", subject: "First", senderId: "vito", senderName: "Vito" });
+    const newest = message({ id: "2", threadId: "t1", createdAt: "2026-03-01T00:00:00.000Z", subject: "Re: First", senderId: "sonny", senderName: "Sonny" });
 
     for (const order of [[oldest, newest], [newest, oldest]]) {
       const [summary] = groupThreads(order);
       expect(summary?.subject).toBe("Re: First");
       expect(summary?.withName).toBe("Sonny");
+      expect(summary?.withId).toBe("sonny");
       expect(summary?.lastAt).toBe("2026-03-01T00:00:00.000Z");
     }
   });
@@ -73,6 +75,7 @@ describe("groupThreads", () => {
       message({ id: "1", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z", senderId: null, senderName: null }),
     ]);
     expect(summary?.withName).toBeNull();
+    expect(summary?.withId).toBeNull();
   });
 
   it("does not mutate the messages it was given", () => {

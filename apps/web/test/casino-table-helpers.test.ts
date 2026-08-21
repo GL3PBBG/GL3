@@ -17,7 +17,7 @@ const TABLE_ID = "0192f0a0-0000-7000-8000-000000000010";
 const LOCATION_ID = "0192f0a0-0000-7000-8000-000000000001";
 
 function seat(over: Partial<CasinoTableSeat> = {}): CasinoTableSeat {
-  return { seat: 0, username: "Punter", wager: "0", leaving: false, idleHands: 0, ...over };
+  return { seat: 0, playerId: "00000000-0000-7000-8000-000000000001", username: "Punter", wager: "0", leaving: false, idleHands: 0, ...over };
 }
 
 function view(over: Partial<CasinoTableView> = {}): CasinoTableView {

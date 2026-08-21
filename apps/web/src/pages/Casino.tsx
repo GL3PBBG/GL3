@@ -18,6 +18,7 @@ import type {
   CasinoTableGame, CasinoTableSeat, CasinoTableView,
 } from "@gl3/shared";
 import { SlotImage } from "../components/GameImage.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 
 /**
  * Why the wager the player typed cannot be staked, in the server's own order.
@@ -304,7 +305,7 @@ function SeatRow({ seat, view }: {
     <li className={isTurn ? `${styles.row} ${styles.rowCurrent}` : styles.row}>
       <span className={styles.rowStack}>
         <span className={isMine ? styles.self : undefined}>
-          Seat {seat.seat + 1} — {seat.username}{isMine ? " (you)" : ""}
+          Seat {seat.seat + 1} — <PlayerLink playerId={seat.playerId} username={seat.username} />{isMine ? " (you)" : ""}
         </span>
         <span className={styles.meta}>
           {staked ? <>stake <Money value={seat.wager} /></> : "no stake"}

@@ -30,6 +30,7 @@ export const OcInviteSchema = z.object({
   heistId: IdSchema,
   role: z.string(),
   buyIn: MoneySchema,
+  leaderId: IdSchema,
   leaderUsername: z.string(),
 });
 export type OcInvite = z.infer<typeof OcInviteSchema>;

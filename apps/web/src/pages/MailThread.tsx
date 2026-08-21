@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMailThread, useMarkMailRead, useMe, useSendMail } from "../api/queries.js";
 import { counterpartName } from "../lib/mail.js";
+import { Markdown } from "../components/Markdown.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -55,9 +57,12 @@ function Thread({ threadId, viewerId }: { threadId: string; viewerId: string }):
           {list.map((message) => (
             <article key={message.id}>
               <p className={styles.meta}>
-                {message.senderName ?? "The management"} · <When iso={message.createdAt} />
+                {message.senderId !== null && message.senderName !== null
+                  ? <PlayerLink playerId={message.senderId} username={message.senderName} />
+                  : "The management"}
+                {" · "}<When iso={message.createdAt} />
               </p>
-              <p className={styles.prose}>{message.body}</p>
+              <Markdown text={message.body} />
             </article>
           ))}
         </div>

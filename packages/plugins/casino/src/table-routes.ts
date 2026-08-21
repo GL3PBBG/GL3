@@ -277,6 +277,7 @@ export async function renderTablePayload(
     maxBet: house.maxBet.toString(),
     seats: seats.map((s) => ({
       seat: s.seatNo,
+      playerId: s.playerId,
       username: names.get(s.playerId) ?? "",
       wager: s.wager.toString(),
       leaving: s.leaving,
