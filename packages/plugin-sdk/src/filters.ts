@@ -106,6 +106,13 @@ export interface BoundFilterSubscription {
  * subscriber's error, aborting the chain (the default shape prior points
  * had); `"collect"` logs and drops a throwing subscriber's contribution,
  * carrying the previous value forward to the next subscriber instead.
+ *
+ * `"collect"` isolates a subscriber's *throw*, not its *mutation*: a
+ * subscriber that mutates the threaded value in place (pushes onto an array
+ * it was handed, rewrites another plugin's entry) instead of returning a
+ * copy is unguarded — the mutation lands regardless of what the subscriber
+ * returns or whether a later subscriber throws. Treat the incoming value as
+ * read-only and return a copy, as every shipped subscriber does.
  */
 export async function runFilterChain<T>(
   bound: readonly BoundFilterSubscription[],

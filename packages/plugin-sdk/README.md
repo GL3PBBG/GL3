@@ -310,6 +310,12 @@ value forward instead. A point's owner picks the policy once, at declaration —
 a UI seam that should degrade rather than break wants `"collect"`; a point
 whose subscribers must all succeed or none should wants `"propagate"`.
 
+`"collect"` isolates a subscriber's *throw*, not its *mutation* — a subscriber
+that mutates the threaded value in place instead of returning a copy is
+unguarded, whatever it returns or whichever later subscriber throws. Treat the
+incoming value as read-only and return a copy, the way every shipped
+subscriber does.
+
 Each subscriber runs against **its own plugin's ctx**, not the ctx of
 whichever plugin triggered the chain: `runFilterChain` looks up a
 `BoundFilterSubscription`'s `ownerId` and calls `ctxFor(ownerId)` per
