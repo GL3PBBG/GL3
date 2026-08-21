@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMailThread, useMarkMailRead, useMe, useSendMail } from "../api/queries.js";
 import { counterpartName } from "../lib/mail.js";
 import { Markdown } from "../components/Markdown.js";
+import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -98,14 +99,10 @@ function Reply({ threadId, to, subject }: { threadId: string; to: string; subjec
   return (
     <Panel title={`Reply to ${to}`}>
       <div className={styles.stack}>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.meta}>Message</span>
-          <textarea
-            maxLength={5000}
-            value={body}
-            onChange={(event) => { setBody(event.target.value); }}
-          />
-        </label>
+          <MarkdownEditor maxLength={5000} value={body} onChange={setBody} />
+        </div>
         <div className={styles.actions}>
           <button type="button" disabled={!valid || send.isPending} onClick={submit}>Send</button>
         </div>

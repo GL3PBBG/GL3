@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ProfileDto, UpdateProfileRequest } from "@gl3/shared";
 import { useMe, useProfile, useUpdateProfile } from "../api/queries.js";
+import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { ProfileCard } from "../components/ProfileCard.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -46,14 +47,10 @@ function EditProfile({ viewerId, profile }: { viewerId: string; profile: Profile
   return (
     <Panel title="Edit profile">
       <div className={styles.stack}>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.meta}>Bio</span>
-          <textarea
-            maxLength={1000}
-            value={bio}
-            onChange={(event) => { setBio(event.target.value); }}
-          />
-        </label>
+          <MarkdownEditor maxLength={1000} value={bio} onChange={setBio} />
+        </div>
         <label className={styles.field}>
           <span className={styles.meta}>Avatar URL (http or https)</span>
           <input

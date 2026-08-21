@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCreateTopic, useForumTopics, useForums } from "../api/queries.js";
+import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -116,14 +117,10 @@ function NewTopic({ forumId }: { forumId: string }): JSX.Element {
             onChange={(event) => { setSubject(event.target.value); }}
           />
         </label>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.meta}>Message</span>
-          <textarea
-            maxLength={10_000}
-            value={body}
-            onChange={(event) => { setBody(event.target.value); }}
-          />
-        </label>
+          <MarkdownEditor maxLength={10_000} value={body} onChange={setBody} />
+        </div>
         <div className={styles.actions}>
           <button type="button" disabled={!valid || create.isPending} onClick={submit}>
             Post topic
