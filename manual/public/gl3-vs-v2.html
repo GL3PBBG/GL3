@@ -213,9 +213,9 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
           <td>Documented lock graph, 7 ABBA regression tests, at-least-once job idempotency keys.</td>
         </tr>
         <tr>
-          <td><strong>Injection &amp; input</strong></td>
-          <td>PDO prepared statements throughout — genuinely not SQL-injectable, which is more than many scripts of its era manage. Request input is otherwise unvalidated and untyped.</td>
-          <td>Every query goes through a query builder that parameterises interpolated values. <code>sql.raw</code> appears in exactly one executing line in the entire codebase — plugin-authored DDL at boot — carrying a comment saying it is "correct here and nowhere else… nothing player-supplied can reach it." Every external boundary is zod-parsed: HTTP bodies, route params, query strings, WebSocket frames in both directions, and bus messages. Player-typed markdown is sanitised with DOMPurify running last over the rendered HTML. CORS is a strict allowlist that <em>refuses to boot</em> on a wildcard.</td>
+          <td><strong>Injection &amp; the wire</strong></td>
+          <td>PDO prepared statements throughout — genuinely not SQL-injectable, which is more than many scripts of its era manage. Beyond the query there is no contract: request input is unvalidated, and responses are HTML assembled by each module.</td>
+          <td>Every query goes through a query builder that parameterises interpolated values. <code>sql.raw</code> appears in exactly one executing line in the entire codebase — plugin-authored DDL at boot — carrying a comment saying it is "correct here and nowhere else… nothing player-supplied can reach it." Every external boundary is zod-parsed: HTTP bodies, route params, query strings, WebSocket frames in both directions, and bus messages. Nothing crosses the wire untyped — 30 DTO modules in one shared package define every shape, the server validates against them inbound and the client parses every response against them on arrival, so the contract is enforced from both ends and the reference documentation is generated from the same schemas. Player-typed markdown is sanitised with DOMPurify running last over the rendered HTML. CORS is a strict allowlist that <em>refuses to boot</em> on a wildcard.</td>
         </tr>
         <tr>
           <td><strong>Passwords</strong></td>
