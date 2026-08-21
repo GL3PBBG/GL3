@@ -19,6 +19,17 @@ export const items = pgTable("items", {
   name: text("name").notNull(),
   itemType: text("item_type").notNull(),
   effects: jsonb("effects").notNull(),
+  /**
+   * V2's `itemMeta` key/value table, collapsed by the M4 migrator. Core owns
+   * the column (`db/schema/content.ts`), so this is a projection and needs no
+   * migration here. An item effect def reads it as the non-editable half of
+   * its config — see `effect-registry.ts`.
+   *
+   * `.default({})` mirrors core's DDL, and is what keeps `meta` optional on
+   * the admin create insert below — this projection generates no DDL of its
+   * own, so the default only ever informs drizzle's insert types.
+   */
+  meta: jsonb("meta").notNull().default({}),
 });
 
 export const playerItems = pgTable("player_items", {
@@ -29,6 +40,7 @@ export const playerItems = pgTable("player_items", {
 
 export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
+  cash: bigint("cash", { mode: "bigint" }).notNull(),
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
   rankId: uuid("rank_id"),

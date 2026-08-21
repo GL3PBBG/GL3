@@ -15,6 +15,19 @@ export function numericEffect(effects: unknown, field: string): number | null {
 }
 
 /**
+ * `numericEffect`'s twin for the one string field in the vocabulary: a
+ * consumable's `effects.kind`, which names its def in the server's item effect
+ * registry. Absent and empty both read as `null` — the server treats both as
+ * the built-in heal, so a page must not show either as a kind of its own.
+ */
+export function stringEffect(effects: unknown, field: string): string | null {
+  if (typeof effects !== "object" || effects === null) return null;
+  const value = (effects as Record<string, unknown>)[field];
+  if (typeof value !== "string" || value === "") return null;
+  return value;
+}
+
+/**
  * The weapon stat line `/inventory` and `/shop` both render, or `null` when the
  * damage range is unusable. Shared so the two pages cannot drift; pure so it can
  * be tested at all, since neither project has a DOM to render a component in.

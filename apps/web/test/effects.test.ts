@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numericEffect, shotsToKill, weaponStatLine } from "../src/lib/effects.js";
+import { numericEffect, shotsToKill, stringEffect, weaponStatLine } from "../src/lib/effects.js";
 
 describe("numericEffect", () => {
   it("reads a numeric field out of an unknown effects blob", () => {
@@ -23,6 +23,25 @@ describe("numericEffect", () => {
 
   it("returns null for NaN", () => {
     expect(numericEffect({ armor: Number.NaN }, "armor")).toBeNull();
+  });
+});
+
+describe("stringEffect", () => {
+  it("reads a consumable's effect kind", () => {
+    expect(stringEffect({ kind: "tonic" }, "kind")).toBe("tonic");
+  });
+
+  it("reads an absent or empty kind as null, the way the server reads it as heal", () => {
+    // The server treats absent and "" identically (both select the built-in
+    // heal def), so the page must not show either as a kind of its own.
+    expect(stringEffect({ heal: 20 }, "kind")).toBeNull();
+    expect(stringEffect({ kind: "" }, "kind")).toBeNull();
+  });
+
+  it("returns null for a non-string value rather than coercing it", () => {
+    expect(stringEffect({ kind: 7 }, "kind")).toBeNull();
+    expect(stringEffect(null, "kind")).toBeNull();
+    expect(stringEffect("nope", "kind")).toBeNull();
   });
 });
 

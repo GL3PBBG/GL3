@@ -2,7 +2,7 @@ import type { InventoryItem } from "@gl3/shared";
 import { Link } from "react-router-dom";
 import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
-import { numericEffect, weaponStatLine } from "../lib/effects.js";
+import { numericEffect, stringEffect, weaponStatLine } from "../lib/effects.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
 
@@ -15,6 +15,9 @@ import { GameImage } from "../components/GameImage.js";
 const WEAPON = "weapon";
 const ARMOR = "armor";
 const CONSUMABLE = "consumable";
+
+/** The server's built-in effect kind, and what an absent `kind` means there. */
+const HEAL_KIND = "heal";
 
 /** Plugin-contributed links from `inventory.itemActions` (e.g. combat's gunsmith repair). */
 function ItemActions({ item }: { item: InventoryItem }): JSX.Element | null {
@@ -29,6 +32,12 @@ function ItemActions({ item }: { item: InventoryItem }): JSX.Element | null {
   );
 }
 
+/** True for the built-in heal effect, which is every item with no `kind`. */
+function isHealItem(item: InventoryItem): boolean {
+  const kind = stringEffect(item.effects, "kind");
+  return kind === null || kind === HEAL_KIND;
+}
+
 function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
   if (item.itemType === WEAPON) {
     const line = weaponStatLine(item.effects);
@@ -41,6 +50,14 @@ function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
     return <span className={styles.muted}>{armor} armor</span>;
   }
   if (item.itemType === CONSUMABLE) {
+    // A consumable names a server-side effect def with `kind`; the label comes
+    // back on the row when one is registered for it. Absent kind is the
+    // built-in heal, which is every migrated item and reads better as a
+    // sentence than as a name.
+    const kind = stringEffect(item.effects, "kind");
+    if (kind !== null && kind !== HEAL_KIND) {
+      return <span className={styles.muted}>{item.effectLabel ?? kind}</span>;
+    }
     const heal = numericEffect(item.effects, "heal");
     if (heal === null) return <span className={styles.muted}>unusable</span>;
     return <span className={styles.muted}>heals {heal}</span>;
@@ -175,6 +192,14 @@ export function Inventory(): JSX.Element {
           <div>
             <h3 className={styles.meta}>Consumables</h3>
             {full ? <p className={styles.bad}>You're at full health — nothing to heal.</p> : null}
+            {/*
+              The def's own line from the last use, shown as text. It is
+              third-party copy the server truncates, so it is rendered here and
+              never interpreted as markup.
+            */}
+            {useItem.data?.message ? (
+              <p className={styles.meta}>{useItem.data.message}</p>
+            ) : null}
             <ul className={styles.rows}>
               {consumables.map((item) => (
                 <li key={item.itemId} className={styles.row}>
@@ -185,7 +210,10 @@ export function Inventory(): JSX.Element {
                   <ItemActions item={item} />
                   <button
                     type="button"
-                    disabled={useItem.isPending || full}
+                    // Full health only blocks a HEAL item — the server refuses
+                    // exactly those with `already_full`. An effect that grants
+                    // exp or pays out has nothing to do with the health bar.
+                    disabled={useItem.isPending || (full && isHealItem(item))}
                     onClick={() => useItem.mutate(item.itemId)}
                   >
                     Use

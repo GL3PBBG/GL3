@@ -14,6 +14,15 @@ import {
   readEffects,
   WeaponEffectsSchema,
 } from "./effects.js";
+import {
+  boundOutcome,
+  buildEffectRegistry,
+  consumableKind,
+  guardEffect,
+  HEAL_EFFECT_KIND,
+  itemEffects,
+  readConsumableUse,
+} from "./effect-registry.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
 import { items, locations, playerItems, playerStats, ranks } from "./schema.js";
 import { purchasedEvent, shopBuyRoute, shopListRoute } from "./shop.js";
@@ -73,6 +82,14 @@ const listRoute = route({
       actions: [],
     });
 
+    // Only when the player actually holds a consumable: the registry costs a
+    // second filter chain, and a page listing nothing but weapons has no use
+    // for it. `label` is server-side, so a non-heal consumable would otherwise
+    // reach the page as a bare kind string.
+    const effectLabels = owned.some((row) => row.itemType === ITEM_TYPE_CONSUMABLE)
+      ? await buildEffectRegistry(ctx)
+      : new Map<string, { label: string }>();
+
     return {
       status: 200,
       body: {
@@ -96,11 +113,23 @@ const listRoute = route({
               }
               return parsed.success;
             });
+          // An unregistered kind gets no label: the page falls back to the raw
+          // kind, which is more honest than inventing a name for a def this
+          // deployment does not have.
+          // Omitted for the built-in heal too: the page renders "heals 20" for
+          // that from `effects` alone and has no use for a second name.
+          const kind = row.itemType === ITEM_TYPE_CONSUMABLE
+            ? consumableKind(row.effects)
+            : null;
+          const label = kind === null || kind === HEAL_EFFECT_KIND
+            ? undefined
+            : effectLabels.get(kind)?.label;
           return {
             ...row,
             effects: readEffects(row.itemType, row.effects),
             ...(art.has(row.itemId) ? { imageUrl: art.get(row.itemId) as string } : {}),
             ...(rowActions.length > 0 ? { actions: rowActions } : {}),
+            ...(label !== undefined ? { effectLabel: label } : {}),
           };
         }),
         equipped: {
@@ -210,22 +239,41 @@ const useRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
+    // Filters run OUTSIDE any transaction (spec: Filters), so the registry is
+    // built before the lock is taken rather than inside the handler below.
+    const registry = await buildEffectRegistry(ctx);
+
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
 
       const [owned] = await tx.db
-        .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
+        .select({
+          itemType: items.itemType,
+          effects: items.effects,
+          meta: items.meta,
+          qty: playerItems.qty,
+        })
         .from(playerItems)
         .innerJoin(items, eq(items.id, playerItems.itemId))
         .where(and(eq(playerItems.playerId, player.id), eq(playerItems.itemId, params.itemId)));
       if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
       if (owned.itemType !== ITEM_TYPE_CONSUMABLE) throw new PluginError("wrong_slot", 400);
 
-      const parsed = ConsumableEffectsSchema.safeParse(owned.effects);
-      if (!parsed.success) throw new PluginError("wrong_slot", 400);
+      const use = readConsumableUse(owned.effects, owned.meta);
+      if (use === null) throw new PluginError("wrong_slot", 400);
+
+      // Resolved BEFORE the decrement: an item naming a kind nobody registered
+      // must not be spent. Same position the `wrong_slot` parse used to hold.
+      const def = registry.get(use.kind);
+      if (def === undefined) throw new PluginError("unknown_effect", 400, { kind: use.kind });
 
       const [stats] = await tx.db
-        .select({ health: playerStats.health, maxHealth: ranks.maxHealth })
+        .select({
+          health: playerStats.health,
+          exp: playerStats.exp,
+          cash: playerStats.cash,
+          maxHealth: ranks.maxHealth,
+        })
         .from(playerStats)
         .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
         .where(eq(playerStats.playerId, player.id));
@@ -236,7 +284,12 @@ const useRoute = route({
       // rank row yet. A plugin cannot import that constant from apps/server,
       // so the two must be kept in step by hand.
       const maxHealth = stats.maxHealth ?? 100;
-      if (stats.health >= maxHealth) throw new PluginError("already_full", 409);
+      // Only the built-in heal refuses at full health. A def that grants exp
+      // or pays out has nothing to do with health, and gating it on a full
+      // health bar would make it unusable for no reason.
+      if (use.kind === HEAL_EFFECT_KIND && stats.health >= maxHealth) {
+        throw new PluginError("already_full", 409);
+      }
 
       // The decrement is the guard, not a preceding read: `qty > 0` in the
       // WHERE makes a concurrent second use match zero rows instead of driving
@@ -254,12 +307,57 @@ const useRoute = route({
       const remaining = decremented[0]?.qty;
       if (remaining === undefined) throw new PluginError("not_owned", 409);
 
-      const health = Math.min(maxHealth, stats.health + parsed.data.heal);
-      await tx.db.update(playerStats).set({ health }).where(eq(playerStats.playerId, player.id));
+      const snapshot = {
+        health: stats.health,
+        maxHealth,
+        exp: Number(stats.exp),
+        cash: stats.cash.toString(),
+      };
+      // The def is pure and third-party; `guardEffect` is what keeps its throw
+      // a 400 rather than a 500, and `boundOutcome` is what keeps its figures
+      // from minting health, exp or money.
+      const outcome = guardEffect(use.kind, () => def.apply(use.config, snapshot));
+      const bounded = boundOutcome(outcome, snapshot);
+
+      if (bounded.health !== stats.health) {
+        await tx.db
+          .update(playerStats)
+          .set({ health: bounded.health })
+          .where(eq(playerStats.playerId, player.id));
+      }
+      if (bounded.expDelta !== 0n) {
+        await tx.db
+          .update(playerStats)
+          .set({ exp: sql`${playerStats.exp} + ${bounded.expDelta}` })
+          .where(eq(playerStats.playerId, player.id));
+      }
+      let cash = stats.cash;
+      if (bounded.cashDelta !== 0n) {
+        // CLAUDE.md rule 3: every balance movement goes through the ledger
+        // path, the same one `POST /api/shop/buy` uses. `boundOutcome` has
+        // already floored the debit at the player's own cash, so the
+        // InsufficientFundsError arm shop/buy needs cannot be reached here.
+        cash = await tx.economy.applyBalanceChange({
+          playerId: player.id,
+          amount: bounded.cashDelta,
+          kind: "cash",
+          reason: `inventory.effect.${use.kind}`,
+          refId: params.itemId,
+        });
+      }
 
       return {
         status: 200,
-        body: { health, healed: health - stats.health, qty: remaining },
+        body: {
+          health: bounded.health,
+          healed: bounded.healed,
+          qty: remaining,
+          exp: (stats.exp + bounded.expDelta).toString(),
+          cash: cash.toString(),
+          // Omitted rather than null when the def said nothing:
+          // `exactOptionalPropertyTypes` makes the spread the honest form.
+          ...(bounded.message !== null ? { message: bounded.message } : {}),
+        },
       };
     });
   },
@@ -312,7 +410,21 @@ const WeaponStatsShape = {
 } as const;
 
 const ArmorStatsShape = { armor: z.coerce.number().int().nonnegative() } as const;
-const ConsumableStatsShape = { heal: z.coerce.number().int().positive() } as const;
+
+/**
+ * `kind` names a def in the `inventory.itemEffects` registry; blank is the
+ * built-in `heal`, which is what every existing item is. `heal` is blankable
+ * for the same reason it became optional in `ConsumableEffectsSchema` — a
+ * non-heal consumable has no heal figure — and `effectsFor` is what still
+ * insists on one when the kind IS heal.
+ *
+ * There is deliberately no generic `meta` editor: `meta` arrives from the M4
+ * migrator and is a def's non-editable config half.
+ */
+const ConsumableStatsShape = {
+  heal: blankable(z.coerce.number().int().positive()),
+  kind: blankable(z.string().min(1).max(40)),
+} as const;
 
 const ItemBodySchema = z.discriminatedUnion("itemType", [
   z.object({
@@ -387,8 +499,18 @@ function effectsFor(body: ItemStatsBody): unknown {
         });
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
-      case ITEM_TYPE_CONSUMABLE:
-        return ConsumableEffectsSchema.parse({ heal: body.heal });
+      case ITEM_TYPE_CONSUMABLE: {
+        // The built-in heal def refuses an item with no heal figure. Catching
+        // that here makes it a 400 at authoring time rather than a `wrong_slot`
+        // the first player to spend the item discovers.
+        if (body.kind === undefined && body.heal === undefined) {
+          throw new Error("a heal consumable needs a heal figure");
+        }
+        return ConsumableEffectsSchema.parse({
+          ...(body.kind !== undefined && { kind: body.kind }),
+          ...(body.heal !== undefined && { heal: body.heal }),
+        });
+      }
     }
   } catch {
     throw new PluginError("invalid_effects", 400);
@@ -424,7 +546,8 @@ const ShopStockBodySchema = z.object({
 function statCells(itemType: string, effects: unknown): Record<string, string> {
   const blank = {
     damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
-    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", armor: "", heal: "",
+    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", armor: "",
+    heal: "", effect: "",
   };
   const parsed = readEffects(itemType, effects);
   const known = itemType === ITEM_TYPE_WEAPON
@@ -458,8 +581,18 @@ function statCells(itemType: string, effects: unknown): Record<string, string> {
     }
     case ITEM_TYPE_ARMOR:
       return { ...blank, armor: String(ArmorEffectsSchema.parse(parsed).armor) };
-    default:
-      return { ...blank, heal: String(ConsumableEffectsSchema.parse(parsed).heal) };
+    default: {
+      const c = ConsumableEffectsSchema.parse(parsed);
+      return {
+        ...blank,
+        // Em dash, like a weapon's absent accuracy: a non-heal consumable has
+        // no heal figure, and "0" would read as one that heals nothing.
+        heal: c.heal === undefined ? "—" : String(c.heal),
+        // The kind the item selects in the effect registry. Whether a def for
+        // it is installed is a runtime question this listing does not ask.
+        effect: consumableKind(parsed) ?? HEAL_EFFECT_KIND,
+      };
+    }
   }
 }
 
@@ -677,6 +810,20 @@ const WEAPON_STAT_FORM_FIELDS = [
   { name: "dps", label: "Damage/sec (blank = flat cooldown)", type: "decimal" },
 ] as const satisfies readonly { name: string; label: string; type: "number" | "decimal" }[];
 
+/**
+ * Spread into both consumable forms for the same reason the weapon fields are:
+ * the two must offer the same stats.
+ *
+ * `kind` is a free text field rather than a select. The registry is assembled
+ * at request time from a filter chain, and the admin page's data sources are
+ * plain routes — a select would need its own route running the chain, for a
+ * value an operator installing a def already knows.
+ */
+const CONSUMABLE_STAT_FORM_FIELDS = [
+  { name: "heal", label: "Heal (blank for a non-heal effect)", type: "number" },
+  { name: "kind", label: "Effect kind (blank = heal)", type: "text" },
+] as const satisfies readonly { name: string; label: string; type: "number" | "text" }[];
+
 const adminPage: PageSchema = {
   id: "inventory-admin",
   path: "/admin/inventory",
@@ -699,6 +846,7 @@ const adminPage: PageSchema = {
             { key: "dps", label: "DPS" },
             { key: "armor", label: "Armor" },
             { key: "heal", label: "Heal" },
+            { key: "effect", label: "Effect" },
           ], rowActions: [
             { label: "Delete", action: "DELETE /api/admin/inventory/items/:id", confirm: "Delete this item? Refused while any player owns or wields one." },
           ] },
@@ -715,7 +863,7 @@ const adminPage: PageSchema = {
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add consumable", fields: [
             { name: "name", label: "Name", type: "text" },
             { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
-            { name: "heal", label: "Heal", type: "number" },
+            ...CONSUMABLE_STAT_FORM_FIELDS,
           ] },
         ],
       },
@@ -739,7 +887,7 @@ const adminPage: PageSchema = {
             { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
             { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
             { name: "name", label: "Rename to (optional)", type: "text" },
-            { name: "heal", label: "Heal", type: "number" },
+            ...CONSUMABLE_STAT_FORM_FIELDS,
           ] },
         ],
       },
@@ -770,6 +918,35 @@ const adminPage: PageSchema = {
 
 export { itemPriceAt } from "./pricing.js";
 
+/**
+ * The open item effect registry. A plugin adds an effect by subscribing to
+ * `itemEffects` with a def whose `apply` is pure — the way `bounties`
+ * subscribes to combat's `killResolved` and a casino game registers through
+ * `casino.games`.
+ *
+ * The bounding half (`boundOutcome` and its caps) is exported for tests and
+ * for anyone auditing what a def can and cannot do; nothing outside this
+ * plugin needs to call it, because the use route is the only place a def runs.
+ */
+export {
+  boundOutcome,
+  buildEffectRegistry,
+  consumableKind,
+  guardEffect,
+  HEAL_EFFECT,
+  HEAL_EFFECT_KIND,
+  itemEffects,
+  MAX_CASH_PER_USE,
+  MAX_EXP_PER_USE,
+  MIN_HEALTH_AFTER_USE,
+  readConsumableUse,
+  type BoundedOutcome,
+  type ConsumableUse,
+  type ItemEffectDef,
+  type ItemEffectOutcome,
+  type ItemEffectSnapshot,
+} from "./effect-registry.js";
+
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
@@ -783,7 +960,7 @@ export default definePlugin({
     adminLocationListRoute,
   ],
   events: [purchasedEvent],
-  provides: [itemActions],
+  provides: [itemActions, itemEffects],
   // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts
   // a no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a

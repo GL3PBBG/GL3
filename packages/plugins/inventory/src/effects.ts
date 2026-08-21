@@ -57,9 +57,20 @@ export const ArmorEffectsSchema = z.object({
   armor: z.number().int().nonnegative(),
 });
 
+/**
+ * OPEN, unlike the weapon and armor schemas: a consumable's effects name a
+ * `kind` in the `inventory.itemEffects` registry and carry whatever config
+ * that kind's def reads, so this plugin cannot enumerate the keys. `.passthrough()`
+ * is what lets a third-party def's config survive the round trip to the client.
+ *
+ * `heal` is still declared — it is the built-in def's whole config and every
+ * existing item's only key — but optional now, because a non-heal consumable
+ * has no heal figure. An absent `kind` means `heal`; see `consumableKind`.
+ */
 export const ConsumableEffectsSchema = z.object({
-  heal: z.number().int().positive(),
-});
+  kind: z.string().min(1).optional(),
+  heal: z.number().int().positive().optional(),
+}).passthrough();
 
 export type WeaponEffects = z.infer<typeof WeaponEffectsSchema>;
 export type ArmorEffects = z.infer<typeof ArmorEffectsSchema>;

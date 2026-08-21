@@ -220,6 +220,8 @@ describe("inventory admin", () => {
         dps: "1.5",
         armor: "",
         heal: "",
+        // The effect kind cell, blank for anything that is not a consumable.
+        effect: "",
       });
       expect(rows[0]).not.toHaveProperty("effects");
     });
