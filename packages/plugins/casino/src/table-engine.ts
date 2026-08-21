@@ -51,19 +51,25 @@ export function clockLapsed(table: TableRow, now: number = Date.now()): boolean 
 }
 
 /**
- * Tells every seat at the table that it moved: one silent `table` event per
- * seated player, published INSIDE the transaction. The loader buffers and
- * flushes after commit, so rule 5 holds without the caller doing anything —
- * and a rollback drops these with everything else, which is the point.
+ * Tells every seat the table moved: one silent `table` event per player,
+ * published INSIDE the transaction. The loader buffers and flushes after
+ * commit, so rule 5 holds without the caller doing anything — and a rollback
+ * drops these with everything else, which is the point.
  *
- * `seats` is the seat set as it stands AFTER the change, so a seat this
- * transaction freed is not told; the caller has the response it answered with,
- * and any other freed seat learns at its next poll. The actor is the caller
- * throughout, recipients included — the client dedupes by cache semantics, and
- * one uniform loop beats a special case for the seat that acted.
+ * `seats` is the UNION of the seat set before the change and the seat set
+ * after it, which is why this deduplicates by player id rather than trusting
+ * `p_casino_seats`' game-wide UNIQUE(player_id). The union is deliberate: a
+ * seat this transaction FREED — by leaving, by the idle sweep, or by a settle
+ * that emptied and deleted the table — is exactly the client whose cache is
+ * now most wrong, and the post-change set is the one place it does not appear.
+ * Telling it costs one more send and saves it a wait on the 15s poll.
  *
- * At most `MAX_TABLE_SEATS` sends, and `p_casino_seats`' game-wide
- * UNIQUE(player_id) is what makes one seat per player here.
+ * The actor is the caller throughout, recipients included — the client dedupes
+ * by cache semantics, and one uniform loop beats a special case for the seat
+ * that acted.
+ *
+ * At most `MAX_TABLE_SEATS` + 1 distinct sends: the union can only add seats
+ * the change removed, and a table never holds more than its seat count.
  */
 export async function publishTableTick(
   tx: PluginTx, ctx: PluginCtx, seats: readonly { playerId: string }[], tableId: string,
@@ -73,7 +79,10 @@ export async function publishTableTick(
   // player before it opens a transaction. Skipped rather than thrown so a
   // future job-driven caller loses its tick instead of its transaction.
   if (actor === null) return;
+  const told = new Set<string>();
   for (const seat of seats) {
+    if (told.has(seat.playerId)) continue;
+    told.add(seat.playerId);
     await tx.events.publish({
       name: tableTickEvent.name,
       actorId: actor.id,
