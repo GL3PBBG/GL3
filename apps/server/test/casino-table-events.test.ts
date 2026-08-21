@@ -137,27 +137,68 @@ const isTableTick = (event: GameEvent): event is PluginEnvelope =>
   event.type === "plugin.event" && event.pluginId === "casino" && event.name === "table";
 
 /**
- * Every `game:events` frame naming `actorId` inside a window, `awaitOwnEvent`'s
- * collecting twin — needed because one table transaction publishes N ticks
- * with the SAME actor and different audiences, and `awaitOwnEvent` settles on
- * the first. Same rule-4 filter, same `GameEventSchema.safeParse` on the way
- * in, so another file's traffic is discarded rather than asserted against.
+ * `awaitOwnEvent`'s collecting twin: resolves as soon as `expected` table ticks
+ * naming `actorId` have arrived, and rejects at `timeoutMs` naming what it did
+ * get. Needed because one table transaction publishes N ticks with the SAME
+ * actor and different audiences, and `awaitOwnEvent` settles on the first.
+ *
+ * COUNT-DRIVEN, NOT WINDOW-DRIVEN, and that is the whole point of the shape.
+ * A fixed window opened before the request is a bet on how long that request
+ * takes under load, which is how a test like this goes flaky on a busy box
+ * (NOTES.md: flaky means broken). The count is known exactly — it is the seat
+ * set the case constructed — so the happy path never waits at all and the
+ * deadline is only ever the failure path.
+ *
+ * Same rule-4 filter as `awaitOwnEvent` and the same
+ * `GameEventSchema.safeParse` on the way in, so another file's traffic is
+ * discarded rather than asserted against.
  */
-function collectOwnEvents(actorId: string, windowMs: number): Promise<GameEvent[]> {
-  return new Promise((resolve) => {
-    const seen: GameEvent[] = [];
+function collectOwnTicks(
+  actorId: string, expected: number, timeoutMs = 5000,
+): Promise<PluginEnvelope[]> {
+  return new Promise((resolve, reject) => {
+    const seen: PluginEnvelope[] = [];
+    const finish = (): void => {
+      clearTimeout(timer);
+      subscriber.off("message", onMessage);
+    };
     const onMessage = (channel: string, raw: string): void => {
       if (channel !== GAME_EVENTS_CHANNEL) return;
       const parsed = GameEventSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.actorId !== actorId) return;
+      if (!isTableTick(parsed.data)) return;
       seen.push(parsed.data);
+      if (seen.length >= expected) {
+        finish();
+        resolve(seen);
+      }
     };
+    const timer = setTimeout(() => {
+      finish();
+      reject(new Error(
+        `collectOwnTicks: wanted ${expected} table ticks for ${actorId} within `
+        + `${timeoutMs}ms, got ${seen.length} (${tickedPlayerIds(seen).join(", ")})`,
+      ));
+    }, timeoutMs);
     subscriber.on("message", onMessage);
-    setTimeout(() => {
-      subscriber.off("message", onMessage);
-      resolve(seen);
-    }, windowMs);
   });
+}
+
+/**
+ * Marks a pending expectation as handled the moment it is created.
+ *
+ * Both helpers above reject on a deadline, and every case here creates them
+ * BEFORE the request whose events they are waiting for. If an assertion
+ * between those two points fails, the promise is still pending and nothing
+ * ever awaits it — vitest would report the real assertion failure and then, up
+ * to five seconds later, an unhandled rejection attributed to whichever test
+ * happened to be running by then. Attaching a no-op handler leaves `await`
+ * behaving exactly as before (the promise still rejects for the awaiting
+ * caller) while making that phantom failure impossible.
+ */
+function armed<T>(pending: Promise<T>): Promise<T> {
+  pending.catch(() => undefined);
+  return pending;
 }
 
 /** The audience player ids of the ticks in `events`, sorted for comparison. */
@@ -207,8 +248,9 @@ describe("POST /api/casino/table/bet", () => {
     const { tableId, players } = await seatTable(2);
     const [a, b] = players as [typeof players[0], typeof players[0]];
 
-    const collected = collectOwnEvents(a.playerId, 1000);
-    const first = awaitOwnEvent(subscriber, a.playerId);
+    // Two seats, so two ticks — the count the collector waits for.
+    const collected = armed(collectOwnTicks(a.playerId, 2));
+    const first = armed(awaitOwnEvent(subscriber, a.playerId));
 
     expect((await bet(a.token, 10_000n)).statusCode).toBe(200);
 
@@ -222,8 +264,7 @@ describe("POST /api/casino/table/bet", () => {
       payload: { tableId },
     });
 
-    const ticks = (await collected).filter(isTableTick);
-    expect(ticks).toHaveLength(2);
+    const ticks = await collected;
     expect(tickedPlayerIds(ticks)).toEqual([a.playerId, b.playerId].sort());
     // The actor is the CALLER for every one of them, including the tick
     // addressed to the seat that did not act.
@@ -235,19 +276,22 @@ describe("POST /api/casino/table/bet", () => {
 
   it("does not tick a player seated at a different table", async () => {
     const { players } = await seatTable(2);
-    const [a] = players as [typeof players[0]];
+    const [a] = players as [typeof players[0], typeof players[0]];
 
     // A whole other town, so a whole other table — the bet below is none of
     // this player's business.
     const elsewhere = await seatTable(1);
     const outsider = elsewhere.players[0]!;
 
-    const collected = collectOwnEvents(a.playerId, 1000);
-    const first = awaitOwnEvent(subscriber, a.playerId);
+    // Both of a's own table's ticks, then the assertion: the outsider is not
+    // among the recipients, and there is nothing left in flight that could
+    // still name them.
+    const collected = armed(collectOwnTicks(a.playerId, 2));
     expect((await bet(a.token, 10_000n)).statusCode).toBe(200);
-    await first;
 
-    expect(tickedPlayerIds(await collected)).not.toContain(outsider.playerId);
+    const recipients = tickedPlayerIds(await collected);
+    expect(recipients).toEqual(players.map((p) => p.playerId).sort());
+    expect(recipients).not.toContain(outsider.playerId);
   });
 });
 
@@ -263,17 +307,16 @@ describe("POST /api/casino/table/leave", () => {
     const { tableId, players } = await seatTable(2);
     const [a, b] = players as [typeof players[0], typeof players[0]];
 
-    const collected = collectOwnEvents(b.playerId, 1000);
-    const first = awaitOwnEvent(subscriber, b.playerId);
+    // Two, not one: the seat that stays AND the seat this leave frees.
+    const collected = armed(collectOwnTicks(b.playerId, 2));
 
     // No stake anywhere, so this is the wager-0 fast exit: the seat is freed
     // in this request rather than deferred to a settle.
     const res = await leave(b.token);
     expect(res.statusCode).toBe(200);
     expect(res.json<{ left: boolean; deferred: boolean }>()).toEqual({ left: true, deferred: false });
-    await first;
 
-    const ticks = (await collected).filter(isTableTick);
+    const ticks = await collected;
     expect(tickedPlayerIds(ticks)).toEqual([a.playerId, b.playerId].sort());
     for (const tick of ticks) {
       expect(tick.actorId).toBe(b.playerId);
@@ -290,15 +333,14 @@ describe("POST /api/casino/table/sit", () => {
     const arriving = await register();
     await placePlayer(arriving.playerId, locationId, 1_000_000n);
 
-    const collected = collectOwnEvents(arriving.playerId, 1000);
-    const first = awaitOwnEvent(subscriber, arriving.playerId);
+    // The seat already there plus the arriving caller.
+    const collected = armed(collectOwnTicks(arriving.playerId, 2));
 
     const res = await sit(arriving.token);
     expect(res.statusCode).toBe(200);
     expect(res.json<{ tableId: string }>().tableId).toBe(tableId);
-    await first;
 
-    const ticks = (await collected).filter(isTableTick);
+    const ticks = await collected;
     expect(tickedPlayerIds(ticks)).toEqual([seated.playerId, arriving.playerId].sort());
   });
 });
