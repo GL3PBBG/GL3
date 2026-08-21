@@ -4,7 +4,7 @@ export default defineConfig({
   title: 'GL3',
   description: 'GL3 developer documentation',
   // GitHub Pages serves project sites under /<repo>/.
-  base: '/GL3/',
+  base: '/',
   lastUpdated: true,
   themeConfig: {
     search: { provider: 'local' },
