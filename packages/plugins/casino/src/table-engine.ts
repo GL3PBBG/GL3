@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { isInsufficientFundsError, PluginError, type PluginCtx, type PluginTx } from "@gl3/plugin-sdk";
+import {
+  isInsufficientFundsError, PluginError,
+  type PluginCtx, type PluginEventDecl, type PluginTx,
+} from "@gl3/plugin-sdk";
 import { payOwner, takeOverFrom } from "@gl3/plugin-properties";
 import {
   escrow, exposureOf, frozenHouse, guardGame, notifyTakeover, readOwnerCash, type House,
@@ -38,7 +41,11 @@ export const tableTickEvent = {
   describe: "{actorName} is at the tables",
   invalidates: ["casino"],
   silent: true,
-};
+  // `satisfies`, not a type annotation: the object keeps its literal type for
+  // `tableTickEvent.name` at the publish site, while a typo'd or misspelled
+  // field fails HERE at compile time rather than at boot, where the manifest's
+  // zod parse would report it as an anonymous bad event declaration.
+} satisfies PluginEventDecl;
 
 /**
  * Whether the table's clock owes this transaction something. Exactly the test
