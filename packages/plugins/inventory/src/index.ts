@@ -2,6 +2,7 @@ import {
   definePlugin, filterPoint, newId, PluginError, route,
   type PageSchema,
 } from "@gl3/plugin-sdk";
+import { ItemActionSchema } from "@gl3/shared";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -79,9 +80,22 @@ const listRoute = route({
           // The shared `ItemActionSchema` is `.strict()` on `{ pluginId, label,
           // to }` — `itemId` is implicit from which item's array it lives in,
           // so it is dropped here rather than carried onto the wire twice.
+          // Then re-validated per-action against that same schema: a
+          // `"collect"`-policy subscriber's malformed action (a
+          // `PLUGIN_PACKAGES`-loaded plugin is never typechecked against it)
+          // must lose only its own entry, not the whole inventory row.
           const rowActions = acted.actions
             .filter((a) => a.itemId === row.itemId)
-            .map(({ pluginId, label, to }) => ({ pluginId, label, to }));
+            .map(({ pluginId, label, to }) => ({ pluginId, label, to }))
+            .filter((action) => {
+              const parsed = ItemActionSchema.safeParse(action);
+              if (!parsed.success) {
+                ctx.log.warn("dropped a malformed item action", {
+                  pointName: itemActions.name, itemId: row.itemId, action, issues: parsed.error.issues,
+                });
+              }
+              return parsed.success;
+            });
           return {
             ...row,
             effects: readEffects(row.itemType, row.effects),
