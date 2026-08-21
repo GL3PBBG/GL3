@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TimestampSchema } from "../primitives.js";
-import { ViewNodeDtoSchema } from "./plugins.js";
+import { INTERNAL_PATH_RE, ViewNodeDtoSchema } from "./plugins.js";
 
 /**
  * Typed fragments a plugin contributes into core-owned UI surfaces (the
@@ -11,7 +11,13 @@ import { ViewNodeDtoSchema } from "./plugins.js";
  */
 export const ProfileExtraSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stat"), pluginId: z.string().min(1), label: z.string().min(1), value: z.string() }).strict(),
-  z.object({ kind: z.literal("link"), pluginId: z.string().min(1), label: z.string().min(1), to: z.string().min(1) }).strict(),
+  z.object({
+    kind: z.literal("link"), pluginId: z.string().min(1), label: z.string().min(1),
+    // Same sink, same rule as view-node link.to and menu path (dto/plugins.ts):
+    // rendered as a react-router `<Link to>` on the public profile page, so a
+    // scheme-carrying value must fail the parse rather than reach the browser.
+    to: z.string().regex(INTERNAL_PATH_RE, "link.to must be an app-internal absolute path"),
+  }).strict(),
 ]);
 export type ProfileExtra = z.infer<typeof ProfileExtraSchema>;
 
@@ -40,7 +46,10 @@ export const MenuBadgeSchema = z.object({
 export type MenuBadge = z.infer<typeof MenuBadgeSchema>;
 
 export const ItemActionSchema = z.object({
-  pluginId: z.string().min(1), label: z.string().min(1), to: z.string().min(1),
+  pluginId: z.string().min(1), label: z.string().min(1),
+  // Same sink, same rule as ProfileExtraSchema's link.to above — rendered as a
+  // react-router `<Link to>` in the inventory row it attaches to.
+  to: z.string().regex(INTERNAL_PATH_RE, "to must be an app-internal absolute path"),
 }).strict();
 export type ItemAction = z.infer<typeof ItemActionSchema>;
 

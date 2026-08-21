@@ -40,6 +40,29 @@ describe("ProfileExtraSchema", () => {
       }),
     ).toThrow();
   });
+
+  // link.to is a client navigation sink (rendered as react-router `<Link to>`),
+  // so it carries the same INTERNAL_PATH_RE posture as view-node link.to and
+  // menu path (dto/plugins.ts) — a bad value must fail the parse, not render
+  // an off-site href on a public, unauthenticated profile page.
+  it.each([
+    ["a javascript: URI", "javascript:alert(1)"],
+    ["an absolute https URL", "https://evil.com"],
+    ["a protocol-relative URL", "//evil.com"],
+  ])("rejects a link extra whose to is %s", (_label, to) => {
+    expect(() =>
+      ProfileExtraSchema.parse({ kind: "link", pluginId: "x", label: "L", to }),
+    ).toThrow();
+  });
+
+  it.each([
+    ["/bounties?target=abc123"],
+    ["/detectives?target=abc123"],
+    ["/combat"],
+  ])("accepts the shipped link extra shape %s", (to) => {
+    const value = { kind: "link" as const, pluginId: "x", label: "L", to };
+    expect(ProfileExtraSchema.parse(value)).toEqual(value);
+  });
 });
 
 describe("DashboardWidgetSchema", () => {
@@ -98,6 +121,23 @@ describe("MoneyFormatSchema", () => {
 describe("ItemActionSchema", () => {
   it("accepts a valid item action", () => {
     const value = { pluginId: "combat", label: "Repair", to: "/combat/gunsmith" };
+    expect(ItemActionSchema.parse(value)).toEqual(value);
+  });
+
+  // Same sink, same posture as ProfileExtraSchema's link.to above — rendered
+  // as a react-router `<Link to>` in Inventory.tsx.
+  it.each([
+    ["a javascript: URI", "javascript:alert(1)"],
+    ["an absolute https URL", "https://evil.com"],
+    ["a protocol-relative URL", "//evil.com"],
+  ])("rejects an item action whose to is %s", (_label, to) => {
+    expect(() =>
+      ItemActionSchema.parse({ pluginId: "combat", label: "Repair", to }),
+    ).toThrow();
+  });
+
+  it("accepts the shipped combat gunsmith shape", () => {
+    const value = { pluginId: "combat", label: "Repair", to: "/combat" };
     expect(ItemActionSchema.parse(value)).toEqual(value);
   });
 });
