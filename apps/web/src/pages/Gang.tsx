@@ -13,6 +13,7 @@ import { canAfford } from "../lib/money.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
+import { Markdown } from "../components/Markdown.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 
 const PERMISSIONS: readonly GangPermission[] = GangPermissionSchema.options;
@@ -120,7 +121,7 @@ function Invites({ viewerId, inGang }: { viewerId: string; inGang: boolean }): J
             <span className={styles.rowStack}>
               <span>{invite.gangName}</span>
               <span className={styles.meta}>
-                from {invite.invitedByUsername} · <When iso={invite.createdAt} />
+                from <PlayerLink playerId={invite.invitedByPlayerId} username={invite.invitedByUsername} /> · <When iso={invite.createdAt} />
               </span>
             </span>
             <span className={styles.actions}>
@@ -211,8 +212,8 @@ function Summary({
       <p className={styles.meta}>
         Level {gang.level} · {gang.memberCount} member{gang.memberCount === 1 ? "" : "s"}
       </p>
-      {gang.description === "" ? null : <p className={styles.prose}>{gang.description}</p>}
-      {gang.info === "" ? null : <p className={styles.prose}>{gang.info}</p>}
+      {gang.description === "" ? null : <Markdown text={gang.description} />}
+      {gang.info === "" ? null : <Markdown text={gang.info} />}
       <p className={styles.big}><Money value={gang.bank} /></p>
       <p className={styles.meta}><Money value={gang.cash} /> on hand.</p>
 

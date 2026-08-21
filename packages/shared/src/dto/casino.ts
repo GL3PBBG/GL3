@@ -124,6 +124,7 @@ export type CasinoStepResponse = z.infer<typeof CasinoStepResponseSchema>;
 /** One occupied seat at a table, as `GET /api/casino/table` reports it. */
 export const CasinoTableSeatSchema = z.object({
   seat: z.number().int().min(0).max(4),
+  playerId: IdSchema,
   username: z.string(),
   wager: MoneySchema,
   leaving: z.boolean(),

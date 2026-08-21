@@ -15,6 +15,8 @@ export interface ThreadSummary {
   subject: string;
   /** Sender of the newest message; null when it came from the system. */
   withName: string | null;
+  /** Their player id, for linking to the profile; null for the system. */
+  withId: string | null;
   lastAt: string;
   unread: number;
 }
@@ -29,6 +31,7 @@ export function groupThreads(mail: readonly MailDto[]): ThreadSummary[] {
         threadId: message.threadId,
         subject: message.subject,
         withName: message.senderName,
+        withId: message.senderId,
         lastAt: message.createdAt,
         unread: message.readAt === null ? 1 : 0,
       });
@@ -40,6 +43,7 @@ export function groupThreads(mail: readonly MailDto[]): ThreadSummary[] {
     if (message.createdAt > existing.lastAt) {
       existing.subject = message.subject;
       existing.withName = message.senderName;
+      existing.withId = message.senderId;
       existing.lastAt = message.createdAt;
     }
   }

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { DetectiveSearchRow } from "@gl3/shared";
 import { useDetectives, useHireDetectives, useProfile, useRemoveDetectiveSearch } from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import styles from "./pages.module.css";
 
 const UNITS = [1, 2, 3, 4, 5] as const;
@@ -37,7 +38,8 @@ function SearchRow({ row }: { row: DetectiveSearchRow }): JSX.Element {
   return (
     <li className={styles.row}>
       <span>
-        {row.detectives} detective{row.detectives === 1 ? "" : "s"} on {row.targetUsername}
+        {row.detectives} detective{row.detectives === 1 ? "" : "s"} on{" "}
+        <PlayerLink playerId={row.targetId} username={row.targetUsername} />
       </span>
       {state === "pending" ? (
         <span className={styles.meta}>

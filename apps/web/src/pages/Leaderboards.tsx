@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { LeaderboardKind } from "@gl3/shared";
 import { useLeaderboard, useMe } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [
@@ -75,7 +76,7 @@ export function Leaderboards(): JSX.Element {
                 className={entry.playerId === me.data?.playerId ? styles.self : undefined}
               >
                 <td>{entry.rank}</td>
-                <td>{entry.username}</td>
+                <td><PlayerLink playerId={entry.playerId} username={entry.username} /></td>
                 <td>{kind === "exp" ? <Amount value={entry.score} /> : <Money value={entry.score} />}</td>
               </tr>
             ))}

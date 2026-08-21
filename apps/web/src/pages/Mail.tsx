@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMail, useSendMail } from "../api/queries.js";
 import { groupThreads } from "../lib/mail.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 import styles from "./pages.module.css";
 
 export function Mail(): JSX.Element {
@@ -28,7 +29,10 @@ export function Mail(): JSX.Element {
               <span className={styles.rowStack}>
                 <Link className={styles.link} to={`/mail/${thread.threadId}`}>{thread.subject}</Link>
                 <span className={styles.meta}>
-                  {thread.withName ?? "The management"} · <When iso={thread.lastAt} />
+                  {thread.withId !== null && thread.withName !== null
+                    ? <PlayerLink playerId={thread.withId} username={thread.withName} />
+                    : "The management"}
+                  {" · "}<When iso={thread.lastAt} />
                 </span>
               </span>
               {thread.unread > 0

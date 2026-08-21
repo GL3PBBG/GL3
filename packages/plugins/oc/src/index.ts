@@ -176,6 +176,7 @@ const stateRoute = route({
           heistId: ocMembers.heistId,
           role: ocMembers.role,
           buyIn: ocHeists.buyIn,
+          leaderId: ocHeists.leaderId,
           leaderUsername: players.username,
         })
         .from(ocMembers)
@@ -198,6 +199,7 @@ const stateRoute = route({
             heistId: r.heistId,
             role: r.role,
             buyIn: r.buyIn.toString(),
+            leaderId: r.leaderId,
             leaderUsername: r.leaderUsername,
           })),
         },

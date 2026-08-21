@@ -6,6 +6,7 @@ import {
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { SlotImage } from "../components/GameImage.js";
+import { PlayerLink } from "../components/PlayerLink.js";
 
 const ROLES = ["mastermind", "driver", "gunman", "hacker"] as const;
 
@@ -106,7 +107,7 @@ export function OrganizedCrime(): JSX.Element {
                     <strong>{role}</strong>
                     {member ? (
                       <>
-                        {" — "}{member.username}
+                        {" — "}<PlayerLink playerId={member.playerId} username={member.username} />
                         <span className={styles.muted}> ({member.state})</span>
                       </>
                     ) : (
@@ -145,7 +146,7 @@ export function OrganizedCrime(): JSX.Element {
 // ---------------------------------------------------------------------------
 
 function InviteCard({ invite, onAcceptOrDecline }: {
-  invite: { heistId: string; role: string; buyIn: string; leaderUsername: string };
+  invite: { heistId: string; role: string; buyIn: string; leaderId: string; leaderUsername: string };
   onAcceptOrDecline: () => void;
 }): JSX.Element {
   const accept = useAccept(invite.heistId);
@@ -154,7 +155,7 @@ function InviteCard({ invite, onAcceptOrDecline }: {
   return (
     <li className={styles.row}>
       <span>
-        {invite.leaderUsername} invited you as <strong>{invite.role}</strong>
+        <PlayerLink playerId={invite.leaderId} username={invite.leaderUsername} /> invited you as <strong>{invite.role}</strong>
         {" (buy-in "}<Money value={invite.buyIn} />{")"}
       </span>
       <div className={styles.actions}>
