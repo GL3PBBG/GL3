@@ -2982,6 +2982,181 @@ this cluster's diff touches casino or the lock helpers; recorded here as
 further evidence the failure is load-dependent rather than tied to any one
 branch's changes.
 
+### Extension surface — core-owned UI seams, policy-on-the-point, per-subscriber ctx binding
+
+Shipped on `feat/extension-surface`, closing the design's own §2/§5 gaps: five
+new **core-owned** filter points give core's UI surfaces the same extension
+seam plugins have had since `bounties→combat`, and the seam mechanism itself
+picked up two structural fixes the design had flagged but not yet forced. No
+new table, no new migration, no new lock-graph edge, and no new `GameEvent`
+variant — every fact this cluster produces is a read-side UI fragment, so
+none of the four places a new event variant would touch needed changing.
+
+**The point count grew 5 → 11.** Five plugin-owned points already existed:
+`combat.killResolved`, `casino.games`, `membership.benefits`,
+`properties.leverSet`, and `travel.locationsListed`. This cluster adds the
+five points the SDK itself now owns (`core-points.ts`) — `core.profileView`,
+`core.dashboard`, `core.hud`, `core.menuBadges`, `core.moneyFormat` — plus
+one plugin-owned point, `inventory.itemActions`, for eleven total.
+
+**`filterPoint(name, policy)` now takes its error-handling policy on the
+point, not on each subscription.** `FilterPolicy` is `"propagate"` (the
+shape every point had before — a subscriber's throw aborts the whole chain)
+or `"collect"` (the point owner's log-and-drop: a throwing subscriber's
+contribution is discarded and the chain carries the previous value forward).
+All five core points are `"collect"` — a UI seam degrading by one missing
+badge or widget is the right failure mode, not a 500 on someone's profile
+page because one plugin's subscriber threw. `runFilterChain` reads the
+policy off the point it is running, so this is enforced at the chain, not
+trusted to each subscriber.
+
+**Per-subscriber ctx binding retires the applier-ctx trap.** Every filter
+subscription is now carried as a `BoundFilterSubscription { ownerId,
+subscription }`, and `runFilterChain` takes a `ctxFor(ownerId): PluginCtx`
+factory instead of a single ctx — so each subscriber runs against *its own*
+plugin's ctx, resolved by the subscription's declared owner, never the ctx
+of whichever plugin triggered the chain. This closes the exact trap recorded
+twice already in this repo's history: the bullets-restock cluster's
+`properties.leverSet` subscriber that "cannot read its own settings
+namespace," and properties-franchise's seizure-on-death path that had to use
+`tx.notify` instead of `tx.events.publish` because a `combat.killResolved`
+subscriber ran under combat's ctx and would have mislabelled the event as
+combat's. Both workarounds stay in the code (nothing forces removing a
+working design), but neither is necessary for new code — a `core.profileView`
+subscriber's `ctx.pluginId` is the subscriber's own id, its `ctx.events.publish`
+attributes to itself, and it can read its own settings namespace, all by
+construction rather than by working around the applier's ctx.
+
+**Error guards are brand-only.** The legacy duck-typed arm in `isPluginError`
+and its siblings (a fallback that matched on shape — `name`/`code`/`status`
+— for an error that predated the `Symbol.for("gl3.plugin-sdk.PluginError")`
+brand) is deleted. Every `PluginError` minted since the brand shipped already
+carries it; the duck-type arm was dead weight kept "just in case" an older
+plugin build slipped through, and this cluster's error-guard audit found no
+such build anywhere in the tree.
+
+**`validatePlugins` enforces the point-name convention it always relied on
+by convention alone.** A plugin's `provides` entries must be named
+`<its-own-id>.<rest>` — the loader now rejects any other prefix as a hard
+boot failure, and separately rejects `"core"` or a `"core."`-prefixed name
+from any plugin, reserving that namespace to the SDK's own core-owned
+points. Before this cluster, nothing stopped a plugin from squatting on
+`core.hud` or on another plugin's namespace; it worked only because nobody
+had.
+
+**Three new core routes**, all reading through the five points above:
+`GET /api/hud/extras` (→ `core.hud`), `GET /api/menu/badges` (→
+`core.menuBadges`), `GET /api/dashboard/widgets` (→ `core.dashboard`). Their
+three base paths — `/api/hud`, `/api/menu`, `/api/dashboard` — join the
+existing reserved list (`/api/auth`, `/api/ws`, `/api/plugins`, `/health`),
+so a plugin claiming any of them is now a boot failure rather than a route
+collision discovered at request time. `GET /api/plugins` itself gained a
+`moneyFormat` field resolved through `core.moneyFormat` **on every request**,
+not cached at boot — the DTO comment that said otherwise was a drafting
+leftover, fixed on this branch (`packages/shared/src/dto/plugins.ts`).
+
+**The web client renders all four surfaces.** Profile extras (`stat`/`link`
+fragments) appear on the profile page; dashboard widgets render each
+plugin's declared view tree on the landing page; HUD entries join the
+persistent status bar, and a `countdownTo` entry ticks client-side rather
+than re-fetching; nav badges are keyed by literal, unencoded path and cover
+both core and plugin links (`Shell.tsx`'s `pluginBadges` record, keyed
+exactly as `MenuBadge.path` is written — see the doc comments added on
+`MenuBadgeSchema` and `coreMenuBadges` this cluster for the convention).
+Money throughout the client now renders via the plugin-driven format instead
+of a hardcoded `$`.
+
+**Five retrofits**, each a new subscriber on an existing core or plugin
+point, none a new plugin→plugin dependency edge (subscribing to a
+core-owned point is not a dependency edge the way subscribing to another
+plugin's point would be — the count of plugin→plugin edges recorded in
+CLAUDE.md's rule 6 stays at eight):
+
+- `bounties` → `core.profileView`: a viewed player's open bounty as a
+  `stat`, plus a "Place bounty" `link`.
+- `detectives` → `core.profileView` (a "Hire detective" `link`) and
+  `core.menuBadges` (a `/detectives` badge counting the caller's
+  ready-to-reveal reports).
+- `membership` → `core.hud` (a ticking countdown to expiry) and
+  `core.profileView` (a member-status `stat`).
+- `crimes` → `core.dashboard`: a "next crime" widget showing cooldown state.
+- `combat` → `inventory.itemActions`: a "Repair at gunsmith" `link` to
+  `/combat`, surfaced wherever inventory already lists a weapon's actions — the
+  cluster's one plugin-owned (not core-owned) point, and the shape every
+  future per-item action integration should follow.
+
+**The compat regime.** Since M5 began, `@gl3/shared` and `@gl3/plugin-sdk`
+have shipped only additive, patch-level changes under `0.x` — the discipline
+CLAUDE.md's "published npm packages" note describes. This cluster's plan
+explicitly **authorizes breaking changes** to both packages' public surface
+for as long as GL3 has no plugin author outside this repo: `filterPoint`
+gaining a required second argument and `runFilterChain`'s signature changing
+shape are both breaking in the strict sense, and both shipped anyway,
+because every consumer of either surface is a workspace package edited in
+the same commit. **The regime's end condition is the first third-party
+plugin author** — not the first `npm publish`, which has already happened
+repeatedly under this same discipline with no external consumer to break.
+Once an author outside this repo depends on a published version, CLAUDE.md's
+additive-only, version-bump-per-change discipline re-arms and this cluster's
+breaking changes become the last ones taken for free.
+
+`@gl3/shared` → **`0.1.20`** (`ProfileExtraSchema`, `DashboardWidgetSchema`,
+`HudEntrySchema`, `MenuBadgeSchema`, `ItemActionSchema`,
+`ProfileViewValueSchema`, and the three extension-route response schemas —
+`dto/extensions.ts`, new this cluster). `@gl3/plugin-sdk` → **`0.1.12`**
+(`filterPoint`'s required policy argument, `BoundFilterSubscription`, and
+the five core-owned points in the new `core-points.ts` — the `runFilterChain`
+signature change is breaking in the strict sense, hence the compat-regime
+paragraph above) — its own `"@gl3/shared"` dependency range tightens to
+`^0.1.20` to match, the same documents-the-coupling move the casino cluster
+made at `0.1.3`. Both bumps are **unpublished**, pending the user's approval
+after a registry check (`npm.gl3.dev` served `@gl3/shared` up to `0.1.19` and
+`@gl3/plugin-sdk` up to `0.1.11` at bump time — both gaps and both maxima
+belong to unrelated work landed on `main` after this branch forked from it;
+see the note below on how far this branch has drifted from `main`).
+
+**This branch forked before a large amount of since-landed `main` work.**
+`main`'s own `packages/shared/package.json` and `packages/plugin-sdk/package.json`
+are already at `0.1.19`/`0.1.11` — the same numbers the registry serves —
+carrying casino table DTOs, a points-balance field, `tx.timers`,
+`PLUGIN_PACKAGES` dynamic loading, a game-wide theme, per-row table actions,
+and the forum plugin, none of which this branch's `CLAUDE.md` (frozen at the
+membership cluster) or this section's plugin-count/edge-count claims above
+account for. That divergence is a merge-time concern for whoever integrates
+this branch, not something this cluster's own suite or docs can resolve —
+flagged here so it isn't mistaken for drift introduced by this cluster.
+
+**Merge gate: green, exit code read from the process, not a wrapper.** A bare
+`npm run verify` was launched in the background with its exit code captured
+to a sentinel file by the script itself (never `; echo "exit=$?"` in the
+harness-reported command — the exact trap this file documents above), and
+that sentinel read **`0`**. `Test Files 253 passed (253)`, `Tests 2010 passed
+| 1 skipped (2011)`, `Type Errors no errors`; a `grep -n "Unhandled"` over the
+full log matched nothing. `casino-lock-order` (5 tests, including the ABBA
+case) ran clean this time — no `40P01`, standalone confirmation not needed.
+Both drift guards that this cluster's plan flagged as expected-not-to-fire
+ran and stayed green: `schema.test.ts` (9 tests, FK/index counts unchanged)
+and the shared-package `events.test.ts` census (17 tests, no new
+`GameEvent` variant). The suite is up from 195 files / 1499 tests (the
+last recorded baseline, `feat/casino-blackjack`) to **253 files / 2010
+tests** — most of that gap is every cluster shipped between that baseline
+and this one (bullets restock, game art, hospital/jail social, location
+combat modes, the social cluster, premium membership), not this cluster
+alone; no per-cluster attribution was reconstructed here.
+
+**Anomaly, not chased**: the run's own `Duration` line reports **3012s**
+(~50 minutes) wall clock against the ~270s this file documents as the
+post-`TRUNCATE`-fix norm — over 10x, well past even the pre-fix ~1000s
+figure. `tests 17866.89s` inside that duration is the sum across parallel
+workers, not wall time, but individual lines still show 15–20s for tests
+that are normally sub-second (`detectives-extras.test.ts`'s three cases at
+8166ms/7532ms/5109ms; `health.test.ts`'s at 4437ms/4218ms/3780ms) — a
+pattern consistent with either database round-trip latency or cold
+caches/argon2 contention under whatever else this box was doing during the
+run, not with any change in this cluster's diff (which touches no test
+infrastructure). Recorded here as an observed anomaly for whoever
+investigates it next; not investigated further on this branch.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There

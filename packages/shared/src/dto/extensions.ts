@@ -26,6 +26,14 @@ export const HudEntrySchema = z.object({
 }).strict();
 export type HudEntry = z.infer<typeof HudEntrySchema>;
 
+/**
+ * `path` is the literal, UNENCODED nav path the badge attaches to — the same
+ * string a `link`/`button` view node's `to`/`action` target would use, e.g.
+ * `"/detectives"` for a core or plugin top-level page, or
+ * `"/plugins/<pageId>"` for a plugin page addressed by its raw (unencoded)
+ * page id. The client matches badges to nav entries by exact string equality
+ * against that convention, not by URL-decoding or normalising either side.
+ */
 export const MenuBadgeSchema = z.object({
   path: z.string().startsWith("/"), count: z.number().int().nonnegative(),
 }).strict();
