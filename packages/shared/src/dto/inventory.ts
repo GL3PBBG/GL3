@@ -27,6 +27,15 @@ export const InventoryItemSchema = z.object({
    * bare array so a server that predates the extension surface still parses.
    */
   actions: z.array(ItemActionSchema).optional(),
+  /**
+   * A consumable's effect label, resolved server-side from the
+   * `inventory.itemEffects` registry — the `label` of whichever def its
+   * `effects.kind` selects. Absent on every non-consumable, on a plain heal
+   * item (the page already knows how to say "heals 20"), and on a consumable
+   * naming a kind this deployment has no def for, where the page falls back to
+   * the raw kind rather than inventing a name.
+   */
+  effectLabel: z.string().optional(),
 });
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 
@@ -59,5 +68,15 @@ export const UseItemResponseSchema = z.object({
   health: z.number().int(),
   healed: z.number().int(),
   qty: z.number().int(),
+  /**
+   * The three below are `.optional()` rather than required so a server that
+   * predates the item effect registry still parses. `exp` and `cash` are the
+   * player's totals AFTER the use — decimal strings, since both are bigint
+   * columns. `message` is the def's own line, shown next to the Use button;
+   * the server truncates it, and it is rendered as text, never as markup.
+   */
+  exp: z.string().optional(),
+  cash: z.string().optional(),
+  message: z.string().optional(),
 });
 export type UseItemResponse = z.infer<typeof UseItemResponseSchema>;
