@@ -13,10 +13,18 @@ FROM node:${NODE_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# All four manifests: web's build needs @gl3/shared, and npm ci validates the
-# whole workspace lockfile.
+# Web's build needs @gl3/shared, and npm ci validates the whole workspace
+# lockfile. plugin-sdk's manifest MUST be here too even though the web build
+# never imports it: apps/server's manifest (below) depends on it, and a
+# workspace member whose folder is absent gets resolved from the REGISTRY
+# instead — which held a published SDK whose `@gl3/shared` range named a
+# version never published, 404ing the whole `npm ci`. The fallback had
+# succeeded silently for as long as the ranges happened to be satisfiable;
+# reproduce any change to this list with a local sim (copy exactly these
+# files into an empty dir, run `npm ci`) before spending a CI round trip.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 
