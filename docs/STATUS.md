@@ -3100,31 +3100,43 @@ Once an author outside this repo depends on a published version, CLAUDE.md's
 additive-only, version-bump-per-change discipline re-arms and this cluster's
 breaking changes become the last ones taken for free.
 
-`@gl3/shared` → **`0.1.20`** (`ProfileExtraSchema`, `DashboardWidgetSchema`,
+`@gl3/shared` → **`0.1.21`** (`ProfileExtraSchema`, `DashboardWidgetSchema`,
 `HudEntrySchema`, `MenuBadgeSchema`, `ItemActionSchema`,
 `ProfileViewValueSchema`, and the three extension-route response schemas —
-`dto/extensions.ts`, new this cluster). `@gl3/plugin-sdk` → **`0.1.12`**
+`dto/extensions.ts`, new this cluster). `@gl3/plugin-sdk` → **`0.1.13`**
 (`filterPoint`'s required policy argument, `BoundFilterSubscription`, and
 the five core-owned points in the new `core-points.ts` — the `runFilterChain`
 signature change is breaking in the strict sense, hence the compat-regime
 paragraph above) — its own `"@gl3/shared"` dependency range tightens to
-`^0.1.20` to match, the same documents-the-coupling move the casino cluster
+`^0.1.21` to match, the same documents-the-coupling move the casino cluster
 made at `0.1.3`. Both bumps are **unpublished**, pending the user's approval
 after a registry check (`npm.gl3.dev` served `@gl3/shared` up to `0.1.19` and
-`@gl3/plugin-sdk` up to `0.1.11` at bump time — both gaps and both maxima
-belong to unrelated work landed on `main` after this branch forked from it;
-see the note below on how far this branch has drifted from `main`).
+`@gl3/plugin-sdk` up to `0.1.11` at first bump time — both gaps and both
+maxima belong to unrelated work landed on `main` after this branch forked
+from it; see the note below on how far this branch has drifted from `main`).
+
+**These numbers were bumped a second time, from `0.1.20`/`0.1.12` to
+`0.1.21`/`0.1.13`.** The task-16 doc review that approved the first bump
+re-checked the registry and `main` roughly a day later and found both had
+independently reached `0.1.20`/`0.1.12` in the meantime, with different
+content — the divergence below had sharpened from "same numbers, different
+content, on `main` only" into an exact collision against the registry's own
+published maximum too. `0.1.21`/`0.1.13` clears both as of that second
+check. Given how much faster `main` is moving than this branch (see below),
+**re-check the registry and `main` again immediately before any publish** —
+a third bump on top of this one would not be surprising.
 
 **This branch forked before a large amount of since-landed `main` work.**
 `main`'s own `packages/shared/package.json` and `packages/plugin-sdk/package.json`
-are already at `0.1.19`/`0.1.11` — the same numbers the registry serves —
-carrying casino table DTOs, a points-balance field, `tx.timers`,
-`PLUGIN_PACKAGES` dynamic loading, a game-wide theme, per-row table actions,
-and the forum plugin, none of which this branch's `CLAUDE.md` (frozen at the
-membership cluster) or this section's plugin-count/edge-count claims above
-account for. That divergence is a merge-time concern for whoever integrates
-this branch, not something this cluster's own suite or docs can resolve —
-flagged here so it isn't mistaken for drift introduced by this cluster.
+had reached `0.1.20`/`0.1.12` by the time of the second check above — the
+same numbers the registry served by then — carrying casino table DTOs, a
+points-balance field, `tx.timers`, `PLUGIN_PACKAGES` dynamic loading, a
+game-wide theme, per-row table actions, and the forum plugin, none of which
+this branch's `CLAUDE.md` (frozen at the membership cluster) or this
+section's plugin-count/edge-count claims above account for. That divergence
+is a merge-time concern for whoever integrates this branch, not something
+this cluster's own suite or docs can resolve — flagged here so it isn't
+mistaken for drift introduced by this cluster.
 
 **Merge gate: green, exit code read from the process, not a wrapper.** A bare
 `npm run verify` was launched in the background with its exit code captured

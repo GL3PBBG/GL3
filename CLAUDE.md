@@ -496,12 +496,20 @@ condition is **the first third-party plugin author**, not the first `npm
 publish` (which has already happened repeatedly with no external consumer
 to break). Once someone outside this repo depends on a published version,
 the additive-only, version-bump-per-change discipline documented earlier in
-this file re-arms. `@gl3/shared` → `0.1.20`, `@gl3/plugin-sdk` → `0.1.12`
-(tightening its own `"@gl3/shared"` range to `^0.1.20`), both **unpublished**
+this file re-arms. `@gl3/shared` → `0.1.21`, `@gl3/plugin-sdk` → `0.1.13`
+(tightening its own `"@gl3/shared"` range to `^0.1.21`), both **unpublished**
 pending the user's approval — see `docs/STATUS.md`'s extension-surface
 section for the registry check and for how far this branch has drifted from
 `main`, which had independently advanced both packages past these numbers
-before this cluster's version stamps were chosen.
+before this cluster's version stamps were chosen. **These numbers were
+bumped once already**, from `0.1.20`/`0.1.12` to `0.1.21`/`0.1.13`: the
+review that approved this cluster's docs also checked `main` and the
+registry a day later and found both had by then reached `0.1.20`/`0.1.12`
+themselves, with unrelated content — an exact version collision, not just
+the divergent-content-at-old-numbers case the first check had flagged. The
+re-bump clears both the registry's and `main`'s maxima as of that second
+check; re-check again before publishing, since `main` is moving faster than
+this branch.
 
 `publishCore` is unrestricted by design: any installed plugin can publish any
 core event to any audience, and plugin output is no longer identifiable on the
