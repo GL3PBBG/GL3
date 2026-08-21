@@ -13,15 +13,16 @@ import { propertiesTable } from "./schema.js";
  * `profit` is left alone: it is that ROW's lifetime P&L across owners, not the
  * victim's, and zeroing it would erase a fact nobody asked to erase.
  *
- * No `seized` event is published here, on purpose. `runFilterChain` (SDK)
- * calls a subscriber with the APPLYING plugin's ctx, not the subscriber's own
- * — and it is combat that calls `ctx.filters.apply(killResolved, ...)`, so
- * `ctx.pluginId` inside this subscriber is "combat". A `tx.events.publish(...)`
- * here would therefore be wrapped as `toEnvelope("combat", ...)` — an event on
- * the wire labelled as combat's, for a name combat never declared, which no
- * client-side plugin-event invalidation can match. `tx.notify(...)` has no
- * such problem: it always publishes the core `notification.created` event,
- * which is not scoped to any plugin id.
+ * No `seized` event is published here — a deliberate design choice, not a
+ * workaround. `runFilterChain` (SDK) binds each subscriber to its OWN
+ * plugin's ctx, so `ctx.pluginId` inside this subscriber is "properties"
+ * regardless of which plugin applied the filter (combat, in production). A
+ * `tx.events.publish(...)` here would correctly wire up as a properties
+ * event — but it would still need a plugin-event name and client-side
+ * invalidation wiring that nothing declares or listens for, for a fact that
+ * has exactly one audience: the victim. `tx.notify(...)` is the direct fit
+ * for that: it always publishes the core `notification.created` event,
+ * which every client already renders, with no bespoke wiring needed.
  *
  * Filters run OUTSIDE the caller's transaction (SDK rule), so this opens its
  * own. Idempotent by shape — `WHERE owner_player_id = victim` matches nothing

@@ -91,8 +91,8 @@ export interface TableGameDef<S = unknown> {
   settle(state: S): { seat: number; payout: bigint }[];
 }
 
-export const games = filterPoint<GameDef[]>("casino.games");
-export const tableGames = filterPoint<TableGameDef[]>("casino.tableGames");
+export const games = filterPoint<GameDef[]>("casino.games", "propagate");
+export const tableGames = filterPoint<TableGameDef[]>("casino.tableGames", "propagate");
 
 /**
  * Built on first use and memoised by the caller. Request-time rather than

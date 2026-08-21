@@ -1,17 +1,20 @@
 import { desc, eq, lte } from "drizzle-orm";
+import { coreProfileView } from "@gl3/plugin-sdk";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
-import { IdSchema, UpdateProfileRequestSchema } from "@gl3/shared";
+import { IdSchema, ProfileExtraSchema, UpdateProfileRequestSchema } from "@gl3/shared";
 import { z } from "zod";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket } from "../../auth/rate-limit.js";
 import type { Db } from "../../db/client.js";
 import { gangs, moneyRanks, players, playerStats, ranks } from "../../db/schema/index.js";
+import type { CoreFilters } from "../../plugins/core-filters.js";
 
 const ProfileParamsSchema = z.object({ playerId: IdSchema });
 
 export function registerProfileRoutes(
   app: FastifyInstance, db: Db, redis: Redis,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  coreFilters: CoreFilters,
   rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
 ): void {
   // Public — no requireAuth. The response is a public surface: only the
@@ -52,6 +55,25 @@ export function registerProfileRoutes(
       .orderBy(desc(moneyRanks.threshold))
       .limit(1);
 
+    // Public route — no authenticated caller, so subscribers get `player:
+    // null` and key off `value.targetId` instead.
+    const applied = await coreFilters.apply(coreProfileView, null, {
+      targetId: row.playerId, extras: [],
+    });
+
+    // Per-entry validation, not a whole-array parse: a subscriber's malformed
+    // extra (a `PLUGIN_PACKAGES`-loaded plugin is never typechecked against
+    // `ProfileExtraSchema`) must lose only its own contribution, the same way
+    // a throwing subscriber already loses only its own under collect policy —
+    // never fail the whole public profile page for every viewer.
+    const extras = applied.extras.filter((extra) => {
+      const parsed = ProfileExtraSchema.safeParse(extra);
+      if (!parsed.success) {
+        request.log.warn({ pointName: coreProfileView.name, extra, issues: parsed.error.issues }, "dropped a malformed extension contribution");
+      }
+      return parsed.success;
+    });
+
     return reply.send({
       playerId: row.playerId, username: row.username, bio: row.bio, avatarUrl: row.avatarUrl,
       gangId: row.gangId, gangName: row.gangName, exp: row.exp.toString(), rankName: row.rankName,
@@ -59,6 +81,7 @@ export function registerProfileRoutes(
       backfire: row.backfire,
       createdAt: row.createdAt.toISOString(),
       lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
+      extras,
     });
   });
 

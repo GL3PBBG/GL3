@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ItemActionSchema } from "./extensions.js";
 
 /**
  * `effects` is `unknown` on purpose. The server passes it through
@@ -20,6 +21,12 @@ export const InventoryItemSchema = z.object({
    * predates game art still parses.
    */
   imageUrl: z.string().optional(),
+  /**
+   * Plugin-contributed links from the `inventory.itemActions` filter point
+   * (e.g. combat's gunsmith repair link on a weapon). Optional rather than a
+   * bare array so a server that predates the extension surface still parses.
+   */
+  actions: z.array(ItemActionSchema).optional(),
 });
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 

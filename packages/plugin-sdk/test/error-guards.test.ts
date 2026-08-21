@@ -29,14 +29,6 @@ class ForeignPluginError extends Error {
   }
 }
 
-/** A plugin built against 0.1.0-0.1.8, whose SDK copy predates the brand. */
-class LegacyPluginError extends Error {
-  constructor(readonly code: string, readonly status: number) {
-    super(code);
-    this.name = "PluginError";
-  }
-}
-
 describe("isPluginError", () => {
   it("accepts our own instance", () => {
     expect(isPluginError(new PluginError("jailed", 423))).toBe(true);
@@ -49,15 +41,14 @@ describe("isPluginError", () => {
     expect(isPluginError(foreign)).toBe(true);
   });
 
-  it("accepts an unbranded error from an SDK copy older than the brand", () => {
-    expect(isPluginError(new LegacyPluginError("too_soon", 429))).toBe(true);
-  });
-
-  it("rejects an unrelated error that merely borrows the name", () => {
-    // `name` alone is not enough: the caller goes on to read `code` and
-    // `status`, and a match here would produce `reply.code(undefined)`.
+  it("rejects an unrelated error that merely borrows the name and fields", () => {
+    // The brand is required: `name` + `code` + `status` alone is not enough
+    // to verify the error is one we threw. Any Error with those fields would pass
+    // the old `named()` check, and we reject that.
     const impostor = new Error("nope");
     impostor.name = "PluginError";
+    (impostor as Record<string, unknown>).code = "some_code";
+    (impostor as Record<string, unknown>).status = 400;
     expect(isPluginError(impostor)).toBe(false);
   });
 

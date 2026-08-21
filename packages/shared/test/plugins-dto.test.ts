@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_VIEW_DEPTH, MAX_VIEW_NODES, PluginsPayloadSchema } from "../src/index.js";
+import { DEFAULT_MONEY_FORMAT, MAX_VIEW_DEPTH, MAX_VIEW_NODES, PluginsPayloadSchema } from "../src/index.js";
 
 describe("PluginsPayloadSchema", () => {
   it("accepts a well-formed payload with one page, menu entry and event", () => {
@@ -10,13 +10,14 @@ describe("PluginsPayloadSchema", () => {
         view: { kind: "panel", title: "Hello", children: [{ kind: "text", value: "Hi" }] },
       }],
       events: [{ pluginId: "hello", name: "greeted", describe: "{actorName} said hello", invalidates: ["hello"] }],
+      moneyFormat: DEFAULT_MONEY_FORMAT,
     };
     expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
   });
 
   it("accepts an empty payload", () => {
-    expect(PluginsPayloadSchema.parse({ menu: [], pages: [], events: [] }))
-      .toEqual({ menu: [], pages: [], events: [] });
+    const payload = { menu: [], pages: [], events: [], moneyFormat: DEFAULT_MONEY_FORMAT };
+    expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
   });
 
   it("rejects a view node with an unknown kind", () => {
@@ -78,6 +79,7 @@ describe("PluginsPayloadSchema view sink constraints", () => {
         pluginId: "hello", id: "hello.index", path: "/hello",
         view: { kind: "panel", title: "x", children: [node] },
       }],
+      moneyFormat: DEFAULT_MONEY_FORMAT,
     };
   }
 
@@ -165,6 +167,7 @@ describe("PluginsPayloadSchema view size bounds", () => {
     return {
       menu: [], events: [],
       pages: [{ pluginId: "hello", id: "hello.index", path: "/hello", view }],
+      moneyFormat: DEFAULT_MONEY_FORMAT,
     };
   }
 

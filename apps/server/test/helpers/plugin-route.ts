@@ -74,7 +74,7 @@ export async function callPluginRoute(
     pluginId: manifest.id,
     player,
     job: null,
-    filters: manifest.filters,
+    filters: manifest.filters.map((subscription) => ({ ownerId: manifest.id, subscription })),
     propertyTypes: new Map(),
     installedPluginIds: new Set([manifest.id]),
     assetSlots: collectAssetSlots([manifest]),

@@ -1,5 +1,6 @@
 import { definePlugin } from "@gl3/plugin-sdk";
 import { membershipPage } from "@gl3/plugin-membership";
+import { DEFAULT_MONEY_FORMAT } from "@gl3/shared";
 import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
@@ -182,13 +183,18 @@ describe("GET /api/plugins", () => {
           pluginId: "membership",
           name: "purchased",
           describe: "{actorName} bought {packageName}",
-          invalidates: ["membership", "me"],
+          invalidates: ["membership", "me", "hudExtras"],
         }, {
           pluginId: "membership",
           name: "gifted",
           describe: "{actorName} gifted {packageName} to {recipientName}",
-          invalidates: ["membership", "me"],
+          invalidates: ["membership", "me", "hudExtras"],
         }],
+        // `core.moneyFormat` is applied fresh per request in
+        // `registerPluginsEndpoint`, not baked into the boot-built payload —
+        // this asserts the no-subscriber default that chain resolves to when
+        // nothing overrides it.
+        moneyFormat: DEFAULT_MONEY_FORMAT,
       });
     } finally {
       await close();
