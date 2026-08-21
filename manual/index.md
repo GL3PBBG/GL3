@@ -28,6 +28,17 @@ features:
     link: /explanation/
 ---
 
+## How GL3 compares to V2
+
+[**Two Gangster Engines**](/gl3-vs-v2.html) - a comparison of this engine against
+[Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2), the PHP 5.6-era
+script it reimplements. Measured by reading both source trees rather than either project's
+documentation: what each is better at, what reached parity, and the three places GL3
+deliberately diverges.
+
+It is a standalone page rather than a Diátaxis section on purpose - it is neither tutorial,
+guide, reference nor ADR, and folding it into one of the four would break the rule below.
+
 ## About this documentation
 
 This documentation follows the [Diátaxis](https://diataxis.fr/) framework: each page is
