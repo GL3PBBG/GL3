@@ -164,16 +164,17 @@ describe("GET /api/plugins", () => {
           pluginId: "membership",
           name: "purchased",
           describe: "{actorName} bought {packageName}",
-          invalidates: ["membership", "me"],
+          invalidates: ["membership", "me", "hudExtras"],
         }, {
           pluginId: "membership",
           name: "gifted",
           describe: "{actorName} gifted {packageName} to {recipientName}",
-          invalidates: ["membership", "me"],
+          invalidates: ["membership", "me", "hudExtras"],
         }],
-        // buildPluginsPayload fills the placeholder default for now — Task 7
-        // replaces this with the `core.moneyFormat` filter chain applied
-        // per request.
+        // `core.moneyFormat` is applied fresh per request in
+        // `registerPluginsEndpoint`, not baked into the boot-built payload —
+        // this asserts the no-subscriber default that chain resolves to when
+        // nothing overrides it.
         moneyFormat: DEFAULT_MONEY_FORMAT,
       });
     } finally {

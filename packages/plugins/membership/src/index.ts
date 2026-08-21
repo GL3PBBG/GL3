@@ -344,14 +344,17 @@ const purchasedEvent = {
   name: "purchased",
   payload: z.object({ packageName: z.string(), until: z.string() }),
   describe: "{actorName} bought {packageName}",
-  invalidates: ["membership", "me"],
+  // `hudExtras` alongside `membership`/`me`: `hudCountdown` below contributes
+  // to `core.hud`, so a purchase should update the HUD countdown live rather
+  // than waiting for a refocus/refetch of that query.
+  invalidates: ["membership", "me", "hudExtras"],
 };
 
 const giftedEvent = {
   name: "gifted",
   payload: z.object({ packageName: z.string(), recipientName: z.string() }),
   describe: "{actorName} gifted {packageName} to {recipientName}",
-  invalidates: ["membership", "me"],
+  invalidates: ["membership", "me", "hudExtras"],
 };
 
 export default definePlugin({
