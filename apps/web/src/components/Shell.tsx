@@ -39,8 +39,9 @@ const LINKS: ReadonlyArray<readonly [string, string]> = [
   ["/forum", "Forum"],
   ["/notifications", "Alerts"],
   ["/news", "News"],
-  ["/online", "Online"],
+  ["/players", "Players"],
   ["/profile", "Profile"],
+  ["/stats", "Stats"],
 ];
 
 function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {

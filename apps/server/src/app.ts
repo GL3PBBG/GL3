@@ -17,6 +17,7 @@ import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerPresenceRoutes } from "./presence/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
+import { registerStatsRoutes } from "./stats/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
 import { CORE_PLUGINS } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
@@ -83,6 +84,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+  registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db);
   registerWsRoutes(app, deps.redis, requireAuth);
 
