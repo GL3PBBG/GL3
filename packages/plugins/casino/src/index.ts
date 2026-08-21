@@ -27,6 +27,7 @@ import {
   readTableIdleKickHands, readTableMaxSeats,
 } from "./settings.js";
 import { fromStorableState, toStorableState } from "./state.js";
+import { tableTickEvent } from "./table-engine.js";
 import { tableRoutes } from "./table-routes.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
@@ -34,7 +35,7 @@ export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
 // table path) and is re-exported here so the plugin's public surface is
 // unchanged by that move.
 export { HOUSE_SEIZED_MESSAGE } from "./engine.js";
-export { lockTable } from "./table-engine.js";
+export { lockTable, publishTableTick, tableTickEvent } from "./table-engine.js";
 export {
   games,
   buildRegistry,
@@ -759,6 +760,11 @@ export default definePlugin({
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
   routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes],
+  // The hub's only event, and a SILENT one: a table tick is a state signal
+  // for the seats at that table, never a line in anybody's feed. Solo
+  // `play`/`act` publish nothing at all — a solo hand has exactly one
+  // interested client and it is the one holding the response.
+  events: [tableTickEvent],
   adminPages: [adminPage],
   // Documentation parity with combat's `provides: [killResolved]`: nothing
   // reads `PluginManifest.provides` today, but this is the point a game

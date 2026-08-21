@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { isInsufficientFundsError, PluginError, type PluginCtx, type PluginTx } from "@gl3/plugin-sdk";
 import { payOwner, takeOverFrom } from "@gl3/plugin-properties";
 import {
@@ -16,6 +17,72 @@ export type TableRow = typeof casinoTables.$inferSelect;
 export type SeatRow = typeof casinoSeats.$inferSelect;
 
 export interface LockedTable { table: TableRow; seats: SeatRow[]; house: House }
+
+/**
+ * The hub's one event, and it is SILENT: the feed skips it, the client's cache
+ * invalidation still honours it.
+ *
+ * A blackjack hand is roughly ten transitions across up to five seats, so a
+ * feed line per transition was never on — which is why the table shipped on a
+ * 2.5s poll and no events at all. `silent` is the primitive that closes that:
+ * `invalidates: ["casino"]` prefixes both `["casino"]` (the lobby) and
+ * `["casino","table"]` (the table view), so a seat learns the table moved the
+ * instant it does, and the poll relaxes to the lazy clock's backstop.
+ *
+ * `describe` is required of every declaration and is real copy rather than a
+ * placeholder: a client too old to know about `silent` renders it.
+ */
+export const tableTickEvent = {
+  name: "table",
+  payload: z.object({ tableId: z.string() }),
+  describe: "{actorName} is at the tables",
+  invalidates: ["casino"],
+  silent: true,
+};
+
+/**
+ * Whether the table's clock owes this transaction something. Exactly the test
+ * `advanceTable`'s loop opens with, named so GET's slow path can ask the same
+ * question before it publishes — the two drifting apart is how a tick gets
+ * published for a table that did not move.
+ */
+export function clockLapsed(table: TableRow, now: number = Date.now()): boolean {
+  return table.deadlineAt !== null && table.deadlineAt.getTime() <= now;
+}
+
+/**
+ * Tells every seat at the table that it moved: one silent `table` event per
+ * seated player, published INSIDE the transaction. The loader buffers and
+ * flushes after commit, so rule 5 holds without the caller doing anything —
+ * and a rollback drops these with everything else, which is the point.
+ *
+ * `seats` is the seat set as it stands AFTER the change, so a seat this
+ * transaction freed is not told; the caller has the response it answered with,
+ * and any other freed seat learns at its next poll. The actor is the caller
+ * throughout, recipients included — the client dedupes by cache semantics, and
+ * one uniform loop beats a special case for the seat that acted.
+ *
+ * At most `MAX_TABLE_SEATS` sends, and `p_casino_seats`' game-wide
+ * UNIQUE(player_id) is what makes one seat per player here.
+ */
+export async function publishTableTick(
+  tx: PluginTx, ctx: PluginCtx, seats: readonly { playerId: string }[], tableId: string,
+): Promise<void> {
+  const actor = ctx.player;
+  // Unreachable from the five table routes: every one of them 401s on a null
+  // player before it opens a transaction. Skipped rather than thrown so a
+  // future job-driven caller loses its tick instead of its transaction.
+  if (actor === null) return;
+  for (const seat of seats) {
+    await tx.events.publish({
+      name: tableTickEvent.name,
+      actorId: actor.id,
+      actorName: actor.username,
+      audience: { kind: "player", playerId: seat.playerId },
+      payload: { tableId },
+    });
+  }
+}
 
 /**
  * RULE 6, the table edge. The caller holds tx.locks.location(the table's
@@ -415,8 +482,12 @@ export async function advanceTable(
   // game whose `autoAct` never advances the turn.
   for (let i = 0; i < 3 * MAX_TABLE_SEATS; i += 1) {
     const { table } = current;
+    // The null test narrows `lapsed` for the calls below (which date each step
+    // FROM it — the eager-equivalence property above); `clockLapsed` owns the
+    // comparison itself, so GET's slow path asks precisely this question
+    // before it publishes a tick.
     const lapsed = table.deadlineAt;
-    if (lapsed === null || lapsed.getTime() > Date.now()) return current;
+    if (lapsed === null || !clockLapsed(table)) return current;
 
     if (table.phase === "betting") {
       await dealIfReady(tx, ctx, current, game, true, lapsed);
