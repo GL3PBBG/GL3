@@ -53,7 +53,10 @@ export default defineConfig({
       },
       {
         text: 'Operators',
-        items: [{ text: 'Operator guide', link: '/operators/' }],
+        items: [
+          { text: 'Operator guide', link: '/operators/' },
+          { text: 'Installing plugins', link: '/operators/installing-plugins' },
+        ],
       },
     ],
     socialLinks: [{ icon: 'github', link: 'https://github.com/rondlite/GL3' }],

@@ -13,7 +13,10 @@ own game. Contributor material lives in the rest of the manual.
   `REDIS_URL`.
 - **Installing plugins without rebuilding**: in the Docker deployment, plugins are
   loaded dynamically through `PLUGIN_PACKAGES` and `PLUGIN_DIR` (a mounted volume),
-  validated at boot. No image rebuild needed.
+  validated at boot. No image rebuild needed. The install itself (`npm i` from the
+  marketplace registry, with credentials) happens *before* boot in an init
+  container — the full walkthrough, including Kubernetes and Compose examples, is
+  in [Installing plugins](./installing-plugins.md).
 - **Choosing plugins**: note the cross-plugin constraints, e.g. setting any town to
   `underground` combat mode requires the `detectives` plugin to be loaded, or every
   attack and target-list read in that town fails.

@@ -11,5 +11,9 @@ export default defineConfig({
     // projects), unlike maxWorkers/minWorkers above, which are pool-level
     // options applied regardless of workspace mode. See vitest.workspace.ts
     // (dbHookTimeout) for the real fix and its evidence.
+    coverage: {
+      include: ["apps/*/src/**", "packages/*/src/**", "packages/plugins/*/src/**"],
+      exclude: ["**/dist/**", "**/*.d.ts", "**/*.test.ts", "**/migrations.ts"],
+    },
   },
 });
