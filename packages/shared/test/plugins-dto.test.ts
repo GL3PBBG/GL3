@@ -37,7 +37,7 @@ describe("PluginsPayloadSchema", () => {
    */
   it("round-trips an event meta that declares itself silent", () => {
     const payload = {
-      menu: [], pages: [],
+      menu: [], pages: [], moneyFormat: DEFAULT_MONEY_FORMAT,
       events: [{
         pluginId: "casino", name: "table", describe: "{actorName} is at the tables",
         invalidates: ["casino"], silent: true,
