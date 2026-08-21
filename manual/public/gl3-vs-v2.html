@@ -290,6 +290,31 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
       </tbody>
     </table>
   </div>
+
+  <h3 style="margin-top:34px">Past parity</h3>
+  <p>Parity was the goal; it is not the ceiling. Three capabilities have no V2 counterpart at all.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Capability</th><th>V2</th><th>GL3</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Multiplayer casino</strong></td>
+          <td>Blackjack exists — 411 lines, and no notion of a seat, a table or another player. You play the house alone.</td>
+          <td>Seats at a shared table: <code>sit</code>, <code>bet</code>, <code>act</code>, <code>leave</code> over one hand, with a lazy clock that deals, auto-stands and settles on any read. The lobby counts who is seated <em>per town</em>, so a busy table is visible from a town you are not standing in.</td>
+        </tr>
+        <tr>
+          <td><strong>Organized crime</strong></td>
+          <td>No such module.</td>
+          <td>Four-role heists with buy-in escrow, resolved by one seeded job into a shared outcome — an equal-split payout or a mass jailing.</td>
+        </tr>
+        <tr>
+          <td><strong>Game art</strong></td>
+          <td>One column, <code>US_pic</code>: a player's own avatar. No content table carries an image.</td>
+          <td>Content-addressed assets bound per entity and per page, so items, cars, towns and ranks all take art — and the sha is the storage key, making dedup and immutable caching free.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section>
@@ -330,7 +355,7 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
 </section>
 
 <footer>
-  <p>Measured against ChristopherDay/Gangster-Legends-V2 @ HEAD (last commit 2024-05-05) and GL3 @ 63cf83e. Line counts exclude node_modules and build output. GL3 table count is 31 core plus 16 plugin-owned across 10 of 20 plugins. Filter-point and subscription counts are from source, not documentation. Blackjack multiplayer was in progress and unmerged at audit time, so it is not assessed here.</p>
+  <p>Measured against ChristopherDay/Gangster-Legends-V2 @ HEAD (last commit 2024-05-05) and GL3 @ 63cf83e. Line counts exclude node_modules and build output. GL3 table count is 31 core plus 16 plugin-owned across 10 of 20 plugins. Filter-point and subscription counts are from source, not documentation.</p>
 </footer>
 
 </div>
