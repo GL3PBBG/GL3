@@ -104,8 +104,9 @@ sixteen. `ensureCurrentRound` settles lazily at read time under
 `pg_advisory_xact_lock(7461002)`, no cron: a live already-snapshotted round
 returns immediately with no transaction, and an ended round is frozen into
 `round_entries` (the hall of fame — there is no separate winners table),
-paid out in `points` (the one balance with no leaderboard ZSET and no
-faucet, so a round's prize cannot move any board the next round measures),
+paid out in `points` (the one balance with no leaderboard ZSET, so the prize
+moves no board *directly* — but it is no longer insulated from the game, and
+must not be treated as if it were: see the points-coupling note below),
 published, and rolled to its successor, all under the one lock so N
 concurrent settlers produce one settle and N−1 no-ops. Two new core
 `GameEvent` variants, `round.started` and `round.finished`, ship in core
@@ -724,6 +725,34 @@ unavailable here.
    the same helper proves only the case that was already safe. The pre-existing
    deadlock test agreed on ordering *by construction* and stayed green through this
    bug for that reason.
+
+---
+
+## Points are not a game balance — keep them that way
+
+`points` was introduced as the round payout precisely because it was inert:
+no leaderboard ZSET, no faucet, nothing to spend it on. The rounds cluster's
+own justification — *"a round's prize cannot move any board the next round
+measures"* — was true when it was written and **is now false**.
+
+`membership` spends points, and membership pays out in gameplay:
+`ceil(cooldown × 0.75)` on crimes, `ceil(cost × 0.25)` on travel fares,
+`min(100, floor(chance × 1.1))` on car theft. So the path exists:
+
+    season placing → points → membership → faster earning → season placing
+
+That loop is currently weak (membership is time-boxed, gifting redistributes
+it, an admin sets both the payout table and the package prices) and it is V2's
+own design, ported faithfully. It stops being weak the moment **points become
+purchasable** — payment-provider plugins are planned, and on that day every
+one of those percentages is something a player can buy.
+
+The standing rule, therefore: **a new points sink must not touch anything that
+scores.** Cosmetics, art slots, name colours, forum flair, an unlock track —
+fine. Cooldowns, payouts, chances, caps, or anything a leaderboard or a round
+delta reads — not without a deliberate decision that this game is pay-to-win.
+Membership is the existing exception, inherited from V2; do not add a second
+one by accident.
 
 ---
 

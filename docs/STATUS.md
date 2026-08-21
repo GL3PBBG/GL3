@@ -1430,10 +1430,15 @@ migration, and the plugin migration count stays **seven of sixteen**.
 - **Points, not cash.** The payout (`payoutPoints`, a settings-driven award
   table keyed by final placing, default `[1000n, 500n, 250n]`) pays into the
   `points` balance through `applyBalanceChange` — the one balance kind with
-  no leaderboard ZSET and no existing faucet, so a round's prize cannot move
-  any board the *next* round measures (paying cash or bank would inject a
-  head start into the exact economy about to be re-scored; `exp` is not
-  payable at all without corrupting the pure-activity board). Every payout
+  no leaderboard ZSET and, at the time, no existing faucet (paying cash or bank
+  would inject a head start into the exact economy about to be re-scored; `exp`
+  is not payable at all without corrupting the pure-activity board). **The
+  stronger claim originally recorded here — that a round's prize "cannot move
+  any board the next round measures" — no longer holds.** It was true while
+  points bought nothing; `membership` now converts them into crime-cooldown,
+  travel-fare and steal-chance advantages, so the prize reaches the next
+  round's boards one step removed. The payout mechanics below are unchanged;
+  only that justification is retired. See CLAUDE.md's points-coupling rule. Every payout
   row carries `balance_kind = 'points'`, `ref_id = <round id>`, and a null
   `job_id` — there is no BullMQ job here, so no `job.id` idempotency key
   applies; the advisory lock is what makes settle-exactly-once.
