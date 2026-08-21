@@ -22,12 +22,16 @@
     "plugins:generate": "node scripts/generate-plugin-map.mjs",
     "db:clean-clones": "node scripts/drop-stale-test-clones.mjs",
     "db:up": "docker compose up -d --wait",
-    "db:down": "docker compose down -v"
+    "db:down": "docker compose down -v",
+    "docs:dev": "vitepress dev manual",
+    "docs:build": "vitepress build manual",
+    "docs:preview": "vitepress preview manual"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@vitest/coverage-v8": "^2.1.9",
     "typescript": "^5.6.3",
+    "vitepress": "^1.6.4",
     "vitest": "^2.1.8"
   }
 }
