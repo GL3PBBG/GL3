@@ -616,6 +616,22 @@ export function usePlugins() {
   return useQuery<PluginsPayload>({
     queryKey: keys.plugins(),
     queryFn: async () => PluginsPayloadSchema.parse(await api("/api/plugins")),
+    // The payload is FIXED for the life of the server process:
+    // `buildPluginsPayload` runs once at boot from the loaded manifests and
+    // `GET /api/plugins` returns that same object to every player forever
+    // after. So an invalidation of this key can never produce a different
+    // answer, and without a staleTime it produces a REFETCH — of the whole
+    // manifest, every page and every view tree included.
+    //
+    // That matters now that plugin events are a realtime channel rather than
+    // an occasional notice: `pluginInvalidationKeys` prepends `keys.plugins()`
+    // to every plugin event (deliberately — an unknown event is exactly when
+    // the manifest is most likely stale), so a casino table would have every
+    // seated client re-downloading the manifest several times a hand. Marking
+    // it permanently fresh keeps that invalidation harmless without touching
+    // the invalidation rule itself. A deployment that loads different plugins
+    // is a new process, and the client reloads with it.
+    staleTime: Infinity,
   });
 }
 
