@@ -314,7 +314,7 @@ export const PluginsPayloadSchema = z.object({
   menu: z.array(MenuItemSchema),
   pages: z.array(PagePayloadSchema),
   events: z.array(EventMetaSchema),
-  /** Resolved from the `core.moneyFormat` filter point at boot. */
+  /** Resolved from the `core.moneyFormat` filter point per request, not at boot. */
   moneyFormat: MoneyFormatSchema,
 }).strict();
 
