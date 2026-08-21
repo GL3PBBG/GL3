@@ -14,6 +14,7 @@ import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
 import { Markdown } from "../components/Markdown.js";
+import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 
 const PERMISSIONS: readonly GangPermission[] = GangPermissionSchema.options;
@@ -75,14 +76,10 @@ function CreateGang({ viewerId }: { viewerId: string }): JSX.Element {
           <span className={styles.meta}>Name</span>
           <input maxLength={50} value={name} onChange={(event) => { setName(event.target.value); }} />
         </label>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.meta}>Description (optional)</span>
-          <textarea
-            maxLength={500}
-            value={description}
-            onChange={(event) => { setDescription(event.target.value); }}
-          />
-        </label>
+          <MarkdownEditor maxLength={500} value={description} onChange={setDescription} />
+        </div>
         <div className={styles.actions}>
           <button type="button" disabled={!valid || create.isPending} onClick={submit}>Found gang</button>
         </div>

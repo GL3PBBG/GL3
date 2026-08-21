@@ -48,6 +48,12 @@
 .barFill { height: 100%; background: var(--accent); }
 
 .tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+
+/* Write/Preview markdown editor (components/MarkdownEditor.tsx). */
+.editor { display: grid; gap: 0.25rem; }
+.editor .tabs { margin-bottom: 0; }
+.editorTools { display: flex; gap: 0.25rem; margin-left: auto; }
+.editorTools button { min-width: 2rem; }
 .tabActive { background: var(--accent); }
 .tabIdle { background: var(--panel); color: var(--fg); border: 1px solid var(--line); }
 

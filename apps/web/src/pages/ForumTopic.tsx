@@ -6,6 +6,7 @@ import {
 } from "../api/queries.js";
 import { useCountdowns } from "../hooks/useCountdowns.js";
 import { Markdown } from "../components/Markdown.js";
+import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { CooldownButton, ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -147,14 +148,10 @@ function Reply({
   return (
     <Panel title="Reply">
       <div className={styles.stack}>
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span className={styles.meta}>Message</span>
-          <textarea
-            maxLength={10_000}
-            value={body}
-            onChange={(event) => { setBody(event.target.value); }}
-          />
-        </label>
+          <MarkdownEditor maxLength={10_000} value={body} onChange={setBody} />
+        </div>
         <div className={styles.actions}>
           <CooldownButton
             label="Reply"
