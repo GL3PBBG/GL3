@@ -26,13 +26,14 @@ import { MailThread } from "./pages/MailThread.js";
 import { News } from "./pages/News.js";
 import { NotFound } from "./pages/NotFound.js";
 import { Notifications } from "./pages/Notifications.js";
-import { Online } from "./pages/Online.js";
+import { Players } from "./pages/Players.js";
 import { OrganizedCrime } from "./pages/OrganizedCrime.js";
 import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
 import { Reset } from "./pages/Reset.js";
 import { Rounds } from "./pages/Rounds.js";
+import { Stats } from "./pages/Stats.js";
 import { Travel } from "./pages/Travel.js";
 import { Verify } from "./pages/Verify.js";
 import { PluginPage } from "./plugins/PluginPage.js";
@@ -93,6 +94,7 @@ export function App(): JSX.Element {
               <Route path="ranks" element={<Ranks />} />
               <Route path="leaderboards" element={<Leaderboards />} />
               <Route path="rounds" element={<Rounds />} />
+              <Route path="stats" element={<Stats />} />
               <Route path="gang" element={<Gang />} />
               <Route path="mail" element={<Mail />} />
               <Route path="mail/:threadId" element={<MailThread />} />
@@ -101,7 +103,10 @@ export function App(): JSX.Element {
               <Route path="forum/topics/:topicId" element={<ForumTopic />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="news" element={<News />} />
-              <Route path="online" element={<Online />} />
+              <Route path="players" element={<Players />} />
+              {/* The page's old address. Kept as an alias so links already in
+                  mail, forum posts and bookmarks keep resolving. */}
+              <Route path="online" element={<Players />} />
               <Route path="profile" element={<Profile />} />
               <Route path="players/:playerId" element={<PlayerProfile />} />
               {/*

@@ -96,4 +96,12 @@ export const keys = {
   hudExtras: () => ["hudExtras"] as const,
   menuBadges: () => ["menuBadges"] as const,
   dashboardWidgets: () => ["dashboardWidgets"] as const,
+
+  // Keyed by the search term, so each debounced term caches its own result
+  // and retyping one lands instantly instead of flickering back to Loading.
+  playerSearch: (q: string) => ["playerSearch", q] as const,
+
+  // Game-wide stats (/stats). One key, no arguments — the server caches the
+  // payload for five minutes, so there is nothing per-player to vary on.
+  stats: () => ["stats"] as const,
 };

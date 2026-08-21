@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+// Its own statement rather than a line in the big block below: /stats is a
+// self-contained page and this keeps its one dependency easy to remove with it.
+import { GameStatsResponseSchema, type GameStatsResponse } from "@gl3/shared";
 import {
   AdminSectionsResponseSchema,
   AttackResponseSchema, AuthResponseSchema, BailResponseSchema, BankStatusResponseSchema,
@@ -24,6 +27,7 @@ import {
   MenuBadgesResponseSchema,
   NewsListResponseSchema, NotificationListResponseSchema, OcCashResponseSchema,
   OcCreateResponseSchema, OcStateResponseSchema, OnlineListResponseSchema, PlaceBountyResponseSchema,
+  PlayerSearchResponseSchema,
   PluginsPayloadSchema,
   PropertyListResponseSchema,
   ProfileDtoSchema, RankListResponseSchema, RemoveDetectiveSearchResponseSchema,
@@ -60,7 +64,8 @@ import {
   type MenuBadgesResponse,
   type NewsListResponse, type NotificationListResponse,
   type OcCashResponse, type OcCreateResponse, type OcStateResponse, type OnlineListResponse,
-  type PlaceBountyRequest, type PlaceBountyResponse, type PluginsPayload,
+  type PlaceBountyRequest, type PlaceBountyResponse, type PlayerSearchResponse,
+  type PluginsPayload,
   type ProfileDto, type RankListResponse, type RemoveDetectiveSearchResponse,
   type RepairResponse,
   type RoundListResponse, type RoundStandingsResponse,
@@ -607,6 +612,20 @@ export function useOnline() {
     queryKey: keys.online(),
     queryFn: async () => OnlineListResponseSchema.parse(await api("/api/online")),
     refetchInterval: 30_000,
+  });
+}
+
+/** Find a player by name. `enabled` is the caller's — the server refuses a
+ *  term under two characters, so the page holds the query back until the
+ *  debounced input is long enough rather than spending a 400 on every
+ *  first keystroke. */
+export function usePlayerSearch(q: string, enabled: boolean) {
+  return useQuery<PlayerSearchResponse>({
+    queryKey: keys.playerSearch(q),
+    queryFn: async () => PlayerSearchResponseSchema.parse(
+      await api(`/api/players/search?q=${encodeURIComponent(q)}`),
+    ),
+    enabled,
   });
 }
 
@@ -1378,5 +1397,22 @@ export function useAdminSections() {
     queryFn: async () => AdminSectionsResponseSchema.parse(await api("/api/admin/plugins")),
     enabled: (me.data?.grants.length ?? 0) > 0,
     retry: false,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Game stats
+// ---------------------------------------------------------------------------
+
+/**
+ * Game-wide totals and 14-day trends. The server already serves this from a
+ * five-minute Redis cache, so a short client staleTime only avoids refetching
+ * on every remount — it is not what protects the database.
+ */
+export function useStats() {
+  return useQuery<GameStatsResponse>({
+    queryKey: keys.stats(),
+    queryFn: async () => GameStatsResponseSchema.parse(await api("/api/stats")),
+    staleTime: 60_000,
   });
 }
