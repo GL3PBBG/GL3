@@ -1,5 +1,5 @@
 import { coreMoneyFormat, type PluginManifest, type ViewNode } from "@gl3/plugin-sdk";
-import { DEFAULT_MONEY_FORMAT } from "@gl3/shared";
+import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
 import type { CoreFilters } from "./core-filters.js";
@@ -53,8 +53,20 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
 }
 
 export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload, coreFilters: CoreFilters): void {
-  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async () => ({
-    ...payload,
-    moneyFormat: await coreFilters.apply(coreMoneyFormat, null, DEFAULT_MONEY_FORMAT),
-  }));
+  app.get("/api/plugins", { preHandler: [app.requireAuth] }, async (request) => {
+    const applied = await coreFilters.apply(coreMoneyFormat, null, DEFAULT_MONEY_FORMAT);
+    // `PluginsPayloadSchema` is `.strict()` and parsed all-or-nothing on the
+    // client — a malformed `coreMoneyFormat` return would take down the WHOLE
+    // plugin payload (nav, pages, events), the same defect class the casino
+    // cluster's `cards`-leaf parity bug fixed at 0.1.6. Fall back to the
+    // default rather than let one bad subscriber blank the entire client.
+    const parsed = MoneyFormatSchema.safeParse(applied);
+    if (!parsed.success) {
+      request.log.warn(
+        { pointName: coreMoneyFormat.name, value: applied, issues: parsed.error.issues },
+        "dropped a malformed core.moneyFormat contribution; falling back to the default",
+      );
+    }
+    return { ...payload, moneyFormat: parsed.success ? parsed.data : DEFAULT_MONEY_FORMAT };
+  });
 }

@@ -76,3 +76,49 @@ describe("hud extras, menu badges and dashboard widget routes", () => {
     }
   });
 });
+
+// A malformed contribution (an extra property `HudEntrySchema` rejects, and a
+// non-ISO `countdownTo`) must lose only its own entry — never fail the whole
+// route (and never the whole `PluginsPayloadSchema` parse client-side) for
+// every caller of `/api/hud/extras`. This is the server-side counterpart of
+// `runFilterChain`'s "collect" policy: that isolates a subscriber's *throw*,
+// this isolates a subscriber's *malformed return value*.
+const malformedHudPlugin = definePlugin({
+  id: "malformed-hud",
+  version: "1.0.0",
+  basePaths: ["/api/malformed-hud"],
+  filters: [
+    on(coreHud, async (ctx, value) => [
+      ...value,
+      // Valid entry — proves a well-formed sibling contribution survives.
+      { pluginId: ctx.pluginId, label: "ok", value: "fine" },
+      // Malformed: `extra` is not a field `HudEntrySchema` (`.strict()`) allows.
+      { pluginId: ctx.pluginId, label: "bad-extra", value: "x", extra: "nope" } as never,
+      // Malformed: `countdownTo` fails `TimestampSchema`'s ISO-8601 parse.
+      { pluginId: ctx.pluginId, label: "bad-countdown", value: "x", countdownTo: "not-a-date" },
+    ]),
+  ],
+});
+
+describe("hud extras drops a malformed contribution rather than failing the whole route", () => {
+  it("returns 200 with the malformed entries absent and the valid ones present", async () => {
+    const { app, close, redis } = await bootTestServer({ plugins: [malformedHudPlugin] });
+    try {
+      const { token } = await registerVerifiedPlayer({ app, redis }, {
+        username: "MalformedHudPlayer",
+        remoteAddress: "10.32.0.2",
+      });
+
+      const res = await app.inject({
+        method: "GET", url: "/api/hud/extras", headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const hud = HudExtrasResponseSchema.parse(res.json());
+      expect(hud.entries).toContainEqual({ pluginId: "malformed-hud", label: "ok", value: "fine" });
+      expect(hud.entries.some((e) => e.label === "bad-extra")).toBe(false);
+      expect(hud.entries.some((e) => e.label === "bad-countdown")).toBe(false);
+    } finally {
+      await close();
+    }
+  });
+});
