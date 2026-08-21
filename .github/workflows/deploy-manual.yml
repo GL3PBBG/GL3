@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'manual/**'
+      - 'packages/shared/**'
+      - 'scripts/generate-reference.mjs'
       - '.github/workflows/deploy-manual.yml'
   workflow_dispatch:
 
