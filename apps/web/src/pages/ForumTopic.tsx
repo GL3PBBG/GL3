@@ -5,6 +5,7 @@ import {
   useCreatePost, useDeletePost, useDeleteTopic, useForumTopic, useLockTopic, useMe, useSetTopicType,
 } from "../api/queries.js";
 import { useCountdowns } from "../hooks/useCountdowns.js";
+import { Markdown } from "../components/Markdown.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { CooldownButton, ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
@@ -70,7 +71,7 @@ function Topic({ topicId, grants }: { topicId: string; grants: readonly string[]
                   : "The management"}
                 {" · "}<When iso={post.createdAt} />
               </p>
-              <p className={styles.prose}>{post.body}</p>
+              <Markdown text={post.body} />
               <div className={styles.actions}>
                 <button
                   type="button"

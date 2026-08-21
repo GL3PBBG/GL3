@@ -61,6 +61,27 @@
    widening the whole layout. */
 .prose { white-space: pre-wrap; overflow-wrap: break-word; margin: 0.5rem 0 0; }
 
+/* Rendered-markdown container (components/Markdown.tsx). No pre-wrap — the
+   text's own newlines are already <br>/<p> by the time it gets here, and
+   pre-wrap would render marked's formatting newlines as phantom blank lines. */
+.markdown { overflow-wrap: break-word; margin: 0.5rem 0 0; }
+.markdown p { margin: 0 0 0.5rem; }
+.markdown p:last-child { margin-bottom: 0; }
+.markdown blockquote {
+  margin: 0 0 0.5rem;
+  padding: 0.1rem 0 0.1rem 0.75rem;
+  border-left: 3px solid var(--line, currentColor);
+  opacity: 0.85;
+}
+.markdown ul, .markdown ol { margin: 0 0 0.5rem; padding-left: 1.5rem; }
+.markdown code { font-size: 0.9em; }
+.markdown pre { overflow-x: auto; }
+.markdown img { max-width: 100%; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  font-size: 1em;
+  margin: 0 0 0.5rem;
+}
+
 .stack { display: grid; gap: 1rem; }
 .rowStack { display: grid; gap: 0.25rem; min-width: 0; }
 /* 0.5rem, not the 0.35rem this shipped with: at that gap a run of buttons with

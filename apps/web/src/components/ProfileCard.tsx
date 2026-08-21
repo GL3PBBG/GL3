@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ProfileDto } from "@gl3/shared";
 import { Amount, Avatar, Panel, When } from "./ui.js";
+import { Markdown } from "./Markdown.js";
 import styles from "../pages/pages.module.css";
 
 /**
@@ -42,7 +43,7 @@ export function ProfileCard({ profile }: { profile: ProfileDto }): JSX.Element {
       {profile.bio === null || profile.bio === "" ? (
         <p className={styles.muted}>No bio.</p>
       ) : (
-        <p className={styles.prose}>{profile.bio}</p>
+        <Markdown text={profile.bio} />
       )}
       {linkExtras.length > 0 ? (
         <div className={styles.actions}>
