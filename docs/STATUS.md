@@ -3156,6 +3156,72 @@ actually fired on a real deadlock: the deliberate inversion produced a genuine
 under a full-suite run, it should — for the first time — carry its SQLSTATE
 too.
 
+### Silent events — a feed-suppressed declaration, and the table's WS path
+
+**The blackjack-tables cluster's one deviation from GL3's event-driven
+invalidation is closed.** That cluster polled at 2.5s and published nothing,
+because every plugin event renders a feed line through its `describe`
+template and a blackjack hand is ~10 transitions across up to five seats.
+The missing primitive was never "an event casino could publish" — it was a
+declaration that says *do not render this*. `PluginEventDecl` gains
+`silent?: boolean` (absent = false, schema still `.strict()`), carried by
+`buildPluginsPayload` into `EventMetaSchema` and read by exactly one place on
+the client: a new pure `isSilentEvent` in `apps/web/src/lib/eventCopy.ts`,
+which `EventFeed.tsx` filters on **before** mapping. `ws/invalidation.ts` and
+`plugins/invalidation.ts` are **untouched, confirmed by diff** — a silent
+event still invalidates precisely what it declares. Silence is a *rendering*
+decision, and it is per-declaration rather than per-publish, so the trust
+class is `publishCore`'s: install-time, no runtime guard, a plugin can
+silence only its own lines.
+
+**`describe` stays required.** A client whose cached manifest predates the
+flag renders the template it already knows — noise, which is what the feed
+did before this cluster, rather than a missing field it would have to cope
+with. The loader OMITS the key when a declaration does not set it (and when
+it sets it to `false`), so every payload built before the flag existed is
+byte-for-byte what it was; `plugin-manifest-endpoint.test.ts`'s existing
+`toEqual` on a flagless declaration is what pins that from the other side.
+
+**Casino publishes its first event**: `table`, `silent: true`, payload
+`{ tableId }`, `invalidates: ["casino"]` — one prefix that covers both the
+lobby's query key and the table view's. `publishTableTick` (`table-engine.ts`)
+sends one per player at the end of every mutating table transaction — sit,
+leave, bet, act — and from **GET's slow path**, which is unusual and correct:
+a lapsed-clock advance is a mutation the other seats must learn about, the
+loader flushes only after commit, and the publish is gated on `clockLapsed`,
+now shared with `advanceTable`'s own loop test rather than restated, so a
+read that lost the race to another transaction and advanced nothing publishes
+nothing.
+
+**Recipients are the seat set before the change UNIONED with the set after
+it**, deduped by player id, and the union is the load-bearing half. A seat
+this transaction FREED — by leaving, by the idle sweep at deal time, or by a
+settle that emptied and deleted the table — appears in the post-change set
+nowhere, and is exactly the client still holding a `casinoTable` cache entry
+nothing will correct. That is why `lockedSeat` hands `bet`/`act` a `before`
+snapshot, why `leave` copies `locked.seats` before the clock runs, and why
+`freeSeat` publishes to its pre-delete seat list: `advanceTable` can swap
+`locked.seats` for a filtered array mid-call, so the pre-set must be copied
+at `lockTable` time or the kicked seats are already gone from it.
+
+**The poll survives, relaxed to 15s** (`TABLE_POLL_MS`). It is no longer the
+realtime channel — WS invalidation is — but it is still the lazy clock's only
+heartbeat: `advanceTable` runs because somebody READ the table, and a table
+nobody is acting at generates no request to publish from. Unseated stays
+`false`.
+
+This cluster adds **no migration, no lock-graph edge and no `GameEvent`
+variant** — a `plugin.event` envelope is not a new variant, so none of the
+four places a core variant touches is involved, and every publish sits inside
+a transaction that already holds the full table lock order.
+`apps/server/test/casino-table-events.test.ts` (registered in
+`vitest.workspace.ts`, the ninth-site trap) covers the manifest flag through
+`GET /api/plugins`, the recipient set for a bet, the leaver's own tick, the
+sit case, and a player at another table receiving nothing. **`@gl3/shared`
+`0.1.19` → `0.1.20` and `@gl3/plugin-sdk` `0.1.11` → `0.1.12`** (its
+`@gl3/shared` range tightened to `^0.1.20`), both additive patches,
+**unpublished** pending the user's approval after a registry check.
+
 ## What M3 established that later work must not undo
 
 - **Lock ordering is per row-pair, not one global rule for the whole app.** There

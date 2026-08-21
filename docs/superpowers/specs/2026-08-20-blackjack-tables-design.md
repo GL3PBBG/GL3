@@ -254,6 +254,13 @@ green sorted-call case. Test waits on `pg_stat_activity`, never sleeps
   per hand. Instead the table page POLLS: `useCasinoTable` sets
   `refetchInterval: 2500` while the caller is seated. Polling doubles as the
   lazy clock's heartbeat — any read past `deadline_at` advances the table.
+  **Superseded 2026-08-21 by the silent-events cluster**
+  (`2026-08-21-silent-events-design.md`): a feed-suppressed event declaration
+  (`silent: true`) removes the flooding objection, so the hub now publishes a
+  silent `table` tick to every seat at the end of each mutating table
+  transaction and `refetchInterval` relaxes to 15000 — WS invalidation is the
+  fast path, the poll is only the lazy clock's backstop for a table nobody is
+  acting at.
 - `apps/web` `Casino.tsx` reworked (stays hand-written): lobby with local
   table cards + greyed remote list; table screen with seat arc, per-seat
   cards from the existing `cards` ViewNode leaf, turn highlight, countdown
