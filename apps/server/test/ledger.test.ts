@@ -110,7 +110,11 @@ describe("applyBalanceChange", () => {
     const rows = await db.select().from(transactions).orderBy(transactions.createdAt);
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.balanceKind === "bank")).toBe(true);
-    expect(rows.map((r) => r.amount)).toEqual([500n, -200n]);
+    // Both rows can share a created_at tick, whose tie order is unspecified —
+    // under full-suite load the pair has come back reversed. The fact under
+    // test is which rows exist, not the tick's tiebreak: compare sorted.
+    const amounts = rows.map((r) => r.amount).sort((a, b) => (a < b ? -1 : 1));
+    expect(amounts).toEqual([-200n, 500n]);
   });
 
   it("credits and debits points, leaving cash and bank untouched, tagged with balance_kind=points", async () => {
