@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, useEffect, useState } from "react";
+import { Fragment, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
@@ -6,6 +6,7 @@ import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
+import { formatRemaining } from "../lib/countdown.js";
 import styles from "../pages/pages.module.css";
 
 // The 56-card SVG deck behind `Hand` is ~155 kB gzipped — over half the app's
@@ -72,6 +73,43 @@ function groupIntoPanels(instructions: readonly RenderInstruction[]): PanelGroup
 }
 
 /**
+ * A ticking cell for `render: "countdown"`. The cell value is an ISO
+ * timestamp; anything unparsable ("—", "") renders verbatim, so a server
+ * mixing live rows and placeholders needs no special casing.
+ *
+ * Deadline-derived, not tick-counted — lib/countdown.ts explains why (background
+ * tabs throttle intervals; the interval is only a repaint trigger). When a
+ * deadline that was LIVE AT MOUNT passes, `onDue` fires exactly once so the
+ * parent can refetch — a lazily-settled row (the settle-at-read idiom) shows
+ * its outcome without a manual reload. A deadline already past at mount never
+ * fires it: with a server that keeps answering an expired timestamp, that
+ * refetch would loop forever.
+ */
+function CountdownCell({ value, onDue }: { value: string; onDue: () => void }): JSX.Element {
+  const target = Date.parse(value);
+  const [now, setNow] = useState(() => Date.now());
+  const onDueRef = useRef(onDue);
+  onDueRef.current = onDue;
+
+  useEffect(() => {
+    if (!Number.isFinite(target) || target <= Date.now()) return;
+    const tick = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= target) {
+        window.clearInterval(tick);
+        onDueRef.current();
+      }
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, [target]);
+
+  if (!Number.isFinite(target)) return <>{value}</>;
+  const remaining = Math.ceil((target - now) / 1000);
+  return <>{remaining > 0 ? formatRemaining(remaining) : "due"}</>;
+}
+
+/**
  * Fetches rows for a `table` instruction. Re-fetches whenever `refetchSignal`
  * increments (i.e. after any successful `runAction` on the same page), so
  * mutation-then-view stays consistent without a full page reload.
@@ -84,7 +122,7 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
   columns: readonly {
     readonly key: string;
     readonly label: string;
-    readonly render: "image" | null;
+    readonly render: "image" | "countdown" | null;
     readonly imageSize: "sm" | "md" | "lg";
   }[];
   rowActions: readonly { readonly label: string; readonly action: string; readonly confirm: string | null }[];
@@ -99,6 +137,9 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
   // disarms this one, so at most one destructive action is ever primed.
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Bumped when a countdown cell reaches zero: one refetch, so a row the
+  // server settles lazily at read time (fixer's status) shows its outcome.
+  const [dueBump, setDueBump] = useState(0);
 
   // `source` is `"GET /api/..."` — strip the method prefix for `api()`.
   const path = source.replace(/^GET\s+/, "");
@@ -121,7 +162,7 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [path, refetchSignal]);
+  }, [path, refetchSignal, dueBump]);
 
   if (loading) return <Loading what="table" />;
   if (error !== null) return <ErrorText error={error} />;
@@ -172,7 +213,9 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
                   // owns the missing-art case, which for a table means most
                   // rows on a fresh install.
                   ? <GameImage url={row[col.key] ?? null} alt={col.label || "image"} size={col.imageSize} />
-                  : row[col.key] ?? ""}
+                  : col.render === "countdown"
+                    ? <CountdownCell value={row[col.key] ?? ""} onDue={() => setDueBump((n) => n + 1)} />
+                    : row[col.key] ?? ""}
               </td>
             ))}
             {showActions ? (

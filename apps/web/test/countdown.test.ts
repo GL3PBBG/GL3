@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  countdownSeconds, pruneExpired, seedDeadline, secondsLeft, startDeadline,
+  countdownSeconds, formatRemaining, pruneExpired, seedDeadline, secondsLeft, startDeadline,
 } from "../src/lib/countdown.js";
 
 const T0 = 1_800_000_000_000;
@@ -110,5 +110,17 @@ describe("countdownSeconds", () => {
     // back to the snapshot made the clock hit 0:00 and jump back to the full
     // sentence until the next fetch — up to 30s with the socket down.
     expect(countdownSeconds(undefined, 60, true)).toBe(0);
+  });
+});
+
+describe("formatRemaining", () => {
+  it("shows hours+minutes past an hour, minutes+seconds under it, bare seconds under a minute", () => {
+    expect(formatRemaining(2 * 3600 + 5 * 60 + 59)).toBe("2h 05m");
+    expect(formatRemaining(4 * 60 + 12)).toBe("4m 12s");
+    expect(formatRemaining(45)).toBe("45s");
+  });
+
+  it("clamps negatives to zero", () => {
+    expect(formatRemaining(-30)).toBe("0s");
   });
 });

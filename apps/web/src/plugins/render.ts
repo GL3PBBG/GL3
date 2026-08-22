@@ -30,7 +30,7 @@ export type RenderInstruction =
   | {
       kind: "table";
       source: string;
-      columns: { key: string; label: string; render: "image" | null; imageSize: "sm" | "md" | "lg" }[];
+      columns: { key: string; label: string; render: "image" | "countdown" | null; imageSize: "sm" | "md" | "lg" }[];
       rowActions: { label: string; action: string; confirm: string | null }[];
     }
   | { kind: "cards"; cards: string[]; size: "sm" | "md" | "lg"; caption: string | null }
@@ -169,7 +169,8 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     const columns = childArray(node.columns).map((c) => ({
       key: isRecord(c) ? String(c.key) : "",
       label: isRecord(c) ? String(c.label) : "",
-      render: isRecord(c) && c.render === "image" ? ("image" as const) : null,
+      render: isRecord(c) && c.render === "image" ? ("image" as const)
+        : isRecord(c) && c.render === "countdown" ? ("countdown" as const) : null,
       // Normalised to a required value, like `render` above and `allowEmpty`
       // on a select field: the renderer never re-derives the DTO's optionality.
       imageSize: isRecord(c) && isSize(c.imageSize) ? c.imageSize : "sm",

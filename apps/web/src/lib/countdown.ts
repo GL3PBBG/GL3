@@ -101,3 +101,18 @@ export function pruneExpired(deadlines: Deadlines, nowMs: number): Deadlines {
   }
   return dropped ? live : deadlines;
 }
+
+/**
+ * "2h 05m", "4m 12s", "45s" — the display format for a ticking table cell
+ * (`render: "countdown"`). Seconds disappear past an hour: at that range they
+ * are noise, and hiding them keeps the cell from changing width every second.
+ */
+export function formatRemaining(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.trunc(totalSeconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const sRem = seconds % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(sRem).padStart(2, "0")}s`;
+  return `${sRem}s`;
+}

@@ -187,8 +187,12 @@ const leafOptions = [
         z.object({
           key: z.string(),
           label: z.string(),
-          /** Absent renders text; `image` treats the cell value as a URL. */
-          render: z.literal("image").optional(),
+          /**
+           * Absent renders text; `image` treats the cell value as a URL;
+           * `countdown` treats it as an ISO timestamp and ticks the remaining
+           * time down client-side (a non-date value renders verbatim).
+           */
+          render: z.enum(["image", "countdown"]).optional(),
           /** Thumbnail size for `render: "image"`. Defaults to `sm`. */
           imageSize: z.enum(["sm", "md", "lg"]).optional(),
         }).strict(),

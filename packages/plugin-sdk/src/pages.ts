@@ -137,8 +137,12 @@ const leafOptions = [
           label: z.string(),
           // Default (absent) renders the cell as text. `image` treats the cell
           // value as a URL and renders an `<img>` — additive, so every column
-          // written before this existed is unaffected.
-          render: z.literal("image").optional(),
+          // written before this existed is unaffected. `countdown` treats the
+          // value as an ISO timestamp and ticks the remaining time down live
+          // client-side, refetching the table once when it reaches zero (so a
+          // lazily-settled row shows its outcome); a non-date value ("—")
+          // renders verbatim.
+          render: z.enum(["image", "countdown"]).optional(),
           // Thumbnail size for `render: "image"`, ignored otherwise. Defaults
           // to `sm`, which is right for a dense table and too small for a page
           // whose whole point is the picture (the garage) — hence the choice.

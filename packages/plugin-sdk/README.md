@@ -253,6 +253,13 @@ wipes what the operator didn't retype. Omit it and the form renders blank,
 exactly as before. Secrets stay masked server-side: return the mask in
 `values` and treat it as "unchanged" when it comes back.
 
+A `table` column may declare `render: "countdown"` — the cell value is then
+an ISO timestamp and the renderer ticks the remaining time down live
+("2h 05m", "4m 12s"). When a countdown that was still running reaches zero,
+the table refetches its `source` once, so a row the server settles lazily at
+read time shows its outcome without a reload. A non-date cell value ("—")
+renders verbatim, so mixed live/placeholder rows need no special casing.
+
 ## Events
 
 ```ts
