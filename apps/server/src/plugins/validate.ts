@@ -92,7 +92,7 @@ function hasDotSegment(path: string): boolean {
 /**
  * Every HTTP endpoint a page's view can drive.
  *
- * Five of the ten node kinds carry at least one: `button`, `cooldownButton`,
+ * Five of the fifteen node kinds carry at least one: `button`, `cooldownButton`,
  * `form`, `table`, and `assetBinder` (the last optionally). Forms additionally
  * carry optional `valuesSource` and per-field `optionsSource` beyond their main
  * action. The two other path-shaped fields are deliberately not here. `link.to`
