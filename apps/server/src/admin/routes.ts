@@ -7,11 +7,12 @@ import { z } from "zod";
 import { clearBanned, markBanned } from "../auth/ban.js";
 import { destroyAllSessions } from "../auth/session.js";
 import type { Db } from "../db/client.js";
-import { players, roleModuleAccess, rounds, roles } from "../db/schema/index.js";
+import { gangs, playerStats, players, roleModuleAccess, rounds, roles, transactions } from "../db/schema/index.js";
 import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { buildAssetsPage } from "./assets-page.js";
+import { economyPage } from "./economy-page.js";
 import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
@@ -95,6 +96,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     // under, and a second name for one thing is how the two drift apart.
     { id: CORE_SCOPE, name: "core (game art)" },
     { id: "rounds", name: "rounds" },
+    { id: "economy", name: "economy (ledger dashboard)" },
     { id: "players", name: "players (moderation)" },
     { id: "theme", name: "theme" },
     ...pluginIds.map((id) => ({ id, name: id })),
@@ -154,6 +156,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "rounds",
         pages: [{ pluginId: "rounds", id: roundsPage.id, path: roundsPage.path, view: roundsPage.view }],
+      });
+    }
+    if (hasPermission(grants, "economy")) {
+      sections.push({
+        pluginId: "economy",
+        pages: [{ pluginId: "economy", id: economyPage.id, path: economyPage.path, view: economyPage.view }],
       });
     }
     if (hasPermission(grants, "players")) {
@@ -512,6 +520,109 @@ export function registerAdminRoutes(
     if (result === "not_found") return reply.code(404).send({ error: "round_not_found" });
     if (result === "started") return reply.code(409).send({ error: "round_not_scheduled" });
     return reply.code(204).send();
+  });
+
+  // ── Economy dashboard (MIMO) ──────────────────────────────────────────────
+  // Gated on the `economy` grant. Read-only aggregates over the transactions
+  // ledger: supply, per-reason flows over 7 days, and daily net over 30 days.
+  // The ledger's invariant (sum(amount) per owner == balance) is what makes
+  // these trustworthy without a second bookkeeping table.
+
+  /**
+   * Signed net with an explicit leading `+`, so a faucet and a sink are told
+   * apart at a glance in a plain-text table. `amount` is bigint; the sum comes
+   * back from postgres as a decimal string, never a JS number.
+   */
+  const signedNet = (sum: string): string => (BigInt(sum) >= 0n ? `+${sum}` : sum);
+
+  app.get("/api/admin/economy/supply/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+
+    // Summed in JS with BigInt, not in SQL: three aggregates over two tables
+    // in one query would be a union of null-able columns, and the totals row
+    // is derived from the parts anyway — a single source of arithmetic.
+    const [p] = await db.select({
+      cash: sql<string>`coalesce(sum(${playerStats.cash}), 0)`,
+      bank: sql<string>`coalesce(sum(${playerStats.bank}), 0)`,
+      points: sql<string>`coalesce(sum(${playerStats.points}), 0)`,
+    }).from(playerStats);
+    const [g] = await db.select({
+      cash: sql<string>`coalesce(sum(${gangs.cash}), 0)`,
+      bank: sql<string>`coalesce(sum(${gangs.bank}), 0)`,
+    }).from(gangs);
+
+    const playerCash = BigInt(p?.cash ?? "0");
+    const playerBank = BigInt(p?.bank ?? "0");
+    const gangCash = BigInt(g?.cash ?? "0");
+    const gangBank = BigInt(g?.bank ?? "0");
+    const supply = playerCash + playerBank + gangCash + gangBank;
+
+    return reply.send({
+      rows: [
+        { label: "Player cash (total)", value: playerCash.toString() },
+        { label: "Player bank (total)", value: playerBank.toString() },
+        { label: "Gang cash (total)", value: gangCash.toString() },
+        { label: "Gang bank (total)", value: gangBank.toString() },
+        { label: "Money supply (cash + bank)", value: supply.toString() },
+        // Points are not money, but they are the other minted currency and the
+        // dashboard is the one place an admin sees the two side by side.
+        { label: "Points (players, total)", value: (p?.points ?? "0").toString() },
+      ],
+    });
+  });
+
+  app.get("/api/admin/economy/flows/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+
+    const rows = await db.select({
+      reason: transactions.reason,
+      inflow: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)`,
+      outflow: sql<string>`coalesce(-sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)`,
+      net: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+      count: sql<number>`count(*)::int`,
+    }).from(transactions)
+      .where(sql`${transactions.balanceKind} <> 'points'
+        and ${transactions.createdAt} >= now() - interval '7 days'`)
+      .groupBy(transactions.reason)
+      // Biggest movers first, regardless of direction: the reason an admin
+      // needs to look at is the one with the largest net, faucet or sink.
+      .orderBy(sql`abs(coalesce(sum(${transactions.amount}), 0)) desc`);
+
+    return reply.send({
+      rows: rows.map((r) => ({
+        reason: r.reason,
+        net: signedNet(r.net),
+        inflow: r.inflow,
+        outflow: r.outflow,
+        count: r.count.toString(),
+      })),
+    });
+  });
+
+  app.get("/api/admin/economy/daily/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+
+    const rows = await db.select({
+      day: sql<string>`to_char(date_trunc('day', ${transactions.createdAt}), 'YYYY-MM-DD')`,
+      net: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+    }).from(transactions)
+      .where(sql`${transactions.balanceKind} <> 'points'
+        and ${transactions.createdAt} >= now() - interval '30 days'`)
+      .groupBy(sql`date_trunc('day', ${transactions.createdAt})`)
+      .orderBy(sql`date_trunc('day', ${transactions.createdAt}) desc`);
+
+    return reply.send({
+      rows: rows.map((r) => ({ day: r.day, net: signedNet(r.net) })),
+    });
   });
 
   // ── Player moderation ────────────────────────────────────────────────────
