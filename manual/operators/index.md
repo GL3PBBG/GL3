@@ -50,6 +50,29 @@ own game. Contributor material lives in the rest of the manual.
   inmate or patient. Watch the effect in the economy dashboard: the
   `jail.bail`, `hospital.discharge` and `detectives.hire` sink rows should
   grow as wealth concentrates.
+- **Wealth tax**: once per UTC day, every player and gang bank above a
+  threshold (default $10M) pays a percent (default 1%) on the EXCESS only,
+  destroyed through the ledger (`economy.wealth_tax` shows as a sink row in
+  the economy dashboard). Demurrage for wealth parked in banks — including
+  franchise owners' takings and long-gone accounts — while cash on hand is
+  untouched and stays stealable, so banking remains a tradeoff rather than a
+  dominant strategy. Drained players get one notification. Runs as a
+  background loop (a settings-table day cursor under an advisory lock, so two
+  server instances produce one pass), settles at boot after downtime, and a
+  missed day is never double-charged. Knobs on the Wealth tax page under the
+  `economy` grant (`economy.wealth_tax_percent`, `economy.wealth_tax_threshold`,
+  restart-to-apply); percent 0 switches it off.
+- **Franchise skim**: a share (default 10%) of every franchise owner CREDIT is
+  destroyed rather than paid — bullet-factory sales and casino house takings
+  now partly drain the economy instead of purely pooling at owners. Debits
+  are never skimmed, so a casino house always pays winnings in full, and the
+  exposure checks read the owner's real (post-skim) balance. Property
+  buy/sell between players is NOT franchise income and is not skimmed. In the
+  economy dashboard the skim appears as positive net flow on the consumer's
+  reason (e.g. `properties.bullets`), the same way bullets' half-split already
+  did. Knob: `properties.skim_percent` on the properties admin page — unlike
+  every other setting it applies immediately, no restart; 0 restores full
+  payout.
 - **Economy dashboard**: `/admin/economy`, behind its own `economy` grant (grant it
   through Roles like any other module key). Read-only, sourced entirely from the
   transactions ledger: current money supply (player and gang cash/bank, points
