@@ -195,6 +195,30 @@ describe("validatePlugins view-action containment", () => {
     expect(() => validatePlugins([manifest])).toThrow(/GET \/api\/bank\/accounts/);
   });
 
+  it("accepts a form's valuesSource inside the plugin's basePaths", () => {
+    const manifest = withPage({
+      kind: "form",
+      action: "POST /api/hello/settings",
+      submitLabel: "Save",
+      valuesSource: "GET /api/hello/settings",
+      fields: [{ name: "cost", label: "Cost", type: "money" }],
+    });
+    expect(() => validatePlugins([manifest])).not.toThrow();
+  });
+
+  // `valuesSource` fetches on mount exactly like `table.source` — an
+  // uncontained one would let a page read any endpoint in the app.
+  it("rejects a form's out-of-scope valuesSource, naming the source", () => {
+    const manifest = withPage({
+      kind: "form",
+      action: "POST /api/hello/settings",
+      submitLabel: "Save",
+      valuesSource: "GET /api/bank/accounts",
+      fields: [{ name: "cost", label: "Cost", type: "money" }],
+    });
+    expect(() => validatePlugins([manifest])).toThrow(/GET \/api\/bank\/accounts/);
+  });
+
   // `link.to` is an app-internal client route (`/plugins/:pageId`), not an HTTP
   // endpoint, so it is deliberately outside containment — `INTERNAL_PATH_RE` is
   // the rule that applies to it. Containing it would forbid the one link the
