@@ -66,8 +66,10 @@
 .line { stroke: var(--accent); fill: none; stroke-width: 2; }
 .hit { fill: transparent; pointer-events: all; }
 .baseline { stroke: var(--line); stroke-width: 1; }
-/* The zero line sits wherever the data puts it, not always at the bottom. */
-.zero { stroke: var(--line); stroke-width: 1; }
+/* The zero line sits wherever the data puts it, not always at the bottom —
+   and unlike the bottom baseline it can float mid-plot, so it takes the
+   stronger `--muted` stroke to stay legible against both themes. */
+.zero { stroke: var(--muted); stroke-width: 1; }
 
 .axis {
   display: flex;
