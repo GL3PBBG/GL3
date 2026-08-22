@@ -92,9 +92,14 @@ practical consequence of the install/load split:
   a Secret. Example `.npmrc`:
 
   ```ini
-  registry=https://npm.gl3.dev
+  @gl3:registry=https://npm.gl3.dev
+  @gl3-plugins:registry=https://npm.gl3.dev
   //npm.gl3.dev/:_authToken=${GL3_NPM_TOKEN}
   ```
+
+  Scoped registry lines, never a bare `registry=` — a global line would
+  route every transitive dependency through the marketplace host, hiding
+  npmjs behind its uplink until the day the host is down.
 
 - The **server container** gets neither the token nor any registry
   configuration. It cannot install packages, so it has no use for
@@ -123,6 +128,13 @@ spec:
       volumes:
         - name: plugins
           emptyDir: {}          # or a PVC — see the note below
+        - name: npmrc
+          configMap:
+            name: gl3-npmrc
+            # ConfigMap key "npmrc" — no secret material in it:
+            #   @gl3:registry=https://npm.gl3.dev
+            #   @gl3-plugins:registry=https://npm.gl3.dev
+            #   //npm.gl3.dev/:_authToken=${GL3_NPM_TOKEN}
       initContainers:
         - name: install-plugins
           image: node:22-alpine # has npm; the runtime image does not
@@ -135,12 +147,19 @@ spec:
           volumeMounts:
             - name: plugins
               mountPath: /data/plugins
-          # Registry credentials for npm.gl3.dev live HERE, not on the server:
-          # either mount a .npmrc, or set NPM_CONFIG_* env vars from a Secret.
+            - name: npmrc
+              mountPath: /npm
+          # Registry credentials for npm.gl3.dev live HERE, not on the server.
+          # The token rides an env var that npm expands inside the mounted
+          # npmrc (`${GL3_NPM_TOKEN}`) — it never sits in a file or image
+          # layer, and rotation is a Secret update. Note a Kubernetes env var
+          # cannot be named `NPM_CONFIG_//host/:_authToken` (slashes and
+          # colons are invalid in env names), which is why the npmrc file
+          # carries that line instead.
           env:
-            - name: NPM_CONFIG_REGISTRY
-              value: "https://npm.gl3.dev"
-            - name: NPM_CONFIG_//npm.gl3.dev/:_authToken
+            - name: NPM_CONFIG_USERCONFIG   # point npm at the mounted file
+              value: /npm/npmrc
+            - name: GL3_NPM_TOKEN
               valueFrom:
                 secretKeyRef: { name: npm-creds, key: token }
       containers:
