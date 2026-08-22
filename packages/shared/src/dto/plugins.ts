@@ -138,6 +138,10 @@ const leafOptions = [
     kind: z.literal("form"),
     action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
     submitLabel: z.string(),
+    // Optional prefill: a GET whose response's `values` object seeds the
+    // form's fields by name. Same GET-only rule and containment treatment as
+    // `table.source` — it fetches on mount and must never mutate.
+    valuesSource: z.string().regex(GET_SOURCE_RE, "valuesSource must be `GET /absolute/path`").optional(),
     // Three strict branches, kept identical to the SDK's copy: select carries
     // its options wiring, hidden carries its constant, the basic branch
     // carries neither — so a branch-only property cannot ride on a text field
@@ -354,8 +358,22 @@ export type EventMeta = z.infer<typeof EventMetaSchema>;
 /** What a `table.source` endpoint returns: pre-stringified rows, column keys as props. */
 export const TableRowsResponseSchema = z.object({
   rows: z.array(z.record(z.string())),
+  // A settings GET may carry the form-prefill map alongside its table rows;
+  // tables ignore it, FormBlock reads it. Optional so every existing
+  // response stays valid.
+  values: z.record(z.string()).optional(),
 }).strict();
 export type TableRowsResponse = z.infer<typeof TableRowsResponseSchema>;
+
+/**
+ * What a form's `valuesSource` GET must return. Passthrough, not strict:
+ * the same URL may also serve `rows` (and anything else) — prefill only
+ * cares that `values` is present and string-valued.
+ */
+export const FormValuesResponseSchema = z.object({
+  values: z.record(z.string()),
+}).passthrough();
+export type FormValuesResponse = z.infer<typeof FormValuesResponseSchema>;
 
 /** `GET /api/admin/plugins` — admin sections grouped by plugin. */
 export const AdminSectionsResponseSchema = z.object({
