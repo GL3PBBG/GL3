@@ -23,7 +23,7 @@ export type RenderInstruction =
   | { kind: "button"; label: string; action: string }
   | { kind: "cooldownButton"; label: string; action: string; cooldownAction: string }
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
-  | { kind: "form"; action: string; submitLabel: string; fields: FormField[] }
+  | { kind: "form"; action: string; submitLabel: string; valuesSource: string | null; fields: FormField[] }
   | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "assetBinder"; scope: string; slot: string; entitySource: string | null; entityLabelKey: string | null }
@@ -114,7 +114,13 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
         type: isRecord(f) && isFieldType(f.type) ? f.type : ("text" as const),
       };
     });
-    return [{ kind: "form", action: String(node.action), submitLabel: String(node.submitLabel), fields }];
+    return [{
+      kind: "form",
+      action: String(node.action),
+      submitLabel: String(node.submitLabel),
+      valuesSource: typeof node.valuesSource === "string" ? node.valuesSource : null,
+      fields,
+    }];
   }
   if (isNode(node, "cards")) {
     return [{

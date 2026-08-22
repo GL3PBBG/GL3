@@ -56,7 +56,7 @@ describe("renderNode", () => {
       fields: [{ name: "amount", label: "Amount", type: "money" as const }],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
-      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
       fields: [{ name: "amount", label: "Amount", type: "money" }],
     }]);
   });
@@ -70,7 +70,7 @@ describe("renderNode", () => {
       fields: [{ name: "critMultiplier", label: "Crit multiplier", type: "decimal" as const }],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
-      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
       fields: [{ name: "critMultiplier", label: "Crit multiplier", type: "decimal" }],
     }]);
   });
@@ -84,7 +84,7 @@ describe("renderNode", () => {
       fields: [{ name: "itemType", type: "hidden" as const, value: "weapon" }],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
-      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
       fields: [{ name: "itemType", type: "hidden", value: "weapon" }],
     }]);
   });
@@ -98,7 +98,7 @@ describe("renderNode", () => {
       }],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
-      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
       fields: [{
         name: "thingId", label: "Thing", type: "select",
         optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
@@ -117,12 +117,25 @@ describe("renderNode", () => {
       }],
     }, {});
     expect(out).toEqual<RenderInstruction[]>([{
-      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
       fields: [{
         name: "thingId", label: "Thing (empty clears)", type: "select",
         optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
         allowEmpty: true,
       }],
+    }]);
+  });
+
+  it("carries a form's valuesSource through, normalised to null when absent", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      valuesSource: "GET /api/x/values",
+      fields: [{ name: "amount", label: "Amount", type: "money" as const }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      valuesSource: "GET /api/x/values",
+      fields: [{ name: "amount", label: "Amount", type: "money" }],
     }]);
   });
 
