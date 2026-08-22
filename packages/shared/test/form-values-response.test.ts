@@ -20,6 +20,7 @@ describe("form prefill wire schemas", () => {
     const body = { rows: [{ key: "cost", label: "Cost", value: "500" }], values: { cost: "500" } };
     expect(TableRowsResponseSchema.safeParse(body).success).toBe(true);
     expect(TableRowsResponseSchema.safeParse({ rows: [] }).success).toBe(true);
+    expect(TableRowsResponseSchema.safeParse({ rows: [], values: { a: 1 } }).success).toBe(false);
   });
 
   it("FormValuesResponse requires values and tolerates rows alongside", () => {

@@ -337,7 +337,7 @@ function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSig
         // Fetch failure degrades to the pre-prefill blank form, silently.
       });
     return () => { cancelled = true; };
-  }, [prefillPath, refetchSignal, index, inst.fields, setFormValues]);
+  }, [prefillPath, refetchSignal, index]); // Primitives only: effect reads inst.fields/setFormValues but keys on primitives so parent re-renders don't refire it and revert in-progress edits.
 
   return (
     <form
