@@ -765,6 +765,13 @@ export default definePlugin({
   providesAssets: [
     { slot: "car", label: "Cars", entitySource: "GET /api/admin/theft/cars", entityLabelKey: "name" },
     { slot: "tier", label: "Theft tiers", entitySource: "GET /api/admin/theft/tiers", entityLabelKey: "name" },
+    // Page banners. These live HERE, not in core's registry: this plugin's
+    // pages render at /plugins/<pageId>, which the Shell's route→slot banner
+    // map never reaches, so core's old page-theft/page-garage slots were
+    // bindable with nothing rendering them. Each page draws its own via a
+    // `slotImage` node (pages.ts), scope-stamped to this plugin by the loader.
+    { slot: "page-theft", label: "Car theft page banner", singleton: true },
+    { slot: "page-garage", label: "Garage page banner", singleton: true },
   ],
   pages: [theftPage, garagePage],
   adminPages: [adminPage],

@@ -8,6 +8,7 @@ export const membershipPage: PageSchema = {
     kind: "panel",
     title: "Premium membership",
     children: [
+      { kind: "slotImage", slot: "page-membership", alt: "Premium membership", size: "lg" },
       { kind: "table", source: "GET /api/membership/status", columns: [
         { key: "status", label: "Status" },
         { key: "expiresAt", label: "Expires" },

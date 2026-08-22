@@ -8,6 +8,7 @@ export const theftPage: PageSchema = {
     kind: "panel",
     title: "Car theft",
     children: [
+      { kind: "slotImage", slot: "page-theft", alt: "Car theft", size: "lg" },
       { kind: "text", value: "Pick a tier. A better tier pays more and gets you caught more." },
       { kind: "table", source: "GET /api/theft/tiers", columns: [
         { key: "image", label: "", render: "image", imageSize: "md" },
@@ -34,6 +35,7 @@ export const garagePage: PageSchema = {
     kind: "panel",
     title: "Garage",
     children: [
+      { kind: "slotImage", slot: "page-garage", alt: "Garage", size: "lg" },
       { kind: "text", value: "Cars stay in the city you stole them in. Sell or repair them there." },
       { kind: "table", source: "GET /api/garage", columns: [
         { key: "image", label: "", render: "image", imageSize: "md" },

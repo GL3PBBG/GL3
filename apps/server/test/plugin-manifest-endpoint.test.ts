@@ -8,6 +8,7 @@ import { z } from "zod";
 import { loadConfig } from "../src/config.js";
 import { createRedis } from "../src/redis.js";
 import { buildPluginsPayload } from "../src/plugins/manifest-endpoint.js";
+import { stampAssetBinderScope } from "../src/plugins/asset-slots.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -133,8 +134,11 @@ describe("GET /api/plugins", () => {
         // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
         // only in the top-level `menu` array, not duplicated onto each page.
         pages: [
-          ...[theftPage, garagePage].map((p) => ({ pluginId: "theft", id: p.id, path: p.path, view: p.view })),
-          { pluginId: "membership", id: membershipPage.id, path: membershipPage.path, view: membershipPage.view },
+          // The loader stamps every slotImage/assetBinder with the declaring
+          // plugin's scope, so the expected views are the STAMPED ones — the
+          // raw manifest views differ by exactly that field.
+          ...[theftPage, garagePage].map((p) => ({ pluginId: "theft", id: p.id, path: p.path, view: stampAssetBinderScope(p.view, "theft") })),
+          { pluginId: "membership", id: membershipPage.id, path: membershipPage.path, view: stampAssetBinderScope(membershipPage.view, "membership") },
         ],
         events: [{
           pluginId: "inventory",

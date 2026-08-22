@@ -373,6 +373,12 @@ export default definePlugin({
   // `PluginManifest.provides` today, but this is the point a consumer
   // subscribes to via `on(benefits, ...)` to add display copy.
   provides: [benefits],
+  // The page renders at /plugins/<pageId>, out of reach of the Shell's
+  // route->slot banner map, so the banner is this plugin's own singleton drawn
+  // by a `slotImage` node in the page view (the theft precedent).
+  providesAssets: [
+    { slot: "page-membership", label: "Membership page banner", singleton: true },
+  ],
   pages: [membershipPage],
   adminPages: [adminPage],
 });

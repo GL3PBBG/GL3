@@ -29,8 +29,6 @@ export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   { scope: CORE_SCOPE, slot: "page-bounties", label: "Bounties page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-detectives", label: "Detectives page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-oc", label: "Organized crime page banner", singleton: true },
-  { scope: CORE_SCOPE, slot: "page-garage", label: "Garage page banner", singleton: true },
-  { scope: CORE_SCOPE, slot: "page-theft", label: "Car theft page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-gang", label: "Gang page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-mail", label: "Mail page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-news", label: "News page banner", singleton: true },
@@ -39,6 +37,20 @@ export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   { scope: CORE_SCOPE, slot: "page-travel", label: "Travel page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-ranks", label: "Ranks page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-leaderboards", label: "Leaderboards page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-inventory", label: "Inventory page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-rounds", label: "Rounds page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-stats", label: "Stats page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-forum", label: "Forum page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-players", label: "Players page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-profile", label: "Profile page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-notifications", label: "Notifications page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-dashboard", label: "Dashboard page banner", singleton: true },
+
+  // `page-theft` and `page-garage` used to sit here — they were bindable and
+  // NEVER rendered, because theft's pages are manifest-declared and live at
+  // /plugins/<pageId>, which the Shell banner map cannot reach. A plugin page's
+  // banner is the plugin's own: a `providesAssets` singleton plus a `slotImage`
+  // node in its view (theft and membership now do exactly that).
 ];
 
 export function slotKey(scope: string, slot: string): string {

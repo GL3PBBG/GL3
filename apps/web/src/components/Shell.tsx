@@ -95,8 +95,6 @@ const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
   "/bounties": { slot: "page-bounties", alt: "Bounties" },
   "/detectives": { slot: "page-detectives", alt: "Detectives" },
   "/oc": { slot: "page-oc", alt: "Organized crime" },
-  "/garage": { slot: "page-garage", alt: "Garage" },
-  "/theft": { slot: "page-theft", alt: "Car theft" },
   "/gang": { slot: "page-gang", alt: "Gang" },
   "/mail": { slot: "page-mail", alt: "Mail" },
   "/news": { slot: "page-news", alt: "News" },
@@ -105,6 +103,19 @@ const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
   "/travel": { slot: "page-travel", alt: "Travel" },
   "/ranks": { slot: "page-ranks", alt: "Ranks" },
   "/leaderboards": { slot: "page-leaderboards", alt: "Leaderboards" },
+  "/inventory": { slot: "page-inventory", alt: "Inventory" },
+  "/rounds": { slot: "page-rounds", alt: "Rounds" },
+  "/stats": { slot: "page-stats", alt: "Stats" },
+  "/forum": { slot: "page-forum", alt: "Forum" },
+  "/players": { slot: "page-players", alt: "Players" },
+  // The page's old address renders the same component — same banner.
+  "/online": { slot: "page-players", alt: "Players" },
+  "/profile": { slot: "page-profile", alt: "Profile" },
+  "/notifications": { slot: "page-notifications", alt: "Notifications" },
+  "/": { slot: "page-dashboard", alt: "Dashboard" },
+  // No /theft or /garage entries: those pages are manifest-declared and live
+  // at /plugins/<pageId>, which this first-segment map cannot reach. A plugin
+  // page's banner is a `slotImage` node in the plugin's own view.
 };
 
 function PageBanner(): JSX.Element | null {
