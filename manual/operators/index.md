@@ -11,6 +11,11 @@ own game. Contributor material lives in the rest of the manual.
   `Dockerfile.server` / `Dockerfile.web` cover the containerised path;
   `.env.example` documents every setting, starting with `DATABASE_URL` and
   `REDIS_URL`.
+- **First boot & upgrades**: how an empty database becomes a playable game
+  (core migrations in an init container → seeds and plugin migrations at
+  server boot → first registered player becomes Administrator), why the
+  migrate step runs on *every* boot, and how it coexists with the
+  plugin-install init container — see [First boot](./first-boot.md).
 - **Installing plugins without rebuilding**: in the Docker deployment, plugins are
   loaded dynamically through `PLUGIN_PACKAGES` and `PLUGIN_DIR` (a mounted volume),
   validated at boot. No image rebuild needed. The install itself (`npm i` from the

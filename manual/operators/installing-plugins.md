@@ -56,6 +56,29 @@ layout `npm i --prefix <PLUGIN_DIR> <specifier>` produces. The full Node
 resolution algorithm is used (including `exports` maps), with a fallback for
 pure-ESM packages.
 
+## The marketplace scopes
+
+The marketplace registry (`npm.gl3.dev`) serves two npm scopes with opposite
+access rules:
+
+| Scope | Contents | Read access |
+| --- | --- | --- |
+| `@gl3/*` | The public engine core: `@gl3/plugin-sdk`, `@gl3/shared`, free plugins | Anyone, no credentials |
+| `@gl3-plugins/*` | **Premium plugins** | Entitlement-gated per account |
+
+For the paid scope, the registry asks the marketplace's entitlement service
+on every request — web UI, search, and `npm install` alike — so a premium
+package is invisible until your account is entitled to it. Buying a plugin
+grants your marketplace account an entitlement for that exact package name
+(all-access plans use the scope wildcard). Marketplace staff read every paid
+package without entitlement rows; everyone else needs the row.
+
+Logging in is standard npm: `npm login --registry https://npm.gl3.dev` with
+your marketplace username and your `gl3_...` access token as the password.
+The token is shown once when minted; roles and entitlements are checked live
+on each request, so a newly-purchased plugin appears without re-minting the
+token (at most, log in again to refresh the session).
+
 ## Registry credentials (the marketplace)
 
 Plugins distributed through the GL3 marketplace are npm packages served from

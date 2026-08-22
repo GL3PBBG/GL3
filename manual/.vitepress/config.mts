@@ -55,6 +55,7 @@ export default defineConfig({
         text: 'Operators',
         items: [
           { text: 'Operator guide', link: '/operators/' },
+          { text: 'First boot', link: '/operators/first-boot' },
           { text: 'Installing plugins', link: '/operators/installing-plugins' },
         ],
       },
