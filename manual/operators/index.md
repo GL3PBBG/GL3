@@ -73,9 +73,9 @@ own game. Contributor material lives in the rest of the manual.
   are never skimmed, so a casino house always pays winnings in full, and the
   exposure checks read the owner's real (post-skim) balance. Property
   buy/sell between players is NOT franchise income and is not skimmed. In the
-  economy dashboard the skim appears as positive net flow on the consumer's
-  reason (e.g. `properties.bullets`), the same way bullets' half-split already
-  did. Knob: `properties.skim_percent` on the properties admin page — unlike
+  economy dashboard the skim appears as net destruction on the consumer's
+  reason (e.g. `bullets.purchase` nets to the kept half plus the skim), the
+  same shape as a casino house's wager/payout pairing. Knob: `properties.skim_percent` on the properties admin page — unlike
   every other setting it applies immediately, no restart; 0 restores full
   payout.
 - **Economy dashboard**: `/admin/economy`, behind its own `economy` grant (grant it

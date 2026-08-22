@@ -455,11 +455,17 @@ const attackRoute = route({
         // Skipped at zero rather than relying on whether a 0n change is a
         // no-op or writes a zero ledger row.
         if (payout > 0n) {
+          // BOTH legs post under ONE reason: this is a transfer, and the
+          // economy dashboard's net-by-reason can only see that if the pair
+          // nets to ~0 on a single reason. Split reasons (the victim's leg
+          // once posted as `combat.killed`) rendered one transfer as a giant
+          // faucet AND a giant sink. Pre-fix ledger rows keep the old string;
+          // they age out of the 30-day window on their own.
           await tx.economy.applyBalanceChange({
             playerId: params.targetId,
             amount: -payout,
             kind: "cash",
-            reason: "combat.killed",
+            reason: "combat.kill_payout",
           });
           await tx.economy.applyBalanceChange({
             playerId: player.id,

@@ -369,7 +369,14 @@ const buyRoute = route({
       }
 
       if (franchise !== null) {
-        await payOwner(tx, franchise.propertyId, cost / 2n, "properties.bullets");
+        // The owner's leg posts under the BUYER'S reason, not a
+        // `properties.bullets` of its own: net-by-reason on the economy
+        // dashboard then reads `bullets.purchase` as exactly the destroyed
+        // share of each sale (the half the game keeps, plus the franchise
+        // skim) instead of splitting one purchase across a fake
+        // sink-of-the-full-price and a fake faucet-of-the-half. Casino's
+        // wager/payout pairing is the same shape.
+        await payOwner(tx, franchise.propertyId, cost / 2n, "bullets.purchase");
       }
 
       // (9) The stock value read under the lock at step 4, minus the purchase.

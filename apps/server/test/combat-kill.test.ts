@@ -181,9 +181,11 @@ describe("POST /api/combat/attack/:targetId — death", () => {
     const all = await db.select().from(transactions);
     const combatRows = all.filter((t) => t.reason.startsWith("combat."));
     expect(combatRows.reduce((acc, t) => acc + t.amount, 0n)).toBe(0n);
+    // Both legs share ONE reason — a transfer must net to ~0 per reason or
+    // the economy dashboard renders it as a faucet AND a sink.
     expect(combatRows.map((t) => t.reason).sort()).toEqual([
       "combat.kill_payout",
-      "combat.killed",
+      "combat.kill_payout",
     ]);
   });
 
@@ -301,7 +303,7 @@ describe("POST /api/combat/attack/:targetId — death", () => {
 
     expect(res.json()).toMatchObject({ targetKilled: true, payout: "0" });
     const rows = await db.select().from(transactions).where(eq(transactions.playerId, targetId));
-    expect(rows.filter((t) => t.reason === "combat.killed")).toHaveLength(0);
+    expect(rows.filter((t) => t.reason === "combat.kill_payout")).toHaveLength(0);
   });
 
   it("leaves the victim's cash alone on a hit that does not kill", async () => {
