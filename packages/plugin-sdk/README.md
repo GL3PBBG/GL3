@@ -244,6 +244,15 @@ React override, not a bigger schema.
 A `menu` entry on a page contributes to the merged navigation tree. Every node
 is `.strict()` — a typo'd prop fails loudly rather than being silently dropped.
 
+A `form` node may declare `valuesSource: "GET /api/..."` — the renderer
+fetches it before first paint and seeds the fields by `name` from the
+response's `values` object (`{ values: Record<string, string> }`; the same
+URL may also serve a table's `rows`). Untouched fields then round-trip
+their current values on submit, so an upsert-all settings route no longer
+wipes what the operator didn't retype. Omit it and the form renders blank,
+exactly as before. Secrets stay masked server-side: return the mask in
+`values` and treat it as "unchanged" when it comes back.
+
 ## Events
 
 ```ts

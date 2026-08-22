@@ -67,6 +67,14 @@ const leafOptions = [
       kind: z.literal("form"),
       action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
       submitLabel: z.string(),
+      // Optional prefill: a GET whose response's `values` object seeds the
+      // form's fields by name (`{ values: Record<string, string> }`,
+      // `FormValuesResponseSchema` in @gl3/shared). Same GET-only rule and
+      // loader containment treatment as `table.source`.
+      valuesSource: z
+        .string()
+        .regex(GET_SOURCE_RE, "valuesSource must be `GET /absolute/path`")
+        .optional(),
       // Three strict branches: select carries its options wiring, hidden
       // carries its constant, the basic branch carries neither — so a
       // branch-only property cannot ride on a text field and silently vanish

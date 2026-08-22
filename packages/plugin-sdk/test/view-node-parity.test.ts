@@ -93,4 +93,34 @@ describe("view node vocabulary parity", () => {
     expect(ViewNodeSchema.safeParse(node).success).toBe(true);
     expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
   });
+
+  // Property-level parity for the prefill field, same rationale as
+  // `table.rowActions` above: both leaves are `.strict()`, so a field one
+  // copy lacks takes down the whole payload in the browser.
+  it("accepts `form.valuesSource` in both the SDK and on the wire", () => {
+    const node = {
+      kind: "form",
+      action: "POST /api/admin/example/settings",
+      submitLabel: "Save",
+      valuesSource: "GET /api/admin/example/settings",
+      fields: [{ name: "pool_size", label: "Offers per town", type: "text" }],
+    };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+  });
+
+  // First reject-parity case: prefill fetches on mount, so a mutating verb
+  // must fail in BOTH copies — a drift where one accepts POST would let a
+  // page mutate on render on whichever side is looser.
+  it("rejects a non-GET `form.valuesSource` in both the SDK and on the wire", () => {
+    const node = {
+      kind: "form",
+      action: "POST /api/admin/example/settings",
+      submitLabel: "Save",
+      valuesSource: "POST /api/admin/example/settings",
+      fields: [{ name: "pool_size", label: "Offers per town", type: "text" }],
+    };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(false);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(false);
+  });
 });
