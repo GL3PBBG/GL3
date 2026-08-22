@@ -155,7 +155,7 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
   <p class="lede">GL3 is a ground-up TypeScript reimplementation of Gangster Legends V2, a PHP 5.6-era mafia PBBG with a large installed base. This is what each one is actually better at, measured against both source trees rather than either project's own documentation.</p>
   <div class="meta">
     <span>V2 @ 2024-05-05</span>
-    <span>GL3 @ 63cf83e</span>
+    <span>GL3 @ 4e2bfae</span>
     <span>measured from source</span>
   </div>
 </header>
@@ -178,12 +178,12 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
     <h3>GL3</h3>
     <p class="sub">TypeScript · Postgres 16 · Redis · WebSockets</p>
     <dl class="stats">
-      <dt>TS source</dt><dd>87,471 ln</dd>
-      <dt>Test files</dt><dd>269</dd>
+      <dt>TS source</dt><dd>87,807 ln</dd>
+      <dt>Test files</dt><dd>270</dd>
       <dt>Plugins</dt><dd>20</dd>
       <dt>Tables</dt><dd>31 + 16</dd>
       <dt>Filter points</dt><dd>13</dd>
-      <dt>API routes</dt><dd>187</dd>
+      <dt>API routes</dt><dd>190</dd>
       <dt>Core UI seams</dt><dd>5</dd>
     </dl>
   </div>
@@ -235,7 +235,7 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
         <tr>
           <td><strong>Verification</strong></td>
           <td>No test suite of any kind.</td>
-          <td>240 test files against real Postgres and Redis — no mocks on DB, queue or bus paths.</td>
+          <td>270 test files — the database-backed ones run against real Postgres and Redis, with no mocks on DB, queue or bus paths.</td>
         </tr>
       </tbody>
     </table>
@@ -297,7 +297,7 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
   </div>
 
   <h3 style="margin-top:34px">Past parity</h3>
-  <p>Parity was the goal; it is not the ceiling. Three capabilities have no V2 counterpart at all.</p>
+  <p>Parity was the goal; it is not the ceiling. Four capabilities have no V2 counterpart at all.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Capability</th><th>V2</th><th>GL3</th></tr></thead>
@@ -316,6 +316,11 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
           <td><strong>Game art</strong></td>
           <td>One column, <code>US_pic</code>: a player's own avatar. No content table carries an image.</td>
           <td>Content-addressed assets bound per entity and per page, so items, cars, towns and ranks all take art — and the sha is the storage key, making dedup and immutable caching free.</td>
+        </tr>
+        <tr>
+          <td><strong>Economy observability</strong></td>
+          <td>Money is a column mutated in place. No movement history exists, so <em>where is money coming from</em> is a question V2's schema cannot answer even in principle.</td>
+          <td>The ledger pays a second dividend: an admin dashboard aggregating money supply, net flow by ledger reason over 7 days, and daily net over 30. Net by reason is computed, not classified — player-to-player transfers post equal-and-opposite rows and cancel, so a faucet shows positive, a sink negative, and a plugin's new reason string appears with its true sign the day it ships.</td>
         </tr>
       </tbody>
     </table>
@@ -360,7 +365,7 @@ footer p{color:var(--muted); font-size:11.5px; max-width:none}
 </section>
 
 <footer>
-  <p>Measured against ChristopherDay/Gangster-Legends-V2 @ HEAD (last commit 2024-05-05) and GL3 @ 63cf83e. Line counts exclude node_modules and build output. GL3 table count is 31 core plus 16 plugin-owned across 10 of 20 plugins. Filter-point and subscription counts are from source, not documentation.</p>
+  <p>Measured against ChristopherDay/Gangster-Legends-V2 @ HEAD (last commit 2024-05-05) and GL3 @ 4e2bfae. Line counts exclude node_modules and build output. GL3 table count is 31 core plus 16 plugin-owned across 10 of 20 plugins. Filter-point and subscription counts are from source, not documentation.</p>
 </footer>
 
 </div>

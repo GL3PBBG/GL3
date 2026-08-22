@@ -32,3 +32,14 @@ own game. Contributor material lives in the rest of the manual.
 - **Admin pages**: towns (combat mode, prices), shops, roles, and the plugin admin
   surface under `/api/admin/<pluginId>`. "Public towns have cheaper shops"-style
   tuning is admin data entry, not code.
+- **Economy dashboard**: `/admin/economy`, behind its own `economy` grant (grant it
+  through Roles like any other module key). Read-only, sourced entirely from the
+  transactions ledger: current money supply (player and gang cash/bank, points
+  alongside), net flow by ledger reason over the last 7 days, and daily net flow
+  over the last 30 days. Net by reason is the faucet/sink signal — a reason whose
+  net is positive creates money (crime payouts), negative destroys it (travel,
+  bail), and roughly zero is a player-to-player transfer, because transfer pairs
+  post equal-and-opposite rows that cancel. No reason list to maintain: a plugin
+  with a new reason string appears automatically. Read it before retuning payouts
+  or sink prices — it answers "which faucet is running hot" with numbers instead
+  of guesses.
