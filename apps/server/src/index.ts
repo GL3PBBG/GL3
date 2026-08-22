@@ -6,6 +6,7 @@ import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
+import { startWealthTaxLoop } from "./economy/tax.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { CORE_PLUGINS, withCorePlugins } from "./plugins/core-plugins.js";
 import { loadDynamicPlugins, type DynamicPlugin } from "./plugins/dynamic.js";
@@ -128,6 +129,19 @@ if (config.sweepIntervalMs > 0) {
   startSentenceSweeper({
     db, redis, intervalMs: config.sweepIntervalMs,
     onError: (error) => { app.log.error({ err: error }, "sentence sweep failed"); },
+  });
+
+  // The daily wealth tax rides the same switch. Its loop's first tick fires
+  // immediately — the boot call is what absorbs downtime, so a server that was
+  // dark at midnight taxes on its first morning tick rather than a day late.
+  // Cadence is a fixed 60s, not the sweep interval: the work is day-granular
+  // and the common tick is one indexed settings-row read (the unlocked cursor
+  // pre-check), so checking often costs nothing and the day never starts late
+  // by more than a minute. Out of buildApp for the sweeper's reason: a
+  // background debit under bootTestServer would race every balance assertion.
+  startWealthTaxLoop({
+    db, settings: loadedSettings, intervalMs: 60_000,
+    onError: (error) => { app.log.error({ err: error }, "wealth tax settle failed"); },
   });
 
   // Asset GC rides the same switch but at a much slower cadence: an orphaned

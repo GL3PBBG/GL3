@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { players, playerStats, roleModuleAccess, roles, transactions } from "../src/db/schema/index.js";
+import { players, playerStats, roleModuleAccess, roles, settings, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -160,5 +160,52 @@ describe("admin economy: money supply", () => {
     expect(byLabel.get("Gang cash (total)")).toBe("0");
     expect(byLabel.get("Gang bank (total)")).toBe("0");
     expect(byLabel.get("Money supply (cash + bank)")).toBe("5000");
+  });
+});
+
+describe("admin economy: wealth tax settings", () => {
+  it("shows parser-effective defaults for unset keys", async () => {
+    const founder = await registerPlayer("Founder");
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/tax/table", headers: auth(founder.token) });
+    expect(res.statusCode, res.body).toBe(200);
+    const byLabel = new Map((res.json().rows as { label: string; value: string }[]).map((r) => [r.label, r.value]));
+    expect(byLabel.get("Percent of excess bank per day (0 = off)")).toBe("1");
+    expect(byLabel.get("Threshold above which the excess is taxed")).toBe("10000000");
+  });
+
+  it("upserts both keys and reads them back through the parsers", async () => {
+    const founder = await registerPlayer("Founder");
+    const write = await app.inject({
+      method: "POST", url: "/api/admin/economy/tax", headers: auth(founder.token),
+      payload: { percent: 2, threshold: "5000000" },
+    });
+    expect(write.statusCode, write.body).toBe(204);
+
+    const [row] = await db.select().from(settings).where(eq(settings.key, "economy.wealth_tax_percent"));
+    expect(row?.value).toBe("2");
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/economy/tax/table", headers: auth(founder.token) });
+    const byLabel = new Map((list.json().rows as { label: string; value: string }[]).map((r) => [r.label, r.value]));
+    expect(byLabel.get("Percent of excess bank per day (0 = off)")).toBe("2");
+    expect(byLabel.get("Threshold above which the excess is taxed")).toBe("5000000");
+  });
+
+  it("403s without the economy grant and 400s bad bodies", async () => {
+    const admin = await registerPlayer("FirstAdmin"); // soaks up the auto-admin slot
+    const p = await registerPlayer("NoGrant");
+    const forbidden = await app.inject({ method: "POST", url: "/api/admin/economy/tax", headers: auth(p.token), payload: { percent: 1, threshold: "1000" } });
+    expect(forbidden.statusCode).toBe(403);
+
+    const badPercent = await app.inject({
+      method: "POST", url: "/api/admin/economy/tax", headers: auth(admin.token),
+      payload: { percent: 101, threshold: "1000" },
+    });
+    expect(badPercent.statusCode).toBe(400);
+
+    const badThreshold = await app.inject({
+      method: "POST", url: "/api/admin/economy/tax", headers: auth(admin.token),
+      payload: { percent: 1, threshold: "12.50" },
+    });
+    expect(badThreshold.statusCode).toBe(400);
   });
 });

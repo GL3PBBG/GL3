@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { locations, playerStats } from "../src/db/schema/index.js";
+import { locations, settings, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -105,6 +105,11 @@ async function scenario(ownership: { lever: bigint } | null): Promise<{
 
 beforeAll(async () => {
   await resetDb(db);
+
+  // payOwner reads the franchise skim LIVE from the settings table. These
+  // suites pin the CONSUMER contract (exact escrow/credit math), so the skim
+  // is pinned off here; its own coverage lives in properties-pay-owner.test.ts.
+  await db.insert(settings).values({ key: "properties.skim_percent", value: "0" });
   ({ app, close: closeServer, redis } = await bootTestServer());
 });
 

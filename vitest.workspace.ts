@@ -274,6 +274,7 @@ export default defineWorkspace([
       root: "./apps/server",
       include: [
         "test/ledger.test.ts",
+        "test/wealth-tax.test.ts",
         "test/schema.test.ts",
         "test/gang-ledger.test.ts",
         "test/plugin-migrate.test.ts",

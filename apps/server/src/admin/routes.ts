@@ -8,6 +8,7 @@ import { clearBanned, markBanned } from "../auth/ban.js";
 import { destroyAllSessions } from "../auth/session.js";
 import type { Db } from "../db/client.js";
 import { gangs, playerStats, players, roleModuleAccess, rounds, roles, settings, transactions } from "../db/schema/index.js";
+import { wealthTaxPercent, wealthTaxThreshold } from "../economy/settings.js";
 import { bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent } from "../game/jail/settings.js";
 import {
   dischargeCostPerSecond, dischargeWealthCapMultiplier, dischargeWealthPercent,
@@ -18,6 +19,7 @@ import { loadGrants } from "../plugins/routes.js";
 import { buildAssetsPage } from "./assets-page.js";
 import { economyPage } from "./economy-page.js";
 import { facilitiesPage } from "./facilities-page.js";
+import { wealthTaxPage } from "./wealth-tax-page.js";
 import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
@@ -167,7 +169,10 @@ export function registerAdminRoutes(
     if (hasPermission(grants, "economy")) {
       sections.push({
         pluginId: "economy",
-        pages: [{ pluginId: "economy", id: economyPage.id, path: economyPage.path, view: economyPage.view }],
+        pages: [
+          { pluginId: "economy", id: economyPage.id, path: economyPage.path, view: economyPage.view },
+          { pluginId: "economy", id: wealthTaxPage.id, path: wealthTaxPage.path, view: wealthTaxPage.view },
+        ],
       });
     }
     if (hasPermission(grants, "facilities")) {
@@ -695,6 +700,58 @@ export function registerAdminRoutes(
       { key: "hospital.discharge_cost_per_second", value: body.hospital_discharge_cost_per_second },
       { key: "hospital.discharge_wealth_percent", value: String(body.hospital_discharge_wealth_percent) },
       { key: "hospital.discharge_wealth_cap_multiplier", value: String(body.hospital_discharge_wealth_cap_multiplier) },
+    ];
+    await db.transaction(async (tx) => {
+      for (const row of values) {
+        await tx.insert(settings).values(row)
+          .onConflictDoUpdate({ target: settings.key, set: { value: row.value } });
+      }
+    });
+    return reply.code(204).send();
+  });
+
+  // ── Wealth tax ────────────────────────────────────────────────────────────
+  // The tax's own knobs under the `economy` grant, one panel beside the MIMO
+  // dashboard that watches the drain. Live table read through the same parsers
+  // the settle pass uses (facilities-page pattern); writes upsert both keys
+  // and take effect on the next restart, like every gameplay setting.
+
+  const WealthTaxBodySchema = z.object({
+    percent: z.coerce.number().int().min(0).max(100),
+    // Digits-only string, like every money field on the wire — the admin form
+    // serialises it as a string and the threshold is bigint, never a number.
+    threshold: z.string().regex(/^\d+$/),
+  }).strict();
+
+  app.get("/api/admin/economy/tax/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+
+    const rows = await db.select().from(settings);
+    const live: Record<string, string> = {};
+    for (const row of rows) live[row.key] = row.value;
+
+    return reply.send({
+      rows: [
+        { label: "Percent of excess bank per day (0 = off)", value: String(wealthTaxPercent(live)) },
+        { label: "Threshold above which the excess is taxed", value: wealthTaxThreshold(live).toString() },
+      ],
+    });
+  });
+
+  app.post("/api/admin/economy/tax", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = WealthTaxBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+
+    const values = [
+      { key: "economy.wealth_tax_percent", value: String(parsed.data.percent) },
+      { key: "economy.wealth_tax_threshold", value: parsed.data.threshold },
     ];
     await db.transaction(async (tx) => {
       for (const row of values) {

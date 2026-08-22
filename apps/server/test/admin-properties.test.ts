@@ -51,8 +51,10 @@ const ADMIN_ROUTES: { method: "GET" | "POST"; url: string }[] = [
   { method: "GET", url: "/api/admin/properties" },
   { method: "GET", url: "/api/admin/properties/locations" },
   { method: "GET", url: "/api/admin/properties/types" },
+  { method: "GET", url: "/api/admin/properties/settings" },
   { method: "POST", url: "/api/admin/properties" },
   { method: "POST", url: "/api/admin/properties/update" },
+  { method: "POST", url: "/api/admin/properties/settings" },
 ];
 
 describe("properties admin", () => {
@@ -321,5 +323,47 @@ describe("properties admin", () => {
     walk(propertiesAdminPage.view);
     expect(idKeys.filter((k) => /^id$|Id$/.test(k))).toEqual([]);
     expect(valueKeys).toContain("id");
+  });
+});
+
+describe("properties admin: skim settings", () => {
+  it("shows the coded default (10) when nothing is stored", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/properties/settings", headers: auth() });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().rows).toEqual([
+      { key: "skim_percent", label: "Skim percent of owner income (0–100)", value: "10" },
+    ]);
+  });
+
+  it("upserts the skim and reads it back through payOwner's own parse", async () => {
+    const write = await app.inject({
+      method: "POST", url: "/api/admin/properties/settings", headers: auth(),
+      payload: { skim_percent: 3 },
+    });
+    expect(write.statusCode, write.body).toBe(204);
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/properties/settings", headers: auth() });
+    expect(list.json().rows[0].value).toBe("3");
+
+    // String-typed, which is what the admin form actually sends.
+    const again = await app.inject({
+      method: "POST", url: "/api/admin/properties/settings", headers: auth(),
+      payload: { skim_percent: "5" },
+    });
+    expect(again.statusCode).toBe(204);
+  });
+
+  it("400s an out-of-range percent and an unknown key", async () => {
+    const over = await app.inject({
+      method: "POST", url: "/api/admin/properties/settings", headers: auth(),
+      payload: { skim_percent: 101 },
+    });
+    expect(over.statusCode).toBe(400);
+
+    const extra = await app.inject({
+      method: "POST", url: "/api/admin/properties/settings", headers: auth(),
+      payload: { skim_percent: 5, bogus: "field" },
+    });
+    expect(extra.statusCode).toBe(400);
   });
 });

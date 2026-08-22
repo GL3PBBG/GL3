@@ -2,12 +2,13 @@ import { and, eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, filterPoint, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
-import { propertiesTable, locations, players, playerStats } from "./schema.js";
+import { propertiesTable, locations, players, playerStats, settings } from "./schema.js";
 import { PROPERTIES_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { seizeOnKill } from "./seizure.js";
+import { readSkimPercent } from "./api.js";
 
-export { ownerAt, payOwner, takeOverFrom, type PropertyOwnership } from "./api.js";
+export { ownerAt, payOwner, readSkimPercent, takeOverFrom, type PropertyOwnership } from "./api.js";
 export { propertiesTable } from "./schema.js";
 
 // ---------------------------------------------------------------------------
@@ -780,6 +781,45 @@ const transferredEvent = {
 };
 
 // ---------------------------------------------------------------------------
+// Admin settings — the skim knob. Reads and writes the settings TABLE, not
+// the boot snapshot, and payOwner reads it live too, so an edit applies
+// WITHOUT a restart — the one knob in this plugin that does, and the panel
+// says so out loud.
+// ---------------------------------------------------------------------------
+
+const SkimSettingsBodySchema = z.object({
+  // The admin form serialises every field as a string (PageRenderer.tsx's
+  // `body: Record<string, string>`), so this coerces.
+  skim_percent: z.coerce.number().int().min(0).max(100),
+}).strict();
+
+const adminSettingsListRoute = route({
+  method: "GET", path: "/api/admin/properties/settings", auth: "admin",
+  handler: async (ctx) => {
+    // The effective value through the same parse payOwner uses, defaults
+    // included, so the panel shows what the next credit will actually skim.
+    const effective = await ctx.transaction((tx) => readSkimPercent(tx));
+    return {
+      status: 200,
+      body: { rows: [{ key: "skim_percent", label: "Skim percent of owner income (0–100)", value: String(effective) }] },
+    };
+  },
+});
+
+const adminSettingsWriteRoute = route({
+  method: "POST", path: "/api/admin/properties/settings", auth: "admin",
+  body: SkimSettingsBodySchema,
+  handler: async (ctx, { body }) => {
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(settings)
+        .values({ key: "properties.skim_percent", value: String(body.skim_percent) })
+        .onConflictDoUpdate({ target: settings.key, set: { value: String(body.skim_percent) } });
+    });
+    return { status: 204 };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Manifest
 // ---------------------------------------------------------------------------
 
@@ -794,6 +834,7 @@ export default definePlugin({
   routes: [
     listRoute, buyRoute, leverRoute, transferRoute, dropRoute, resetRoute,
     adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
+    adminSettingsListRoute, adminSettingsWriteRoute,
   ],
   events: [boughtEvent, droppedEvent, transferredEvent],
   pages: [],

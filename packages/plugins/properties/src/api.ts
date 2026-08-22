@@ -1,6 +1,25 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { PluginTx } from "@gl3/plugin-sdk";
-import { propertiesTable, playerStats } from "./schema.js";
+import { propertiesTable, playerStats, settings } from "./schema.js";
+
+const DEFAULT_SKIM_PERCENT = 10;
+const SKIM_KEY = "properties.skim_percent";
+
+/**
+ * The skim knob, read LIVE from the settings table inside the payer's
+ * transaction — one indexed PK lookup per property-income event — so an edit
+ * applies without a restart, which the admin panel states out loud. Malformed
+ * values fall back to the default, never throw mid-transaction. Exported for
+ * the admin settings route, which shows the same effective value.
+ */
+export async function readSkimPercent(tx: PluginTx): Promise<number> {
+  const [row] = await tx.db.select({ value: settings.value }).from(settings)
+    .where(eq(settings.key, SKIM_KEY));
+  if (row === undefined) return DEFAULT_SKIM_PERCENT;
+  const parsed = Number(row.value);
+  if (!Number.isInteger(parsed)) return DEFAULT_SKIM_PERCENT;
+  return Math.min(100, Math.max(0, parsed));
+}
 
 export interface PropertyOwnership {
   propertyId: string;
@@ -100,9 +119,14 @@ export async function takeOverFrom(
 
 /**
  * Credit (`amount > 0`) or debit (`amount < 0`) the property's owner and move
- * `profit` by the amount actually moved. Returns that amount — a debit is
- * clamped to the owner's cash, so `profit` never claims a loss the ledger did
- * not take. Returns 0n when the property is unowned or `amount` is 0n.
+ * `profit` by the amount actually CREDITED. Credits are first reduced by the
+ * franchise skim (`properties.skim_percent`, default 10%, read live from the
+ * settings table — 0 restores full payout): the skimmed share is destroyed by
+ * never being credited, since the consumer already debited the payer in full.
+ * Returns the amount that actually moved — a debit is clamped to the owner's
+ * cash and never skimmed, so `profit` never claims a loss the ledger did not
+ * take and a house that pays out pays in full. Returns 0n when the property
+ * is unowned or `amount` is 0n.
  *
  * V2's `Property::updateProfit()` plus the balance write its callers do by
  * hand; folded together here so a consumer cannot move one without the other.
@@ -189,6 +213,22 @@ export async function payOwner(
     moved = -(cash < wanted ? cash : wanted);
   }
   if (moved === 0n) return 0n;
+
+  // CREDITS only: the franchise skim destroys its share by never crediting
+  // it — the consumer already debited the payer in full (the same way bullets
+  // destroys half of every sale), so no second ledger row is needed and the
+  // MIMO dashboard shows the drain as positive net on the consumer's reason.
+  // Debits are NEVER skimmed: the return value is what casino's bankruptcy
+  // detection reads, and a house that pays out must pay out in full.
+  if (moved > 0n) {
+    const skimPercent = await readSkimPercent(tx);
+    if (skimPercent > 0) {
+      // Ceiling on the destroyed share — the void gets the rounding, the
+      // same direction as the wealth-scaled fees' rounding.
+      const skim = (moved * BigInt(skimPercent) + 99n) / 100n;
+      moved -= skim;
+    }
+  }
 
   await tx.economy.applyBalanceChange({ playerId: ownerId, amount: moved, kind: "cash", reason });
   await tx.db

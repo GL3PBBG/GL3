@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { games, type GameDef, type GameStep } from "@gl3/plugin-casino";
 import { definePlugin, on, type PluginManifest } from "@gl3/plugin-sdk";
-import { locations, notifications, playerStats, transactions } from "../src/db/schema/index.js";
+import { locations, settings, notifications, playerStats, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
@@ -176,6 +176,11 @@ const throwsPlugin: PluginManifest = definePlugin({
 
 beforeAll(async () => {
   await resetDb(db);
+
+  // payOwner reads the franchise skim LIVE from the settings table. These
+  // suites pin the CONSUMER contract (exact escrow/credit math), so the skim
+  // is pinned off here; its own coverage lives in properties-pay-owner.test.ts.
+  await db.insert(settings).values({ key: "properties.skim_percent", value: "0" });
   ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [faroPlugin, throwsPlugin] }));
 });
 

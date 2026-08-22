@@ -8,7 +8,7 @@ import casinoPlugin, {
   adminPage as casinoAdminPage, games, MAX_SESSION_EXPIRY_MINUTES, type GameDef,
 } from "@gl3/plugin-casino";
 import { loadConfig } from "../src/config.js";
-import { locations, playerStats } from "../src/db/schema/index.js";
+import { locations, settings, playerStats } from "../src/db/schema/index.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { FARO, faroPlugin } from "./helpers/faro.js";
@@ -128,6 +128,11 @@ async function openHand(token: string, wager: string): Promise<{ sessionId: stri
 
 beforeAll(async () => {
   await resetDb(db);
+
+  // payOwner reads the franchise skim LIVE from the settings table. These
+  // suites pin the CONSUMER contract (exact escrow/credit math), so the skim
+  // is pinned off here; its own coverage lives in properties-pay-owner.test.ts.
+  await db.insert(settings).values({ key: "properties.skim_percent", value: "0" });
   ({ app, close: closeServer } = await bootTestServer({ plugins: [faroPlugin] }));
   // FIRST registration in this file, so this is the Administrator.
   const founder = await register();

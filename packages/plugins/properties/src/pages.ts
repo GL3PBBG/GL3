@@ -30,6 +30,14 @@ export const adminPage: PageSchema = {
           optionsSource: "GET /api/admin/properties/types", valueKey: "pluginId", labelKey: "name", allowEmpty: true },
         { name: "cost", label: "Lever", type: "money" },
       ] },
+      { kind: "text", value: "Franchise skim: the share of every owner CREDIT destroyed rather than paid, so property income partly drains the economy instead of purely pooling at owners. Debits (a casino house paying out) are never skimmed. 0 restores full payout. Unlike every other setting this one applies immediately — no restart." },
+      { kind: "table", source: "GET /api/admin/properties/settings", columns: [
+        { key: "label", label: "Setting" },
+        { key: "value", label: "Value" },
+      ] },
+      { kind: "form", action: "POST /api/admin/properties/settings", submitLabel: "Update skim", fields: [
+        { name: "skim_percent", label: "Skim percent of owner income (0–100)", type: "number" },
+      ] },
     ],
   },
 };

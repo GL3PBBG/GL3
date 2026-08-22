@@ -46,3 +46,14 @@ export const players = pgTable("players", {
   id: uuid("id").primaryKey(),
   username: text("username").notNull(),
 });
+
+/**
+ * Core-owned key/value, mirrored so `payOwner` can read the skim knob LIVE
+ * inside the transaction (the bullets-restock cursor precedent — a settings
+ * row read from the table, not the boot snapshot). Nothing here locks it FOR
+ * UPDATE, so it stays out of the lock graph entirely.
+ */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
