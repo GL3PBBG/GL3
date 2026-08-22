@@ -7,12 +7,16 @@ import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
+import { wealthScaledFee } from "../../economy/wealth-fee.js";
 import { newSeed } from "../rng.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { bustSucceeds } from "./bust.js";
 import { releaseIfExpired, sendToJail } from "./status.js";
-import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "./settings.js";
+import {
+  bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent,
+  bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds,
+} from "./settings.js";
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 
@@ -32,11 +36,19 @@ export function registerJailRoutes(
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
     const rows = await listSentencedAtLocation(db, playerId, "jail");
+    // The caller's wealth sizes each fee, so the roster's prices are what THIS
+    // caller would pay. Plain read, no lock: a preview may lag the authoritative
+    // computation the bail route does under lock — never the reverse.
+    const [me] = await db.select({ cash: playerStats.cash, bank: playerStats.bank })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    const wealth = (me?.cash ?? 0n) + (me?.bank ?? 0n);
     const rate = bailCostPerSecond(settings);
+    const percent = bailWealthPercent(settings);
+    const capMultiplier = bailWealthCapMultiplier(settings);
     return reply.send({
       inmates: rows.map((row) => ({
         ...row,
-        bailCost: (BigInt(row.remainingSeconds) * rate).toString(),
+        bailCost: wealthScaledFee(BigInt(row.remainingSeconds) * rate, wealth, percent, capMultiplier).toString(),
       })),
     });
   });
@@ -60,7 +72,11 @@ export function registerJailRoutes(
         // is read (NOTES.md rule 6) — the same shape as discharge-player.
         await lockPlayersForUpdate(tx, [playerId, targetId]);
 
-        const [caller] = await tx.select({ locationId: playerStats.locationId })
+        const [caller] = await tx.select({
+          locationId: playerStats.locationId,
+          cash: playerStats.cash,
+          bank: playerStats.bank,
+        })
           .from(playerStats).where(eq(playerStats.playerId, playerId));
         const [target] = await tx.select({
           locationId: playerStats.locationId,
@@ -80,7 +96,15 @@ export function registerJailRoutes(
         if (remainingMs <= 0) return { kind: "free" as const };
         const remainingSeconds = Math.ceil(remainingMs / 1000);
 
-        const cost = BigInt(remainingSeconds) * bailCostPerSecond(settings);
+        // Scaled on the PAYER's wealth (cash + bank), computed under the lock
+        // taken above — the /local roster previews the same formula unlocked.
+        // Wealth includes the bank on purpose: cash-only scaling would make
+        // depositing a bail shelter.
+        const cost = wealthScaledFee(
+          BigInt(remainingSeconds) * bailCostPerSecond(settings),
+          (caller?.cash ?? 0n) + (caller?.bank ?? 0n),
+          bailWealthPercent(settings), bailWealthCapMultiplier(settings),
+        );
         const cash = await applyBalanceChange(tx, {
           playerId, amount: -cost, kind: "cash", reason: "jail.bail",
         });

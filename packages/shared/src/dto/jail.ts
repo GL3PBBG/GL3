@@ -14,6 +14,7 @@ export const JailInmateSchema = z.object({
   rankName: z.string(),
   until: z.string(),
   remainingSeconds: z.number().int().nonnegative(),
+  /** What bail would cost THE CALLER — wealth-scaled, so two viewers see different prices. */
   bailCost: MoneySchema,
 });
 export type JailInmate = z.infer<typeof JailInmateSchema>;

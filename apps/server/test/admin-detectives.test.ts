@@ -24,18 +24,18 @@ afterAll(async () => { await closeServer(); await conn.end(); });
 const auth = () => ({ authorization: `Bearer ${adminToken}` });
 
 describe("detectives admin settings", () => {
-  it("lists the three settings at their coded defaults when nothing is stored", async () => {
+  it("lists the five settings at their coded defaults when nothing is stored", async () => {
     const res = await app.inject({ method: "GET", url: "/api/admin/detectives/settings", headers: auth() });
     expect(res.statusCode).toBe(200);
     const rows = res.json<{ rows: { key: string; label: string; value: string }[] }>().rows;
-    expect(rows.map((r) => r.key)).toEqual(["cost", "duration", "expire"]);
-    expect(rows.map((r) => r.value)).toEqual(["125000", "3600", "600"]);
+    expect(rows.map((r) => r.key)).toEqual(["cost", "duration", "expire", "wealth_percent", "wealth_cap_multiplier"]);
+    expect(rows.map((r) => r.value)).toEqual(["125000", "3600", "600", "1", "10"]);
   });
 
   it("upserts the settings rows and reads them back", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
-      payload: { cost: "90000", duration: 60, expire: 300 },
+      payload: { cost: "90000", duration: 60, expire: 300, wealth_percent: 0, wealth_cap_multiplier: 4 },
     });
     expect(res.statusCode).toBe(204);
 
@@ -46,12 +46,12 @@ describe("detectives admin settings", () => {
     // next boot will read — same posture as bullets' options panel.
     const list = await app.inject({ method: "GET", url: "/api/admin/detectives/settings", headers: auth() });
     expect(list.json<{ rows: { key: string; value: string }[] }>().rows.map((r) => r.value))
-      .toEqual(["90000", "60", "300"]);
+      .toEqual(["90000", "60", "300", "0", "4"]);
 
     // Second write updates in place rather than violating the key PK.
     const again = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
-      payload: { cost: "90000", duration: 3600, expire: 300 },
+      payload: { cost: "90000", duration: 3600, expire: 300, wealth_percent: 0, wealth_cap_multiplier: 4 },
     });
     expect(again.statusCode).toBe(204);
     const [updated] = await db.select().from(settings).where(eq(settings.key, "detectives.duration"));
@@ -63,25 +63,39 @@ describe("detectives admin settings", () => {
     // (`body: Record<string, string>`), so the wire shape is all-strings.
     const res = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
-      payload: { cost: "90000", duration: "60", expire: "300" },
+      payload: { cost: "90000", duration: "60", expire: "300", wealth_percent: "0", wealth_cap_multiplier: "4" },
     });
     expect(res.statusCode).toBe(204);
     const [row] = await db.select().from(settings).where(eq(settings.key, "detectives.duration"));
     expect(row?.value).toBe("60");
   });
 
-  it("400s a zero duration and a non-digit cost", async () => {
+  it("400s a zero duration, a non-digit cost, and out-of-range wealth knobs", async () => {
     const zero = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
-      payload: { cost: "1000", duration: 0, expire: 300 },
+      payload: { cost: "1000", duration: 0, expire: 300, wealth_percent: 1, wealth_cap_multiplier: 10 },
     });
     expect(zero.statusCode).toBe(400);
 
     const junk = await app.inject({
       method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
-      payload: { cost: "12.50", duration: 60, expire: 300 },
+      payload: { cost: "12.50", duration: 60, expire: 300, wealth_percent: 1, wealth_cap_multiplier: 10 },
     });
     expect(junk.statusCode).toBe(400);
+
+    // 101% and a 0× cap are both nonsense: the percent is a share of the
+    // payer's whole wealth, and a 0 cap would zero the fee rather than cap it.
+    const percent = await app.inject({
+      method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
+      payload: { cost: "1000", duration: 60, expire: 300, wealth_percent: 101, wealth_cap_multiplier: 10 },
+    });
+    expect(percent.statusCode).toBe(400);
+
+    const cap = await app.inject({
+      method: "POST", url: "/api/admin/detectives/settings", headers: auth(),
+      payload: { cost: "1000", duration: 60, expire: 300, wealth_percent: 1, wealth_cap_multiplier: 0 },
+    });
+    expect(cap.statusCode).toBe(400);
   });
 
   it("403s a non-admin caller", async () => {

@@ -182,3 +182,71 @@ describe.each([
     }
   });
 });
+
+/**
+ * Wealth-scaled discharge, mirroring the bail block in jail-bail-bust.test.ts:
+ * the fee rises toward 1% (default) of the payer's cash + bank, floored at the
+ * flat fee. A ~100s stay puts the flat fee at ≤ 100k, so the 500k scaled
+ * expectations are drift-proof — the sentence can lose a second boundary
+ * without moving the answer.
+ */
+describe("hospital routes — wealth scaling", () => {
+  it("quotes and charges a rich patient above the flat fee", async () => {
+    await db.update(playerStats)
+      .set({ hospitalUntil: new Date(Date.now() + 100_000), health: 0, cash: 50_000_000n })
+      .where(eq(playerStats.playerId, playerId));
+
+    const quote = await app.inject({
+      method: "GET", url: "/api/hospital",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(quote.json().dischargeCost).toBe("500000"); // 1% of 50M
+
+    const res = await app.inject({
+      method: "POST", url: "/api/hospital/discharge",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().paid).toBe("500000");
+    expect(res.json().cash).toBe("49500000");
+  });
+
+  it("counts the patient's bank in the scaling but debits cash only", async () => {
+    await db.update(playerStats)
+      .set({ hospitalUntil: new Date(Date.now() + 100_000), health: 0, cash: 600_000n, bank: 49_400_000n })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: "/api/hospital/discharge",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.json().paid).toBe("500000");
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.cash).toBe(100_000n);
+    expect(row?.bank).toBe(49_400_000n);
+  });
+
+  it("collapses to the flat fee when the percent is 0 — the rollback knob", async () => {
+    await db.insert(settings).values({ key: "hospital.discharge_wealth_percent", value: "0" });
+    const own = await bootTestServer();
+    try {
+      const { token: flatToken, playerId: flatId } = await registerVerifiedPlayer(
+        { app: own.app, redis: own.redis }, { username: `HospFlat${uuidv7().slice(-8)}` },
+      );
+      await db.update(playerStats)
+        .set({ hospitalUntil: new Date(Date.now() + 100_000), health: 0, cash: 50_000_000n })
+        .where(eq(playerStats.playerId, flatId));
+
+      const res = await own.app.inject({
+        method: "POST", url: "/api/hospital/discharge",
+        headers: { authorization: `Bearer ${flatToken}` },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const paid = BigInt(res.json().paid);
+      expect(paid).toBeGreaterThanOrEqual(99_000n);
+      expect(paid).toBeLessThanOrEqual(100_000n);
+    } finally {
+      await own.close();
+    }
+  });
+});

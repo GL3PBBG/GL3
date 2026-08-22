@@ -144,6 +144,123 @@ describe("POST /api/jail/bail", () => {
 });
 
 /**
+ * Wealth-scaled bail: the fee rises toward `jail.bail_wealth_percent` (1% by
+ * default) of the PAYER's cash + bank, floored at the flat fee and capped at
+ * `jail.bail_wealth_cap_multiplier` (10×) the flat fee. Every case below
+ * seeds a ~100s sentence, so the flat fee is ≤ 100k and second-boundary drift
+ * cannot move an expected value: the scaled amounts (500k, 1M) sit above the
+ * flat fee's whole drift band, below or at the cap.
+ */
+describe("POST /api/jail/bail — wealth scaling", () => {
+  const sentence = () => new Date(Date.now() + 100_000);
+
+  it("charges a rich payer above the flat fee", async () => {
+    const payer = await register("Rich");
+    const inmate = await register("Inmate");
+    await place(payer, townA, { cash: 50_000_000n });
+    await place(inmate, townA, { jailedUntil: sentence() });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bail", headers: auth(payer),
+      payload: { playerId: inmate.playerId },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().paid).toBe("500000"); // 1% of 50M, above the ≤100k floor
+
+    const [payerRow] = await db.select().from(playerStats).where(eq(playerStats.playerId, payer.playerId));
+    expect(payerRow?.cash).toBe(49_500_000n);
+  });
+
+  it("caps the fee at 10× the flat fee for extreme wealth", async () => {
+    const payer = await register("Whale");
+    const inmate = await register("Inmate");
+    await place(payer, townA, { cash: 5_000_000_000n });
+    await place(inmate, townA, { jailedUntil: sentence() });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bail", headers: auth(payer),
+      payload: { playerId: inmate.playerId },
+    });
+    // 1% of 5B is 50M, but the cap is flat(≤100k) × 10 = ≤1M — and above the
+    // 500k crossing point the cap is exactly 1M however many seconds remain.
+    expect(res.json().paid).toBe("1000000");
+  });
+
+  it("counts the payer's bank — depositing is not a bail shelter", async () => {
+    const payer = await register("Split");
+    const inmate = await register("Inmate");
+    await place(payer, townA, { cash: 600_000n, bank: 49_400_000n });
+    await place(inmate, townA, { jailedUntil: sentence() });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bail", headers: auth(payer),
+      payload: { playerId: inmate.playerId },
+    });
+    expect(res.json().paid).toBe("500000"); // 1% of 50M cash+bank
+    const [payerRow] = await db.select().from(playerStats).where(eq(playerStats.playerId, payer.playerId));
+    // Debited from cash only — the bank balance is untouched, existing behavior.
+    expect(payerRow?.cash).toBe(100_000n);
+    expect(payerRow?.bank).toBe(49_400_000n);
+  });
+
+  it("409s a bank-rich, cash-poor payer — the debit stays cash-only", async () => {
+    const payer = await register("Vault");
+    const inmate = await register("Inmate");
+    await place(payer, townA, { cash: 100_000n, bank: 50_000_000n });
+    await place(inmate, townA, { jailedUntil: sentence() });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bail", headers: auth(payer),
+      payload: { playerId: inmate.playerId },
+    });
+    expect(res.json()).toMatchObject({ error: "insufficient_funds" });
+  });
+
+  it("prices the roster per viewer: two callers see different bailCosts", async () => {
+    const poor = await register("Poor");
+    const rich = await register("Rich");
+    const inmate = await register("Inmate");
+    await place(poor, townA, { cash: 10_000n });
+    await place(rich, townA, { cash: 50_000_000n });
+    await place(inmate, townA, { jailedUntil: sentence() });
+
+    const asPoor = await app.inject({ method: "GET", url: "/api/jail/local", headers: auth(poor) });
+    const asRich = await app.inject({ method: "GET", url: "/api/jail/local", headers: auth(rich) });
+    expect(asPoor.statusCode).toBe(200);
+    expect(asRich.statusCode).toBe(200);
+
+    const costFor = (res: typeof asPoor): bigint =>
+      BigInt(res.json().inmates.find((i: { playerId: string }) => i.playerId === inmate.playerId).bailCost);
+    // Poor: 1% of 10k is 100, below the flat fee — the floor, exactly the
+    // pre-scaling price. Rich: 1% of 50M, drift-proof as above.
+    expect(costFor(asPoor)).toBeLessThanOrEqual(100_000n);
+    expect(costFor(asRich)).toBe(500_000n);
+  });
+
+  it("collapses to the flat fee when the percent is 0 — the rollback knob", async () => {
+    const own = await bootWith({ "jail.bail_wealth_percent": "0" });
+    try {
+      const payer = await registerOn(own.app, "RichFlat");
+      const inmate = await registerOn(own.app, "InmateFlat");
+      await place(payer, townA, { cash: 50_000_000n });
+      await place(inmate, townA, { jailedUntil: sentence() });
+
+      const res = await own.app.inject({
+        method: "POST", url: "/api/jail/bail",
+        headers: { authorization: `Bearer ${payer.token}` },
+        payload: { playerId: inmate.playerId },
+      });
+      // 100s × 1000/sec, one second of drift either way.
+      const paid = BigInt(res.json().paid);
+      expect(paid).toBeGreaterThanOrEqual(99_000n);
+      expect(paid).toBeLessThanOrEqual(100_000n);
+    } finally {
+      await own.close();
+    }
+  });
+});
+
+/**
  * `jail.bust_success_percent` is read once at boot, so each branch gets its
  * own app. 100 and 0 make the outcome independent of the draw — the roll
  * itself is unit-tested in facility-settings.test.ts.

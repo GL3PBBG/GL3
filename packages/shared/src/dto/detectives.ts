@@ -34,7 +34,7 @@ export const DetectiveSearchRowSchema = z.object({
 export type DetectiveSearchRow = z.infer<typeof DetectiveSearchRowSchema>;
 
 export const DetectiveListResponseSchema = z.object({
-  /** Unit cost — the client previews cost x detectives x hours. */
+  /** Unit cost for THIS caller — wealth-scaled; the client previews cost x detectives x hours. */
   cost: MoneySchema,
   /**
    * Seconds one duration unit lasts — V2's `detectiveDuration`. The 1–5

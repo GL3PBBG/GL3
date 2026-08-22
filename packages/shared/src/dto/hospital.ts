@@ -8,6 +8,7 @@ export const HospitalStatusSchema = z.object({
   hospitalised: z.boolean(),
   until: z.string().nullable(),
   remainingSeconds: z.number().int().nonnegative(),
+  /** Buy-out quote for the CALLER's own stay — wealth-scaled on their cash + bank. */
   dischargeCost: MoneySchema,
 });
 export type HospitalStatus = z.infer<typeof HospitalStatusSchema>;
@@ -26,7 +27,7 @@ export const HospitalPatientSchema = z.object({
   rankName: z.string(),
   until: z.string(),
   remainingSeconds: z.number().int().nonnegative(),
-  /** What it would cost THE CALLER to pay this patient out. */
+  /** What it would cost THE CALLER to pay this patient out — wealth-scaled on the caller. */
   dischargeCost: MoneySchema,
 });
 export type HospitalPatient = z.infer<typeof HospitalPatientSchema>;

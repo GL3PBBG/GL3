@@ -7,10 +7,13 @@ import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
+import { wealthScaledFee } from "../../economy/wealth-fee.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "./status.js";
-import { checkinSecondsPerHp, dischargeCostPerSecond } from "./settings.js";
+import {
+  checkinSecondsPerHp, dischargeCostPerSecond, dischargeWealthCapMultiplier, dischargeWealthPercent,
+} from "./settings.js";
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 
@@ -30,7 +33,7 @@ export function registerHospitalRoutes(
     await db.transaction((tx) => settleHospital(tx, playerId));
 
     const status = await checkHospital(db, playerId);
-    const [row] = await db.select({ health: playerStats.health })
+    const [row] = await db.select({ health: playerStats.health, cash: playerStats.cash, bank: playerStats.bank })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     const maxHealth = await db.transaction((tx) => maxHealthFor(tx, playerId));
 
@@ -41,7 +44,13 @@ export function registerHospitalRoutes(
       until: status.until,
       remainingSeconds: status.remainingSeconds,
       // Money crosses the wire as a decimal string, never a JSON number.
-      dischargeCost: (BigInt(status.remainingSeconds) * dischargeCostPerSecond(settings)).toString(),
+      // Wealth-scaled on the caller (preview read, no lock — the discharge
+      // route recomputes authoritatively under its own lock).
+      dischargeCost: wealthScaledFee(
+        BigInt(status.remainingSeconds) * dischargeCostPerSecond(settings),
+        (row?.cash ?? 0n) + (row?.bank ?? 0n),
+        dischargeWealthPercent(settings), dischargeWealthCapMultiplier(settings),
+      ).toString(),
     });
   });
 
@@ -51,11 +60,20 @@ export function registerHospitalRoutes(
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
     const rows = await listSentencedAtLocation(db, playerId, "hospital");
+    // Caller-relative pricing, same as jail/local: each dischargeCost is what
+    // THIS caller would pay, previewed unlocked.
+    const [me] = await db.select({ cash: playerStats.cash, bank: playerStats.bank })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    const wealth = (me?.cash ?? 0n) + (me?.bank ?? 0n);
     const rate = dischargeCostPerSecond(settings);
+    const percent = dischargeWealthPercent(settings);
+    const capMultiplier = dischargeWealthCapMultiplier(settings);
     return reply.send({
       patients: rows.map((row) => ({
         ...row,
-        dischargeCost: (BigInt(row.remainingSeconds) * rate).toString(),
+        dischargeCost: wealthScaledFee(
+          BigInt(row.remainingSeconds) * rate, wealth, percent, capMultiplier,
+        ).toString(),
       })),
     });
   });
@@ -84,7 +102,15 @@ export function registerHospitalRoutes(
         const settled = await settleHospital(tx, playerId);
         if (!settled.hospitalised) return { kind: "free" as const };
 
-        const cost = BigInt(settled.remainingSeconds) * dischargeCostPerSecond(settings);
+        // Under the lock taken above: the fee scales with the payer's OWN
+        // cash + bank, so it cannot drift between the quote and the debit.
+        const [me] = await tx.select({ cash: playerStats.cash, bank: playerStats.bank })
+          .from(playerStats).where(eq(playerStats.playerId, playerId));
+        const cost = wealthScaledFee(
+          BigInt(settled.remainingSeconds) * dischargeCostPerSecond(settings),
+          (me?.cash ?? 0n) + (me?.bank ?? 0n),
+          dischargeWealthPercent(settings), dischargeWealthCapMultiplier(settings),
+        );
         const cash = await applyBalanceChange(tx, {
           playerId, amount: -cost, kind: "cash", reason: "hospital.discharge",
         });
@@ -131,7 +157,9 @@ export function registerHospitalRoutes(
       const settled = await settleHospital(tx, playerId);
       if (settled.hospitalised) return { kind: "already" as const };
 
-      const [row] = await tx.select({ health: playerStats.health })
+      const [row] = await tx.select({
+        health: playerStats.health, cash: playerStats.cash, bank: playerStats.bank,
+      })
         .from(playerStats).where(eq(playerStats.playerId, playerId));
       const health = row?.health ?? 0;
       const maxHealth = await maxHealthFor(tx, playerId);
@@ -145,7 +173,10 @@ export function registerHospitalRoutes(
       // above exists to prevent.
       if (seconds <= 0) return { kind: "healthy" as const };
       const until = await sendToHospital(tx, playerId, seconds);
-      return { kind: "admitted" as const, until, seconds, maxHealth };
+      return {
+        kind: "admitted" as const, until, seconds, maxHealth,
+        wealth: (row?.cash ?? 0n) + (row?.bank ?? 0n),
+      };
     });
 
     if (result.kind === "already") return reply.code(409).send({ error: "already_hospitalised" });
@@ -157,7 +188,12 @@ export function registerHospitalRoutes(
       hospitalised: true,
       until: result.until.toISOString(),
       remainingSeconds: result.seconds,
-      dischargeCost: (BigInt(result.seconds) * dischargeCostPerSecond(settings)).toString(),
+      // Buy-out quote for the stay just admitted, on the caller's own wealth.
+      dischargeCost: wealthScaledFee(
+        BigInt(result.seconds) * dischargeCostPerSecond(settings),
+        result.wealth,
+        dischargeWealthPercent(settings), dischargeWealthCapMultiplier(settings),
+      ).toString(),
     });
   });
 
@@ -182,7 +218,11 @@ export function registerHospitalRoutes(
         // exists for on the single-player discharge route above.
         await lockPlayersForUpdate(tx, [playerId, targetId]);
 
-        const [caller] = await tx.select({ locationId: playerStats.locationId })
+        const [caller] = await tx.select({
+          locationId: playerStats.locationId,
+          cash: playerStats.cash,
+          bank: playerStats.bank,
+        })
           .from(playerStats).where(eq(playerStats.playerId, playerId));
         const [target] = await tx.select({
           locationId: playerStats.locationId,
@@ -202,7 +242,13 @@ export function registerHospitalRoutes(
         if (remainingMs <= 0) return { kind: "free" as const };
         const remainingSeconds = Math.ceil(remainingMs / 1000);
 
-        const cost = BigInt(remainingSeconds) * dischargeCostPerSecond(settings);
+        // Scaled on the PAYER's wealth under the lock above, mirroring jail
+        // bail exactly — the fee is what discharging THIS caller costs.
+        const cost = wealthScaledFee(
+          BigInt(remainingSeconds) * dischargeCostPerSecond(settings),
+          (caller?.cash ?? 0n) + (caller?.bank ?? 0n),
+          dischargeWealthPercent(settings), dischargeWealthCapMultiplier(settings),
+        );
         const cash = await applyBalanceChange(tx, {
           playerId, amount: -cost, kind: "cash", reason: "hospital.discharge",
         });

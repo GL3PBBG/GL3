@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkinSecondsPerHp, dischargeCostPerSecond } from "../src/game/hospital/settings.js";
-import { bailCostPerSecond, bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "../src/game/jail/settings.js";
+import {
+  checkinSecondsPerHp, dischargeCostPerSecond, dischargeWealthCapMultiplier, dischargeWealthPercent,
+} from "../src/game/hospital/settings.js";
+import {
+  bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent,
+  bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds,
+} from "../src/game/jail/settings.js";
 import { bustSucceeds } from "../src/game/jail/bust.js";
 
 /**
@@ -18,6 +23,10 @@ describe("facility settings parsers", () => {
     expect(bustSuccessPercent({})).toBe(25);
     expect(bustFailJailSeconds({})).toBe(300);
     expect(escapeFailExtraSeconds({})).toBe(90);
+    expect(bailWealthPercent({})).toBe(1);
+    expect(bailWealthCapMultiplier({})).toBe(10);
+    expect(dischargeWealthPercent({})).toBe(1);
+    expect(dischargeWealthCapMultiplier({})).toBe(10);
   });
 
   it("reads well-formed values", () => {
@@ -27,13 +36,46 @@ describe("facility settings parsers", () => {
     expect(bustSuccessPercent({ "jail.bust_success_percent": "100" })).toBe(100);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "60" })).toBe(60);
     expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": "120" })).toBe(120);
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": "0" })).toBe(0);
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": "7" })).toBe(7);
+    expect(bailWealthCapMultiplier({ "jail.bail_wealth_cap_multiplier": "3" })).toBe(3);
+    expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": "0" })).toBe(0);
+    expect(dischargeWealthCapMultiplier({ "hospital.discharge_wealth_cap_multiplier": "5" })).toBe(5);
   });
 
-  it.each(["", "   ", "abc", "-1", "1.5"])("falls back on %j", (raw) => {
+  it.each(["", "   ", "abc", "1.5"])("falls back on %j", (raw) => {
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": raw })).toBe(30);
     expect(bailCostPerSecond({ "jail.bail_cost_per_second": raw })).toBe(1000n);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": raw })).toBe(300);
     expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": raw })).toBe(90);
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": raw })).toBe(1);
+    expect(bailWealthCapMultiplier({ "jail.bail_wealth_cap_multiplier": raw })).toBe(10);
+    expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": raw })).toBe(1);
+    expect(dischargeWealthCapMultiplier({ "hospital.discharge_wealth_cap_multiplier": raw })).toBe(10);
+  });
+
+  it("falls back on -1 everywhere except the percents, which clamp it to 0", () => {
+    // -1 is an integer, so the percent parsers clamp it (the case above) the
+    // way bustSuccessPercent does, while every other parser treats it as
+    // malformed — which is why it is not in the each-matrix above.
+    expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "-1" })).toBe(30);
+    expect(bailCostPerSecond({ "jail.bail_cost_per_second": "-1" })).toBe(1000n);
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": "-1" })).toBe(0);
+    expect(bailWealthCapMultiplier({ "jail.bail_wealth_cap_multiplier": "-1" })).toBe(10);
+    expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": "-1" })).toBe(0);
+    expect(dischargeWealthCapMultiplier({ "hospital.discharge_wealth_cap_multiplier": "-1" })).toBe(10);
+  });
+
+  it("clamps the wealth percent like bustSuccessPercent — typed intent over silent default", () => {
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": "150" })).toBe(100);
+    expect(bailWealthPercent({ "jail.bail_wealth_percent": "-5" })).toBe(0);
+    expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": "250" })).toBe(100);
+    expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": "-1" })).toBe(0);
+  });
+
+  it("rejects 0 for the cap multiplier — a zero cap would zero every fee", () => {
+    expect(bailWealthCapMultiplier({ "jail.bail_wealth_cap_multiplier": "0" })).toBe(10);
+    expect(dischargeWealthCapMultiplier({ "hospital.discharge_wealth_cap_multiplier": "0" })).toBe(10);
   });
 
   it("rejects 0 for the parsers a zero-length stay would exploit", () => {

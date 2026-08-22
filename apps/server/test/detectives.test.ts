@@ -388,3 +388,70 @@ describe("activeReportTargetIds", () => {
     expect(set).toEqual(new Set([active]));
   });
 });
+
+/**
+ * Wealth-scaled unit pricing: the UNIT cost rises toward
+ * detectives.wealth_percent (1% default) of the hirer's cash + bank, floored
+ * at detectives.cost and capped at detectives.wealth_cap_multiplier × it —
+ * then still multiplied by detectives × hours, so the client's preview
+ * formula stays exact. Scaling the unit, not the total, is what keeps
+ * listRoute's `cost` field honest for every dets/hours combination at once.
+ */
+describe("POST /api/detectives — wealth scaling", () => {
+  it("scales the unit cost on the hirer's wealth", async () => {
+    // 1% of 50M = 500k per unit-hour, above the 125k floor and below the
+    // 1.25M cap. 2 dets x 3 hours = 6 units -> 3M exactly.
+    await db.update(playerStats).set({ cash: 50_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 2, hours: 3 });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().cash).toBe("47000000"); // 50M - 3M
+
+    const [ledgerRow] = await db.select().from(transactions)
+      .where(eq(transactions.reason, "detectives.hire"));
+    expect(ledgerRow!.amount).toBe(-3_000_000n);
+  });
+
+  it("caps the unit at wealth_cap_multiplier x the flat unit", async () => {
+    // 1% of 5B = 50M per unit, capped at 10 x 125k = 1.25M. 1 x 1 -> 1.25M.
+    await db.update(playerStats).set({ cash: 5_000_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+
+    const res = await hire(hirerToken, { targetUsername: "Fugitive", detectives: 1, hours: 1 });
+    expect(res.statusCode, res.body).toBe(201);
+    // 5,000,000,000 - 1,250,000
+    expect(res.json().cash).toBe("4998750000");
+  });
+
+  it("previews the scaled unit in the list route — caller-relative, like bail", async () => {
+    // Broke hirer: floor (125k, the pre-scaling price). Rich hirer: 500k.
+    await db.update(playerStats).set({ cash: 50_000_000n })
+      .where(eq(playerStats.playerId, hirerId));
+    const richList = await list(hirerToken);
+    expect(richList.statusCode).toBe(200);
+    expect(richList.json().cost).toBe("500000");
+
+    const poor = await registerVerifiedPlayer({ app, redis }, { username: `Broke${Date.now()}` });
+    const poorList = await list(poor.token);
+    expect(poorList.json().cost).toBe("125000");
+  });
+
+  it("collapses to the flat unit when the percent is 0 — the rollback knob", async () => {
+    await db.insert(settings).values({ key: "detectives.wealth_percent", value: "0" });
+    const { app: freshApp, close } = await bootTestServer();
+    try {
+      await db.update(playerStats).set({ cash: 50_000_000n })
+        .where(eq(playerStats.playerId, hirerId));
+      const res = await freshApp.inject({
+        method: "POST", url: "/api/detectives",
+        headers: { authorization: `Bearer ${hirerToken}` },
+        payload: { targetUsername: "Fugitive", detectives: 1, hours: 1 },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(res.json().cash).toBe("49875000"); // 50M - 125000
+    } finally {
+      await close();
+    }
+  });
+});

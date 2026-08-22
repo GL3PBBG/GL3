@@ -1,4 +1,5 @@
-import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Read/write mirrors of core-owned tables — the pattern
@@ -17,6 +18,10 @@ export const players = pgTable("players", {
 export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   locationId: uuid("location_id"),
+  // Wealth-scaling the hire fee reads both balances (bank included on
+  // purpose — see the fee copy in index.ts).
+  cash: bigint("cash", { mode: "bigint" }).notNull().default(sql`0`),
+  bank: bigint("bank", { mode: "bigint" }).notNull().default(sql`0`),
 });
 
 export const locations = pgTable("locations", {

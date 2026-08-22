@@ -126,3 +126,24 @@ describe("POST /api/hospital/discharge-player", () => {
     expect((await post(payer, {})).statusCode).toBe(400);
   });
 });
+
+/**
+ * Wealth scaling on the pay-for-others side: the fee sizes on the PAYER's
+ * cash + bank, not the patient's — the same formula and the same drift-proof
+ * setup as the jail bail block (100s stay → flat ≤ 100k; 1% of 50M = 500k).
+ */
+describe("POST /api/hospital/discharge-player — wealth scaling", () => {
+  it("charges a rich payer above the flat fee, priced on the payer not the patient", async () => {
+    const payer = await register("RichPayer");
+    const patient = await register("PoorPatient");
+    await place(payer, townA, { cash: 50_000_000n });
+    await place(patient, townA, { health: 0, hospitalUntil: new Date(Date.now() + 100_000) });
+
+    const res = await post(payer, { playerId: patient.playerId });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().paid).toBe("500000");
+    const [payerRow] = await db.select().from(playerStats).where(eq(playerStats.playerId, payer.playerId));
+    expect(payerRow?.cash).toBe(49_500_000n);
+  });
+});

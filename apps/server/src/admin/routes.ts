@@ -7,12 +7,17 @@ import { z } from "zod";
 import { clearBanned, markBanned } from "../auth/ban.js";
 import { destroyAllSessions } from "../auth/session.js";
 import type { Db } from "../db/client.js";
-import { gangs, playerStats, players, roleModuleAccess, rounds, roles, transactions } from "../db/schema/index.js";
+import { gangs, playerStats, players, roleModuleAccess, rounds, roles, settings, transactions } from "../db/schema/index.js";
+import { bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent } from "../game/jail/settings.js";
+import {
+  dischargeCostPerSecond, dischargeWealthCapMultiplier, dischargeWealthPercent,
+} from "../game/hospital/settings.js";
 import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { buildAssetsPage } from "./assets-page.js";
 import { economyPage } from "./economy-page.js";
+import { facilitiesPage } from "./facilities-page.js";
 import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
@@ -97,6 +102,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     { id: CORE_SCOPE, name: "core (game art)" },
     { id: "rounds", name: "rounds" },
     { id: "economy", name: "economy (ledger dashboard)" },
+    { id: "facilities", name: "facilities (jail & hospital fees)" },
     { id: "players", name: "players (moderation)" },
     { id: "theme", name: "theme" },
     ...pluginIds.map((id) => ({ id, name: id })),
@@ -162,6 +168,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "economy",
         pages: [{ pluginId: "economy", id: economyPage.id, path: economyPage.path, view: economyPage.view }],
+      });
+    }
+    if (hasPermission(grants, "facilities")) {
+      sections.push({
+        pluginId: "facilities",
+        pages: [{ pluginId: "facilities", id: facilitiesPage.id, path: facilitiesPage.path, view: facilitiesPage.view }],
       });
     }
     if (hasPermission(grants, "players")) {
@@ -623,6 +635,74 @@ export function registerAdminRoutes(
     return reply.send({
       rows: rows.map((r) => ({ day: r.day, net: signedNet(r.net) })),
     });
+  });
+
+  // ── Facility fees (jail & hospital) ───────────────────────────────────────
+  // Gated on the `facilities` grant. Reads the settings TABLE live and shows
+  // EFFECTIVE values through the same parsers the game uses — the panel shows
+  // defaults for unset keys, so what the admin sees is what the next boot
+  // will charge. Writes are upserts; the boot-time snapshot makes every edit
+  // restart-to-apply.
+
+  // The admin form serialises every field as a string (PageRenderer.tsx's
+  // `body: Record<string, string>`), so the numeric knobs coerce — the same
+  // shape as detectives' options panel. The money floors stay digit strings,
+  // like every money field on the wire.
+  const FacilitiesBodySchema = z.object({
+    jail_bail_cost_per_second: z.string().regex(/^\d+$/),
+    jail_bail_wealth_percent: z.coerce.number().int().min(0).max(100),
+    jail_bail_wealth_cap_multiplier: z.coerce.number().int().min(1),
+    hospital_discharge_cost_per_second: z.string().regex(/^\d+$/),
+    hospital_discharge_wealth_percent: z.coerce.number().int().min(0).max(100),
+    hospital_discharge_wealth_cap_multiplier: z.coerce.number().int().min(1),
+  }).strict();
+
+  app.get("/api/admin/facilities/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "facilities")) return reply.code(403).send({ error: "forbidden" });
+
+    const rows = await db.select().from(settings);
+    const live: Record<string, string> = {};
+    for (const row of rows) live[row.key] = row.value;
+
+    return reply.send({
+      rows: [
+        { label: "Bail per second (flat floor)", value: bailCostPerSecond(live).toString() },
+        { label: "Bail wealth percent (0 = flat)", value: String(bailWealthPercent(live)) },
+        { label: "Bail cap multiple of flat", value: String(bailWealthCapMultiplier(live)) },
+        { label: "Discharge per second (flat floor)", value: dischargeCostPerSecond(live).toString() },
+        { label: "Discharge wealth percent (0 = flat)", value: String(dischargeWealthPercent(live)) },
+        { label: "Discharge cap multiple of flat", value: String(dischargeWealthCapMultiplier(live)) },
+      ],
+    });
+  });
+
+  app.post("/api/admin/facilities", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "facilities")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = FacilitiesBodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+
+    const body = parsed.data;
+    const values = [
+      { key: "jail.bail_cost_per_second", value: body.jail_bail_cost_per_second },
+      { key: "jail.bail_wealth_percent", value: String(body.jail_bail_wealth_percent) },
+      { key: "jail.bail_wealth_cap_multiplier", value: String(body.jail_bail_wealth_cap_multiplier) },
+      { key: "hospital.discharge_cost_per_second", value: body.hospital_discharge_cost_per_second },
+      { key: "hospital.discharge_wealth_percent", value: String(body.hospital_discharge_wealth_percent) },
+      { key: "hospital.discharge_wealth_cap_multiplier", value: String(body.hospital_discharge_wealth_cap_multiplier) },
+    ];
+    await db.transaction(async (tx) => {
+      for (const row of values) {
+        await tx.insert(settings).values(row)
+          .onConflictDoUpdate({ target: settings.key, set: { value: row.value } });
+      }
+    });
+    return reply.code(204).send();
   });
 
   // ── Player moderation ────────────────────────────────────────────────────

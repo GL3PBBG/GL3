@@ -31,7 +31,25 @@ own game. Contributor material lives in the rest of the manual.
   frozen per row at write time and won't retroactively change.
 - **Admin pages**: towns (combat mode, prices), shops, roles, and the plugin admin
   surface under `/api/admin/<pluginId>`. "Public towns have cheaper shops"-style
-  tuning is admin data entry, not code.
+  tuning is admin data entry, not code. The core Facility fees page (`facilities`
+  grant, `/admin/facilities`) edits jail/hospital fee settings, which previously
+  had no admin editor at all.
+- **Wealth-scaled fees**: bail, hospital discharge, and detectives are priced on
+  the payer's wealth — raised toward a percent (default 1%) of the payer's
+  cash + bank, floored at the flat fee, capped at a multiple of it (default
+  10×). A poor player pays exactly the old flat price; a rich player pays
+  more, so the sinks stay felt late-game instead of becoming pocket change.
+  The bank counts toward wealth on purpose (depositing is not a bail
+  shelter), but the debit itself is still cash-only. Rollback is per feature:
+  set the percent to 0 and every payer pays the flat fee again. Knobs (all
+  restart-to-apply): `jail.bail_wealth_percent` / `_cap_multiplier`,
+  `hospital.discharge_wealth_percent` / `_cap_multiplier` on the Facility fees
+  page, and `wealth_percent` / `wealth_cap_multiplier` on the detectives admin
+  panel (per-detective-hour unit). Detectives' list cost and the jail/hospital
+  rosters are caller-relative — two players see different prices for the same
+  inmate or patient. Watch the effect in the economy dashboard: the
+  `jail.bail`, `hospital.discharge` and `detectives.hire` sink rows should
+  grow as wealth concentrates.
 - **Economy dashboard**: `/admin/economy`, behind its own `economy` grant (grant it
   through Roles like any other module key). Read-only, sourced entirely from the
   transactions ledger: current money supply (player and gang cash/bank, points

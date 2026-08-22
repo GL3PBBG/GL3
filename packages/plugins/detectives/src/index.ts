@@ -29,6 +29,8 @@ export { activeReportTargetIds } from "./reports.js";
 const DEFAULT_COST = 125_000n;
 const DEFAULT_DURATION_SECONDS = 3600;
 const DEFAULT_EXPIRE_SECONDS = 600;
+const DEFAULT_WEALTH_PERCENT = 1;
+const DEFAULT_WEALTH_CAP_MULTIPLIER = 10;
 
 type Settings = { get(key: string): string | null };
 
@@ -43,6 +45,42 @@ function readSeconds(settings: Settings, key: string, fallback: number): number 
   if (raw === null) return fallback;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * The wealth-scaling knobs, mirroring jail/hospital (see the facility-fee
+ * work): the fee rises toward this percent of the HIRER's cash + bank, floored
+ * at the flat unit cost and capped at a multiple of it. 0 is the rollback to
+ * pure flat; out-of-range integers clamp rather than revert, matching core's
+ * parsers.
+ */
+function readWealthPercent(settings: Settings): number {
+  const raw = settings.get("wealth_percent");
+  if (raw === null) return DEFAULT_WEALTH_PERCENT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) return DEFAULT_WEALTH_PERCENT;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function readWealthCapMultiplier(settings: Settings): number {
+  return readSeconds(settings, "wealth_cap_multiplier", DEFAULT_WEALTH_CAP_MULTIPLIER);
+}
+
+/**
+ * Verbatim copy of core's economy/wealth-fee.ts — plugins import from
+ * @gl3/plugin-sdk, not core, and one function is below the threshold the
+ * "plugins copy small parsers" convention sets. Keep the two in lockstep;
+ * wealth-fee.test.ts pins the arithmetic this must match.
+ */
+function wealthScaledFee(
+  flat: bigint, wealth: bigint, percent: number, capMultiplier: number,
+): bigint {
+  if (percent <= 0) return flat;
+  if (flat <= 0n) return flat;
+  const target = (wealth * BigInt(percent) + 99n) / 100n;
+  const capped = flat * BigInt(capMultiplier);
+  const raised = target > flat ? target : flat;
+  return raised > capped ? capped : raised;
 }
 
 const HireBodySchema = z.object({
@@ -62,9 +100,11 @@ const hireRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    const cost = readCost(ctx.settings) * BigInt(body.detectives) * BigInt(body.hours);
+    const flatUnit = readCost(ctx.settings);
     const durationSeconds = readSeconds(ctx.settings, "duration", DEFAULT_DURATION_SECONDS);
     const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
+    const wealthPercent = readWealthPercent(ctx.settings);
+    const wealthCapMultiplier = readWealthCapMultiplier(ctx.settings);
 
     const result = await ctx.transaction(async (tx) => {
       // Plain SELECT, no lock: the username -> id mapping is immutable.
@@ -75,6 +115,22 @@ const hireRoute = route({
       // 400s, not bounties' 404: the spec (§4) pins hire-input problems to 400.
       if (!target) throw new PluginError("target_not_found", 400);
       if (target.id === player.id) throw new PluginError("cannot_search_self", 400);
+
+      // The UNIT cost scales with the hirer's wealth (cash + bank), read here
+      // in-transaction like freshStats' precedent — the debit's own lock inside
+      // applyBalanceChange stays what makes the money safe; this read only
+      // sizes the price, so a hair of staleness shifts the fee, never the
+      // balance. Scaling the unit rather than the total keeps the client's
+      // cost × detectives × hours preview exact (listRoute returns the same
+      // scaled unit for the caller).
+      const [hirer] = await tx.db
+        .select({ cash: playerStats.cash, bank: playerStats.bank })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, player.id));
+      const unitCost = wealthScaledFee(
+        flatUnit, (hirer?.cash ?? 0n) + (hirer?.bank ?? 0n), wealthPercent, wealthCapMultiplier,
+      );
+      const cost = unitCost * BigInt(body.detectives) * BigInt(body.hours);
 
       // No pair lock, deliberately (spec §2 Locks): this debit locks only the
       // hirer's own player_stats row, and the INSERT's FKs take KEY SHARE on
@@ -128,9 +184,17 @@ const listRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    const unitCost = readCost(ctx.settings);
+    const flatUnit = readCost(ctx.settings);
     const durationSeconds = readSeconds(ctx.settings, "duration", DEFAULT_DURATION_SECONDS);
     const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
+    // Caller-relative price: the same wealth scaling the hire route applies,
+    // computed from the request's PlayerSnapshot. Unlocked preview — the hire
+    // recomputes in-transaction — so the two can drift by one concurrent
+    // money move, never more.
+    const previewWealth = player.cash + player.bank;
+    const unitCost = wealthScaledFee(
+      flatUnit, previewWealth, readWealthPercent(ctx.settings), readWealthCapMultiplier(ctx.settings),
+    );
 
     return ctx.transaction(async (tx) => {
       // Live tracking is this un-cached join (spec §2): the target's CURRENT
@@ -161,7 +225,8 @@ const listRoute = route({
       return {
         status: 200,
         body: {
-          // Unit cost so the client can preview cost x dets x hours.
+          // Unit cost so the client can preview cost x dets x hours —
+          // wealth-scaled for THIS caller, matching what a hire would charge.
           cost: unitCost.toString(),
           // Seconds per duration unit, so the client can label the 1–5
           // dropdown honestly ("1 hour" at 3600, "1 second" at V2's shipped
@@ -228,9 +293,11 @@ const removeRoute = route({
 // ---------------------------------------------------------------------------
 
 const SETTING_LABELS = [
-  ["cost", "Cost per detective per unit"],
+  ["cost", "Cost per detective per unit (flat floor)"],
   ["duration", "Seconds one duration unit lasts (V2's detectiveDuration; 3600 = real hours)"],
   ["expire", "Seconds a successful report stays live (V2's detectiveExpire)"],
+  ["wealth_percent", "Wealth-scaled fee: percent of hirer's cash+bank (0 = flat only)"],
+  ["wealth_cap_multiplier", "Wealth-scaled fee: cap as multiple of the flat unit cost"],
 ] as const;
 
 const AdminSettingsBodySchema = z.object({
@@ -240,6 +307,8 @@ const AdminSettingsBodySchema = z.object({
   // panel is the same shape.
   duration: z.coerce.number().int().min(1),
   expire: z.coerce.number().int().min(1),
+  wealth_percent: z.coerce.number().int().min(0).max(100),
+  wealth_cap_multiplier: z.coerce.number().int().min(1),
 }).strict();
 
 const adminSettingsListRoute = route({
@@ -253,6 +322,8 @@ const adminSettingsListRoute = route({
       cost: readCost(read).toString(),
       duration: String(readSeconds(read, "duration", DEFAULT_DURATION_SECONDS)),
       expire: String(readSeconds(read, "expire", DEFAULT_EXPIRE_SECONDS)),
+      wealth_percent: String(readWealthPercent(read)),
+      wealth_cap_multiplier: String(readWealthCapMultiplier(read)),
     };
     return {
       status: 200,
@@ -269,6 +340,8 @@ const adminSettingsWriteRoute = route({
       { key: "detectives.cost", value: body.cost },
       { key: "detectives.duration", value: String(body.duration) },
       { key: "detectives.expire", value: String(body.expire) },
+      { key: "detectives.wealth_percent", value: String(body.wealth_percent) },
+      { key: "detectives.wealth_cap_multiplier", value: String(body.wealth_cap_multiplier) },
     ];
     await ctx.transaction(async (tx) => {
       for (const row of values) {
@@ -286,7 +359,7 @@ const adminPage: PageSchema = {
   view: {
     kind: "panel", title: "Detectives",
     children: [
-      { kind: "text", value: "The 1–5 \"hours\" dropdown is a unit count; the duration setting is how many real seconds one unit lasts (V2's detectiveDuration — 1 for fast testing, 3600 for real hours). Cost and success odds are per unit, not per real second. Edits take effect on the next server restart." },
+      { kind: "text", value: "The 1–5 \"hours\" dropdown is a unit count; the duration setting is how many real seconds one unit lasts (V2's detectiveDuration — 1 for fast testing, 3600 for real hours). Cost and success odds are per unit, not per real second. The wealth knobs raise each unit's price toward a percent of the hirer's cash + bank, floored at the flat cost and capped — set the percent to 0 to price flat for everyone. Edits take effect on the next server restart." },
       { kind: "table", source: "GET /api/admin/detectives/settings", columns: [
         { key: "label", label: "Setting" },
         { key: "value", label: "Value" },
@@ -295,6 +368,8 @@ const adminPage: PageSchema = {
         { name: "cost", label: "Cost per detective per unit", type: "money" },
         { name: "duration", label: "Seconds per duration unit", type: "number" },
         { name: "expire", label: "Report lifetime (seconds)", type: "number" },
+        { name: "wealth_percent", label: "Wealth percent of hirer (0–100)", type: "number" },
+        { name: "wealth_cap_multiplier", label: "Cap multiple of flat cost", type: "number" },
       ] },
     ],
   },

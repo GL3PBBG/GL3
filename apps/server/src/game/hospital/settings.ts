@@ -6,6 +6,8 @@
  */
 const DEFAULT_DISCHARGE_COST_PER_SECOND = 1000n;
 const DEFAULT_CHECKIN_SECONDS_PER_HP = 30;
+const DEFAULT_DISCHARGE_WEALTH_PERCENT = 1;
+const DEFAULT_DISCHARGE_WEALTH_CAP_MULTIPLIER = 10;
 
 export function parseNonNegativeBigint(raw: string | undefined, fallback: bigint): bigint {
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -35,6 +37,27 @@ export function parsePositiveInt(raw: string | undefined, fallback: number): num
 export function dischargeCostPerSecond(settings: Record<string, string>): bigint {
   return parseNonNegativeBigint(
     settings["hospital.discharge_cost_per_second"], DEFAULT_DISCHARGE_COST_PER_SECOND,
+  );
+}
+
+/**
+ * The wealth-scaling knobs for discharge (see economy/wealth-fee.ts): the fee
+ * is raised toward this percent of the PAYER's cash + bank, floored at the
+ * flat fee. 0 is the rollback to pure flat; out-of-range integers clamp the
+ * same way jail's bustSuccessPercent does — typed intent beats silent default.
+ */
+export function dischargeWealthPercent(settings: Record<string, string>): number {
+  const raw = settings["hospital.discharge_wealth_percent"];
+  if (raw === undefined || raw.trim() === "") return DEFAULT_DISCHARGE_WEALTH_PERCENT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) return DEFAULT_DISCHARGE_WEALTH_PERCENT;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+/** Ceiling multiple of the flat discharge fee, whatever the payer's wealth. */
+export function dischargeWealthCapMultiplier(settings: Record<string, string>): number {
+  return parsePositiveInt(
+    settings["hospital.discharge_wealth_cap_multiplier"], DEFAULT_DISCHARGE_WEALTH_CAP_MULTIPLIER,
   );
 }
 
