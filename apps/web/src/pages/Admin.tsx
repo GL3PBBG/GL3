@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAdminSections } from "../api/queries.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
+import { PAGE_OVERRIDES } from "../plugins/overrides.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
@@ -10,7 +11,10 @@ import styles from "./pages.module.css";
  * tab per section (same pattern as Leaderboards). Only the active section
  * mounts, so a page's tables and selects fetch when its tab opens, not all at
  * once. Each page within a section is rendered through the same `renderNode`
- * + `PageRenderer` path that `PluginPage` uses.
+ * + `PageRenderer` path that `PluginPage` uses — unless the page id has an
+ * entry in PAGE_OVERRIDES, in which case that bespoke component renders
+ * instead (PluginPage's own check, applied here so core admin pages can use
+ * it too; the economy dashboard is the first).
  */
 export function Admin(): JSX.Element {
   const sections = useAdminSections();
@@ -47,6 +51,8 @@ export function Admin(): JSX.Element {
       </div>
       <div className={styles.stack}>
         {current.pages.map((page) => {
+          const Override = PAGE_OVERRIDES.get(page.id);
+          if (Override !== undefined) return <Override key={`${current.pluginId}:${page.id}`} />;
           const instructions = renderNode(page.view, {});
           return (
             <PageRenderer

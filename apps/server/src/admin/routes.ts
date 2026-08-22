@@ -1,4 +1,5 @@
 import { hasPermission, type PluginManifest } from "@gl3/plugin-sdk";
+import { AdminEconomyOverviewSchema, type AdminEconomyOverview, type AdminEconomyWindow } from "@gl3/shared";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
@@ -540,106 +541,134 @@ export function registerAdminRoutes(
   });
 
   // ── Economy dashboard (MIMO) ──────────────────────────────────────────────
-  // Gated on the `economy` grant. Read-only aggregates over the transactions
-  // ledger: supply, per-reason flows over 7 days, and daily net over 30 days.
-  // The ledger's invariant (sum(amount) per owner == balance) is what makes
-  // these trustworthy without a second bookkeeping table.
+  // Gated on the `economy` grant. One round trip for the bespoke AdminEconomy
+  // page (the one core admin page that outgrew the static view vocabulary):
+  // supply, 7d/30d window totals, per-reason flows, and a gap-filled 30-day
+  // daily series. The ledger's invariant (sum(amount) per owner == balance)
+  // is what makes these trustworthy without a second bookkeeping table.
 
-  /**
-   * Signed net with an explicit leading `+`, so a faucet and a sink are told
-   * apart at a glance in a plain-text table. `amount` is bigint; the sum comes
-   * back from postgres as a decimal string, never a JS number.
-   */
-  const signedNet = (sum: string): string => (BigInt(sum) >= 0n ? `+${sum}` : sum);
+  const OVERVIEW_CACHE_KEY = "stats:economy-admin";
+  const OVERVIEW_CACHE_TTL_SECONDS = 300;
+  const OVERVIEW_FLOW_DAYS = 7;
+  const OVERVIEW_DAILY_DAYS = 30;
 
-  app.get("/api/admin/economy/supply/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
-    const playerId = request.playerId;
-    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
-    const grants = await loadGrants(db, playerId);
-    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+  async function computeEconomyOverview(now: Date): Promise<AdminEconomyOverview> {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const todayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const utcDayKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+    const dailyDays = Array.from(
+      { length: OVERVIEW_DAILY_DAYS },
+      (_, i) => utcDayKey(todayStartMs - (OVERVIEW_DAILY_DAYS - 1 - i) * dayMs),
+    );
+    const flowStart = new Date(todayStartMs - (OVERVIEW_FLOW_DAYS - 1) * dayMs).toISOString();
+    const dailyStart = new Date(todayStartMs - (OVERVIEW_DAILY_DAYS - 1) * dayMs).toISOString();
 
-    // Summed in JS with BigInt, not in SQL: three aggregates over two tables
-    // in one query would be a union of null-able columns, and the totals row
-    // is derived from the parts anyway — a single source of arithmetic.
-    const [p] = await db.select({
-      cash: sql<string>`coalesce(sum(${playerStats.cash}), 0)`,
-      bank: sql<string>`coalesce(sum(${playerStats.bank}), 0)`,
-      points: sql<string>`coalesce(sum(${playerStats.points}), 0)`,
-    }).from(playerStats);
-    const [g] = await db.select({
-      cash: sql<string>`coalesce(sum(${gangs.cash}), 0)`,
-      bank: sql<string>`coalesce(sum(${gangs.bank}), 0)`,
-    }).from(gangs);
+    // Points are the other minted currency but not money: every flow and
+    // window below excludes them, same rule as the original table routes.
+    // Window totals are summed from these very rows in BigInt, so the chart
+    // series and the headline totals can never disagree.
+    const money = sql`${transactions.balanceKind} <> 'points'`;
+    const [playersRow, gangsRow, flowRows, dailyRows] = await Promise.all([
+      db.select({
+        cash: sql<string>`coalesce(sum(${playerStats.cash}), 0)::text`,
+        bank: sql<string>`coalesce(sum(${playerStats.bank}), 0)::text`,
+        points: sql<string>`coalesce(sum(${playerStats.points}), 0)::text`,
+      }).from(playerStats),
+      db.select({
+        cash: sql<string>`coalesce(sum(${gangs.cash}), 0)::text`,
+        bank: sql<string>`coalesce(sum(${gangs.bank}), 0)::text`,
+      }).from(gangs),
+      db.select({
+        reason: transactions.reason,
+        inflow: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)::text`,
+        outflow: sql<string>`coalesce(-sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)::text`,
+        net: sql<string>`coalesce(sum(${transactions.amount}), 0)::text`,
+        count: sql<number>`count(*)::int`,
+      }).from(transactions)
+        .where(sql`${money} and ${transactions.createdAt} >= ${flowStart}`)
+        .groupBy(transactions.reason)
+        .orderBy(sql`abs(coalesce(sum(${transactions.amount}), 0)) desc`),
+      db.select({
+        day: sql<string>`to_char(date_trunc('day', ${transactions.createdAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+        inflow: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)::text`,
+        outflow: sql<string>`coalesce(-sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)::text`,
+        net: sql<string>`coalesce(sum(${transactions.amount}), 0)::text`,
+      }).from(transactions)
+        .where(sql`${money} and ${transactions.createdAt} >= ${dailyStart}`)
+        .groupBy(sql`date_trunc('day', ${transactions.createdAt} at time zone 'UTC')`),
+    ]);
 
-    const playerCash = BigInt(p?.cash ?? "0");
-    const playerBank = BigInt(p?.bank ?? "0");
-    const gangCash = BigInt(g?.cash ?? "0");
-    const gangBank = BigInt(g?.bank ?? "0");
-    const supply = playerCash + playerBank + gangCash + gangBank;
+    const windowOf = (rows: { inflow: string; outflow: string; net: string }[]): AdminEconomyWindow => {
+      let inflow = 0n, outflow = 0n, net = 0n;
+      for (const row of rows) {
+        inflow += BigInt(row.inflow);
+        outflow += BigInt(row.outflow);
+        net += BigInt(row.net);
+      }
+      return { net: net.toString(), inflow: inflow.toString(), outflow: outflow.toString() };
+    };
 
-    return reply.send({
-      rows: [
-        { label: "Player cash (total)", value: playerCash.toString() },
-        { label: "Player bank (total)", value: playerBank.toString() },
-        { label: "Gang cash (total)", value: gangCash.toString() },
-        { label: "Gang bank (total)", value: gangBank.toString() },
-        { label: "Money supply (cash + bank)", value: supply.toString() },
-        // Points are not money, but they are the other minted currency and the
-        // dashboard is the one place an admin sees the two side by side.
-        { label: "Points (players, total)", value: (p?.points ?? "0").toString() },
-      ],
+    // Postgres only returns days that HAVE rows; a chart with holes renders a
+    // lie, so index by day and fill the gaps — stats.ts's pattern.
+    const dailyByDay = new Map(dailyRows.map((row) => [row.day, row]));
+    const daily = dailyDays.map((day) => {
+      const row = dailyByDay.get(day);
+      return {
+        day,
+        net: row?.net ?? "0",
+        inflow: row?.inflow ?? "0",
+        outflow: row?.outflow ?? "0",
+      };
     });
-  });
 
-  app.get("/api/admin/economy/flows/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
-    const playerId = request.playerId;
-    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
-    const grants = await loadGrants(db, playerId);
-    if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
+    const playerCash = BigInt(playersRow[0]?.cash ?? "0");
+    const playerBank = BigInt(playersRow[0]?.bank ?? "0");
+    const gangCash = BigInt(gangsRow[0]?.cash ?? "0");
+    const gangBank = BigInt(gangsRow[0]?.bank ?? "0");
 
-    const rows = await db.select({
-      reason: transactions.reason,
-      inflow: sql<string>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)`,
-      outflow: sql<string>`coalesce(-sum(case when ${transactions.amount} < 0 then ${transactions.amount} else 0 end), 0)`,
-      net: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
-      count: sql<number>`count(*)::int`,
-    }).from(transactions)
-      .where(sql`${transactions.balanceKind} <> 'points'
-        and ${transactions.createdAt} >= now() - interval '7 days'`)
-      .groupBy(transactions.reason)
-      // Biggest movers first, regardless of direction: the reason an admin
-      // needs to look at is the one with the largest net, faucet or sink.
-      .orderBy(sql`abs(coalesce(sum(${transactions.amount}), 0)) desc`);
-
-    return reply.send({
-      rows: rows.map((r) => ({
+    return {
+      generatedAt: now.toISOString(),
+      supply: {
+        playerCash: playerCash.toString(),
+        playerBank: playerBank.toString(),
+        gangCash: gangCash.toString(),
+        gangBank: gangBank.toString(),
+        moneySupply: (playerCash + playerBank + gangCash + gangBank).toString(),
+        points: (playersRow[0]?.points ?? "0").toString(),
+      },
+      windows: { d7: windowOf(flowRows), d30: windowOf(dailyRows) },
+      flows: flowRows.map((r) => ({
         reason: r.reason,
-        net: signedNet(r.net),
+        net: r.net,
         inflow: r.inflow,
         outflow: r.outflow,
-        count: r.count.toString(),
+        count: r.count,
       })),
-    });
-  });
+      daily,
+    };
+  }
 
-  app.get("/api/admin/economy/daily/table", { preHandler: [app.requireAuth] }, async (request, reply) => {
+  app.get("/api/admin/economy/overview", { preHandler: [app.requireAuth] }, async (request, reply) => {
     const playerId = request.playerId;
     if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
     const grants = await loadGrants(db, playerId);
     if (!hasPermission(grants, "economy")) return reply.code(403).send({ error: "forbidden" });
 
-    const rows = await db.select({
-      day: sql<string>`to_char(date_trunc('day', ${transactions.createdAt}), 'YYYY-MM-DD')`,
-      net: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
-    }).from(transactions)
-      .where(sql`${transactions.balanceKind} <> 'points'
-        and ${transactions.createdAt} >= now() - interval '30 days'`)
-      .groupBy(sql`date_trunc('day', ${transactions.createdAt})`)
-      .orderBy(sql`date_trunc('day', ${transactions.createdAt}) desc`);
+    // Read-through cache, stats.ts's shape and for stats.ts's reasons: the
+    // payload is a pure aggregate over committed rows (no state to lose to a
+    // check-then-act race), the aggregates walk a growing ledger, and the
+    // dashboard is for trend-watching, not live tailing — five minutes of
+    // staleness buys five minutes of cheap serving. Parsed, never trusted: an
+    // entry written by an older deploy must not break the client's parse.
+    const cached = await redis.get(OVERVIEW_CACHE_KEY);
+    if (cached !== null) {
+      const parsed = AdminEconomyOverviewSchema.safeParse(JSON.parse(cached) as unknown);
+      if (parsed.success) return reply.send(parsed.data);
+    }
 
-    return reply.send({
-      rows: rows.map((r) => ({ day: r.day, net: signedNet(r.net) })),
-    });
+    const overview = await computeEconomyOverview(new Date());
+    await redis.set(OVERVIEW_CACHE_KEY, JSON.stringify(overview), "EX", OVERVIEW_CACHE_TTL_SECONDS);
+    return reply.send(overview);
   });
 
   // ── Facility fees (jail & hospital) ───────────────────────────────────────

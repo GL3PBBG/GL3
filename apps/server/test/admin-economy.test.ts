@@ -1,4 +1,4 @@
-import { TableRowsResponseSchema } from "@gl3/shared";
+import { AdminEconomyOverviewSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
@@ -10,11 +10,16 @@ import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
- * The economy dashboard — three read-only aggregates over the transactions
- * ledger (`/api/admin/economy/{supply,flows,daily}/table`). The load-bearing
- * property under test is that NET BY REASON is the faucet/sink signal: a
- * transfer posts equal-and-opposite rows that cancel, while points rows and
- * stale rows are excluded from the money aggregates entirely.
+ * The economy dashboard — `GET /api/admin/economy/overview`, the bespoke
+ * AdminEconomy page's one round trip (supply, 7d/30d window totals, per-reason
+ * flows, gap-filled daily series). The load-bearing properties under test:
+ * NET BY REASON is the faucet/sink signal (transfers cancel; points and stale
+ * rows never enter the money aggregates), and `daily` is ascending and
+ * contiguous — the client charts it, and a chart with holes renders a lie.
+ *
+ * The endpoint caches in Redis for five minutes; tests therefore DELETE the
+ * cache key in beforeEach, or a later file's fresh-data assertion could read
+ * the previous test's payload.
  */
 
 const { db } = testDb();
@@ -39,33 +44,35 @@ const auth = (token: string): { authorization: string } => ({ authorization: `Be
 beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer, redis } = await bootTestServer());
+  // The endpoint caches for five minutes; without this a later test's
+  // fresh-data assertion could read the previous test's payload.
+  await redis.del("stats:economy-admin");
 });
 
 afterAll(async () => { await closeServer(); });
 
 describe("admin economy: authorization", () => {
-  for (const path of ["/api/admin/economy/supply/table", "/api/admin/economy/flows/table", "/api/admin/economy/daily/table"]) {
-    it(`401s with no token on ${path}`, async () => {
-      const res = await app.inject({ method: "GET", url: path });
-      expect(res.statusCode).toBe(401);
-    });
+  it("401s with no token", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview" });
+    expect(res.statusCode).toBe(401);
+  });
 
-    it(`403s a role with no grant on ${path}`, async () => {
-      await registerPlayer("FirstAdmin");
-      const p = await registerPlayer("NoRole");
-      const res = await app.inject({ method: "GET", url: path, headers: auth(p.token) });
-      expect(res.statusCode).toBe(403);
-      expect(res.json()).toEqual({ error: "forbidden" });
-    });
+  it("403s a role with no grant", async () => {
+    await registerPlayer("FirstAdmin");
+    const p = await registerPlayer("NoRole");
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(p.token) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: "forbidden" });
+  });
 
-    it(`200s the economy grant on ${path}`, async () => {
-      await registerPlayer("FirstAdmin");
-      const p = await registerPlayer("EconMod");
-      await giveRole(p.playerId, "economy");
-      const res = await app.inject({ method: "GET", url: path, headers: auth(p.token) });
-      expect(res.statusCode, res.body).toBe(200);
-    });
-  }
+  it("200s the economy grant and parses against the DTO", async () => {
+    await registerPlayer("FirstAdmin");
+    const p = await registerPlayer("EconMod");
+    await giveRole(p.playerId, "economy");
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(p.token) });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(AdminEconomyOverviewSchema.safeParse(res.json()).success).toBe(true);
+  });
 
   it("lists the dashboard under /api/admin/plugins for an economy-granted role", async () => {
     await registerPlayer("FirstAdmin");
@@ -97,27 +104,32 @@ describe("admin economy: flows by reason", () => {
       },
     ]);
 
-    const res = await app.inject({ method: "GET", url: "/api/admin/economy/flows/table", headers: auth(founder.token) });
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(founder.token) });
     expect(res.statusCode, res.body).toBe(200);
-    const parsed = TableRowsResponseSchema.safeParse(res.json());
-    expect(parsed.success, JSON.stringify(res.json())).toBe(true);
+    const body = AdminEconomyOverviewSchema.parse(res.json());
 
-    const rows = res.json().rows as { reason: string; net: string; inflow: string; outflow: string; count: string }[];
-    const byReason = new Map(rows.map((r) => [r.reason, r]));
+    const byReason = new Map(body.flows.map((f) => [f.reason, f]));
 
     // Faucet: only the fresh row counts.
-    expect(byReason.get("crime.payout")).toMatchObject({ net: "+5000", inflow: "5000", outflow: "0", count: "1" });
-    // Sink: outflow reported unsigned, net signed negative.
-    expect(byReason.get("travel.cost")).toMatchObject({ net: "-1000", inflow: "0", outflow: "1000", count: "1" });
-    // Transfer: inflow and outflow still visible, but net cancels to +0.
-    expect(byReason.get("bullets.purchase")).toMatchObject({ net: "+0", inflow: "300", outflow: "300", count: "2" });
+    expect(byReason.get("crime.payout")).toMatchObject({ net: "5000", inflow: "5000", outflow: "0", count: 1 });
+    // Sink: outflow reported unsigned, net signed negative — a plain signed
+    // MoneySchema string now, no explicit `+` (the client formats the sign).
+    expect(byReason.get("travel.cost")).toMatchObject({ net: "-1000", inflow: "0", outflow: "1000", count: 1 });
+    // Transfer: inflow and outflow still visible, but net cancels to 0.
+    expect(byReason.get("bullets.purchase")).toMatchObject({ net: "0", inflow: "300", outflow: "300", count: 2 });
     // Points never enter the money aggregate.
     expect(byReason.has("round.payout")).toBe(false);
+
+    // The 7-day window totals are the sum of exactly these rows: +5000 −1000
+    // (−300 + 300) = +4000 net, 5300 in, 1300 out.
+    expect(body.windows.d7).toEqual({ net: "4000", inflow: "5300", outflow: "1300" });
+    // Ordered by |net| so the biggest mover leads.
+    expect(body.flows[0]?.reason).toBe("crime.payout");
   });
 });
 
-describe("admin economy: daily net", () => {
-  it("groups by UTC day, newest first, with signed nets", async () => {
+describe("admin economy: daily series", () => {
+  it("is thirty ascending gap-filled UTC days with per-day nets and window totals", async () => {
     const founder = await registerPlayer("Founder");
     const today = new Date();
     const yesterday = new Date(today.getTime() - 86_400_000);
@@ -128,17 +140,30 @@ describe("admin economy: daily net", () => {
       { id: uuidv7(), playerId: founder.playerId, amount: 2000n, balanceKind: "cash", reason: "theft.sell", createdAt: yesterday },
     ]);
 
-    const res = await app.inject({ method: "GET", url: "/api/admin/economy/daily/table", headers: auth(founder.token) });
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(founder.token) });
     expect(res.statusCode, res.body).toBe(200);
-    const rows = res.json().rows as { day: string; net: string }[];
+    const body = AdminEconomyOverviewSchema.parse(res.json());
 
-    expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(new Date(rows[0]!.day).getTime()).toBeGreaterThanOrEqual(new Date(rows[1]!.day).getTime());
-    const todayIso = today.toISOString().slice(0, 10);
-    const todayRow = rows.find((r) => r.day === todayIso);
-    expect(todayRow?.net).toBe("+3500");
-    const yesterdayRow = rows.find((r) => r.day === yesterday.toISOString().slice(0, 10));
-    expect(yesterdayRow?.net).toBe("+2000");
+    // Ascending, contiguous, exactly thirty UTC days ending today — Postgres
+    // buckets by date_trunc at UTC, so the keys are computed the same way.
+    expect(body.daily).toHaveLength(30);
+    const todayKey = today.toISOString().slice(0, 10);
+    expect(body.daily[body.daily.length - 1]?.day).toBe(todayKey);
+    for (let i = 1; i < body.daily.length; i += 1) {
+      const prev = new Date(`${body.daily[i - 1]!.day}T00:00:00Z`).getTime();
+      const next = new Date(`${body.daily[i]!.day}T00:00:00Z`).getTime();
+      expect(next - prev).toBe(86_400_000);
+    }
+
+    const byDay = new Map(body.daily.map((d) => [d.day, d]));
+    expect(byDay.get(todayKey)).toMatchObject({ net: "3500", inflow: "4000", outflow: "500" });
+    expect(byDay.get(yesterday.toISOString().slice(0, 10))).toMatchObject({ net: "2000", inflow: "2000", outflow: "0" });
+    // An empty day is a zero row, not a hole — the client charts this array.
+    expect(byDay.get(new Date(today.getTime() - 2 * 86_400_000).toISOString().slice(0, 10)))
+      .toMatchObject({ net: "0", inflow: "0", outflow: "0" });
+
+    // The 30-day window totals sum the same rows.
+    expect(body.windows.d30).toEqual({ net: "5500", inflow: "6000", outflow: "500" });
   });
 });
 
@@ -150,16 +175,34 @@ describe("admin economy: money supply", () => {
     await db.update(playerStats).set({ cash: 1_500n, bank: 2_500n }).where(eq(playerStats.playerId, founder.playerId));
     await db.update(playerStats).set({ cash: 1_000n }).where(eq(playerStats.playerId, other.playerId));
 
-    const res = await app.inject({ method: "GET", url: "/api/admin/economy/supply/table", headers: auth(founder.token) });
+    const res = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(founder.token) });
     expect(res.statusCode, res.body).toBe(200);
-    const rows = res.json().rows as { label: string; value: string }[];
-    const byLabel = new Map(rows.map((r) => [r.label, r.value]));
+    const body = AdminEconomyOverviewSchema.parse(res.json());
 
-    expect(byLabel.get("Player cash (total)")).toBe("2500");
-    expect(byLabel.get("Player bank (total)")).toBe("2500");
-    expect(byLabel.get("Gang cash (total)")).toBe("0");
-    expect(byLabel.get("Gang bank (total)")).toBe("0");
-    expect(byLabel.get("Money supply (cash + bank)")).toBe("5000");
+    expect(body.supply).toMatchObject({
+      playerCash: "2500",
+      playerBank: "2500",
+      gangCash: "0",
+      gangBank: "0",
+      moneySupply: "5000",
+    });
+  });
+
+  it("serves the five-minute Redis cache on a second read", async () => {
+    const founder = await registerPlayer("Founder");
+    const first = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(founder.token) });
+    expect(first.statusCode, first.body).toBe(200);
+    const generatedAt = first.json().generatedAt as string;
+
+    // A row landing AFTER the cached compute must not appear — the payload is
+    // the cached one, byte for byte.
+    await db.insert(transactions).values({
+      id: uuidv7(), playerId: founder.playerId, amount: 999n, balanceKind: "cash", reason: "cache.probe",
+    });
+    const second = await app.inject({ method: "GET", url: "/api/admin/economy/overview", headers: auth(founder.token) });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().generatedAt).toBe(generatedAt);
+    expect(JSON.stringify(second.json())).toBe(JSON.stringify(first.json()));
   });
 });
 

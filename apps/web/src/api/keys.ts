@@ -104,4 +104,8 @@ export const keys = {
   // Game-wide stats (/stats). One key, no arguments — the server caches the
   // payload for five minutes, so there is nothing per-player to vary on.
   stats: () => ["stats"] as const,
+
+  // The admin economy overview — same server-side five-minute cache, same
+  // no-arguments reasoning.
+  adminEconomyOverview: () => ["adminEconomyOverview"] as const,
 };

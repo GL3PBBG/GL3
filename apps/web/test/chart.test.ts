@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  barPath, countFractions, indexOfMax, layoutBars, moneyFractions,
-  sparklinePath, sparklinePoints,
+  barPath, barPathDown, countFractions, indexOfMax, layoutBars, layoutSignedBars,
+  moneyFractions, signedFractions, sparklinePath, sparklinePoints, supplySeries,
 } from "../src/lib/chart.js";
 
 describe("countFractions", () => {
@@ -130,5 +130,94 @@ describe("sparklinePoints / sparklinePath", () => {
     const path = sparklinePath(sparklinePoints([0, 0.5, 1], { width: 100, height: 40 }));
     expect(path.startsWith("M")).toBe(true);
     expect(path.split("L")).toHaveLength(3);
+  });
+});
+
+describe("signedFractions", () => {
+  it("scales against the largest magnitude in either direction", () => {
+    expect(signedFractions(["100", "-50", "0"])).toEqual([1, -0.5, 0]);
+  });
+
+  it("is symmetric when the extremes match", () => {
+    expect(signedFractions(["-300", "300"])).toEqual([-1, 1]);
+  });
+
+  it("returns zeros for an all-zero series", () => {
+    expect(signedFractions(["0", "0"])).toEqual([0, 0]);
+  });
+
+  it("keeps figures past 2^53 distinct instead of collapsing onto one bar", () => {
+    const big = "9007199254740993"; // 2^53 + 1
+    const fractions = signedFractions([big, big, "-1"]);
+    expect(fractions[0]).toBe(1);
+    expect(fractions[1]).toBe(1);
+    // The tiny sink must not round up to a visible bar.
+    expect(fractions[2]!).toBeLessThan(0.000001);
+  });
+});
+
+describe("layoutSignedBars", () => {
+  it("puts the zero line at the bottom for an all-positive series — full height", () => {
+    const { bars, zeroY } = layoutSignedBars([0.5, 1], { width: 100, height: 40 });
+    expect(zeroY).toBe(40);
+    expect(bars[1]).toMatchObject({ y: 0, height: 40 });
+  });
+
+  it("puts the zero line at the top for an all-negative series", () => {
+    const { bars, zeroY } = layoutSignedBars([-0.5, -1], { width: 100, height: 40 });
+    expect(zeroY).toBe(0);
+    expect(bars[1]).toMatchObject({ y: 0, height: 40 });
+  });
+
+  it("splits the plot proportionally and keeps one scale across both directions", () => {
+    // max up 1, max down 0.5 → scale 40/1.5 ≈ 26.67 px per unit, zero line at
+    // 40 − 0.5 × 26.67 ≈ 26.67 from the top.
+    const { bars, zeroY } = layoutSignedBars([1, -0.5, 0], { width: 300, height: 40 });
+    const scale = 40 / 1.5;
+    expect(zeroY).toBeCloseTo(40 - 0.5 * scale, 10);
+    // toBeCloseTo, not equality: y lands on 0 only up to float rounding.
+    expect(bars[0]!.y).toBeCloseTo(0, 10);
+    expect(bars[0]!.height).toBeCloseTo(scale, 10);
+    // Half the magnitude of bar[0], in the SAME pixels-per-unit.
+    expect(bars[1]!.y).toBeCloseTo(zeroY, 10);
+    expect(bars[1]!.height).toBeCloseTo(0.5 * scale, 10);
+    expect(bars[2]?.height).toBe(0);
+  });
+
+  it("returns an empty layout for an empty series", () => {
+    expect(layoutSignedBars([], { width: 100, height: 40 })).toEqual({ bars: [], zeroY: 40 });
+  });
+});
+
+describe("barPathDown", () => {
+  it("mirrors barPath: square at the top, rounded at the data end", () => {
+    const path = barPathDown({ x: 0, y: 10, width: 10, height: 20 });
+    expect(path.startsWith("M0 10")).toBe(true);
+    expect(path.endsWith("Z")).toBe(true);
+    // The rounded corners are in the BOTTOM half (y ≈ 30), unlike barPath's.
+    expect(path).toContain("Q0 30");
+  });
+
+  it("returns an empty path for a zero-height bar", () => {
+    expect(barPathDown({ x: 0, y: 10, width: 10, height: 0 })).toBe("");
+  });
+});
+
+describe("supplySeries", () => {
+  it("reconstructs end-of-day supplies by walking today's balance backwards", () => {
+    // Nets +100, -30, -30 from a 1000 start → end-of-day 1100, 1070, 1040.
+    // An end-of-day figure INCLUDES that day's net — the last entry is
+    // supplyNow itself.
+    expect(supplySeries("1040", ["100", "-30", "-30"])).toEqual(["1100", "1070", "1040"]);
+  });
+
+  it("degrades to the flat present with no history", () => {
+    expect(supplySeries("500", [])).toEqual([]);
+  });
+
+  it("stays exact past 2^53 — bigint end to end", () => {
+    const big = "9007199254740992"; // 2^53
+    // Day 0 moved nothing, day 1 minted one: end-of-day0 is big − 1, exactly.
+    expect(supplySeries(big, ["0", "1"])).toEqual([(BigInt(big) - 1n).toString(), big]);
   });
 });

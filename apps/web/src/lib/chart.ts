@@ -135,3 +135,114 @@ export function sparklinePath(points: readonly Point[]): string {
   if (points.length === 0) return "";
   return points.map((point, i) => `${i === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
 }
+
+/**
+ * The signed counterpart of moneyFractions, for a series that crosses zero
+ * (a daily net-flow series is faucets AND sinks). Values scale against the
+ * largest MAGNITUDE in either direction, so +1 and −1 are the two extremes —
+ * the BigInt ratio keeps figures past 2^53 distinct, same as moneyFractions.
+ */
+export function signedFractions(values: readonly string[]): number[] {
+  const amounts = values.map((value) => BigInt(value));
+  let maxAbs = 0n;
+  for (const amount of amounts) {
+    const magnitude = amount < 0n ? -amount : amount;
+    if (magnitude > maxAbs) maxAbs = magnitude;
+  }
+  if (maxAbs <= 0n) return amounts.map(() => 0);
+  return amounts.map((amount) => (
+    Number((amount * FRACTION_SCALE) / maxAbs) / Number(FRACTION_SCALE)
+  ));
+}
+
+export interface SignedBarLayout extends BarLayout {
+  /**
+   * Where the zero line sits, computed by layoutSignedBars from the fractions
+   * themselves: proportional to how much of the range is negative, so an
+   * all-positive series uses the whole height like an ordinary bar chart and
+   * a series with both signs splits the plot by its actual extremes.
+   */
+  zeroY: number;
+}
+
+/**
+ * Bars for a signed series: positive fractions rise from the zero line,
+ * negative ones hang below it. A fraction's magnitude maps to the distance
+ * from the zero line to ITS edge (up for positive, down for negative), so the
+ * series' max in each direction touches its edge exactly. Zero days get a
+ * zero-height bar, which barPathDown/barPath render as nothing.
+ */
+export function layoutSignedBars(
+  fractions: readonly number[], layout: Omit<SignedBarLayout, "zeroY">,
+): { bars: BarGeometry[]; zeroY: number } {
+  const gap = layout.gap ?? DEFAULT_GAP;
+  const maxBarWidth = layout.maxBarWidth ?? DEFAULT_MAX_BAR_WIDTH;
+  if (fractions.length === 0) return { bars: [], zeroY: layout.height };
+
+  let up = 0, down = 0;
+  for (const fraction of fractions) {
+    const clamped = Math.min(1, Math.max(-1, Number.isFinite(fraction) ? fraction : 0));
+    if (clamped > up) up = clamped;
+    if (-clamped > down) down = -clamped;
+  }
+  // All-zero series: zeroY at the bottom, same degenerate shape as a plain
+  // bar chart with no data.
+  // ONE scale factor for both directions, or a −0.5 bar would draw at a
+  // different pixels-per-unit than a +0.5 bar. The extremes must touch their
+  // edges exactly, which fixes the scale and the zero line together:
+  // up × scale == zeroY and down × scale == height − zeroY.
+  const scale = up + down === 0 ? 0 : layout.height / (up + down);
+  const zeroY = layout.height - down * scale;
+
+  const slot = layout.width / fractions.length;
+  const barWidth = Math.max(1, Math.min(maxBarWidth, slot - gap));
+
+  const bars = fractions.map((fraction, i) => {
+    const clamped = Math.min(1, Math.max(-1, Number.isFinite(fraction) ? fraction : 0));
+    const x = i * slot + (slot - barWidth) / 2;
+    const height = Math.abs(clamped) * scale;
+    return clamped >= 0
+      ? { x, y: zeroY - height, width: barWidth, height }
+      : { x, y: zeroY, width: barWidth, height };
+  });
+  return { bars, zeroY };
+}
+
+/**
+ * barPath's mirror for the bars that hang below the zero line: rounded at the
+ * data end (the bottom), square at the baseline (the top).
+ */
+export function barPathDown(bar: BarGeometry, radius = 4): string {
+  if (bar.height <= 0) return "";
+  const r = Math.max(0, Math.min(radius, bar.width / 2, bar.height));
+  const { x, y, width: w, height: h } = bar;
+  return [
+    `M${x} ${y}`,
+    `L${x} ${y + h - r}`,
+    `Q${x} ${y + h} ${x + r} ${y + h}`,
+    `L${x + w - r} ${y + h}`,
+    `Q${x + w} ${y + h} ${x + w} ${y + h - r}`,
+    `L${x + w} ${y}`,
+    "Z",
+  ].join(" ");
+}
+
+/**
+ * The money supply at the end of each day, derived rather than queried: the
+ * ledger's invariant (sum of movements == balances) makes each day's net flow
+ * the supply delta, so walking today's supply backwards through the nets
+ * reconstructs history without a snapshot table. `dailyNets` is ASCENDING;
+ * the result is the same length, supplyNow at the last index.
+ */
+export function supplySeries(supplyNow: string, dailyNets: readonly string[]): string[] {
+  const nets = dailyNets.map((value) => BigInt(value));
+  const out: string[] = [];
+  let remaining = BigInt(supplyNow);
+  // Walk from the newest day backwards, subtracting each day's net to get the
+  // balance BEFORE it, then emit oldest-first by unshifting.
+  for (let i = nets.length - 1; i >= 0; i -= 1) {
+    out.unshift(remaining.toString());
+    remaining -= nets[i]!;
+  }
+  return out;
+}

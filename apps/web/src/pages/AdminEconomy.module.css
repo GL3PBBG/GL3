@@ -1,0 +1,103 @@
+/* Every colour is a theme token, never a literal, so the dashboard follows
+   whatever palette the server serves — same rule as Stats.module.css, whose
+   card/tile/hero shapes this page borrows. */
+
+.hero {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+  display: grid;
+  gap: 0.15rem;
+}
+.heroLabel { color: var(--muted); font-size: 0.85rem; }
+.heroValue { font-size: clamp(2rem, 7vw, 3rem); line-height: 1.1; font-weight: 600; }
+.heroNote { color: var(--muted); font-size: 0.85rem; }
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  display: grid;
+  gap: 0.15rem;
+}
+.tileLabel { color: var(--muted); font-size: 0.8rem; }
+.tileValue { font-size: 1.35rem; line-height: 1.2; font-weight: 600; }
+
+/* Faucets read accent (gold), sinks read danger — the page's one bit of
+   colour semantics, used by the tiles, the diverging bars, and the flows
+   table's net column so all three agree. */
+.faucet { color: var(--accent); }
+.sink { color: var(--danger); }
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+.chartCard {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.85rem 0.95rem 0.7rem;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.chartTitle { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.chartNote { color: var(--muted); font-size: 0.8rem; margin: 0; }
+
+.plot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* The daily-net chart's two hues, straight from the tiles' vocabulary. */
+.barUp { fill: var(--accent); }
+.barDown { fill: var(--danger); }
+/* The sparkline is a line, so the hue rides a stroke, not a fill. */
+.line { stroke: var(--accent); fill: none; stroke-width: 2; }
+.hit { fill: transparent; pointer-events: all; }
+.baseline { stroke: var(--line); stroke-width: 1; }
+/* The zero line sits wherever the data puts it, not always at the bottom. */
+.zero { stroke: var(--line); stroke-width: 1; }
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.table td {
+  padding: 0.35rem 0.5rem;
+  border-top: 1px solid var(--line);
+}
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.breakdown { margin-top: 1rem; }
+.muted { color: var(--muted); font-size: 0.85rem; }
