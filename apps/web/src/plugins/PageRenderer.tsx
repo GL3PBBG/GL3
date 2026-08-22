@@ -1,7 +1,7 @@
 import { Fragment, Suspense, lazy, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
-import { TableRowsResponseSchema } from "@gl3/shared";
+import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
 import { togglePending } from "./pending.js";
@@ -291,6 +291,114 @@ function SelectField({ field, value, onChange, refetchSignal }: {
 }
 
 /**
+ * A `form` instruction: text/select/hidden fields, submitted via `runAction`.
+ *
+ * `valuesSource` (a `"GET /api/..."` string, or null) seeds `formValues` from
+ * the server on mount and again after every successful submit anywhere on the
+ * page — same cancel-flag/refetch-signal shape as `SelectField` and
+ * `TableBlock`. Prefill degrades to a blank form on a fetch failure or a
+ * response shape that doesn't parse as `FormValuesResponseSchema`; either way
+ * the submit path must keep working.
+ */
+function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSignal, runAction }: {
+  index: number;
+  inst: Extract<RenderInstruction, { kind: "form" }>;
+  formValues: Record<string, string>;
+  setFormValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  pending: boolean;
+  refetchSignal: number;
+  runAction: (index: number, action: string, body?: Record<string, string>) => Promise<void>;
+}): JSX.Element {
+  const prefillPath = inst.valuesSource === null ? null : inst.valuesSource.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    if (prefillPath === null) return;
+    let cancelled = false;
+    void api<unknown>(prefillPath)
+      .then((body) => {
+        if (cancelled) return;
+        const parsed = FormValuesResponseSchema.safeParse(body);
+        // Degrade to a blank form on any shape mismatch — prefill must never
+        // block the submit path.
+        if (!parsed.success) return;
+        const values = parsed.data.values;
+        setFormValues((previous) => {
+          const next = { ...previous };
+          for (const field of inst.fields) {
+            // Hidden fields submit their declared constant; never seeded.
+            if (field.type === "hidden") continue;
+            const value = values[field.name];
+            if (value !== undefined) next[`${index}:${field.name}`] = value;
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Fetch failure degrades to the pre-prefill blank form, silently.
+      });
+    return () => { cancelled = true; };
+  }, [prefillPath, refetchSignal, index, inst.fields, setFormValues]);
+
+  return (
+    <form
+      className={styles.formCard}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const body: Record<string, string> = {};
+        for (const field of inst.fields) {
+          // A hidden field has no input and therefore no `formValues`
+          // entry — its constant comes straight off the schema.
+          body[field.name] = field.type === "hidden"
+            ? field.value
+            : formValues[`${index}:${field.name}`] ?? "";
+        }
+        void runAction(index, inst.action, body);
+      }}
+    >
+      {inst.fields.map((field) => {
+        const key = `${index}:${field.name}`;
+        // Nothing to draw and nothing to label: onSubmit reads the
+        // constant off the field itself. Rendering an
+        // `<input type="hidden">` would only add a second, unread copy.
+        if (field.type === "hidden") return null;
+        return (
+          <label key={field.name} className={styles.field}>
+            <span className={styles.meta}>{field.label}</span>
+            {field.type === "select" ? (
+              <SelectField
+                field={field}
+                value={formValues[key] ?? ""}
+                onChange={(value) => {
+                  setFormValues((previous) => ({ ...previous, [key]: value }));
+                }}
+                refetchSignal={refetchSignal}
+              />
+            ) : (
+              <input
+                name={field.name}
+                // `money` is a decimal string on the wire, so it stays a text
+                // input — a number input would round-trip it through Number.
+                type={field.type === "money" ? "text" : field.type === "decimal" ? "number" : field.type}
+                // `<input type="number">` defaults to step="1", which makes
+                // the browser reject a fractional value on submit. `decimal`
+                // is the same widget with that restriction lifted.
+                {...(field.type === "decimal" ? { step: "any" } : {})}
+                value={formValues[key] ?? ""}
+                onChange={(event) => {
+                  const { value } = event.target;
+                  setFormValues((previous) => ({ ...previous, [key]: value }));
+                }}
+              />
+            )}
+          </label>
+        );
+      })}
+      <button type="submit" disabled={pending}>{inst.submitLabel}</button>
+    </form>
+  );
+}
+
+/**
  * The admin upload widget: pick an entity, pick a file, and the two requests
  * that binding art actually takes happen here rather than in the plugin.
  *
@@ -551,62 +659,16 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
         );
       case "form":
         return (
-          <form
+          <FormBlock
             key={index}
-            className={styles.formCard}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const body: Record<string, string> = {};
-              for (const field of inst.fields) {
-                // A hidden field has no input and therefore no `formValues`
-                // entry — its constant comes straight off the schema.
-                body[field.name] = field.type === "hidden"
-                  ? field.value
-                  : formValues[`${index}:${field.name}`] ?? "";
-              }
-              void runAction(index, inst.action, body);
-            }}
-          >
-            {inst.fields.map((field) => {
-              const key = `${index}:${field.name}`;
-              // Nothing to draw and nothing to label: onSubmit reads the
-              // constant off the field itself. Rendering an
-              // `<input type="hidden">` would only add a second, unread copy.
-              if (field.type === "hidden") return null;
-              return (
-                <label key={field.name} className={styles.field}>
-                  <span className={styles.meta}>{field.label}</span>
-                  {field.type === "select" ? (
-                    <SelectField
-                      field={field}
-                      value={formValues[key] ?? ""}
-                      onChange={(value) => {
-                        setFormValues((previous) => ({ ...previous, [key]: value }));
-                      }}
-                      refetchSignal={refetchSignal}
-                    />
-                  ) : (
-                    <input
-                      name={field.name}
-                      // `money` is a decimal string on the wire, so it stays a text
-                      // input — a number input would round-trip it through Number.
-                      type={field.type === "money" ? "text" : field.type === "decimal" ? "number" : field.type}
-                      // `<input type="number">` defaults to step="1", which makes
-                      // the browser reject a fractional value on submit. `decimal`
-                      // is the same widget with that restriction lifted.
-                      {...(field.type === "decimal" ? { step: "any" } : {})}
-                      value={formValues[key] ?? ""}
-                      onChange={(event) => {
-                        const { value } = event.target;
-                        setFormValues((previous) => ({ ...previous, [key]: value }));
-                      }}
-                    />
-                  )}
-                </label>
-              );
-            })}
-            <button type="submit" disabled={pending.has(index)}>{inst.submitLabel}</button>
-          </form>
+            index={index}
+            inst={inst}
+            formValues={formValues}
+            setFormValues={setFormValues}
+            pending={pending.has(index)}
+            refetchSignal={refetchSignal}
+            runAction={runAction}
+          />
         );
       case "table":
         return (
