@@ -327,7 +327,12 @@ const adminSettingsListRoute = route({
     };
     return {
       status: 200,
-      body: { rows: SETTING_LABELS.map(([key, label]) => ({ key, label, value: values[key] })) },
+      body: {
+        rows: SETTING_LABELS.map(([key, label]) => ({ key, label, value: values[key] })),
+        // The same map, exposed for form prefill — field names on the admin
+        // form already equal these keys exactly.
+        values,
+      },
     };
   },
 });
@@ -364,7 +369,8 @@ const adminPage: PageSchema = {
         { key: "label", label: "Setting" },
         { key: "value", label: "Value" },
       ] },
-      { kind: "form", action: "POST /api/admin/detectives/settings", submitLabel: "Update settings", fields: [
+      { kind: "form", action: "POST /api/admin/detectives/settings", submitLabel: "Update settings",
+        valuesSource: "GET /api/admin/detectives/settings", fields: [
         { name: "cost", label: "Cost per detective per unit", type: "money" },
         { name: "duration", label: "Seconds per duration unit", type: "number" },
         { name: "expire", label: "Report lifetime (seconds)", type: "number" },

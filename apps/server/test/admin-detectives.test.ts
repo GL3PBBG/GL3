@@ -98,6 +98,17 @@ describe("detectives admin settings", () => {
     expect(cap.statusCode).toBe(400);
   });
 
+  it("settings GET carries a values map matching the stored rows", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/detectives/settings", headers: auth() });
+    const body = res.json<{ rows: { key: string; value: string }[]; values: Record<string, string> }>();
+    expect(Object.keys(body.values).sort()).toEqual(
+      ["cost", "duration", "expire", "wealth_cap_multiplier", "wealth_percent"],
+    );
+    for (const row of body.rows) {
+      expect(body.values[row.key]).toBe(row.value);
+    }
+  });
+
   it("403s a non-admin caller", async () => {
     const punter = await registerVerifiedPlayer({ app, redis }, {
       username: "Punter", remoteAddress: "10.80.0.2",
