@@ -294,6 +294,37 @@ All of these fail **loud, at boot**, before the server accepts traffic:
   nonexistent version): in Kubernetes the pod never leaves `Init:Error`, so
   the old pods keep serving during a rollout — a bad plugin install cannot
   take down a healthy running deployment mid-rollout.
+- **`PLUGIN_DIR` unset on the server container** — the tell is the error's
+  wording: `import failed (Cannot find package '@x/y' imported from
+  .../dist/plugins/dynamic.js)`. "Imported from dynamic.js" means the loader
+  fell back to a bare import against the server's own `node_modules` because
+  no directory was configured; the files sitting in the volume are fine,
+  nothing is looking there. Set `PLUGIN_DIR` on the **server** container and
+  make sure the same volume is mounted at that path on the server, not only
+  on the init container. (With `PLUGIN_DIR` set, the same failure reads
+  `not resolvable from /data/plugins` instead.)
+
+Three init-container gotchas seen in the wild, none of them GL3-specific:
+
+- **`CrashLoopBackOff` with last state `Terminated: Completed`** — the
+  one-shot container is in `containers:` instead of `initContainers:`. A
+  Deployment restarts any main container that exits, *even on exit 0*. Move
+  it to the init list (in the Rancher UI, flip the container's
+  "Init Container" toggle — a second container is added as a sidecar by
+  default).
+- **Install finishes but the container never exits** — npm's post-install
+  tail (audit / fund / update-notifier) stalling against restricted egress.
+  Run with `--no-audit --no-fund --ignore-scripts`; `--ignore-scripts` is
+  also the right supply-chain posture for prebuilt plugin `dist/`. Remember
+  the install needs npmjs.org reachable too (the plugin's own dependencies),
+  not just the marketplace host.
+- **`EINVALIDTAGNAME: Invalid tag name "{"`** — a shell snippet
+  (`|| { ...; }`) pasted as separate YAML `command:` list items instead of
+  one `sh -c` string; npm read `{` as a package name. The whole pipeline
+  must be exactly `["sh", "-c", "<one quoted script>"]`. To capture npm's
+  debug log on failure, end the script with
+  `|| { cat /root/.npm/_logs/*.log; exit 1; }` so the real error reaches
+  `kubectl logs` before the container dies.
 
 There is no partial load: packages are loaded sequentially and the first
 failure aborts boot naming the package that failed. A plugin you name in
