@@ -174,4 +174,16 @@ describe("bullets admin options", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  it("options GET carries form-name-keyed values for prefill, blank for unlimited", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/bullets/options", headers: auth() });
+    const body = res.json<{ values: Record<string, string> }>();
+    expect(body.values).toMatchObject({
+      stockMinPerHour: expect.stringMatching(/^\d+$/),
+      stockMaxPerHour: expect.stringMatching(/^\d+$/),
+      maxStock: expect.stringMatching(/^\d+$/),
+      maxCost: "",
+      maxBuy: "",
+    });
+  });
 });

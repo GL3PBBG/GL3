@@ -95,6 +95,16 @@ const adminOptionsListRoute = route({
           const value = config[field];
           return { key, label, value: value === null ? "unlimited" : value.toString() };
         }),
+        // Prefill map for the options form: keyed by the FORM field names
+        // (camelCase config fields), with null → "" so "unlimited" the
+        // display word never round-trips into a stored setting.
+        values: {
+          stockMinPerHour: config.stockMinPerHour.toString(),
+          stockMaxPerHour: config.stockMaxPerHour.toString(),
+          maxStock: config.maxStock.toString(),
+          maxCost: config.maxCost === null ? "" : config.maxCost.toString(),
+          maxBuy: config.maxBuy === null ? "" : config.maxBuy.toString(),
+        },
       },
     };
   },
@@ -189,7 +199,8 @@ const adminPage: PageSchema = {
             { key: "label", label: "Option" },
             { key: "value", label: "Value" },
           ] },
-          { kind: "form", action: "POST /api/admin/bullets/options", submitLabel: "Update options", fields: [
+          { kind: "form", action: "POST /api/admin/bullets/options", submitLabel: "Update options",
+            valuesSource: "GET /api/admin/bullets/options", fields: [
             { name: "stockMinPerHour", label: "Stock min per hour", type: "number" },
             { name: "stockMaxPerHour", label: "Stock max per hour", type: "number" },
             { name: "maxStock", label: "Max stock", type: "number" },
