@@ -96,10 +96,10 @@ silently fails because the tables it needs don't exist yet.
 Every ported V2 module is a plugin in `packages/plugins/`, split into two
 sets by `GL3_PROFILE`:
 
-- **framework** (every profile) — the game-agnostic engine, openPBBG's
+- **framework** (every profile): the game-agnostic engine, openPBBG's
   module list: `ranks`, `notifications`, `news`, `bank`, `mail`, `forum`,
   `inventory`, `membership`.
-- **gameplay** (`full`, the default) — the gangster game on top:
+- **gameplay** (`full`, the default): the gangster game on top:
   `crimes`, `bullets`, `travel`, `gangs`, `combat`, `bounties`, `detectives`,
   `oc`, `theft`, `properties`, `casino`, `blackjack`. A `framework` boot also
   skips jail/hospital, the sentence sweeper, the wealth tax and the gameplay
