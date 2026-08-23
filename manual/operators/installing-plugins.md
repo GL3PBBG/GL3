@@ -39,7 +39,8 @@ This split is deliberate, not an accident of packaging:
   GL3's marketplace trust model is hand-audited install, not auto-fetch: a
   human (or a pipeline a human controls) decides exactly which package
   versions land on disk, and the server only ever loads what that decision
-  produced.
+  produced. The audit itself follows the checklist in
+  [Review a plugin](/guides/review-a-plugin).
 
 ## The three environment variables
 

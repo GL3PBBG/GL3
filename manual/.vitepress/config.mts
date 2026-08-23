@@ -28,6 +28,7 @@ export default defineConfig({
         text: 'How-to guides',
         items: [
           { text: 'Create a plugin', link: '/guides/create-a-plugin' },
+          { text: 'Review a plugin', link: '/guides/review-a-plugin' },
           { text: 'Add a migration', link: '/guides/add-a-migration' },
           { text: 'Testing conventions', link: '/guides/testing-conventions' },
         ],

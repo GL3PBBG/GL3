@@ -116,3 +116,9 @@ history is rule 6 in `NOTES.md`.
 
 See [Testing conventions](/guides/testing-conventions). Every plugin lands with a
 test file registered in `vitest.workspace.ts`'s explicit include list.
+
+## Publishing
+
+Before a plugin goes to the registry it passes the hand audit in
+[Review a plugin](/guides/review-a-plugin) — write against its checklist from
+the start rather than discovering the lock-order rules at review time.
