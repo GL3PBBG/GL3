@@ -1,12 +1,12 @@
 .shell { max-width: 1180px; margin: 0 auto; padding: 1rem; }
 
-/* Offscreen until keyboard focus: the nav is ~25 links, and without this a
-   keyboard user tabs through every one of them on every page. */
+/* Offscreen until keyboard focus: above the drawer (its scrim is 105) so the
+   link stays reachable even while the drawer is open. */
 .skipLink {
   position: absolute;
   left: -999px;
   top: 0;
-  z-index: 101;
+  z-index: 120;
   padding: 0.4rem 0.9rem;
   background: var(--accent);
   color: var(--bg);
@@ -14,50 +14,133 @@
 }
 .skipLink:focus { left: 0.5rem; top: 0.5rem; }
 
-/* Text for screen readers only — the badge shows a bare number; this names it. */
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+  /* Anchors the account chip's dropdown panel. */
+  position: relative;
   border-bottom: 1px solid var(--line);
   padding-bottom: 0.75rem;
 }
 .brand { margin: 0; font-size: 1.15rem; letter-spacing: 0.08em; text-transform: uppercase; }
-.hud { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; }
+
+/* Phone-only: unhides at the media query below, where the full hud hides. */
+.hamburger {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.hamburger span {
+  display: block;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg);
+}
+
+/* The HUD in related pairs — money, combat, progression — rather than ten
+   same-weight stats in one line: the dividers, not spacing, carry the
+   grouping. */
+.hud { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; margin-left: auto; }
+.hudGroup {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding-right: 1rem;
+  border-right: 1px solid var(--line);
+}
+.hud .hudGroup:last-child { border-right: 0; padding-right: 0; }
 .stat { display: inline-flex; gap: 0.35rem; align-items: baseline; }
 .statLabel { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
 
-.nav { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
-.navLink {
+/* The account chip replaces the old "Player" stat and header log-out button:
+   identity plus its menu, where a log-out belongs. */
+.account { position: relative; }
+.accountChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
   color: var(--fg);
-  text-decoration: none;
-  padding: 0.3rem 0.7rem;
-  border-radius: 4px;
-  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.9rem;
 }
-.navLink:hover { border-color: var(--line); }
-.navActive { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+.accountDot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.accountMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.35rem;
+  z-index: 20;
+  padding: 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
 
-.badge {
-  margin-left: 0.35rem;
-  padding: 0 0.35rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
+/* Phone-condensed HUD: cash large, rank·location under it. */
+.miniHud { display: none; flex-direction: column; align-items: flex-end; line-height: 1.25; margin-left: auto; }
+.miniCash { font-weight: 600; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.miniSub { color: var(--muted); font-size: 0.75rem; }
+
+/* ---- Phone drawer ------------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  background: rgba(0, 0, 0, 0.55);
 }
+.drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 110;
+  width: min(300px, 85vw);
+  padding: 0.75rem;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  outline: none;
+}
+.drawerHead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.5rem;
+}
+.drawerAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 700;
+}
+.drawerWho { display: flex; flex-direction: column; line-height: 1.3; }
+.drawerSub { color: var(--muted); font-size: 0.75rem; }
+.drawerLogout { width: 100%; margin-top: 0.75rem; }
 
 .jailBanner {
   margin: 0.75rem 0 0;
@@ -67,11 +150,21 @@
   color: var(--danger);
 }
 
+/* Positioning for the NavMenu the shell hosts. In top-nav mode the component
+   needs nothing from here — its own padding and border carry the bar. */
+.navSlot { }
 .body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 1fr); gap: 1.5rem; padding-top: 1.25rem; align-items: start; }
 .content { display: grid; gap: 1.25rem; min-width: 0; }
 
 @media (max-width: 860px) {
   .body { grid-template-columns: 1fr; }
+  /* The bar hides; its drawer copy takes over, and the header trades the full
+     HUD and the account chip for the hamburger and the condensed stats. */
+  .navSlot { display: none; }
+  .hamburger { display: flex; }
+  .hud { display: none; }
+  .account { display: none; }
+  .miniHud { display: flex; }
 }
 
 /* Sidebar mode — `data-nav="left"` is stamped on <html> by applyTheme from
@@ -81,7 +174,7 @@
    banner gets its own named row so its absence collapses to nothing. */
 :global([data-nav="left"]) .shell {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   column-gap: 1.5rem;
   grid-template-areas:
     "header header"
@@ -91,28 +184,20 @@
 }
 :global([data-nav="left"]) .header { grid-area: header; }
 :global([data-nav="left"]) .jailBanner { grid-area: banner; }
-:global([data-nav="left"]) .nav {
+/* Sticky inside its grid area: a tall accordion scrolls with the page until
+   its column's top edge reaches the viewport's, then rides along. */
+:global([data-nav="left"]) .navSlot {
   grid-area: nav;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  align-items: stretch;
   align-self: start;
-  border-bottom: 0;
-  border-right: 1px solid var(--line);
-  padding: 0.75rem 0.75rem 0.75rem 0;
+  position: sticky;
+  top: 1rem;
 }
 :global([data-nav="left"]) .body { grid-area: body; }
 
-/* The sidebar has no room on a phone — fall back to the top bar. */
+/* The sidebar has no room on a phone — the drawer takes over. */
 @media (max-width: 860px) {
   :global([data-nav="left"]) .shell { display: block; }
-  :global([data-nav="left"]) .nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 0.75rem 0;
-  }
+  :global([data-nav="left"]) .navSlot { display: none; }
 }
 
 /* The page banner sits above the page's own content. No fixed height: an

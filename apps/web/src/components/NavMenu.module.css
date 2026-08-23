@@ -1,0 +1,158 @@
+/* The categorized nav's own chrome. Where it sits on the page is the shell's
+   business (Shell.module.css hands this component a className); what a
+   category button and its item list look like in each layout mode is decided
+   here, on the same markup, keyed off the admin's [data-nav] attribute — see
+   applyTheme.ts for why layout rides an attribute rather than React state.
+
+   Default shape: a horizontal category bar; the open category drops an
+   absolutely-positioned panel. Accordion shape: a vertical column whose open
+   category's items flow inline — used by the admin's [data-nav="left"]
+   sidebar and, regardless of that choice, by the phone drawer. The accordion
+   selectors are written once with both contexts in the selector list, so the
+   sidebar and the drawer cannot drift apart. */
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.cat { position: relative; }
+.catBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+.catBtn:hover { border-color: var(--line); }
+.catActive { color: var(--accent); }
+.icon { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.catActive .icon { color: var(--accent); }
+.chev { width: 12px; height: 12px; color: var(--muted); flex: none; transition: transform 0.15s; }
+.open .chev { transform: rotate(90deg); }
+
+/* Badges: the category's rolled-up count rides the button (visible while
+   collapsed), each item's own count rides the item. */
+.catBadge, .itemBadge {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.catBadge { margin-left: 0.35rem; }
+.itemBadge { margin-left: auto; }
+
+/* Items: hidden unless the category is open, so the same DOM serves both a
+   dropdown (absolute, below) and an accordion (inline — see below). */
+.items {
+  display: none;
+  min-width: 220px;
+  padding: 0.4rem;
+}
+.open .items {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.35rem;
+  z-index: 20;
+  display: grid;
+  gap: 0.1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+.item:hover { background: var(--line); color: var(--accent); }
+.itemActive { background: var(--line); color: var(--accent); }
+
+/* Text for screen readers only — the badges show a bare number; this names it. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- Accordion shape: sidebar + drawer ----------------------------------
+ *
+ * The drawer gets it via the className Shell passes ("drawerNav"); the
+ * sidebar via the html attribute the theme stamps. One selector list, one
+ * truth. In this shape the items are part of the flow — a soft left rule
+ * with the active item's accent tick — rather than a floating panel, which
+ * would overlap content it never needs to hide. */
+
+:global([data-nav="left"]) .nav,
+.drawerNav {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+/* The sidebar sticks (Shell.module.css) while the page scrolls, so a nav
+   taller than the viewport must scroll its own middle instead of being cut
+   off at the fold. The drawer's wrapper (Shell.module.css) already scrolls. */
+:global([data-nav="left"]) .nav { max-height: calc(100vh - 2rem); overflow-y: auto; }
+.drawerNav { padding: 0; border: 0; }
+
+:global([data-nav="left"]) .nav .catBtn,
+.drawerNav .catBtn {
+  width: 100%;
+  justify-content: flex-start;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+:global([data-nav="left"]) .nav .chev,
+.drawerNav .chev { margin-left: auto; }
+
+:global([data-nav="left"]) .nav .items,
+.drawerNav .items {
+  position: static;
+  margin: 0.15rem 0 0.25rem 0.7rem;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+:global([data-nav="left"]) .nav .open .items,
+.drawerNav .open .items { display: block; }
+
+:global([data-nav="left"]) .nav .item,
+.drawerNav .item {
+  margin-left: -1px;
+  padding-left: 0.65rem;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+}
+:global([data-nav="left"]) .nav .item:hover,
+:global([data-nav="left"]) .nav .itemActive,
+.drawerNav .item:hover,
+.drawerNav .itemActive { background: none; }
+:global([data-nav="left"]) .nav .itemActive,
+.drawerNav .itemActive { border-left-color: var(--accent); }

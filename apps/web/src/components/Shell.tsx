@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import {
   useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges,
   useNotifications, usePlugins, useRanks,
@@ -10,39 +10,13 @@ import { secondsLeft } from "../lib/countdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
+import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
+import { NavMenu } from "./NavMenu.js";
 import { Amount, Money } from "./ui.js";
 import { SlotImage } from "./GameImage.js";
 import styles from "./Shell.module.css";
-
-const LINKS: ReadonlyArray<readonly [string, string]> = [
-  ["/", "Dashboard"],
-  ["/crimes", "Crimes"],
-  ["/jail", "Jail"],
-  ["/hospital", "Hospital"],
-  ["/bank", "Bank"],
-  ["/travel", "Travel"],
-  ["/bullets", "Bullets"],
-  ["/shop", "Shop"],
-  ["/inventory", "Inventory"],
-  ["/combat", "Combat"],
-  ["/bounties", "Bounties"],
-  ["/detectives", "Detectives"],
-  ["/casino", "Casino"],
-  ["/oc", "Heists"],
-  ["/ranks", "Ranks"],
-  ["/leaderboards", "Leaderboards"],
-  ["/rounds", "Rounds"],
-  ["/gang", "Gang"],
-  ["/mail", "Mail"],
-  ["/forum", "Forum"],
-  ["/notifications", "Alerts"],
-  ["/news", "News"],
-  ["/players", "Players"],
-  ["/profile", "Profile"],
-  ["/stats", "Stats"],
-];
 
 function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -138,19 +112,17 @@ function PageBanner(): JSX.Element | null {
  * Per-route document titles. An SPA leaves `<title>` at whatever index.html
  * shipped, so every tab, every history entry and — for a screen-reader user,
  * who hears the title to learn a page changed — every navigation reads "GL3".
+ *
+ * The label comes from the built nav (lib/nav.ts), which knows every
+ * destination the menu knows, labels included — the one table that already
+ * had this mapping, now that LINKS is gone.
  */
-function usePageTitle(pluginLabelFor: (pageId: string) => string | undefined): void {
+function usePageTitle(categories: readonly NavCategory[]): void {
   const { pathname } = useLocation();
   // Computed per render, effect keyed on the result: a plugin page's label
   // arrives with the plugins query, possibly after the navigation that needs
   // it, and the title must catch up when it does.
-  const [, first, second] = pathname.split("/");
-  let label: string | undefined;
-  if (first === "" || first === undefined) label = "Dashboard";
-  else if (first === "admin") label = "Admin";
-  else if (first === "plugins" && second !== undefined) {
-    label = pluginLabelFor(decodeURIComponent(second));
-  } else label = LINKS.find(([to]) => to === `/${first}`)?.[1];
+  const label = labelForPath(categories, pathname);
   const title = label === undefined ? "GL3" : `${label} — GL3`;
   useEffect(() => { document.title = title; }, [title]);
 }
@@ -167,6 +139,59 @@ export function Shell(): JSX.Element {
   const hudExtras = useHudExtras();
   const menuBadges = useMenuBadges();
 
+  const { pathname } = useLocation();
+  const activeKey = navKeyFor(pathname);
+
+  // The drawer (phones) and the account menu (desktop) are the two pieces of
+  // transient chrome the header owns; both close on Escape and on the outside
+  // click of their openers.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const accountRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!drawerOpen && !accountOpen) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      setDrawerOpen(false);
+      setAccountOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent): void => {
+      if (accountRef.current !== null && !accountRef.current.contains(event.target as Node)) {
+        setAccountOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [drawerOpen, accountOpen]);
+
+  // While the drawer covers the page the body behind it must not scroll.
+  useEffect(() => {
+    document.body.style.overflow = drawerOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [drawerOpen]);
+
+  // Focus moves into the drawer when it opens and back to the hamburger when
+  // it closes — a keyboard user is otherwise stranded behind the scrim. The
+  // `wasOpen` guard keeps the initial render (drawer never opened) from
+  // stealing focus to the hamburger on page load.
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    if (drawerOpen) {
+      drawerWasOpen.current = true;
+      drawerRef.current?.focus();
+    } else if (drawerWasOpen.current) {
+      drawerWasOpen.current = false;
+      hamburgerRef.current?.focus();
+    }
+  }, [drawerOpen]);
+
   // The banner is on screen on every page, so it is the countdown a player
   // watches most — it has to tick between anchors like /jail does.
   const jailSeconds = useSentenceCountdown(
@@ -181,7 +206,10 @@ export function Shell(): JSX.Element {
   const pluginLinks = [...(plugins.data?.menu ?? [])]
     .sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
 
-  usePageTitle((pageId) => pluginLinks.find((entry) => entry.pageId === pageId)?.label);
+  const admin = (me.data?.grants.length ?? 0) > 0;
+  const categories = buildNav(pluginLinks, { admin });
+
+  usePageTitle(categories);
 
   // /api/auth/me carries neither rank nor location; both are derived from the
   // list endpoints, which is why the HUD depends on three queries.
@@ -195,9 +223,9 @@ export function Shell(): JSX.Element {
   //
   // Plugin-supplied counts (`menu.badges` / core.ts applier) are keyed by the
   // literal path a subscriber wrote — `/plugins/<pageId>` for a plugin page —
-  // so they merge into the same lookup the core LINKS use, and spread first:
-  // the two core paths above are the ones this shell actually computes, and
-  // keep that meaning even if a plugin ever collided on one of them.
+  // so they merge into the same lookup the core categories use, and spread
+  // first: the two core paths above are the ones this shell actually computes,
+  // and keep that meaning even if a plugin ever collided on one of them.
   const pluginBadges: Readonly<Record<string, number>> = Object.fromEntries(
     (menuBadges.data?.badges ?? []).map((badge) => [badge.path, badge.count]),
   );
@@ -213,89 +241,134 @@ export function Shell(): JSX.Element {
       <div className={styles.shell}>
         <a href="#main" className={styles.skipLink}>Skip to content</a>
         <header className={styles.header}>
+          <button
+            ref={hamburgerRef}
+            type="button"
+            className={styles.hamburger}
+            aria-expanded={drawerOpen}
+            aria-controls="app-drawer"
+            aria-label="Menu"
+            onClick={() => { setDrawerOpen(true); }}
+          >
+            <span /><span /><span />
+          </button>
           <h1 className={styles.brand}>GL3</h1>
           <div className={styles.hud}>
-            <Stat label="Player">{me.data?.username ?? "—"}</Stat>
-            <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
-            <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
-            <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
-            <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
-            <Stat label="Exp">{me.data ? <Amount value={me.data.exp} /> : "—"}</Stat>
-            <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
-            <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
-            {(hudExtras.data?.entries ?? []).map((entry) => (
-              <Stat key={`${entry.pluginId}:${entry.label}`} label={entry.label}>
-                {entry.countdownTo !== undefined
-                  ? <CountdownValue to={entry.countdownTo} />
-                  : entry.value}
-              </Stat>
-            ))}
-            <button type="button" disabled={logout.isPending} onClick={() => { logout.mutate(); }}>
-              Log out
+            <div className={styles.hudGroup}>
+              <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
+              <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
+            </div>
+            <div className={styles.hudGroup}>
+              <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
+              <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
+            </div>
+            <div className={styles.hudGroup}>
+              <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
+              <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
+            </div>
+            {(hudExtras.data?.entries ?? []).length > 0 ? (
+              <div className={styles.hudGroup}>
+                {(hudExtras.data?.entries ?? []).map((entry) => (
+                  <Stat key={`${entry.pluginId}:${entry.label}`} label={entry.label}>
+                    {entry.countdownTo !== undefined
+                      ? <CountdownValue to={entry.countdownTo} />
+                      : entry.value}
+                  </Stat>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {/* The phone's condensed HUD: cash plus rank·location, one line each.
+              The full hud above is display:none at that width. */}
+          <div className={styles.miniHud}>
+            <span className={styles.miniCash}>{me.data ? <Money value={me.data.cash} /> : "—"}</span>
+            <span className={styles.miniSub}>{rank?.current?.name ?? "Unranked"} · {here?.name ?? "Nowhere"}</span>
+          </div>
+          <div ref={accountRef} className={styles.account}>
+            <button
+              type="button"
+              className={styles.accountChip}
+              aria-haspopup="menu"
+              aria-expanded={accountOpen}
+              onClick={() => { setAccountOpen(!accountOpen); }}
+            >
+              <span className={styles.accountDot} aria-hidden="true" />
+              {me.data?.username ?? "—"}
             </button>
+            {accountOpen ? (
+              <div className={styles.accountMenu} role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={logout.isPending}
+                  onClick={() => { logout.mutate(); }}
+                >
+                  Log out
+                </button>
+              </div>
+            ) : null}
           </div>
         </header>
 
-        <nav className={styles.nav}>
-          {LINKS.map(([to, label]) => {
-            const unread = badges[to] ?? 0;
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                className={({ isActive }) =>
-                  isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-                }
-              >
-                {label}
-                {unread > 0 ? (
-                  <span className={styles.badge}>
-                    {unread}<span className={styles.srOnly}> unread</span>
-                  </span>
-                ) : null}
-              </NavLink>
-            );
-          })}
-          {/*
-            Plugin entries sit below the core links. The link target is the
-            namespaced route, not the entry's declared `path` — see the routing
-            note in App.tsx. `pageId` is only constrained to be non-empty, so it
-            is encoded rather than trusted as a path segment. The badge lookup
-            below still uses the literal `/plugins/<pageId>` path, because that
-            is what a `menu.badges` subscriber writes (queries.ts, useMenuBadges).
-          */}
-          {me.data && me.data.grants.length > 0 ? (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-              }
+        {/*
+          The nav itself lives in NavMenu: one component, three shapes — the
+          top category bar (default), the left accordion sidebar
+          ([data-nav="left"]), and the copy inside the phone drawer below. The
+          slot class Shell passes only positions it on the page.
+        */}
+        <NavMenu
+          categories={categories}
+          badges={badges}
+          activeKey={activeKey}
+          className={styles.navSlot}
+        />
+
+        {drawerOpen ? (
+          <>
+            <div className={styles.scrim} onClick={() => { setDrawerOpen(false); }} />
+            <div
+              id="app-drawer"
+              ref={drawerRef}
+              className={styles.drawer}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Menu"
+              tabIndex={-1}
+              onClick={(event) => {
+                // Close on navigation, not on every tap: a category header
+                // toggle inside the drawer is a button, and must not slam the
+                // drawer shut on the player mid-browse.
+                if ((event.target as HTMLElement).closest("a") !== null) setDrawerOpen(false);
+              }}
             >
-              Admin
-            </NavLink>
-          ) : null}
-          {pluginLinks.map((entry) => {
-            const path = `/plugins/${entry.pageId}`;
-            const unread = badges[path] ?? 0;
-            return (
-              <NavLink
-                key={entry.pageId}
-                to={`/plugins/${encodeURIComponent(entry.pageId)}`}
-                className={({ isActive }) =>
-                  isActive ? `${styles.navLink} ${styles.navActive}` : styles.navLink
-                }
-              >
-                {entry.label}
-                {unread > 0 ? (
-                  <span className={styles.badge}>
-                    {unread}<span className={styles.srOnly}> unread</span>
+              <div className={styles.drawerHead}>
+                <span className={styles.drawerAvatar} aria-hidden="true">
+                  {(me.data?.username ?? "?").slice(0, 1).toUpperCase()}
+                </span>
+                <span className={styles.drawerWho}>
+                  <b>{me.data?.username ?? "—"}</b>
+                  <span className={styles.drawerSub}>
+                    {me.data ? <Amount value={me.data.bullets} /> : "—"} bullets · {rank?.current?.name ?? "Unranked"}
                   </span>
-                ) : null}
-              </NavLink>
-            );
-          })}
-        </nav>
+                </span>
+              </div>
+              <NavMenu
+                categories={categories}
+                badges={badges}
+                activeKey={activeKey}
+                variant="drawer"
+              />
+              <button
+                type="button"
+                className={styles.drawerLogout}
+                disabled={logout.isPending}
+                onClick={() => { logout.mutate(); }}
+              >
+                Log out
+              </button>
+            </div>
+          </>
+        ) : null}
 
         {jail.data?.jailed === true ? (
           <p className={styles.jailBanner} role="status">
