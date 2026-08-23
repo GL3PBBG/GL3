@@ -1,17 +1,21 @@
 # GL3
 
-A modern successor to [Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2),
-with a one-command migration path for existing V2 games. Documentation lives at
+A modern platform for persistent browser games, and the gangster game built
+on it. One codebase, two faces: `GL3_PROFILE=full` (the default) is the
+successor to [Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2);
+`GL3_PROFILE=framework` is the game-agnostic engine, the same module shape
+as [openPBBG](https://github.com/ChristopherDay/openPBBG) (the GL2 framework
+without the gangster game). Existing databases of either kind migrate in one
+command, players and passwords included. Documentation lives at
 **[docs.gl3.dev](https://docs.gl3.dev)**: tutorials, how-to guides, full API/DTO
 reference, and the design-decision record. A live demo runs at
 **[game.gl3.dev](https://game.gl3.dev)**.
 
-The whole GL2/MCCodes lineage is aging the same way: `int(11)` money columns
-overflowing past ~2.14B on long-running games, and `sha256` password hashes
-with no work factor. GL3 is the move-off path for that installed base: bigint
-money, argon2id, real foreign keys. `gl3-migrate` carries an existing game,
-players and passwords included, across in one command (see
-[Migrating from V2](#migrating-from-v2) and the
+The whole GL2/MCCodes lineage is aging the same way, openPBBG included:
+`int(11)` money columns overflowing past ~2.14B on long-running games, and
+`sha256` password hashes with no work factor. GL3 is the move-off path for
+that installed base: bigint money, argon2id, real foreign keys
+(see [Migrating from V2 or openPBBG](#migrating-from-v2-or-openpbbg) and the
 [V2 comparison](https://docs.gl3.dev/gl3-vs-v2.html)).
 
 **Stack:** Node.js 22 · TypeScript (strict) · Fastify 5 · PostgreSQL 16 · Redis 7
@@ -32,7 +36,9 @@ player becomes Administrator. With `EMAIL_DRIVER` at its default, the email
 verification link prints to `docker compose --profile app logs server`.
 Hosting elsewhere: set `GL3_PUBLIC_ORIGIN` (the URL players reach the game
 at, which feeds the CORS allowlist the WebSocket gateway also checks) and
-`GL3_PORT`; nothing needs editing.
+`GL3_PORT`; nothing needs editing. Want the engine without the gangster
+game? `GL3_PROFILE=framework` boots the openPBBG-shaped platform instead
+(see [The framework profile](https://docs.gl3.dev/operators/framework-profile.html)).
 
 The same file without the profile is the development database pair:
 `docker compose up -d` (what `npm run db:up` runs) starts only Postgres and
@@ -80,7 +86,7 @@ silently fails because the tables it needs don't exist yet.
 - `apps/migrate`: `gl3-migrate`, the V2 → GL3 migration CLI
 - `packages/shared`: zod event contracts and DTOs, shared by both apps
 - `packages/plugin-sdk`: the SDK plugins are written against
-- `packages/plugins/*`: twenty first-party plugins (see below)
+- `packages/plugins/*`: twenty first-party plugins, split framework/gameplay by `GL3_PROFILE` (see below)
 - `examples/hello-plugin`: a minimal, annotated example plugin
 - `deploy/`: the nginx router config the compose `app` profile mounts
 - `manual/`: the VitePress source of docs.gl3.dev
@@ -117,7 +123,7 @@ and invalidates it on first use, so it can't be replayed even if it leaks into
 a proxy or access log. The gateway also validates the `Origin` header against
 the CORS allowlist to prevent cross-site WebSocket hijacking.
 
-## Migrating from V2
+## Migrating from V2 or openPBBG
 
 `gl3-migrate` converts a live Gangster Legends V2 MySQL database into a GL3
 PostgreSQL one (players, passwords, cash, gangs, inventories) in one command:
@@ -133,6 +139,14 @@ open|underground` picks V2's everybody-hidden combat rules up front. The
 target needs a booted GL3 schema first (core migrations + one server boot for
 plugin tables); see `apps/migrate/README.md` and the
 [operator guide](https://docs.gl3.dev/operators/) for the walkthrough.
+
+openPBBG databases are the same story with less data: the account tables are
+byte-identical to V2's, and the game tables (`crimes`, `gangs`, `cars`, ...)
+simply do not exist. The same CLI handles them, skipping every games phase
+with a report entry, and pairs naturally with a `GL3_PROFILE=framework`
+target, whose absent `p_*` plugin tables are skipped the same way. See
+[The framework profile](https://docs.gl3.dev/operators/framework-profile.html)
+for the walkthrough.
 
 ## Deliberate model changes vs V2
 
@@ -172,6 +186,10 @@ and nulls `legacy_password_sha256`. Players never notice, and nobody is forced t
   ports complete; the gameplay clusters listed under **Plugins** above have
   shipped on top of it, along with admin (role → module grants) and a themed,
   categorized game shell.
+- **Framework profile**: `GL3_PROFILE=framework` runs the engine without the
+  gangster game (openPBBG parity, plugin-shaped gameplay, boot-enforced
+  cross-plugin `requires`), and `gl3-migrate` accepts openPBBG sources and
+  framework targets.
 
 `docs/STATUS.md` is the living, itemised record; read it before assuming
 anything here is the whole story.
