@@ -3,6 +3,7 @@ import {
   COOLDOWN_ACTION_RE,
   INTERNAL_PATH_RE,
   MoneySchema,
+  NAV_CATEGORIES,
   VIEW_ACTION_RE,
 } from "@gl3/shared";
 import { z } from "zod";
@@ -301,8 +302,22 @@ export const ViewNodeSchema: z.ZodType<ViewNode> = z.lazy(() =>
   ]),
 );
 
+/**
+ * A page's nav entry. `category` is where the page asks to live — the six ids
+ * in `NAV_CATEGORIES` (@gl3/shared), checked here so a typo fails at boot with
+ * the declaring plugin's id in the message rather than quietly filing the page
+ * under the client's catch-all "More".
+ *
+ * Optional, and deliberately so: the client keeps its `PLUGIN_CATEGORY` map as
+ * the fallback for pages authored before this field, so an existing manifest
+ * needs no edit and lands exactly where it did.
+ */
 export const MenuEntrySchema = z
-  .object({ label: z.string().min(1), order: z.number().int() })
+  .object({
+    label: z.string().min(1),
+    order: z.number().int(),
+    category: z.enum(NAV_CATEGORIES).optional(),
+  })
   .strict();
 
 /**

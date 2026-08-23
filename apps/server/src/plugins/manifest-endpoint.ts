@@ -1,10 +1,14 @@
 import { coreMoneyFormat, type PluginManifest, type ViewNode } from "@gl3/plugin-sdk";
-import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema } from "@gl3/shared";
+import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema, type NavCategoryId } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
 import type { CoreFilters } from "./core-filters.js";
 
-export interface MenuItem { pageId: string; path: string; label: string; order: number }
+export interface MenuItem {
+  pageId: string; path: string; label: string; order: number;
+  /** The page's declared nav home (`menu.category`). Omitted, never `undefined`. */
+  category?: NavCategoryId;
+}
 export interface PagePayload { pluginId: string; id: string; path: string; view: ViewNode }
 export interface EventMeta {
   pluginId: string; name: string; describe: string; invalidates: string[];
@@ -39,7 +43,14 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
         view: stampAssetBinderScope(page.view, manifest.id),
       });
       if (page.menu !== undefined) {
-        menu.push({ pageId: page.id, path: page.path, label: page.menu.label, order: page.menu.order });
+        menu.push({
+          pageId: page.id, path: page.path, label: page.menu.label, order: page.menu.order,
+          // Spread, like `silent` below: a page that declares no category
+          // produces no key at all, so the payload a pre-category manifest
+          // builds is byte-for-byte what it was and the client's map fallback
+          // still owns it.
+          ...(page.menu.category !== undefined ? { category: page.menu.category } : {}),
+        });
       }
     }
     for (const event of manifest.events) {

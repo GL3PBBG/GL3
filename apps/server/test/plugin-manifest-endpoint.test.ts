@@ -54,6 +54,22 @@ describe("buildPluginsPayload", () => {
     expect(buildPluginsPayload([alpha]).pages.map((p) => p.id)).toContain("alpha.hidden");
   });
 
+  it("carries a declared nav category through to the menu item", () => {
+    const gamma = definePlugin({
+      id: "gamma", version: "1.0.0", basePaths: ["/api/gamma"],
+      pages: [{ id: "gamma.index", path: "/gamma",
+        menu: { label: "Gamma", order: 30, category: "crimes" },
+        view: { kind: "text", value: "g" } }],
+    });
+    expect(buildPluginsPayload([gamma]).menu[0]).toEqual({
+      pageId: "gamma.index", path: "/gamma", label: "Gamma", order: 30, category: "crimes",
+    });
+  });
+
+  it("omits the category key entirely for a page that declares none", () => {
+    expect(buildPluginsPayload([alpha]).menu[0]).not.toHaveProperty("category");
+  });
+
   it("carries each event's describe template and invalidation keys", () => {
     expect(buildPluginsPayload([alpha]).events).toEqual([
       { pluginId: "alpha", name: "pinged", describe: "{actorName} pinged", invalidates: ["alpha"] },

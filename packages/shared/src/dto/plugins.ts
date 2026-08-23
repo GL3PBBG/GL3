@@ -311,6 +311,20 @@ export const BoundedViewNodeDtoSchema: z.ZodType<unknown, z.ZodTypeDef, unknown>
   .superRefine(checkViewBounds)
   .pipe(ViewNodeDtoSchema);
 
+/**
+ * The nav's category ids — the one list the whole system agrees on.
+ *
+ * It lives here, not in the web app, because a plugin now names its own home
+ * (`menu.category` in the SDK) and the name has to be checkable at boot on
+ * the server side of the wire. The web's category table is built from this
+ * list, so a category that exists to be declared always exists to render
+ * into. `actions` is the plugin-only one: no core route lands there, and the
+ * shell drops it when nothing does.
+ */
+export const NAV_CATEGORIES = ["home", "crimes", "actions", "town", "social", "account"] as const;
+
+export type NavCategoryId = (typeof NAV_CATEGORIES)[number];
+
 export const MenuItemSchema = z.object({
   pageId: z.string().min(1),
   // The same value as the page's own `path` (manifest-endpoint.ts copies it)
@@ -319,6 +333,17 @@ export const MenuItemSchema = z.object({
   path: z.string().regex(INTERNAL_PATH_RE, "menu path must be an app-internal absolute path"),
   label: z.string().min(1),
   order: z.number().int(),
+  /**
+   * The nav category the declaring page asked for (`menu.category`), carried
+   * through the manifest endpoint. Optional and omitted when absent, so a
+   * payload built before the field existed parses unchanged — the same rule
+   * `EventMetaSchema.silent` follows, and for the same reason: this schema is
+   * parsed all-or-nothing in the browser.
+   *
+   * A page that declares nothing falls back to the client's `PLUGIN_CATEGORY`
+   * map, then to the trailing "More" category.
+   */
+  category: z.enum(NAV_CATEGORIES).optional(),
 }).strict();
 
 export const PagePayloadSchema = z.object({

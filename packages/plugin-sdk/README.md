@@ -244,6 +244,18 @@ React override, not a bigger schema.
 A `menu` entry on a page contributes to the merged navigation tree. Every node
 is `.strict()` — a typo'd prop fails loudly rather than being silently dropped.
 
+`menu.category` is where the page asks to live: one of `home`, `crimes`,
+`actions`, `town`, `social`, `account` (`NAV_CATEGORIES` in `@gl3/shared`),
+validated at boot so a misspelling names the plugin instead of quietly filing
+the page under the nav's trailing "More". `actions` exists for plugin pages
+that belong between Crimes and Town; it is dropped when nothing routes there.
+Omit the field and the page keeps its old placement — the client's fallback
+map, then "More".
+
+```ts
+menu: { label: "The Fixer", order: 46, category: "crimes" },
+```
+
 A `form` node may declare `valuesSource: "GET /api/..."` — the renderer
 fetches it before first paint and seeds the fields by `name` from the
 response's `values` object (`{ values: Record<string, string> }`; the same

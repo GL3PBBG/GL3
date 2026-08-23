@@ -120,6 +120,20 @@ describe("PageSchemaSchema", () => {
     const bad = { ...page, menu: { label: "Hello", order: 1.5 } };
     expect(() => PageSchemaSchema.parse(bad)).toThrow(/Expected integer/);
   });
+
+  it("keeps a declared nav category", () => {
+    const withCategory = { ...page, menu: { label: "Hello", order: 50, category: "crimes" } };
+    expect(PageSchemaSchema.parse(withCategory).menu?.category).toBe("crimes");
+  });
+
+  it("makes the category optional, so a pre-category page parses unchanged", () => {
+    expect(PageSchemaSchema.parse(page).menu?.category).toBeUndefined();
+  });
+
+  it("rejects a category outside the nav's own list", () => {
+    const bad = { ...page, menu: { label: "Hello", order: 50, category: "crime" } };
+    expect(() => PageSchemaSchema.parse(bad)).toThrow(/Invalid enum value/);
+  });
 });
 
 /** The dotted path of the first issue, for a value the schema must reject. */

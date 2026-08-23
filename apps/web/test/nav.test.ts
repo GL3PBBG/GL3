@@ -1,11 +1,12 @@
+import { NAV_CATEGORIES } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
 import {
   buildNav, categoryBadge, categoryForPath, labelForPath, linkFor, navKeyFor,
-  type PluginMenuEntry,
+  PLUGIN_CATEGORY, type PluginMenuEntry,
 } from "../src/lib/nav.js";
 
-function entry(pageId: string, label: string, order: number): PluginMenuEntry {
-  return { pageId, path: `/plugins/${pageId}`, label, order };
+function entry(pageId: string, label: string, order: number, category?: string): PluginMenuEntry {
+  return { pageId, path: `/plugins/${pageId}`, label, order, ...(category === undefined ? {} : { category }) };
 }
 
 describe("navKeyFor", () => {
@@ -41,6 +42,38 @@ describe("buildNav", () => {
     expect(account.items.map((i) => i.label)).toContain("Membership");
     // No unmapped plugin pages, so no trailing catch-all category.
     expect(nav.some((c) => c.id === "more")).toBe(false);
+  });
+
+  it("files a page into the category it declares for itself", () => {
+    const nav = buildNav([entry("fixer.index", "The Fixer", 46, "crimes")], { admin: false });
+    const crimes = nav.find((c) => c.id === "crimes")!;
+    expect(crimes.items.at(-1)).toEqual({ to: "/plugins/fixer.index", label: "The Fixer" });
+    expect(nav.some((c) => c.id === "more")).toBe(false);
+  });
+
+  it("lets a declared category beat the fallback map", () => {
+    const nav = buildNav([entry("theft.index", "Car theft", 40, "town")], { admin: false });
+    expect(nav.find((c) => c.id === "town")!.items.at(-1)?.label).toBe("Car theft");
+    expect(nav.find((c) => c.id === "crimes")!.items.some((i) => i.label === "Car theft")).toBe(false);
+  });
+
+  it("drops a page declaring an unknown category into More, not out of the nav", () => {
+    const nav = buildNav([entry("rogue.index", "Rogue", 10, "smuggling")], { admin: false });
+    expect(nav.at(-1)!.id).toBe("more");
+    expect(nav.at(-1)!.items).toEqual([{ to: "/plugins/rogue.index", label: "Rogue" }]);
+  });
+
+  it("renders every category the SDK lets a plugin declare", () => {
+    for (const id of NAV_CATEGORIES) {
+      const nav = buildNav([entry("probe.index", "Probe", 1, id)], { admin: true });
+      expect(nav.find((c) => c.id === id)?.items.some((i) => i.label === "Probe")).toBe(true);
+    }
+  });
+
+  it("keeps the fallback map pointing only at categories that exist", () => {
+    for (const id of Object.values(PLUGIN_CATEGORY)) {
+      expect(NAV_CATEGORIES).toContain(id);
+    }
   });
 
   it("collects unmapped plugin pages under a trailing More category", () => {
