@@ -208,9 +208,10 @@ always required, matching how plugin settings already behave (read at boot).
 
 ## Docker Compose equivalent
 
-The `docker-compose.yml` in the repository is a **development** file (Postgres
-and Redis only — no server service), so this is a pattern to add to your own
-production compose file, not something shipped:
+The repository's `docker-compose.yml` runs the full game under its `app`
+profile (`docker compose --profile app up`), so this is a service to add
+next to `server` in that file — same shape, whether you run the shipped file
+or your own:
 
 ```yaml
 services:

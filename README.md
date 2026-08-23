@@ -3,12 +3,43 @@
 A modern successor to [Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2),
 with a one-command migration path for existing V2 games. Documentation lives at
 **[docs.gl3.dev](https://docs.gl3.dev)** — tutorials, how-to guides, full API/DTO
-reference, and the design-decision record.
+reference, and the design-decision record. A live demo runs at
+**[game.gl3.dev](https://game.gl3.dev)**.
+
+The whole GL2/MCCodes lineage is aging the same way: `int(11)` money columns
+overflowing past ~2.14B on long-running games, and `sha256` password hashes
+with no work factor. GL3 is the move-off path for that installed base —
+bigint money, argon2id, real foreign keys — and `gl3-migrate` carries an
+existing game, players and passwords included, across in one command
+(see [Migrating from V2](#migrating-from-v2) and the
+[V2 comparison](https://docs.gl3.dev/gl3-vs-v2.html)).
 
 **Stack:** Node.js 22 · TypeScript (strict) · Fastify 5 · PostgreSQL 16 · Redis 7
 (BullMQ + pub/sub) · WebSockets · React 18 + Vite · a first-party plugin SDK
 
-## Quick start
+## First boot (Docker)
+
+```bash
+docker compose --profile app up
+```
+
+That single command stands up the whole game from the published images:
+Postgres and Redis (internal to the compose network), a one-shot migrate
+container that asserts the schema, the server (starter content seeded at
+boot), the web bundle, and an nginx router keeping the browser same-origin
+(`deploy/nginx.conf`). Open http://localhost:8080 and register — the first
+player becomes Administrator. With `EMAIL_DRIVER` at its default, the email
+verification link prints to `docker compose --profile app logs server`.
+Hosting elsewhere: set `GL3_PUBLIC_ORIGIN` (the URL players reach the game
+at — it feeds the CORS allowlist the WebSocket gateway also checks) and
+`GL3_PORT`; nothing needs editing.
+
+The same file without the profile is the development database pair —
+`docker compose up -d` (what `npm run db:up` runs) starts only Postgres and
+Redis. CI publishes the images to GHCR on every push to `main`
+(`ghcr.io/rondlite/gl3-server`, `ghcr.io/rondlite/gl3-web`).
+
+## Quick start (from source)
 
 ```bash
 npm install
@@ -42,9 +73,6 @@ suite while your dev database is stale — the server boots fine but every
 background job (crime resolution, cooldowns, anything going through BullMQ)
 silently fails because the tables it needs don't exist yet.
 
-CI publishes the server and web images to GHCR on every push to `main`
-(`ghcr.io/rondlite/gl3-server`, `ghcr.io/rondlite/gl3-web`).
-
 ## Layout
 
 - `apps/server` — Fastify API, WS gateway, BullMQ workers, plugin loader
@@ -54,6 +82,7 @@ CI publishes the server and web images to GHCR on every push to `main`
 - `packages/plugin-sdk` — the SDK plugins are written against
 - `packages/plugins/*` — twenty first-party plugins (see below)
 - `examples/hello-plugin` — a minimal, annotated example plugin
+- `deploy/` — the nginx router config the compose `app` profile mounts
 - `manual/` — the VitePress source of docs.gl3.dev
 
 ## Plugins
@@ -79,6 +108,23 @@ connects to `/ws?ticket=<ticket>`; the gateway consumes the ticket atomically
 and invalidates it on first use, so it can't be replayed even if it leaks into
 a proxy or access log. The gateway also validates the `Origin` header against
 the CORS allowlist to prevent cross-site WebSocket hijacking.
+
+## Migrating from V2
+
+`gl3-migrate` converts a live Gangster Legends V2 MySQL database into a GL3
+PostgreSQL one — players, passwords, cash, gangs, inventories — in one command:
+
+```bash
+gl3-migrate --mysql mysql://user:pass@host/v2db --pg postgres://user:pass@host/gl3db
+```
+
+`--dry-run` runs every migrator inside a transaction that always rolls back
+(use this first against a production V2 database); `--report report.json`
+writes the full per-table machine-readable report; `--town-combat-mode
+open|underground` picks V2's everybody-hidden combat rules up front. The
+target needs a booted GL3 schema first (core migrations + one server boot for
+plugin tables) — see `apps/migrate/README.md` and the
+[operator guide](https://docs.gl3.dev/operators/) for the walkthrough.
 
 ## Deliberate model changes vs V2
 
@@ -130,3 +176,7 @@ anything here is the whole story.
 - `NOTES.md` — the short version of both, plus this machine's environment quirks.
 - `manual/` — the docs site source; documentation changes ship in the same PR
   as the code they describe.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

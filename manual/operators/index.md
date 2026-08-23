@@ -7,10 +7,13 @@ own game. Contributor material lives in the rest of the manual.
 
 ## Topics
 
-- **Install & run**: Node 22, Postgres 16, Redis 7. `docker-compose.yml` and
-  `Dockerfile.server` / `Dockerfile.web` cover the containerised path;
-  `.env.example` documents every setting, starting with `DATABASE_URL` and
-  `REDIS_URL`.
+- **Install & run**: Node 22, Postgres 16, Redis 7 — or one command with
+  Docker: `docker compose --profile app up` stands up the whole game from the
+  published images (databases, the migrate one-shot, the server, the web
+  bundle, and an nginx router keeping the browser same-origin — see
+  [First boot](./first-boot.md)). Without the profile, the same file is the
+  development database pair (`npm run db:up`). `.env.example` documents every
+  setting, starting with `DATABASE_URL` and `REDIS_URL`.
 - **First boot & upgrades**: how an empty database becomes a playable game
   (core migrations in an init container → seeds and plugin migrations at
   server boot → first registered player becomes Administrator), why the

@@ -91,7 +91,9 @@ spec:
 
 Compose has no native init containers; the same effect is two one-shot
 services with `depends_on: { condition: service_completed_successfully }` on
-the server.
+the server. The repository's `docker-compose.yml` ships exactly that as its
+`app` profile — `docker compose --profile app up` runs the migrate one-shot,
+then the server, against the file's own Postgres and Redis.
 
 ## Troubleshooting
 

@@ -1,3 +1,29 @@
+# One file, two modes.
+#
+#   docker compose up -d --wait              # dev: Postgres + Redis only
+#   docker compose --profile app up          # first boot: the whole game
+#
+# The dev mode is what `npm run db:up` runs and is unchanged: databases on
+# their usual host ports, nothing else. The `app` profile layers the published
+# images on top — the migrate one-shot (manual/operators/first-boot.md's
+# init-container pattern; idempotent, so it also asserts schema on every later
+# `up`), the server, the web image, and an nginx router that keeps the browser
+# same-origin: /api, /ws and /assets to the server, everything else to the web
+# bundle (deploy/nginx.conf). First player to register through the router
+# becomes Administrator.
+#
+# Two knobs for the app profile, both optional:
+#   GL3_PUBLIC_ORIGIN - the URL players reach the game at. Feeds the CORS
+#     allowlist (which the WS gateway also validates Origin against) and the
+#     links in outbound mail. Set it when you host on another origin; the
+#     default matches the default port below.
+#   GL3_PORT - the host port the router listens on (default 8080).
+#
+# postgres-data is a named volume so an operator's game survives
+# `docker compose down`; `npm run db:down` (`down -v`) still wipes it for dev.
+# Uploads (game art) land in ./var/assets next to this file — already
+# gitignored — for the same reason.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,11 +32,14 @@ services:
       POSTGRES_PASSWORD: gl3
       POSTGRES_DB: gl3
     ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gl3 -d gl3"]
       interval: 2s
       timeout: 3s
       retries: 20
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -19,3 +48,66 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+
+  # Compose has no init containers; first-boot.md's migrate-before-server is a
+  # one-shot service the server waits on. `restart: "no"` keeps `up` from
+  # reviving it after it exits 0.
+  migrate:
+    profiles: ["app"]
+    image: ghcr.io/rondlite/gl3-server:latest
+    command: ["node", "apps/server/dist/db/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://gl3:gl3@postgres:5432/gl3
+      # The migrator only talks to Postgres, but it loads the full config
+      # schema, which refuses to boot without REDIS_URL — same from-source
+      # behaviour as npm run db:migrate.
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    profiles: ["app"]
+    image: ghcr.io/rondlite/gl3-server:latest
+    environment:
+      DATABASE_URL: postgres://gl3:gl3@postgres:5432/gl3
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGINS: ${GL3_PUBLIC_ORIGIN:-http://localhost:8080}
+      APP_BASE_URL: ${GL3_PUBLIC_ORIGIN:-http://localhost:8080}
+      # EMAIL_DRIVER defaults to log: verification links print to
+      # `docker compose --profile app logs server`, which is the whole signup
+      # flow for a private instance. Switch to resend for real mail (see
+      # .env.example).
+    volumes:
+      - ./var/assets:/app/var/assets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    profiles: ["app"]
+    image: ghcr.io/rondlite/gl3-web:latest
+    restart: unless-stopped
+
+  router:
+    profiles: ["app"]
+    image: nginx:alpine
+    ports:
+      - "${GL3_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      server:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
