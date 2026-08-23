@@ -72,6 +72,18 @@ module's tables, or a core V2 table with no GL3 counterpart in v1, like
 `premiumMembership` or the forum tables) are listed under `unknownTables` — "custom
 module tables, not migrated." Nothing here is fatal; check the report afterward.
 
+## Framework-shaped sources and targets (openPBBG)
+
+An openPBBG database is GL2's framework without the gangster game: the account
+tables are byte-identical, the game tables (`crimes`, `gangs`, `cars`, ...) and
+userStats' two game columns (`US_gang`, `US_crimes`) simply do not exist. The
+fingerprint requires only the account tables; every games phase whose source
+tables are absent skips and is listed under `missingSourceTables`. Symmetrically,
+a `GL3_PROFILE=framework` target never created the gameplay plugins' `p_*`
+tables — migrators headed for one skip that section and record it under
+`absentTargetTables`. Both fields are informational: accounts, mail, news,
+settings, items and membership packages migrate normally either way.
+
 ## Model differences from V2 (deliberate, see SPEC §2.5)
 
 - `users` + `userStats` merge into `players` + `player_stats` (kept as two tables

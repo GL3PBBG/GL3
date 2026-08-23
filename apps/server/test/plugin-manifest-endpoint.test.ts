@@ -1,7 +1,6 @@
 import { definePlugin } from "@gl3/plugin-sdk";
 import { membershipPage } from "@gl3/plugin-membership";
 import { DEFAULT_MONEY_FORMAT } from "@gl3/shared";
-import { garagePage, theftPage } from "@gl3/plugin-theft";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -42,16 +41,20 @@ async function register(app: FastifyInstance): Promise<{ token: string }> {
 }
 
 describe("buildPluginsPayload", () => {
+  // "framework" throughout this describe: these cases are about how PLUGIN
+  // menus merge with each other, and the full profile additionally appends
+  // the synthetic jail/hospital core pages — asserted in
+  // framework-profile.test.ts, kept out of the way here.
   it("merges menus across plugins and sorts by order", () => {
-    expect(buildPluginsPayload([alpha, beta]).menu.map((m) => m.label)).toEqual(["Beta", "Alpha"]);
+    expect(buildPluginsPayload([alpha, beta], "framework").menu.map((m) => m.label)).toEqual(["Beta", "Alpha"]);
   });
 
   it("omits pages that declare no menu entry", () => {
-    expect(buildPluginsPayload([alpha]).menu).toHaveLength(1);
+    expect(buildPluginsPayload([alpha], "framework").menu).toHaveLength(1);
   });
 
   it("still describes a menu-less page so it can be routed to directly", () => {
-    expect(buildPluginsPayload([alpha]).pages.map((p) => p.id)).toContain("alpha.hidden");
+    expect(buildPluginsPayload([alpha], "framework").pages.map((p) => p.id)).toContain("alpha.hidden");
   });
 
   it("carries a declared nav category through to the menu item", () => {
@@ -61,13 +64,13 @@ describe("buildPluginsPayload", () => {
         menu: { label: "Gamma", order: 30, category: "crimes" },
         view: { kind: "text", value: "g" } }],
     });
-    expect(buildPluginsPayload([gamma]).menu[0]).toEqual({
+    expect(buildPluginsPayload([gamma], "framework").menu[0]).toEqual({
       pageId: "gamma.index", path: "/gamma", label: "Gamma", order: 30, category: "crimes",
     });
   });
 
   it("omits the category key entirely for a page that declares none", () => {
-    expect(buildPluginsPayload([alpha]).menu[0]).not.toHaveProperty("category");
+    expect(buildPluginsPayload([alpha], "framework").menu[0]).not.toHaveProperty("category");
   });
 
   it("carries each event's describe template and invalidation keys", () => {
@@ -107,53 +110,50 @@ describe("GET /api/plugins", () => {
   });
 
   it("returns the merged payload to an authenticated player", async () => {
-    const { app, close } = await bootTestServer({ plugins: [alpha, beta] });
+    const { app, close } = await bootTestServer({ profile: "framework", plugins: [alpha, beta] });
     try {
       const { token } = await register(app);
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
-      // `bootTestServer` always merges CORE_PLUGINS (`withCorePlugins`) under
-      // `alpha`/`beta`, so `theft`'s two menu entries and `membership`'s one
-      // ride along here too — sorted by `order` with everyone else's.
+      // A framework boot merges only `membership`'s menu entry under
+      // `alpha`/`beta` — the gameplay plugins' pages (and the synthetic
+      // jail/hospital entries) are the full profile's, covered below and in
+      // framework-profile.test.ts.
       expect(res.json().menu.map((m: { label: string }) => m.label)).toEqual([
-        "Beta", "Alpha", "Car theft", "Garage", "Membership",
+        "Beta", "Alpha", "Membership",
       ]);
     } finally {
       await close();
     }
   });
 
-  // bootTestServer() with no argument is the only path that leaves
-  // `deps.plugins` undefined, which is the branch this case exists for.
-  // Passing `{ plugins: [] }` would run the loader and reach the endpoint
-  // through the *defined* branch, proving nothing about a plugin-less boot.
+  // A framework boot keeps this census small and stable: the eight
+  // game-agnostic plugins only. The full-profile payload (gameplay pages,
+  // synthetic jail/hospital, the gameplay plugins' events) is covered by
+  // framework-profile.test.ts's payload assertions — an exact-equality
+  // census of all twenty would break on every plugin tweak, which this
+  // file's history (see the casino entry saga below, now trimmed away with
+  // the gameplay plugins) shows is not a hypothetical.
   //
-  // "No plugins loaded" is about that branch, not an actually-empty plugin
-  // set: `bootTestServer()`'s no-arg path still merges `CORE_PLUGINS` via
-  // `withCorePlugins`, so any core plugin's own menu/pages/events surface
-  // here. `inventory` declares the `purchased` event (`shop.ts`), the first
-  // core plugin to declare any, and `theft` declares two — hence the
-  // non-empty `events` array below. Order follows `CORE_PLUGINS`, where
-  // `theft` is appended after `inventory`.
-  it("returns an empty 200 payload when no plugins are loaded", async () => {
-    const { app, close } = await bootTestServer();
+  // bootTestServer() builds `deps.plugins` itself for every option shape,
+  // so the branch where `deps.plugins` is undefined is exercised the same
+  // way here as it ever was by the old no-arg call.
+  it("returns the framework payload for a framework boot", async () => {
+    const { app, close } = await bootTestServer({ profile: "framework" });
     try {
       const { token } = await register(app);
       const res = await app.inject({ method: "GET", url: "/api/plugins", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         menu: [
-          { pageId: "theft.index", path: "/theft", label: "Car theft", order: 40 },
-          { pageId: "theft.garage", path: "/garage", label: "Garage", order: 41 },
           { pageId: "membership.index", path: "/membership", label: "Membership", order: 60 },
         ],
         // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
         // only in the top-level `menu` array, not duplicated onto each page.
         pages: [
           // The loader stamps every slotImage/assetBinder with the declaring
-          // plugin's scope, so the expected views are the STAMPED ones — the
-          // raw manifest views differ by exactly that field.
-          ...[theftPage, garagePage].map((p) => ({ pluginId: "theft", id: p.id, path: p.path, view: stampAssetBinderScope(p.view, "theft") })),
+          // plugin's scope, so the expected view is the STAMPED one — the raw
+          // manifest view differs by exactly that field.
           { pluginId: "membership", id: membershipPage.id, path: membershipPage.path, view: stampAssetBinderScope(membershipPage.view, "membership") },
         ],
         events: [{
@@ -162,56 +162,6 @@ describe("GET /api/plugins", () => {
           describe: "Bought {qty}x {name}",
           invalidates: ["inventory", "me"],
         }, {
-          pluginId: "theft",
-          name: "resolved",
-          describe: "{actorName} {outcome}",
-          invalidates: ["theft", "garage", "me"],
-        }, {
-          pluginId: "theft",
-          name: "sold",
-          describe: "{actorName} sold a {carName} for {payout}",
-          invalidates: ["garage", "me"],
-        }, {
-          // This whole `events` array is a hand-maintained census with no
-          // type-level tie to the plugin manifests it asserts against — it
-          // only catches drift when this file itself changes. `properties`
-          // shed its `income` model on `feat/properties-franchise`: `bought`'s
-          // describe string changed and `dropped`/`transferred` were added,
-          // both here to match `packages/plugins/properties/src/index.ts`'s
-          // `events: [boughtEvent, droppedEvent, transferredEvent]`. There is
-          // deliberately no `seized` event — a `killResolved` filter
-          // subscriber runs under the *applying* plugin's ctx (combat's), so
-          // publishing from it would go out mislabelled as `combat`'s; seizure
-          // notifies the victim via `tx.notify` instead.
-          pluginId: "properties",
-          name: "bought",
-          describe: "{actorName} bought the {typeName} in {locationName} for {price}",
-          invalidates: ["properties", "me"],
-        }, {
-          pluginId: "properties",
-          name: "dropped",
-          describe: "{actorName} dropped the {typeName} in {locationName} for {refund} back",
-          invalidates: ["properties", "me"],
-        }, {
-          pluginId: "properties",
-          name: "transferred",
-          describe: "{actorName} transferred the {typeName} in {locationName} to you",
-          invalidates: ["properties", "me"],
-        }, {
-          // `casino` sits between `properties` and `membership` in
-          // `CORE_PLUGINS`. This entry was MISSED when the silent-events
-          // cluster declared casino's first event (`table-engine.ts`,
-          // commit 3b52cf3) — the census failed on every full-suite run
-          // since, twice misdiagnosed as cross-session cross-talk before a
-          // baseline worktree run proved it deterministic on main.
-          pluginId: "casino",
-          name: "table",
-          describe: "{actorName} is at the tables",
-          invalidates: ["casino"],
-          silent: true,
-        }, {
-          // `membership` is appended last in `CORE_PLUGINS`
-          // (`plugins/core-plugins.ts`), after `properties`.
           pluginId: "membership",
           name: "purchased",
           describe: "{actorName} bought {packageName}",
@@ -222,6 +172,11 @@ describe("GET /api/plugins", () => {
           describe: "{actorName} gifted {packageName} to {recipientName}",
           invalidates: ["membership", "me", "hudExtras"],
         }],
+        // Feature detection for the client (HUD stat gating): every installed
+        // plugin id, sorted.
+        installed: [
+          "bank", "forum", "inventory", "mail", "membership", "news", "notifications", "ranks",
+        ],
         // `core.moneyFormat` is applied fresh per request in
         // `registerPluginsEndpoint`, not baked into the boot-built payload —
         // this asserts the no-subscriber default that chain resolves to when

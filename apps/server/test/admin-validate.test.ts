@@ -115,7 +115,9 @@ describe("buildPluginsPayload admin leak test", () => {
       pages: [{ id: "pub", path: "/hello", view: { kind: "text", value: "x" } }],
       adminPages: [{ id: "adm", path: "/admin/hello", view: { kind: "text", value: "x" } }],
     });
-    const payload = buildPluginsPayload([m]);
+    // framework: this is about adminPages exclusion, and the full profile
+    // would additionally append the synthetic jail/hospital core pages.
+    const payload = buildPluginsPayload([m], "framework");
     expect(payload.pages.map((p) => p.id)).toEqual(["pub"]);
   });
 });

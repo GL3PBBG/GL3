@@ -827,6 +827,9 @@ export default definePlugin({
   id: "properties",
   version: "1.0.0",
   basePaths: ["/api/properties", "/api/admin/properties"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["combat"],
   tables: {
     properties: "p_properties_properties",
   },

@@ -32,7 +32,9 @@ function requireEnv(name: string): string {
  * Only the MySQL/V2 half — the Postgres/GL3 target half (Task 5) will
  * export `createIsolatedPgTarget` from the same file.
  */
-export async function createIsolatedMysqlFixture(): Promise<{ url: string; teardown: () => Promise<void> }> {
+export async function createIsolatedMysqlFixture(
+  options?: { flavor?: "gl2" | "openpbbg" },
+): Promise<{ url: string; teardown: () => Promise<void> }> {
   const adminUrl = requireEnv("MYSQL_ADMIN_URL");
   const dbName = `gl3_test_mysql_${randomBytes(8).toString("hex")}`;
 
@@ -64,6 +66,19 @@ export async function createIsolatedMysqlFixture(): Promise<{ url: string; teard
     const seed = await readFile(SEED_SQL, "utf8");
     await conn.query(schema);
     await conn.query(seed);
+    // The openPBBG flavor is the GL2 framework without the gangster game:
+    // same load, then the game tables and userStats' two game columns are
+    // dropped — the shape a real openPBBG database has.
+    if (options?.flavor === "openpbbg") {
+      for (const table of [
+        "cars", "crimes", "gangs", "gangPermissions", "gangInvites", "gangLogs", "garage",
+        "locations", "theft", "weapons", "forums", "forumAccess", "topicReads", "topics",
+        "posts", "properties", "detectives", "bounties",
+      ]) {
+        await conn.query(`DROP TABLE IF EXISTS \`${table}\``);
+      }
+      await conn.query("ALTER TABLE userStats DROP COLUMN US_gang, DROP COLUMN US_crimes");
+    }
   } finally {
     await conn.end();
   }
@@ -105,7 +120,9 @@ const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url)
  * adds and `p_membership_packages` this task adds). Returns a connection URL
  * plus a teardown function.
  */
-export async function createIsolatedPgTarget(): Promise<{ url: string; teardown: () => Promise<void> }> {
+export async function createIsolatedPgTarget(
+  options?: { plugins?: "all" | "framework" | "none" },
+): Promise<{ url: string; teardown: () => Promise<void> }> {
   const adminUrl = requireEnv("DATABASE_URL");
   const dbName = `gl3_test_migrate_pg_${randomBytes(8).toString("hex")}`;
 
@@ -128,14 +145,21 @@ export async function createIsolatedPgTarget(): Promise<{ url: string; teardown:
 
   // The ten plugin-owned target tables ("Known unknowns" item 8, plus
   // forum's three and membership's one), created the same way apps/server's
-  // loader creates them at boot.
-  const pluginDb = createDb(target.toString());
-  try {
-    await runPluginMigrations(pluginDb.db, [
-      bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin, forumPlugin, membershipPlugin,
-    ]);
-  } finally {
-    await pluginDb.sql.end();
+  // loader creates them at boot. `{ plugins: "framework" }` runs only the
+  // membership plugin's — the exact table set a GL3_PROFILE=framework boot
+  // creates (membership is a framework plugin; the other five are gameplay).
+  // `{ plugins: "none" }` runs none.
+  const pluginSelection =
+    options?.plugins === "framework" ? [membershipPlugin]
+    : options?.plugins === "none" ? []
+    : [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin, forumPlugin, membershipPlugin];
+  if (pluginSelection.length > 0) {
+    const pluginDb = createDb(target.toString());
+    try {
+      await runPluginMigrations(pluginDb.db, pluginSelection);
+    } finally {
+      await pluginDb.sql.end();
+    }
   }
 
   return {

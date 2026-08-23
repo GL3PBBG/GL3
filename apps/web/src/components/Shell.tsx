@@ -60,21 +60,21 @@ function CountdownValue({ to }: { to: string }): JSX.Element {
  * a fresh install.
  */
 const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
-  "/crimes": { slot: "page-crimes", alt: "Crimes" },
-  "/jail": { slot: "page-jail", alt: "Jail" },
-  "/hospital": { slot: "page-hospital", alt: "Hospital" },
+  "/plugins/crimes.index": { slot: "page-crimes", alt: "Crimes" },
+  "/plugins/jail": { slot: "page-jail", alt: "Jail" },
+  "/plugins/hospital": { slot: "page-hospital", alt: "Hospital" },
   "/bank": { slot: "page-bank", alt: "Bank" },
-  "/casino": { slot: "page-casino", alt: "Casino" },
-  "/combat": { slot: "page-combat", alt: "Combat" },
-  "/bounties": { slot: "page-bounties", alt: "Bounties" },
-  "/detectives": { slot: "page-detectives", alt: "Detectives" },
-  "/oc": { slot: "page-oc", alt: "Organized crime" },
-  "/gang": { slot: "page-gang", alt: "Gang" },
+  "/plugins/casino.index": { slot: "page-casino", alt: "Casino" },
+  "/plugins/combat.index": { slot: "page-combat", alt: "Combat" },
+  "/plugins/bounties.index": { slot: "page-bounties", alt: "Bounties" },
+  "/plugins/detectives.index": { slot: "page-detectives", alt: "Detectives" },
+  "/plugins/oc.index": { slot: "page-oc", alt: "Organized crime" },
+  "/plugins/gangs.index": { slot: "page-gang", alt: "Gang" },
   "/mail": { slot: "page-mail", alt: "Mail" },
   "/news": { slot: "page-news", alt: "News" },
   "/shop": { slot: "page-shop", alt: "Shop" },
-  "/bullets": { slot: "page-bullets", alt: "Bullet shop" },
-  "/travel": { slot: "page-travel", alt: "Travel" },
+  "/plugins/bullets.index": { slot: "page-bullets", alt: "Bullet shop" },
+  "/plugins/travel.index": { slot: "page-travel", alt: "Travel" },
   "/ranks": { slot: "page-ranks", alt: "Ranks" },
   "/leaderboards": { slot: "page-leaderboards", alt: "Leaderboards" },
   "/inventory": { slot: "page-inventory", alt: "Inventory" },
@@ -87,9 +87,10 @@ const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
   "/profile": { slot: "page-profile", alt: "Profile" },
   "/notifications": { slot: "page-notifications", alt: "Notifications" },
   "/": { slot: "page-dashboard", alt: "Dashboard" },
-  // No /theft or /garage entries: those pages are manifest-declared and live
-  // at /plugins/<pageId>, which this first-segment map cannot reach. A plugin
-  // page's banner is a `slotImage` node in the plugin's own view.
+  // Manifest-declared gameplay pages are keyed by their /plugins/<pageId>
+  // nav path (navKeyFor's second segment), same as /theft and /garage would
+  // be — the days of a first-segment-only map ended when these pages stopped
+  // being hardcoded core routes.
 };
 
 function PageBanner(): JSX.Element | null {
@@ -136,6 +137,9 @@ export function Shell(): JSX.Element {
   const mail = useMail();
   const notifications = useNotifications();
   const plugins = usePlugins();
+  const installed = plugins.data?.installed;
+  const showBullets = installed === undefined || installed.includes("combat") || installed.includes("bullets");
+  const showLocation = installed === undefined || installed.includes("travel");
   const hudExtras = useHudExtras();
   const menuBadges = useMenuBadges();
 
@@ -258,13 +262,17 @@ export function Shell(): JSX.Element {
               <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
               <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
             </div>
+            {/* Feature detection via the plugins payload: a stat whose
+                owning plugin is absent (framework boot: no combat, no
+                travel) would be a permanent zero/Nowhere readout. Undefined
+                while the payload loads — show, then hide if absent. */}
             <div className={styles.hudGroup}>
-              <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat>
+              {showBullets ? <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat> : null}
               <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
             </div>
             <div className={styles.hudGroup}>
               <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
-              <Stat label="Location">{here?.name ?? "Nowhere"}</Stat>
+              {showLocation ? <Stat label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
             </div>
             {(hudExtras.data?.entries ?? []).length > 0 ? (
               <div className={styles.hudGroup}>
@@ -282,7 +290,9 @@ export function Shell(): JSX.Element {
               The full hud above is display:none at that width. */}
           <div className={styles.miniHud}>
             <span className={styles.miniCash}>{me.data ? <Money value={me.data.cash} /> : "—"}</span>
-            <span className={styles.miniSub}>{rank?.current?.name ?? "Unranked"} · {here?.name ?? "Nowhere"}</span>
+            <span className={styles.miniSub}>
+              {rank?.current?.name ?? "Unranked"}{showLocation ? ` · ${here?.name ?? "Nowhere"}` : ""}
+            </span>
           </div>
           <div ref={accountRef} className={styles.account}>
             <button

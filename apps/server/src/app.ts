@@ -19,7 +19,7 @@ import { registerPresenceRoutes } from "./presence/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { registerStatsRoutes } from "./stats/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
-import { CORE_PLUGINS } from "./plugins/core-plugins.js";
+import { bundledPlugins } from "./plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
@@ -79,8 +79,14 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
-  registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
-  registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+  // Jail and hospital are combat-adjacent sentence mechanics — gangster game,
+  // not framework. A framework boot registers neither; nothing can sentence a
+  // player there (no crimes, no combat), so the routes would be dead weight
+  // answering with never-set state.
+  if (config.profile === "full") {
+    registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+    registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+  }
   registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
@@ -92,14 +98,13 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // app.ts keeps registering un-ported modules directly (spec: Sequencing).
   // Both paths coexist for the length of M5 and the old one is deleted last.
   //
-  // A ported core module is never optional, so this app must end up with
-  // CORE_PLUGINS loaded one way or another. `bootTestServer()` and `index.ts`
-  // both build their own `deps.plugins` (CORE_PLUGINS plus whatever optional
-  // manifests were selected) and pass it in explicitly — that always wins.
-  // But most test files call `buildApp` directly with no `plugins` at all
+  // This app must end up with the profile's bundled plugins loaded one way or
+  // another. `bootTestServer()` and `index.ts` both build their own
+  // `deps.plugins` and pass it in explicitly — that always wins. But most
+  // test files call `buildApp` directly with no `plugins` at all
   // (`ranks.test.ts` among them), and those callers still need a ported
   // module's route to answer rather than 404. When `deps.plugins` is
-  // undefined, load CORE_PLUGINS here instead.
+  // undefined, load the bundled set for the config's profile here instead.
   let loaded = deps.plugins;
   let ownsLoadedPlugins = false;
   if (loaded === undefined) {
@@ -107,21 +112,27 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     // own `loadPlugins` call (`plugin-test-${randomUUID()}-`) — a shared
     // BullMQ queue name across concurrently-running test files has already
     // caused real cross-talk here (see the `crime-test-${randomUUID()}`
-    // comment in test/helpers/server.ts). `crimes` is the first core plugin
-    // that declares jobs, so this fallback now always throws on a real boot:
-    // every caller must pass `deps.plugins` explicitly, built with an
+    // comment in test/helpers/server.ts). `crimes` is the first bundled
+    // plugin that declares jobs, so this fallback throws on a full-profile
+    // boot: every caller must pass `deps.plugins` explicitly, built with an
     // isolated queue prefix, exactly as `bootTestServer` and `index.ts`
     // already do. The guard stays even though the branch below it is now
     // unreachable — the alternative is silently creating an unprefixed,
     // unisolated queue the first time a caller forgets to pass `plugins`.
-    for (const manifest of CORE_PLUGINS) {
+    const fallbackPlugins = bundledPlugins(config.profile, []);
+    for (const manifest of fallbackPlugins) {
       if (Object.keys(manifest.jobs).length > 0) {
         throw new Error(
-          `core plugin "${manifest.id}" declares jobs — it must be loaded by the caller with an isolated queue prefix, not by buildApp's default`,
+          `bundled plugin "${manifest.id}" declares jobs — it must be loaded by the caller with an isolated queue prefix, not by buildApp's default`,
         );
       }
     }
-    loaded = await loadPlugins({ db: deps.db, redis: deps.redis, settings: loadedSettings, leaderboardPrefix, assetDriver }, CORE_PLUGINS);
+    loaded = await loadPlugins(
+      { db: deps.db, redis: deps.redis, settings: loadedSettings, leaderboardPrefix, assetDriver },
+      fallbackPlugins,
+      "",
+      config.profile,
+    );
     ownsLoadedPlugins = true;
   }
 

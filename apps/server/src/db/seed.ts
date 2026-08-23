@@ -2,6 +2,27 @@ import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.js";
 import { crimes, items, locations, ranks } from "./schema/index.js";
 
+/**
+ * Which of the sample-content seeds a boot should run, given the plugin ids
+ * that boot loaded. Pure so the profile's seeding policy is testable without
+ * a database: a seed runs only when a plugin that reads its table loaded —
+ * sample crimes with no crimes plugin would fill a table no route ever
+ * queries. Ranks always run: the ladder is progression infrastructure and
+ * the ranks plugin is framework (never absent); the mafia rank names are
+ * admin-editable sample data, not code.
+ */
+export function bootSeedsFor(loadedPluginIds: Iterable<string>): {
+  crimes: boolean; ranks: true; locations: boolean; items: boolean;
+} {
+  const ids = loadedPluginIds instanceof Set ? loadedPluginIds : new Set(loadedPluginIds);
+  return {
+    crimes: ids.has("crimes"),
+    ranks: true,
+    locations: ids.has("travel") || ids.has("bullets"),
+    items: ids.has("inventory"),
+  };
+}
+
 export async function seedCrimes(db: Db): Promise<void> {
   const existing = await db.select({ id: crimes.id }).from(crimes).limit(1);
   if (existing.length > 0) return;

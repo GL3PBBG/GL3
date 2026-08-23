@@ -1,12 +1,20 @@
 import type mysql from "mysql2/promise";
 import { membershipPackages } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id } from "../id-map.js";
-import { bumpTable, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
+import { targetHas } from "../pg/plugin-tables.js";
 
 interface MembershipRow { PM_id: number; PM_desc: string; PM_seconds: number; PM_cost: number }
 
-export async function migrateMembership(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateMembership(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
+  if (!targetHas(targetTables, "p_membership_packages")) {
+    recordAbsentTargetTable(report, "p_membership_packages");
+    return;
+  }
   const [rows] = await pool.query<(MembershipRow & mysql.RowDataPacket)[]>(
     "SELECT PM_id, PM_desc, PM_seconds, PM_cost FROM premiumMembership",
   );

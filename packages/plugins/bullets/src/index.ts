@@ -419,6 +419,18 @@ export default definePlugin({
   id: "bullets",
   version: "1.0.0",
   basePaths: ["/api/bullets", "/api/admin/bullets"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["properties", "travel"],
+  pages: [{
+    id: "bullets.index",
+    path: "/bullets",
+    menu: { label: "Bullets", order: 30, category: "town" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   routes: [shopRoute, buyRoute, adminListRoute, adminStockRoute, adminOptionsListRoute, adminOptionsRoute],
   adminPages: [adminPage],
   // V2's maxBulletCost, enforced where the owner sets their price. The read

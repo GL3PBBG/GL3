@@ -335,8 +335,16 @@ starting — it is never silently absent from a running game.
 
 ## Cross-plugin constraints
 
-Some plugins assume others are present, and the loader does not resolve
-plugin-to-plugin dependencies for you. The known constraints are listed in the
-[operator guide](./index.md) — the canonical example: setting any town to
-`underground` combat mode requires the `detectives` plugin to be loaded, or
-every attack and target-list read in that town fails.
+Plugins that statically import another plugin declare it on their manifest
+(`requires`), and the loader enforces it at boot: a boot whose set does not
+satisfy every `requires` fails with an error naming the plugin and the
+missing requirement, before any route serves a request. The bundled gameplay
+clusters (`combat` → `detectives`; `casino` → `properties` → `combat`;
+`bullets` → `properties` + `travel`; the full list is in the
+[framework profile guide](./framework-profile.md)) are all covered by
+declarations, so an incomplete `PLUGIN_IDS` is a boot error, not a runtime one.
+
+That covers code dependencies. Data-driven couplings are still yours to
+check — the canonical example: setting any town to `underground` combat mode
+requires the `detectives` plugin to be loaded, or every attack and
+target-list read in that town fails.

@@ -763,6 +763,18 @@ export default definePlugin({
   id: "casino",
   version: "1.0.0",
   basePaths: ["/api/casino", "/api/admin/casino"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["properties"],
+  pages: [{
+    id: "casino.index",
+    path: "/casino",
+    menu: { label: "Casino", order: 33, category: "town" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
   routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes],

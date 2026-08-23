@@ -271,6 +271,23 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     }
   }
 
+  // Cross-plugin requirements run after the id sweep above: the full boot set
+  // (bundled + optional + dynamic) is known only once every manifest has been
+  // seen, and a missing requirement is exactly as boot-fatal as a missing
+  // table — the requiring plugin's code imports the requirement's package and
+  // would otherwise die at the first query with "relation does not exist".
+  // This is the enforced form of what installing-plugins.md used to state as
+  // prose (e.g. "underground combat mode requires detectives").
+  for (const manifest of manifests) {
+    for (const requiredId of manifest.requires) {
+      if (!seenIds.has(requiredId)) {
+        fail(
+          `plugin "${manifest.id}" requires plugin "${requiredId}", which is not in this boot — add it to PLUGIN_IDS or install it`,
+        );
+      }
+    }
+  }
+
   // Containment runs second: every basePath is known by now, so a route or an
   // action under a *later* basePath of the same plugin is not reported as a
   // violation.

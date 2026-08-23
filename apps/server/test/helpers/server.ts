@@ -7,7 +7,7 @@ import type { FilesystemDriver } from "../../src/assets/fs-driver.js";
 import { loadConfig } from "../../src/config.js";
 import { createDb } from "../../src/db/client.js";
 import { rebuildLeaderboards } from "../../src/game/leaderboard/service.js";
-import { withCorePlugins } from "../../src/plugins/core-plugins.js";
+import { withCorePlugins, bundledPlugins } from "../../src/plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "../../src/plugins/loader.js";
 import { loadSettings } from "../../src/settings/load.js";
 import { createRedis, createSubscriber } from "../../src/redis.js";
@@ -15,7 +15,7 @@ import { attachGateway } from "../../src/ws/gateway.js";
 import { testAssetDriver } from "./assets.js";
 
 export async function bootTestServer(
-  options?: { plugins?: readonly PluginManifest[] },
+  options?: { plugins?: readonly PluginManifest[]; profile?: "full" | "framework" },
 ): Promise<{
   app: FastifyInstance;
   close: () => Promise<void>;
@@ -26,7 +26,9 @@ export async function bootTestServer(
    * opening a second connection. See `registerVerifiedPlayer`. */
   redis: Redis;
 }> {
-  const config = loadConfig({ ...process.env, NODE_ENV: "test" });
+  // GL3_PROFILE is pinned per call, not inherited: an ambient variable in a
+  // developer's shell must not flip a test file's plugin set.
+  const config = loadConfig({ ...process.env, NODE_ENV: "test", GL3_PROFILE: options?.profile ?? "full" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
 
@@ -78,8 +80,14 @@ export async function bootTestServer(
 
   const loadedPlugins = await loadPlugins(
     { db, redis, settings: loadedTestSettings, leaderboardPrefix, assetDriver },
-    withCorePlugins(options?.plugins ?? []),
+    // Full-profile boots keep the historical merge (every bundled plugin plus
+    // the caller's extras); a framework boot loads the game-agnostic subset —
+    // the same selection production makes through bundledPlugins.
+    options?.profile === "framework"
+      ? bundledPlugins("framework", options.plugins ?? [])
+      : withCorePlugins(options?.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
+    config.profile,
   );
 
   const app = await buildApp(config, {

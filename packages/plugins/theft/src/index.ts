@@ -734,6 +734,9 @@ export default definePlugin({
   id: "theft",
   version: "1.0.0",
   basePaths: ["/api/theft", "/api/garage", "/api/admin/theft"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["membership"],
   tables: {
     cars: "p_theft_cars",
     tiers: "p_theft_tiers",

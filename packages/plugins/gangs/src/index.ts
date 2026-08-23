@@ -844,6 +844,15 @@ export default definePlugin({
   id: "gangs",
   version: "1.0.0",
   basePaths: ["/api/gangs", "/api/admin/gangs"],
+  pages: [{
+    id: "gangs.index",
+    path: "/gang",
+    menu: { label: "Gang", order: 44, category: "social" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   routes: [
     // Reads
     getGangRoute, gangLogsRoute, gangMembersRoute, myInvitesRoute,

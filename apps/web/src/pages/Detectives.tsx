@@ -55,7 +55,7 @@ function SearchRow({ row }: { row: DetectiveSearchRow }): JSX.Element {
       {state === "active" ? (
         <span>
           spotted in <strong>{row.targetLocationName}</strong> (live, until{" "}
-          <When iso={row.expiresAt} />) <Link to="/travel">Travel there</Link>
+          <When iso={row.expiresAt} />) <Link to="/plugins/travel.index">Travel there</Link>
         </span>
       ) : null}
       {state !== "pending" ? (

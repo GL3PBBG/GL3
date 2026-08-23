@@ -922,6 +922,18 @@ export default definePlugin({
   id: "combat",
   version: "1.0.0",
   basePaths: ["/api/combat"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["inventory", "detectives"],
+  pages: [{
+    id: "combat.index",
+    path: "/combat",
+    menu: { label: "Combat", order: 12, category: "crimes" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   migrations: COMBAT_MIGRATIONS,
   routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute],
   provides: [killResolved],

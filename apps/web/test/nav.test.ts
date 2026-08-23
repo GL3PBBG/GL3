@@ -36,8 +36,10 @@ describe("buildNav", () => {
       [entry("theft.index", "Car theft", 40), entry("membership.index", "Membership", 60)],
       { admin: false },
     );
+    // Gameplay destinations are plugin-declared now: the Crimes category is
+    // exactly what the payload routes into it.
     const crimes = nav.find((c) => c.id === "crimes")!;
-    expect(crimes.items.map((i) => i.label)).toEqual(["Crimes", "Combat", "Bounties", "Detectives", "Heists", "Car theft"]);
+    expect(crimes.items.map((i) => i.label)).toEqual(["Car theft"]);
     const account = nav.find((c) => c.id === "account")!;
     expect(account.items.map((i) => i.label)).toContain("Membership");
     // No unmapped plugin pages, so no trailing catch-all category.
@@ -54,7 +56,8 @@ describe("buildNav", () => {
   it("lets a declared category beat the fallback map", () => {
     const nav = buildNav([entry("theft.index", "Car theft", 40, "town")], { admin: false });
     expect(nav.find((c) => c.id === "town")!.items.at(-1)?.label).toBe("Car theft");
-    expect(nav.find((c) => c.id === "crimes")!.items.some((i) => i.label === "Car theft")).toBe(false);
+    // Nothing routed into Crimes, so the category does not materialize at all.
+    expect(nav.some((c) => c.id === "crimes")).toBe(false);
   });
 
   it("drops a page declaring an unknown category into More, not out of the nav", () => {
@@ -107,16 +110,32 @@ describe("buildNav", () => {
 describe("category and label lookup", () => {
   const nav = buildNav([], { admin: true });
 
-  it("places jail and hospital in Town — services, not crimes", () => {
-    expect(categoryForPath(nav, "/jail")?.id).toBe("town");
-    expect(categoryForPath(nav, "/hospital")?.id).toBe("town");
-    expect(categoryForPath(nav, "/crimes")?.id).toBe("crimes");
+  it("places the payload's jail and hospital pages in Town — services, not crimes", () => {
+    const withServices = buildNav([
+      entry("jail", "Jail", 38, "town"),
+      entry("hospital", "Hospital", 39, "town"),
+    ], { admin: true });
+    expect(categoryForPath(withServices, "/plugins/jail")?.id).toBe("town");
+    expect(categoryForPath(withServices, "/plugins/hospital")?.id).toBe("town");
   });
 
-  it("folds the old Actions destinations into Crimes and drops the empty category", () => {
+  it("a framework payload leaves no crimes category and a services-only Town", () => {
+    expect(nav.some((c) => c.id === "crimes")).toBe(false);
     expect(nav.some((c) => c.id === "actions")).toBe(false);
-    for (const path of ["/combat", "/bounties", "/detectives", "/oc"]) {
-      expect(categoryForPath(nav, path)?.id).toBe("crimes");
+    expect(nav.find((c) => c.id === "town")!.items.map((i) => i.label)).toEqual(["Bank", "Shop"]);
+  });
+
+  it("folds the gameplay plugin pages into Crimes and drops the empty Actions category", () => {
+    const withGameplay = buildNav([
+      entry("crimes.index", "Crimes", 10, "crimes"),
+      entry("combat.index", "Combat", 12, "crimes"),
+      entry("bounties.index", "Bounties", 14, "crimes"),
+      entry("detectives.index", "Detectives", 16, "crimes"),
+      entry("oc.index", "Heists", 18, "crimes"),
+    ], { admin: false });
+    expect(withGameplay.some((c) => c.id === "actions")).toBe(false);
+    for (const path of ["/plugins/combat.index", "/plugins/bounties.index", "/plugins/detectives.index", "/plugins/oc.index"]) {
+      expect(categoryForPath(withGameplay, path)?.id).toBe("crimes");
     }
   });
 

@@ -18,6 +18,16 @@ const EnvSchema = z.object({
     (value) => !value.split(",").map((o) => o.trim()).includes("*"),
     { message: "CORS_ORIGINS must not contain a wildcard \"*\" — spec §7 requires a strict allowlist" },
   ),
+  /**
+   * Which bundled plugins load at boot. `full` (default) loads every
+   * first-party plugin — the gangster game, unchanged. `framework` loads
+   * only the game-agnostic set (ranks, notifications, news, bank, mail,
+   * forum, inventory, membership), skips jail/hospital, the sentence
+   * sweeper, the wealth tax and the gameplay seeds — an openPBBG-shaped
+   * engine that gameplay plugins can be added back onto via PLUGIN_IDS
+   * (e.g. `GL3_PROFILE=framework PLUGIN_IDS=crimes`).
+   */
+  GL3_PROFILE: z.enum(["full", "framework"]).default("full"),
   /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
   PLUGIN_IDS: z.string().default(""),
   /**
@@ -105,6 +115,8 @@ export interface Config {
   sessionTtlSeconds: number;
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
+  /** `full` = every bundled plugin; `framework` = the game-agnostic subset. */
+  profile: "full" | "framework";
   pluginIds: string[];
   /** Package specifiers imported at boot from outside this build. */
   pluginPackages: string[];
@@ -124,6 +136,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     sessionTtlSeconds: parsed.SESSION_TTL,
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     nodeEnv: parsed.NODE_ENV,
+    profile: parsed.GL3_PROFILE,
     pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
     pluginPackages: parsed.PLUGIN_PACKAGES.split(",").map((p) => p.trim()).filter(Boolean),
     pluginDir: parsed.PLUGIN_DIR ?? null,

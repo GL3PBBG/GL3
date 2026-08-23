@@ -77,6 +77,9 @@ services:
       REDIS_URL: redis://redis:6379
       CORS_ORIGINS: ${GL3_PUBLIC_ORIGIN:-http://localhost:8080}
       APP_BASE_URL: ${GL3_PUBLIC_ORIGIN:-http://localhost:8080}
+      # full (default) = the gangster game; framework = the game-agnostic
+      # engine (openPBBG-shaped), gameplay plugins addable via PLUGIN_IDS.
+      GL3_PROFILE: ${GL3_PROFILE:-full}
       # EMAIL_DRIVER defaults to log: verification links print to
       # `docker compose --profile app logs server`, which is the whole signup
       # flow for a private instance. Switch to resend for real mail (see

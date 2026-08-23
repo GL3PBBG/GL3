@@ -1,14 +1,22 @@
 import type mysql from "mysql2/promise";
 import { propertiesPlugin } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
-import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
+import { targetHas } from "../pg/plugin-tables.js";
 
 interface PropertyRow {
   PR_id: number; PR_location: number; PR_module: string; PR_user: number; PR_cost: number; PR_profit: number;
 }
 
-export async function migrateProperties(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateProperties(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
+  if (!targetHas(targetTables, "p_properties_properties")) {
+    recordAbsentTargetTable(report, "p_properties_properties");
+    return;
+  }
   const [rows] = await pool.query<(PropertyRow & mysql.RowDataPacket)[]>(
     "SELECT PR_id, PR_location, PR_module, PR_user, PR_cost, PR_profit FROM properties",
   );

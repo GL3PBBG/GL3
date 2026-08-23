@@ -509,7 +509,7 @@ function TableError({ error }: { error: unknown }): JSX.Element | null {
   if (error instanceof ApiError && error.code === "wrong_location") {
     return (
       <p role="alert" className={styles.bad}>
-        Your table is in another town. <Link to="/travel">Travel back</Link>, or leave your seat.
+        Your table is in another town. <Link to="/plugins/travel.index">Travel back</Link>, or leave your seat.
       </p>
     );
   }
@@ -574,7 +574,7 @@ function RemoteTables({ remote }: { remote: readonly CasinoRemoteTables[] }): JS
           </li>
         ))}
       </ul>
-      <p className={styles.meta}><Link to="/travel">Travel</Link> to join them.</p>
+      <p className={styles.meta}><Link to="/plugins/travel.index">Travel</Link> to join them.</p>
     </>
   );
 }
@@ -635,7 +635,7 @@ export function Casino(): JSX.Element {
       <Panel title="Casino">
         <ErrorText error={lobby.error} />
         {nowhere ? (
-          <p className={styles.meta}><Link to="/travel">Travel somewhere</Link> first.</p>
+          <p className={styles.meta}><Link to="/plugins/travel.index">Travel somewhere</Link> first.</p>
         ) : null}
       </Panel>
     );

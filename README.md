@@ -87,12 +87,20 @@ silently fails because the tables it needs don't exist yet.
 
 ## Plugins
 
-Every ported V2 module is a plugin, loaded unconditionally from
-`packages/plugins/`: `ranks`, `notifications`, `news`, `bank`, `bullets`,
-`travel`, `crimes`, `mail`, `gangs`, plus first-party clusters with no V2
-counterpart: `combat` + `inventory` (PvP, hospital, location shops),
-`bounties`, `detectives`, `oc` (organized crime), `theft` (car theft + garage),
-`properties` (franchises), `forum`, `casino` + `blackjack`, `membership`.
+Every ported V2 module is a plugin in `packages/plugins/`, split into two
+sets by `GL3_PROFILE`:
+
+- **framework** (every profile) — the game-agnostic engine, openPBBG's
+  module list: `ranks`, `notifications`, `news`, `bank`, `mail`, `forum`,
+  `inventory`, `membership`.
+- **gameplay** (`full`, the default) — the gangster game on top:
+  `crimes`, `bullets`, `travel`, `gangs`, `combat`, `bounties`, `detectives`,
+  `oc`, `theft`, `properties`, `casino`, `blackjack`. A `framework` boot also
+  skips jail/hospital, the sentence sweeper, the wealth tax and the gameplay
+  seeds, and gameplay plugins can be added back individually with
+  `PLUGIN_IDS` (`GL3_PROFILE=framework PLUGIN_IDS=crimes`). Cross-plugin
+  requirements (`combat` needs `detectives`, ...) are declared on the
+  manifests and enforced at boot.
 
 Third-party plugins load through `PLUGIN_IDS` (compiled into the server) and
 `PLUGIN_PACKAGES` (imported at boot from outside the build); `.env.example`

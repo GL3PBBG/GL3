@@ -42,16 +42,14 @@ const HOME: NavCategory = {
   items: [{ to: "/", label: "Dashboard" }],
 };
 
+/* Plugin-only today: the crimes category's core items moved onto the
+   gameplay plugins' own page declarations (crimes.index, combat.index, ...)
+   in the profile split, so the category exists exactly when a gameplay page
+   routes here — and vanishes entirely under a framework boot. */
 const CRIMES: NavCategory = {
   id: "crimes",
   label: "Crimes",
-  items: [
-    { to: "/crimes", label: "Crimes" },
-    { to: "/combat", label: "Combat" },
-    { to: "/bounties", label: "Bounties" },
-    { to: "/detectives", label: "Detectives" },
-    { to: "/oc", label: "Heists" },
-  ],
+  items: [],
 };
 
 /* Plugin-only: rendered between Crimes and Town when a plugin page routes
@@ -62,17 +60,14 @@ const ACTIONS: NavCategory = {
   items: [],
 };
 
+/* Bank and Shop are the framework's town services; bullets/casino/travel/
+   jail/hospital are plugin/synthetic pages folded in from the payload. */
 const TOWN: NavCategory = {
   id: "town",
   label: "Town",
   items: [
     { to: "/bank", label: "Bank" },
     { to: "/shop", label: "Shop" },
-    { to: "/bullets", label: "Bullets" },
-    { to: "/casino", label: "Casino" },
-    { to: "/travel", label: "Travel" },
-    { to: "/jail", label: "Jail" },
-    { to: "/hospital", label: "Hospital" },
   ],
 };
 
@@ -82,7 +77,6 @@ const SOCIAL: NavCategory = {
   items: [
     { to: "/mail", label: "Mail" },
     { to: "/forum", label: "Forum" },
-    { to: "/gang", label: "Gang" },
     { to: "/players", label: "Players" },
     { to: "/news", label: "News" },
     { to: "/notifications", label: "Alerts" },

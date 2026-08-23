@@ -38,10 +38,12 @@ describe("fingerprintV2Schema", () => {
     const fixture = await createIsolatedMysqlFixture();
     try {
       const pool = await createMysqlPool(fixture.url);
-      await pool.query("ALTER TABLE userStats DROP COLUMN US_crimes");
+      // US_money is framework-required; US_gang/US_crimes are game columns
+      // and their absence is informational (see the openpbbg test), not fatal.
+      await pool.query("ALTER TABLE userStats DROP COLUMN US_money");
       const result = await fingerprintV2Schema(pool);
       expect(result.ok).toBe(false);
-      expect(result.missingColumns.userStats).toEqual(["US_crimes"]);
+      expect(result.missingColumns.userStats).toEqual(["US_money"]);
       await pool.end();
     } finally {
       await fixture.teardown();

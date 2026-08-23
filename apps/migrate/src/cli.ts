@@ -78,6 +78,14 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
 
+  const gameColumnEntries = Object.entries(fingerprint.missingGameColumns);
+  if (gameColumnEntries.length > 0) {
+    console.log(
+      `Note: framework-shaped V2 source (openPBBG?) — game columns absent, games phases will skip: ` +
+      gameColumnEntries.map(([table, cols]) => `${table}.${cols.join("/")}`).join(", "),
+    );
+  }
+
   const { db, sql } = createDb(args.pgUrl);
   try {
     await runMigration({ mysql: pool, db, report, dryRun: args.dryRun, townCombatMode: args.townCombatMode });

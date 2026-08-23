@@ -11,12 +11,13 @@ describe("PluginsPayloadSchema", () => {
       }],
       events: [{ pluginId: "hello", name: "greeted", describe: "{actorName} said hello", invalidates: ["hello"] }],
       moneyFormat: DEFAULT_MONEY_FORMAT,
+      installed: ["bank"],
     };
     expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
   });
 
   it("accepts an empty payload", () => {
-    const payload = { menu: [], pages: [], events: [], moneyFormat: DEFAULT_MONEY_FORMAT };
+    const payload = { menu: [], pages: [], events: [], installed: [], moneyFormat: DEFAULT_MONEY_FORMAT };
     expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
   });
 
@@ -38,6 +39,7 @@ describe("PluginsPayloadSchema", () => {
   it("round-trips an event meta that declares itself silent", () => {
     const payload = {
       menu: [], pages: [], moneyFormat: DEFAULT_MONEY_FORMAT,
+      installed: ["bank"],
       events: [{
         pluginId: "casino", name: "table", describe: "{actorName} is at the tables",
         invalidates: ["casino"], silent: true,
@@ -80,6 +82,7 @@ describe("PluginsPayloadSchema view sink constraints", () => {
         view: { kind: "panel", title: "x", children: [node] },
       }],
       moneyFormat: DEFAULT_MONEY_FORMAT,
+      installed: ["bank"],
     };
   }
 
@@ -168,6 +171,7 @@ describe("PluginsPayloadSchema view size bounds", () => {
       menu: [], events: [],
       pages: [{ pluginId: "hello", id: "hello.index", path: "/hello", view }],
       moneyFormat: DEFAULT_MONEY_FORMAT,
+      installed: ["bank"],
     };
   }
 

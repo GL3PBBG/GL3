@@ -424,7 +424,7 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
 const profileExtras = on(coreProfileView, async (ctx, value) => ({
   ...value,
   extras: [...value.extras,
-    { kind: "link" as const, pluginId: ctx.pluginId, label: "Hire detective", to: `/detectives?target=${value.targetId}` }],
+    { kind: "link" as const, pluginId: ctx.pluginId, label: "Hire detective", to: `/plugins/detectives.index?target=${value.targetId}` }],
 }));
 
 const menuBadge = on(coreMenuBadges, async (ctx, value) => {
@@ -443,13 +443,24 @@ const menuBadge = on(coreMenuBadges, async (ctx, value) => {
     return rows.length;
   });
 
-  return ready > 0 ? [...value, { path: "/detectives", count: ready }] : value;
+  // The nav key of the detectives page — a plugin page since the profile
+  // split, so the badge keys on /plugins/<pageId> to land on its item.
+  return ready > 0 ? [...value, { path: "/plugins/detectives.index", count: ready }] : value;
 });
 
 export default definePlugin({
   id: "detectives",
   version: "1.0.0",
   basePaths: ["/api/detectives", "/api/admin/detectives"],
+  pages: [{
+    id: "detectives.index",
+    path: "/detectives",
+    menu: { label: "Detectives", order: 16, category: "crimes" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   migrations: DETECTIVES_MIGRATIONS,
   routes: [hireRoute, listRoute, removeRoute, adminSettingsListRoute, adminSettingsWriteRoute],
   adminPages: [adminPage],

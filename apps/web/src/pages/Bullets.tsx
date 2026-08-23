@@ -28,7 +28,7 @@ export function Bullets(): JSX.Element {
       <Panel title="Bullets">
         <p style={{ margin: 0 }}>You aren't anywhere yet — bullets are bought from a city.</p>
         <p className={styles.meta}>
-          <Link to="/travel">Travel somewhere</Link> first.
+          <Link to="/plugins/travel.index">Travel somewhere</Link> first.
         </p>
       </Panel>
     );

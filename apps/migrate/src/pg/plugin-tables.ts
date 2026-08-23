@@ -109,3 +109,14 @@ export const membershipPackages = pgTable("p_membership_packages", {
   costPoints: bigint("cost_points", { mode: "bigint" }).notNull(),
   durationSeconds: integer("duration_seconds").notNull(),
 });
+
+/**
+ * True when the target GL3 has the named table. A framework-profile target
+ * (`GL3_PROFILE=framework`) never creates the gameplay plugins' p_* tables,
+ * so their migrators skip and report rather than die on Postgres 42P01. An
+ * undefined set means "assume everything" — the direct-call tests, which
+ * always build targets with every plugin migration applied.
+ */
+export function targetHas(targetTables: ReadonlySet<string> | undefined, name: string): boolean {
+  return targetTables === undefined || targetTables.has(name);
+}

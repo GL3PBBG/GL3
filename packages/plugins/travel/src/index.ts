@@ -534,6 +534,18 @@ export default definePlugin({
   // First port claiming two base paths; plugins/validate.ts checks each route
   // path is contained in one of them and that no other plugin claims either.
   basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["membership"],
+  pages: [{
+    id: "travel.index",
+    path: "/travel",
+    menu: { label: "Travel", order: 36, category: "town" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
   filters: [declareBenefit],

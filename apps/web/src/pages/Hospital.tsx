@@ -75,7 +75,7 @@ export function Hospital(): JSX.Element {
               </>
             ) : null}
             <p className={styles.meta}>
-              <Link to="/combat">Back to combat</Link>
+              <Link to="/plugins/combat.index">Back to combat</Link>
             </p>
           </>
         )}

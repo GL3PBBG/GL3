@@ -232,7 +232,7 @@ const profileExtras = on(coreProfileView, async (ctx, value) => {
   const total = rows.reduce((sum, r) => sum + r.amount, 0n);
 
   const extras = [...value.extras,
-    { kind: "link" as const, pluginId: ctx.pluginId, label: "Place bounty", to: `/bounties?target=${value.targetId}` }];
+    { kind: "link" as const, pluginId: ctx.pluginId, label: "Place bounty", to: `/plugins/bounties.index?target=${value.targetId}` }];
   if (total > 0n) {
     extras.unshift({ kind: "stat" as const, pluginId: ctx.pluginId, label: "Open bounty", value: `$${total.toString()}` });
   }
@@ -243,6 +243,18 @@ export default definePlugin({
   id: "bounties",
   version: "1.0.0",
   basePaths: ["/api/bounties"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["combat"],
+  pages: [{
+    id: "bounties.index",
+    path: "/bounties",
+    menu: { label: "Bounties", order: 14, category: "crimes" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   migrations: BOUNTIES_MIGRATIONS,
   routes: [placeRoute, listRoute],
   filters: [claimOnKill, profileExtras],

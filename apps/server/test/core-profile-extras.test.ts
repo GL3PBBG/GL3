@@ -50,8 +50,8 @@ describe("core.profileView and core.moneyFormat applied at their real seams", ()
       // an always-on link ahead of the test plugins here, in plugin load
       // order (core-plugins.ts).
       expect(parsed.extras).toEqual([
-        { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/bounties?target=${playerId}` },
-        { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/detectives?target=${playerId}` },
+        { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/plugins/bounties.index?target=${playerId}` },
+        { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/plugins/detectives.index?target=${playerId}` },
         { kind: "stat", pluginId: "profile-contributor", label: "Contributed", value: "1" },
         { kind: "link", pluginId: "profile-contributor", label: "See more", to: "/profile-contributor" },
       ]);

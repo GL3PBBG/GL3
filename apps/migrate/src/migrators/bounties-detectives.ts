@@ -1,7 +1,7 @@
 import type mysql from "mysql2/promise";
-import { bounties, detectiveSearches } from "../pg/plugin-tables.js";
+import { bounties, detectiveSearches, targetHas } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
-import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 import { unixToDate } from "../time.js";
 
@@ -11,7 +11,13 @@ import { unixToDate } from "../time.js";
 interface BountyRow { B_id: number; B_user: number; B_userToKill: number; B_cost: number; }
 interface DetectiveRow { D_id: number; D_user: number; D_userToFind: number; D_detectives: number; D_start: number; D_end: number; D_success: number | null; }
 
-export async function migrateBountiesAndDetectives(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateBountiesAndDetectives(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
+  if (!targetHas(targetTables, "p_bounties_bounties")) {
+    recordAbsentTargetTable(report, "p_bounties_bounties");
+  } else {
   const [bountyRows] = await pool.query<(BountyRow & mysql.RowDataPacket)[]>(
     "SELECT B_id, B_user, B_userToKill, B_cost FROM bounties",
   );
@@ -32,6 +38,12 @@ export async function migrateBountiesAndDetectives(pool: mysql.Pool, exec: Execu
     bumpTable(report, "bounties", "written");
   }
 
+  }
+
+  if (!targetHas(targetTables, "p_detectives_searches")) {
+    recordAbsentTargetTable(report, "p_detectives_searches");
+    return;
+  }
   const [detectiveRows] = await pool.query<(DetectiveRow & mysql.RowDataPacket)[]>(
     "SELECT D_id, D_user, D_userToFind, D_detectives, D_start, D_end, D_success FROM detectives",
   );

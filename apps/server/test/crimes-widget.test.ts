@@ -51,7 +51,7 @@ describe("crimes on the dashboard (core.dashboard)", () => {
     if (text!.kind !== "text") throw new Error("unreachable");
     expect(text!.value).toBe("A crime is ready.");
     const link = widget!.view.children.find((c) => c.kind === "link");
-    expect(link).toEqual({ kind: "link", label: "Go to crimes", to: "/crimes" });
+    expect(link).toEqual({ kind: "link", label: "Go to crimes", to: "/plugins/crimes.index" });
   });
 
   it("shows the armed cooldown after a commit, proving the sibling ctx reads crimes' own scope", async () => {

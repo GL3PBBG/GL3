@@ -12,6 +12,21 @@ export interface MigrationReport {
   tables: TableReport[];
   orphans: OrphanEntry[];
   unknownTables: string[];
+  /**
+   * V2 tables this pipeline knows how to migrate but the source database
+   * lacks — an openPBBG source (the GL2 framework without the game) has no
+   * crimes/gangs/cars/... tables at all. Each migrator whose required source
+   * tables are all present runs normally; one that is missing any records
+   * them here and skips, rather than dying on MySQL 1146.
+   */
+  missingSourceTables: string[];
+  /**
+   * GL3 plugin-owned tables the TARGET lacks — a framework-profile GL3
+   * (`GL3_PROFILE=framework`) never creates p_bounties_bounties and
+   * friends. The corresponding plugin-table migrators skip and record the
+   * table name here instead of dying on Postgres 42P01.
+   */
+  absentTargetTables: string[];
   unknownTimerKeys: string[];
   droppedCrimePositions: DroppedCrimePosition[];
   bossNotInGang: Array<{ gangV2Id: number; bossV2Id: number }>;
@@ -27,6 +42,8 @@ export function createReport(dryRun: boolean): MigrationReport {
     tables: [],
     orphans: [],
     unknownTables: [],
+    missingSourceTables: [],
+    absentTargetTables: [],
     unknownTimerKeys: [],
     droppedCrimePositions: [],
     bossNotInGang: [],
@@ -55,6 +72,14 @@ export function recordUnknownTimerKey(report: MigrationReport, key: string): voi
   if (!report.unknownTimerKeys.includes(key)) report.unknownTimerKeys.push(key);
 }
 
+export function recordMissingSourceTable(report: MigrationReport, table: string): void {
+  if (!report.missingSourceTables.includes(table)) report.missingSourceTables.push(table);
+}
+
+export function recordAbsentTargetTable(report: MigrationReport, table: string): void {
+  if (!report.absentTargetTables.includes(table)) report.absentTargetTables.push(table);
+}
+
 export function recordDroppedCrimePosition(report: MigrationReport, playerV2Id: number, position: number): void {
   report.droppedCrimePositions.push({ playerV2Id, position });
 }
@@ -77,6 +102,12 @@ export function formatHumanSummary(report: MigrationReport): string {
   lines.push(`${report.orphans.length} orphan row(s) skipped`);
   if (report.unknownTables.length > 0) {
     lines.push(`Unknown tables (custom module tables, not migrated): ${report.unknownTables.join(", ")}`);
+  }
+  if (report.missingSourceTables.length > 0) {
+    lines.push(`Source tables absent, migrators skipped (framework-shaped V2 source?): ${report.missingSourceTables.join(", ")}`);
+  }
+  if (report.absentTargetTables.length > 0) {
+    lines.push(`Target plugin tables absent, sections skipped (framework-profile GL3?): ${report.absentTargetTables.join(", ")}`);
   }
   if (report.unknownTimerKeys.length > 0) {
     lines.push(`Unknown userTimers keys (migrated anyway): ${report.unknownTimerKeys.join(", ")}`);

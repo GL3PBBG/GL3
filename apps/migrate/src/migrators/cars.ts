@@ -1,13 +1,24 @@
 import type mysql from "mysql2/promise";
 import { cars, theftTiers } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id } from "../id-map.js";
-import { bumpTable, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
+import { targetHas } from "../pg/plugin-tables.js";
 
 interface CarRow { CA_id: number; CA_name: string; CA_value: number; CA_theftChance: number; }
 interface TheftRow { T_id: number; T_name: string; T_chance: number; T_maxDamage: number; T_worstCar: number; T_bestCar: number; }
 
-export async function migrateCars(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateCars(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
+  // The theft plugin owns both target tables; a framework GL3 has neither.
+  if (!targetHas(targetTables, "p_theft_cars") || !targetHas(targetTables, "p_theft_tiers")) {
+    for (const t of ["p_theft_cars", "p_theft_tiers"]) {
+      if (!targetHas(targetTables, t)) recordAbsentTargetTable(report, t);
+    }
+    return;
+  }
   const [carRows] = await pool.query<(CarRow & mysql.RowDataPacket)[]>(
     "SELECT CA_id, CA_name, CA_value, CA_theftChance FROM cars",
   );

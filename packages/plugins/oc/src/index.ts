@@ -754,6 +754,15 @@ export default definePlugin({
   id: "oc",
   version: "1.0.0",
   basePaths: ["/api/oc"],
+  pages: [{
+    id: "oc.index",
+    path: "/oc",
+    menu: { label: "Heists", order: 18, category: "crimes" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   // One image per ROLE, not per heist: a heist row is a live instance a player
   // created, while the four roles are the fixed content of the feature. They
   // are singletons because a role is not a row — `ROLES` is a constant, so

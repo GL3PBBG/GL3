@@ -55,7 +55,7 @@ export function Jail(): JSX.Element {
           <>
             <p className={styles.ok} style={{ margin: 0 }}>You're free.</p>
             <p className={styles.meta}>
-              <Link to="/crimes">Back to work</Link>
+              <Link to="/plugins/crimes.index">Back to work</Link>
             </p>
           </>
         )}

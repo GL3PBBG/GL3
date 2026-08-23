@@ -137,6 +137,8 @@ export interface PluginManifestInput {
   id: string;
   version: string;
   basePaths: string[];
+  /** Ids of other plugins that must be loaded in the same boot. */
+  requires?: string[];
   tables?: Record<string, unknown>;
   migrations?: PluginMigration[];
   routes?: PluginRoute[];
@@ -155,6 +157,7 @@ export interface PluginManifest {
   id: string;
   version: string;
   basePaths: string[];
+  requires: string[];
   tables: Record<string, unknown>;
   migrations: PluginMigration[];
   routes: PluginRoute[];
@@ -214,6 +217,13 @@ const InputSchema = z
       )
       .min(1),
     tables: z.record(z.unknown()).optional(),
+    // Cross-plugin dependencies, checked against the FINAL boot set by the
+    // loader (validate.ts) — this schema can only see one manifest at a time.
+    // Ids (not package names) because that is what PLUGIN_IDS and every boot
+    // error already speak.
+    requires: z
+      .array(z.string().regex(PLUGIN_ID_PATTERN, "required plugin id must be lowercase kebab-case"))
+      .optional(),
     migrations: z.array(MigrationSchema).optional(),
     routes: z.array(z.custom<PluginRoute>()).optional(),
     pages: z.array(PageSchemaSchema).optional(),
@@ -279,6 +289,13 @@ const InputSchema = z
         }
       });
     }
+    if (manifest.requires?.includes(manifest.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requires"],
+        message: "a plugin cannot require itself",
+      });
+    }
   });
 
 /**
@@ -328,6 +345,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     id: parsed.id,
     version: parsed.version,
     basePaths: parsed.basePaths,
+    requires: parsed.requires ?? [],
     tables: parsed.tables ?? {},
     migrations: parsed.migrations ?? [],
     routes: parsed.routes ?? [],

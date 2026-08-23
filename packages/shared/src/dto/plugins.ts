@@ -375,6 +375,14 @@ export const PluginsPayloadSchema = z.object({
   menu: z.array(MenuItemSchema),
   pages: z.array(PagePayloadSchema),
   events: z.array(EventMetaSchema),
+  /**
+   * Every installed plugin id, sorted — the client's feature detection. The
+   * HUD hides a system's stat when the plugin that owns it is absent (a
+   * framework boot loads no combat, so a Bullets readout there would be a
+   * permanent zero). Plugin ids only; the synthetic "core" page entries do
+   * not appear here.
+   */
+  installed: z.array(z.string()),
   /** Resolved from the `core.moneyFormat` filter point per request, not at boot. */
   moneyFormat: MoneyFormatSchema,
 }).strict();

@@ -4,21 +4,12 @@ import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
 import { Admin } from "./pages/Admin.js";
 import { Bank } from "./pages/Bank.js";
-import { Bounties } from "./pages/Bounties.js";
-import { Detectives } from "./pages/Detectives.js";
 import { Forgot } from "./pages/Forgot.js";
 import { Forum } from "./pages/Forum.js";
 import { ForumTopic } from "./pages/ForumTopic.js";
-import { Bullets } from "./pages/Bullets.js";
-import { Casino } from "./pages/Casino.js";
-import { Combat } from "./pages/Combat.js";
-import { Crimes } from "./pages/Crimes.js";
 import { Shop } from "./pages/Shop.js";
 import { Dashboard } from "./pages/Dashboard.js";
-import { Gang } from "./pages/Gang.js";
-import { Hospital } from "./pages/Hospital.js";
 import { Inventory } from "./pages/Inventory.js";
-import { Jail } from "./pages/Jail.js";
 import { Leaderboards } from "./pages/Leaderboards.js";
 import { Login } from "./pages/Login.js";
 import { Mail } from "./pages/Mail.js";
@@ -27,14 +18,12 @@ import { News } from "./pages/News.js";
 import { NotFound } from "./pages/NotFound.js";
 import { Notifications } from "./pages/Notifications.js";
 import { Players } from "./pages/Players.js";
-import { OrganizedCrime } from "./pages/OrganizedCrime.js";
 import { PlayerProfile } from "./pages/PlayerProfile.js";
 import { Profile } from "./pages/Profile.js";
 import { Ranks } from "./pages/Ranks.js";
 import { Reset } from "./pages/Reset.js";
 import { Rounds } from "./pages/Rounds.js";
 import { Stats } from "./pages/Stats.js";
-import { Travel } from "./pages/Travel.js";
 import { Verify } from "./pages/Verify.js";
 import { PluginPage } from "./plugins/PluginPage.js";
 import { useGameEvents } from "./ws/useGameEvents.js";
@@ -78,24 +67,20 @@ export function App(): JSX.Element {
             <Route path="/verify" element={<Verify />} />
             <Route element={<Shell />}>
               <Route index element={<Dashboard />} />
-              <Route path="crimes" element={<Crimes />} />
-              <Route path="jail" element={<Jail />} />
-              <Route path="hospital" element={<Hospital />} />
+              {/* The gameplay pages (crimes, combat, bounties, detectives,
+                  heists, casino, gang, bullets, travel, jail, hospital) are
+                  plugin-declared pages rendered through /plugins/:pageId with
+                  hand-written overrides — see plugins/overrides.ts. They exist
+                  exactly when their plugin (or, for jail/hospital, the full
+                  profile) is loaded, so a framework boot has neither the
+                  routes nor the nav entries. */}
               <Route path="bank" element={<Bank />} />
-              <Route path="travel" element={<Travel />} />
-              <Route path="bullets" element={<Bullets />} />
               <Route path="shop" element={<Shop />} />
               <Route path="inventory" element={<Inventory />} />
-              <Route path="combat" element={<Combat />} />
-              <Route path="bounties" element={<Bounties />} />
-              <Route path="detectives" element={<Detectives />} />
-              <Route path="casino" element={<Casino />} />
-              <Route path="oc" element={<OrganizedCrime />} />
               <Route path="ranks" element={<Ranks />} />
               <Route path="leaderboards" element={<Leaderboards />} />
               <Route path="rounds" element={<Rounds />} />
               <Route path="stats" element={<Stats />} />
-              <Route path="gang" element={<Gang />} />
               <Route path="mail" element={<Mail />} />
               <Route path="mail/:threadId" element={<MailThread />} />
               <Route path="forum" element={<Forum />} />

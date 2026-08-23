@@ -1,7 +1,7 @@
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import type { Queue, Worker } from "bullmq";
 import { buildCoreFilters, type CoreFilters } from "./core-filters.js";
-import { buildPluginsPayload, type PluginsPayload } from "./manifest-endpoint.js";
+import { buildPluginsPayload, type Gl3Profile, type PluginsPayload } from "./manifest-endpoint.js";
 import { createPluginQueues, createPluginWorkers } from "./jobs.js";
 import { runPluginMigrations } from "./migrate.js";
 import { validatePlugins } from "./validate.js";
@@ -37,6 +37,7 @@ export async function loadPlugins(
   deps: LoadPluginsDeps,
   manifests: readonly PluginManifest[],
   queuePrefix = "",
+  profile: Gl3Profile = "full",
 ): Promise<LoadedPlugins> {
   validatePlugins(manifests);
   await runPluginMigrations(deps.db, manifests);
@@ -51,7 +52,9 @@ export async function loadPlugins(
   );
   // Built last, after queues/workers exist: a core-owned filter point's
   // subscriber ctx needs `ctx.jobs.enqueue`, same as any plugin route's ctx,
-  // which is only wireable once `queues` is populated.
+  // which is only wireable once `queues` is populated. The profile threads
+  // through to decide the synthetic core pages (jail/hospital) — see
+  // `buildPluginsPayload`.
   const coreFilters = buildCoreFilters({ ...deps, queues }, manifests);
-  return { manifests, payload: buildPluginsPayload(manifests), queues, workers, coreFilters };
+  return { manifests, payload: buildPluginsPayload(manifests, profile), queues, workers, coreFilters };
 }

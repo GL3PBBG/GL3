@@ -53,7 +53,7 @@ const dashboardWidget = on(coreDashboard, async (ctx, value) => {
           kind: "text" as const,
           value: remaining > 0 ? `Next crime ready in ${remaining}s` : "A crime is ready.",
         },
-        { kind: "link" as const, label: "Go to crimes", to: "/crimes" },
+        { kind: "link" as const, label: "Go to crimes", to: "/plugins/crimes.index" },
       ],
     },
   }];
@@ -442,6 +442,18 @@ export default definePlugin({
   id: "crimes",
   version: "1.0.0",
   basePaths: ["/api/crimes", "/api/admin/crimes"],
+  // Real import dependencies (see this package's package.json) —
+  // enforced against the final boot set by plugins/validate.ts.
+  requires: ["membership"],
+  pages: [{
+    id: "crimes.index",
+    path: "/crimes",
+    menu: { label: "Crimes", order: 10, category: "crimes" },
+    // Stub view: the client renders a hand-written override (apps/web
+    // PAGE_OVERRIDES) for this id; the schema view exists because a
+    // page declaration requires one.
+    view: { kind: "list", items: [] },
+  }],
   routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },

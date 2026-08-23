@@ -20,14 +20,37 @@ export interface EventMeta {
  * through the `core.moneyFormat` filter chain rather than being fixed at boot. */
 export interface PluginsPayload {
   menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[];
+  /** Every installed plugin id, sorted — the client's feature detection. */
+  installed: string[];
 }
+
+/** Which bundled set a boot loaded — see `plugins/core-plugins.ts`. */
+export type Gl3Profile = "full" | "framework";
+
+/**
+ * Core-owned gameplay screens that ride the plugin payload so the client
+ * shows them exactly when the server serves them. Jail and hospital are core
+ * modules, not plugins — but their pages behave like plugin pages: they
+ * appear in `pages`/`menu` only when the profile registers their routes, so
+ * a framework boot's nav and routes lose them with zero client-side
+ * mechanism. The view is a stub because the client renders a hand-written
+ * override for these ids (apps/web PAGE_OVERRIDES) and never falls through
+ * to the schema view.
+ */
+const FULL_PROFILE_CORE_PAGES = [
+  { id: "jail", label: "Jail", order: 38, category: "town" },
+  { id: "hospital", label: "Hospital", order: 39, category: "town" },
+] as const;
 
 /**
  * Pure and called once at boot (spec: Boot sequence step 6) — the payload is
  * identical for every player in v1, so rebuilding it per request would be
  * work with no result to show for it.
  */
-export function buildPluginsPayload(manifests: readonly PluginManifest[]): PluginsPayload {
+export function buildPluginsPayload(
+  manifests: readonly PluginManifest[],
+  profile: Gl3Profile = "full",
+): PluginsPayload {
   const menu: MenuItem[] = [];
   const pages: PagePayload[] = [];
   const events: EventMeta[] = [];
@@ -67,10 +90,21 @@ export function buildPluginsPayload(manifests: readonly PluginManifest[]): Plugi
     }
   }
 
+  if (profile === "full") {
+    for (const page of FULL_PROFILE_CORE_PAGES) {
+      pages.push({
+        pluginId: "core", id: page.id, path: `/plugins/${page.id}`,
+        view: { kind: "list", items: [] },
+      });
+      menu.push({ pageId: page.id, path: `/plugins/${page.id}`, label: page.label, order: page.order, category: page.category });
+    }
+  }
+
   // Ties break on page id so the order is stable across boots rather than
   // depending on the config's plugin order.
   menu.sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
-  return { menu, pages, events };
+  const installed = manifests.map((m) => m.id).sort();
+  return { menu, pages, events, installed };
 }
 
 export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload, coreFilters: CoreFilters): void {

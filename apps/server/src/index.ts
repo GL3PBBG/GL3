@@ -2,13 +2,13 @@ import type { PluginManifest } from "@gl3/plugin-sdk";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
+import { bootSeedsFor, seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
 import { startWealthTaxLoop } from "./economy/tax.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
-import { CORE_PLUGINS, withCorePlugins } from "./plugins/core-plugins.js";
+import { CORE_PLUGINS, bundledPlugins } from "./plugins/core-plugins.js";
 import { loadDynamicPlugins, type DynamicPlugin } from "./plugins/dynamic.js";
 import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
 import { createStorageDriver } from "./assets/factory.js";
@@ -23,9 +23,11 @@ import { attachGateway } from "./ws/gateway.js";
  * step 1). A static `import` is what keeps the dependency direction
  * checkable by the compiler — the example package imports only
  * `@gl3/plugin-sdk`/`zod`/`drizzle-orm`, and a dynamic `import(pluginId)`
- * would bypass that check. Ported core modules are not looked up here — they
- * live in `CORE_PLUGINS` and load unconditionally, never gated by
- * `PLUGIN_IDS`.
+ * would bypass that check. Framework plugins (ranks, bank, mail, ...) are
+ * not looked up here — they load in every profile through `bundledPlugins`.
+ * The gameplay plugins ARE here as well as in `GAMEPLAY_PLUGINS`: the full
+ * profile loads them automatically, and under `GL3_PROFILE=framework`
+ * `PLUGIN_IDS` is the only way they load.
  *
  * Those static imports are now GENERATED rather than hand-written:
  * `installed-plugins.ts` is produced by `npm run plugins:generate` from
@@ -41,9 +43,9 @@ const AVAILABLE_PLUGINS: Record<string, PluginManifest> = buildAvailablePlugins(
  * Fails boot when a dynamically loaded package declares an id already taken by
  * a core plugin or by a compiled-in one, naming both sides.
  *
- * `withCorePlugins` de-duplicates by id SILENTLY, which is right for its own
- * case — a core module named redundantly in `PLUGIN_IDS` should just not load
- * twice. It is wrong here: an operator who installs `@acme/casino` and gets
+ * `bundledPlugins` de-duplicates by id SILENTLY, which is right for its own
+ * case — a bundled plugin named redundantly in `PLUGIN_IDS` should just not
+ * load twice. It is wrong here: an operator who installs `@acme/casino` and gets
  * nothing has no way to discover that its id collided with ours, because the
  * plugin simply never appears. Two packages colliding with each other is
  * already caught by `buildAvailablePlugins`; this covers the two cases it
@@ -70,13 +72,10 @@ const config = loadConfig(process.env);
 const { db } = createDb(config.databaseUrl);
 const redis = createRedis(config.redisUrl);
 
-await seedCrimes(db);
-await seedRanks(db);
-await seedLocations(db);
-await seedItems(db);
-await rebuildLeaderboards(db, redis);
-
-// Resolve optional plugin ids to manifests, failing boot on an unknown id.
+// Resolve the plugin set BEFORE seeding: which seeds run is a function of
+// which plugins loaded (seedCrimes without the crimes plugin would fill a
+// table no route reads; seedLocations without travel/bullets seeds cities
+// nobody can reach).
 const optionalManifests = config.pluginIds.map((id) => {
   const manifest = AVAILABLE_PLUGINS[id];
   if (manifest === undefined) throw new Error(`unknown plugin id "${id}" — no entry in AVAILABLE_PLUGINS`);
@@ -85,12 +84,23 @@ const optionalManifests = config.pluginIds.map((id) => {
 
 // Plugins the operator installed outside this build (`PLUGIN_PACKAGES`), which
 // is the only route into the published image — see `plugins/dynamic.ts`.
+// Collision detection names the whole bundled set regardless of profile: an
+// id our gameplay plugins own is taken even under a framework boot that left
+// them unloaded — loading both in one boot is impossible either way.
 const dynamicManifests = assertNoIdCollisions(
   await loadDynamicPlugins(config.pluginPackages, config.pluginDir),
   [...CORE_PLUGINS.map((m) => m.id), ...optionalManifests.map((m) => m.id)],
 );
 
-const manifests: PluginManifest[] = withCorePlugins([...optionalManifests, ...dynamicManifests]);
+const manifests: PluginManifest[] = bundledPlugins(config.profile, [...optionalManifests, ...dynamicManifests]);
+
+// Sample content, gated on the plugins that read it — see bootSeedsFor.
+const seeds = bootSeedsFor(manifests.map((m) => m.id));
+if (seeds.crimes) await seedCrimes(db);
+await seedRanks(db);
+if (seeds.locations) await seedLocations(db);
+if (seeds.items) await seedItems(db);
+await rebuildLeaderboards(db, redis);
 
 const loadedSettings = await loadSettings(db);
 
@@ -110,6 +120,8 @@ const assetDriver = createStorageDriver(config.assets);
 const loadedPlugins = await loadPlugins(
   { db, redis, settings: loadedSettings, leaderboardPrefix: DEFAULT_LEADERBOARD_PREFIX, assetDriver },
   manifests,
+  "",
+  config.profile,
 );
 
 // Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
@@ -125,7 +137,13 @@ await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config
 // clearing jailed_until under those tests would make half of them race. In
 // production the sweeper is what turns release into a WebSocket push instead
 // of a client poll.
-if (config.sweepIntervalMs > 0) {
+//
+// The sentence sweeper and the wealth tax are gangster-game loops: a
+// framework boot has no crimes or combat, so nobody can be sentenced, and a
+// player-cash tax is not something an openPBBG-shaped game inherits silently.
+// Asset GC is not gameplay — avatars and plugin art exist in every profile —
+// so it alone rides the switch under framework.
+if (config.profile === "full" && config.sweepIntervalMs > 0) {
   startSentenceSweeper({
     db, redis, intervalMs: config.sweepIntervalMs,
     onError: (error) => { app.log.error({ err: error }, "sentence sweep failed"); },
@@ -143,16 +161,18 @@ if (config.sweepIntervalMs > 0) {
     db, settings: loadedSettings, intervalMs: 60_000,
     onError: (error) => { app.log.error({ err: error }, "wealth tax settle failed"); },
   });
+}
 
-  // Asset GC rides the same switch but at a much slower cadence: an orphaned
-  // image costs storage, not correctness, and its candidates are bounded by an
-  // hour-old grace period anyway. Every sixty sentence ticks is roughly every
-  // two minutes at the default interval — far more often than art changes.
+if (config.sweepIntervalMs > 0) {
+  // Asset GC at a much slower cadence: an orphaned image costs storage, not
+  // correctness, and its candidates are bounded by an hour-old grace period
+  // anyway. Every sixty sweep intervals is roughly every two minutes at the
+  // default — far more often than art changes.
   //
   // Kept out of buildApp for the same reason the sentence sweeper is: every
   // integration test builds its server through buildApp/bootTestServer, and a
-  // background pass deleting rows under those tests would make a whole class of
-  // them race.
+  // background pass deleting rows under those tests would make a whole class
+  // of them race.
   const assetSweepIntervalMs = config.sweepIntervalMs * 60;
   const assetTimer = setInterval(() => {
     void (async () => {

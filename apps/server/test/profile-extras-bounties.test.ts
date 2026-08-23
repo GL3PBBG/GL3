@@ -44,7 +44,7 @@ describe("bounties on the profile (core.profileView)", () => {
     expect(extras).toEqual(
       expect.arrayContaining([
         { kind: "stat", pluginId: "bounties", label: "Open bounty", value: "$5000" },
-        { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/bounties?target=${targetId}` },
+        { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/plugins/bounties.index?target=${targetId}` },
       ]),
     );
   });
@@ -57,7 +57,7 @@ describe("bounties on the profile (core.profileView)", () => {
     const extras = profileRes.json().extras;
 
     expect(extras).toContainEqual(
-      { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/bounties?target=${playerId}` },
+      { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/plugins/bounties.index?target=${playerId}` },
     );
     expect(extras.some((e: { pluginId: string; kind: string }) => e.pluginId === "bounties" && e.kind === "stat")).toBe(false);
   });

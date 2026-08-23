@@ -2,8 +2,9 @@ import type mysql from "mysql2/promise";
 import { sql } from "drizzle-orm";
 import { forumPosts, forumTopics, forums } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
-import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
+import { targetHas } from "../pg/plugin-tables.js";
 import { unixToDate } from "../time.js";
 
 interface ForumRow { F_id: number; F_name: string; F_sort: number; }
@@ -25,7 +26,16 @@ function isGangForum(fId: number): boolean {
   return fId < 0;
 }
 
-export async function migrateForum(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateForum(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
+  const missingForumTargets = ["p_forum_forums", "p_forum_topics", "p_forum_posts"]
+    .filter((t) => !targetHas(targetTables, t));
+  if (missingForumTargets.length > 0) {
+    for (const t of missingForumTargets) recordAbsentTargetTable(report, t);
+    return;
+  }
   const [gangForumCountRows] = await pool.query<({ n: number } & mysql.RowDataPacket)[]>(
     "SELECT count(*) AS n FROM forums WHERE F_id < 0",
   );

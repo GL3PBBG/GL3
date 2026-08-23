@@ -21,44 +21,59 @@ import casinoPlugin from "@gl3/plugin-casino";
 import blackjackPlugin from "@gl3/plugin-blackjack";
 
 /**
- * Ported core modules — plugin-served, never optional. A static `import`
- * per manifest, not a lookup by id: that is what keeps the dependency
- * direction checkable by the compiler (spec) and is why this list, unlike
- * `PLUGIN_IDS`, cannot be driven by an env var.
- *
- * `apps/server/src/index.ts` loads this set unconditionally, concatenated
- * with whatever optional manifests `PLUGIN_IDS` selects. `buildApp` also
- * falls back to it whenever a caller builds an app without specifying
- * `deps.plugins` at all (see the comment at that seam in `app.ts`) — which
- * is how `apps/server/test/ranks.test.ts` gets `/api/ranks` from the
- * plugin route despite calling `buildApp` directly, with no test-boot
- * change of its own.
+ * Ported core modules, split by what kind of game they assume. A static
+ * `import` per manifest, not a lookup by id: that is what keeps the
+ * dependency direction checkable by the compiler (spec). What changed with
+ * the profile split is only *membership at runtime* — which of the two
+ * static arrays a boot concatenates — never how the manifests get here.
  */
-export const CORE_PLUGINS: readonly PluginManifest[] = [
-  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, bulletsPlugin, travelPlugin, crimesPlugin,
-  mailPlugin, gangsPlugin, inventoryPlugin, combatPlugin, bountiesPlugin, detectivesPlugin, ocPlugin,
-  theftPlugin,
-  propertiesPlugin,
-  casinoPlugin,
-  blackjackPlugin,
-  forumPlugin,
-  membershipPlugin,
+export const FRAMEWORK_PLUGINS: readonly PluginManifest[] = [
+  rankPlugin, notificationsPlugin, newsPlugin, bankPlugin, mailPlugin,
+  forumPlugin, inventoryPlugin, membershipPlugin,
 ];
 
 /**
- * A ported core module is never optional (spec) — CORE_PLUGINS always loads,
- * and the caller's optional manifests only add to it. De-duplicated by id so
- * a core module's id also named among the optional manifests doesn't load
- * twice.
+ * The gangster game on top of the framework. Loaded by the `full` profile;
+ * individually addable onto a `framework` boot via `PLUGIN_IDS` (each of
+ * these carries the `"gl3": { "plugin": true }` marker, so the generated
+ * map makes them selectable). Cross-plugin requirements are declared on the
+ * manifests (`requires`) and enforced at boot — see `plugins/validate.ts`.
  */
-export function withCorePlugins(optional: readonly PluginManifest[]): PluginManifest[] {
-  const seenIds = new Set(CORE_PLUGINS.map((m) => m.id));
+export const GAMEPLAY_PLUGINS: readonly PluginManifest[] = [
+  bulletsPlugin, travelPlugin, crimesPlugin, gangsPlugin, combatPlugin, bountiesPlugin,
+  detectivesPlugin, ocPlugin, theftPlugin, propertiesPlugin, casinoPlugin, blackjackPlugin,
+];
+
+/** Every bundled plugin, in load order: framework first, then gameplay. */
+export const CORE_PLUGINS: readonly PluginManifest[] = [...FRAMEWORK_PLUGINS, ...GAMEPLAY_PLUGINS];
+
+/**
+ * The boot set for a profile: the framework set always, the gameplay set
+ * only under `full`, plus the caller's optional manifests on top.
+ * De-duplicated by id so a plugin named both here and among the optional
+ * manifests doesn't load twice.
+ */
+export function bundledPlugins(
+  profile: "full" | "framework",
+  optional: readonly PluginManifest[],
+): PluginManifest[] {
+  const base = profile === "full" ? CORE_PLUGINS : FRAMEWORK_PLUGINS;
+  const seenIds = new Set(base.map((m) => m.id));
   return [
-    ...CORE_PLUGINS,
+    ...base,
     ...optional.filter((m) => {
       if (seenIds.has(m.id)) return false;
       seenIds.add(m.id);
       return true;
     }),
   ];
+}
+
+/**
+ * The `full`-profile merge — what every pre-profile caller meant by
+ * "core plugins plus my extras". Kept because the test suite leans on it
+ * heavily; production boots go through `bundledPlugins(config.profile, ...)`.
+ */
+export function withCorePlugins(optional: readonly PluginManifest[]): PluginManifest[] {
+  return bundledPlugins("full", optional);
 }

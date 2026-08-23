@@ -18,9 +18,12 @@
  * a transitive dependency can never smuggle itself into the boot; the marker
  * means no npm scope is mandated, so operators can publish under their own.
  *
- * The 14 ported core plugins deliberately carry no marker. The marker means
- * "optional, selectable via PLUGIN_IDS" — core ports load unconditionally
- * through CORE_PLUGINS and are never gated.
+ * The 8 framework plugins (ranks, notifications, news, bank, mail, forum,
+ * inventory, membership) deliberately carry no marker: they load in every
+ * profile through bundledPlugins. The 12 gameplay plugins DO carry the
+ * marker — "selectable via PLUGIN_IDS" — because under GL3_PROFILE=framework
+ * that is the only way they load; the full profile additionally loads them
+ * automatically. See core-plugins.ts for the partition.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -33,8 +36,9 @@ const HEADER = `// GENERATED FILE — do not edit by hand.
 //
 // The optional-plugin import map. Every entry is a direct dependency of
 // apps/server whose package.json declares \`"gl3": { "plugin": true }\`.
-// \`PLUGIN_IDS\` selects which of these actually load; ported core modules are
-// never listed here (they load unconditionally via CORE_PLUGINS).
+// \`PLUGIN_IDS\` selects which of these actually load. The framework plugins
+// are never listed here (every profile loads them via bundledPlugins); the
+// gameplay plugins are listed AND auto-loaded by the full profile.
 `;
 
 /**

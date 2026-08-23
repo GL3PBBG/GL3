@@ -57,6 +57,7 @@ export default defineConfig({
         items: [
           { text: 'Operator guide', link: '/operators/' },
           { text: 'First boot', link: '/operators/first-boot' },
+          { text: 'The framework profile', link: '/operators/framework-profile' },
           { text: 'Installing plugins', link: '/operators/installing-plugins' },
         ],
       },

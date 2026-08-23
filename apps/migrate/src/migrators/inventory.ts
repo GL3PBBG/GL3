@@ -1,14 +1,17 @@
 import type mysql from "mysql2/promise";
 import { playerItems } from "../../../server/src/db/schema/index.js";
-import { garage } from "../pg/plugin-tables.js";
+import { garage, targetHas } from "../pg/plugin-tables.js";
 import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
-import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
+import { bumpTable, recordAbsentTargetTable, recordMissingSourceTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
 interface InventoryRow { UI_user: number; UI_item: number; UI_qty: number; }
 interface GarageRow { GA_id: number; GA_uid: number; GA_car: number; GA_damage: number; GA_location: number; }
 
-export async function migrateInventory(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
+export async function migrateInventory(
+  pool: mysql.Pool, exec: Executor, report: MigrationReport,
+  targetTables?: ReadonlySet<string>,
+): Promise<void> {
   const [invRows] = await pool.query<(InventoryRow & mysql.RowDataPacket)[]>(
     "SELECT UI_user, UI_item, UI_qty FROM userInventory",
   );
@@ -31,6 +34,20 @@ export async function migrateInventory(pool: mysql.Pool, exec: Executor, report:
     bumpTable(report, "userInventory", "written");
   }
 
+  // The garage half migrates only when BOTH sides have it: a framework-shaped
+  // source (openPBBG) has no garage table — the inventory half above still
+  // ran — and a framework-profile target has no p_theft_garage.
+  const [garageTableRows] = await pool.query<({ n: number } & mysql.RowDataPacket)[]>(
+    "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'garage'",
+  );
+  if (garageTableRows[0]!.n === 0) {
+    recordMissingSourceTable(report, "garage");
+    return;
+  }
+  if (!targetHas(targetTables, "p_theft_garage")) {
+    recordAbsentTargetTable(report, "p_theft_garage");
+    return;
+  }
   const [garageRows] = await pool.query<(GarageRow & mysql.RowDataPacket)[]>(
     "SELECT GA_id, GA_uid, GA_car, GA_damage, GA_location FROM garage",
   );

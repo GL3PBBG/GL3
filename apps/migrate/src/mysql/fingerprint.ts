@@ -4,8 +4,20 @@ const REQUIRED_TABLES = ["users", "userStats", "userTimers"] as const;
 
 const REQUIRED_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], string[]> = {
   users: ["U_id", "U_name", "U_password"],
-  userStats: ["US_id", "US_money", "US_gang", "US_crimes"],
+  userStats: ["US_id", "US_money"],
   userTimers: ["UT_user", "UT_desc", "UT_time"],
+};
+
+/**
+ * Gangster-game columns on otherwise-framework tables: `US_gang` (gang
+ * membership) and `US_crimes` (per-crime skill chances) exist in GL2 but not
+ * in the GL2 framework — openPBBG's `userStats` carries neither. Their
+ * absence makes `ok` FALSE only never: the games phases skip and report
+ * instead, which is why they surface in `missingGameColumns` (informational)
+ * rather than `missingColumns` (fatal).
+ */
+const GAME_COLUMNS: Record<"userStats", string[]> = {
+  userStats: ["US_gang", "US_crimes"],
 };
 
 /** Every table this migrator actually migrates (Tasks 11–28). Anything else
@@ -25,6 +37,8 @@ export interface FingerprintResult {
   ok: boolean;
   missingTables: string[];
   missingColumns: Record<string, string[]>;
+  /** Game-only columns absent from a framework-shaped source — informational. */
+  missingGameColumns: Record<string, string[]>;
   unknownTables: string[];
 }
 
@@ -52,12 +66,21 @@ export async function fingerprintV2Schema(pool: mysql.Pool): Promise<Fingerprint
     if (missing.length > 0) missingColumns[table] = missing;
   }
 
+  const missingGameColumns: Record<string, string[]> = {};
+  for (const [table, columns] of Object.entries(GAME_COLUMNS) as Array<[keyof typeof GAME_COLUMNS, string[]]>) {
+    const cols = columnsByTable.get(table);
+    if (!cols) continue; // missing table already reported above
+    const missing = columns.filter((c) => !cols.has(c));
+    if (missing.length > 0) missingGameColumns[table] = missing;
+  }
+
   const unknownTables = [...columnsByTable.keys()].filter((t) => !KNOWN_TABLES.has(t));
 
   return {
     ok: missingTables.length === 0 && Object.keys(missingColumns).length === 0,
     missingTables,
     missingColumns,
+    missingGameColumns,
     unknownTables,
   };
 }

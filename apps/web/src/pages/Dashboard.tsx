@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useDashboardWidgets, useJail, useLocations, useMe, useRanks } from "../api/queries.js";
+import { useDashboardWidgets, useJail, useLocations, useMe, usePlugins, useRanks } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatAmount } from "../lib/money.js";
 import { formatDuration } from "../lib/errors.js";
@@ -11,6 +11,7 @@ import styles from "./pages.module.css";
 
 export function Dashboard(): JSX.Element {
   const me = useMe();
+  const plugins = usePlugins();
   const jail = useJail();
   const ranks = useRanks();
   const locations = useLocations();
@@ -55,30 +56,35 @@ export function Dashboard(): JSX.Element {
         </p>
       </Panel>
 
-      <Panel title="Where you are">
-        {here === undefined ? (
-          <p className={styles.meta}>
-            Nowhere yet. <Link to="/travel">Travel</Link> somewhere to unlock the bullet shop.
-          </p>
-        ) : (
-          <p style={{ margin: 0 }}>
-            {here.name} — bullets at <Money value={here.bulletCost} /> each,{" "}
-            {here.bulletStock} in stock. <Link to="/bullets">Buy</Link>
-          </p>
-        )}
-      </Panel>
+      {/* Travel-town panel: absent entirely when the travel plugin is not
+          installed (framework boot) — "Nowhere yet, travel somewhere" would
+          be a dead-end suggestion on a game with no travel. */}
+      {(plugins.data?.installed ?? []).includes("travel") ? (
+        <Panel title="Where you are">
+          {here === undefined ? (
+            <p className={styles.meta}>
+              Nowhere yet. <Link to="/plugins/travel.index">Travel</Link> somewhere to unlock the bullet shop.
+            </p>
+          ) : (
+            <p style={{ margin: 0 }}>
+              {here.name} — bullets at <Money value={here.bulletCost} /> each,{" "}
+              {here.bulletStock} in stock. <Link to="/plugins/bullets.index">Buy</Link>
+            </p>
+          )}
+        </Panel>
+      ) : null}
 
       {jail.data?.jailed === true ? (
         <Panel title="Jail">
           <p className={styles.bad} style={{ margin: 0 }}>
             Locked up for another {formatDuration(jailSeconds)}.{" "}
-            <Link to="/jail">Watch the clock</Link>
+            <Link to="/plugins/jail">Watch the clock</Link>
           </p>
         </Panel>
-      ) : (
+      ) : jail.isError ? null : (
         <Panel title="Next">
           <p style={{ margin: 0 }}>
-            <Link to="/crimes">Commit a crime</Link> · <Link to="/bank">Bank your cash</Link> ·{" "}
+            <Link to="/plugins/crimes.index">Commit a crime</Link> · <Link to="/bank">Bank your cash</Link> ·{" "}
             <Link to="/leaderboards">See who's winning</Link>
           </p>
         </Panel>

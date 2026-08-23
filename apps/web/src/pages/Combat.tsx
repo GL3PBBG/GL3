@@ -118,7 +118,7 @@ export function Combat(): JSX.Element {
           {rows.length === 0 ? (
             mode === "underground" ? (
               <p className={styles.meta}>
-                Nobody shows their face in this town. <Link to="/detectives">Hire a detective.</Link>
+                Nobody shows their face in this town. <Link to="/plugins/detectives.index">Hire a detective.</Link>
               </p>
             ) : (
               <p className={styles.meta}>Nobody else is in this city.</p>

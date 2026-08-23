@@ -31,7 +31,7 @@ describe("detectives on the profile (core.profileView) and menu badges (core.men
     const extras = profileRes.json().extras;
 
     expect(extras).toContainEqual(
-      { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/detectives?target=${playerId}` },
+      { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/plugins/detectives.index?target=${playerId}` },
     );
   });
 
@@ -51,7 +51,7 @@ describe("detectives on the profile (core.profileView) and menu badges (core.men
       method: "GET", url: "/api/menu/badges", headers: { authorization: `Bearer ${token}` },
     });
     expect(badgesRes.statusCode).toBe(200);
-    expect(badgesRes.json().badges).toContainEqual({ path: "/detectives", count: 1 });
+    expect(badgesRes.json().badges).toContainEqual({ path: "/plugins/detectives.index", count: 1 });
   });
 
   it("shows no detectives badge for a player with no ready search", async () => {
@@ -61,6 +61,6 @@ describe("detectives on the profile (core.profileView) and menu badges (core.men
       method: "GET", url: "/api/menu/badges", headers: { authorization: `Bearer ${token}` },
     });
     expect(badgesRes.statusCode).toBe(200);
-    expect(badgesRes.json().badges.some((b: { path: string }) => b.path === "/detectives")).toBe(false);
+    expect(badgesRes.json().badges.some((b: { path: string }) => b.path === "/plugins/detectives.index")).toBe(false);
   });
 });
