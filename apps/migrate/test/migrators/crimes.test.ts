@@ -7,7 +7,7 @@ import { createReport } from "../../src/report.js";
 import { migrateCrimes } from "../../src/migrators/crimes.js";
 
 describe("migrateCrimes", () => {
-  it("migrates the 5 crimes (id gap at 4 is a source-data fact, not a migrator concern here)", async () => {
+  it("migrates the 6 crimes (id gap at 4 is a source-data fact, not a migrator concern here)", async () => {
     const fixture = await createIsolatedMysqlFixture();
     const target = await createIsolatedPgTarget();
     try {
@@ -18,7 +18,7 @@ describe("migrateCrimes", () => {
       await migrateCrimes(pool, db, report);
 
       const rows = await db.select().from(crimes);
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
       const gta = rows.find((r) => r.name === "Grand Theft Auto");
       expect(gta?.minPayout).toBe(500n);
       expect(gta?.maxPayout).toBe(2000n);

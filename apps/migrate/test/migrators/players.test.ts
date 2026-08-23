@@ -53,7 +53,9 @@ describe("migratePlayers", () => {
       const vitoStats = (await db.select().from(playerStats).where(eq(playerStats.playerId, vito!.id)))[0];
       expect(vitoStats?.cash).toBe(2100000000n); // above the V2 int32 comfort zone, exact
       expect(vitoStats?.gangId).toBeNull(); // deferred to the gangs migrator (Task 23)
-      expect(vitoStats?.avatarUrl).toBeNull();
+      // US_pic is NOT NULL with a default upstream; the seed omits it, so
+      // every real dump row carries V2's default avatar path.
+      expect(vitoStats?.avatarUrl).toBe("themes/default/images/default-profile-picture.png");
       expect(vitoStats?.bio).toBe("Head of the family");
 
       const usersTable = report.tables.find((t) => t.table === "users");

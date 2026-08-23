@@ -5,7 +5,7 @@ const REQUIRED_TABLES = ["users", "userStats", "userTimers"] as const;
 const REQUIRED_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], string[]> = {
   users: ["U_id", "U_name", "U_password"],
   userStats: ["US_id", "US_money", "US_gang", "US_crimes"],
-  userTimers: ["UT_user", "UT_key", "UT_time"],
+  userTimers: ["UT_user", "UT_desc", "UT_time"],
 };
 
 /** Every table this migrator actually migrates (Tasks 11–28). Anything else

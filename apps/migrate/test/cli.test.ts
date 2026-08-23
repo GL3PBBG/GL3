@@ -28,7 +28,7 @@ describe("main (CLI entrypoint)", () => {
       expect(code).toBe(0);
       const report = JSON.parse(await readFile(reportPath, "utf8"));
       expect(report.tables.find((t: { table: string }) => t.table === "users")).toMatchObject({ written: 6 });
-      expect(report.unknownTables.sort()).toEqual(["blackjackHands"]);
+      expect(report.unknownTables.sort()).toEqual(["blackjackHands", "forumAccess", "topicReads"]);
       expect(logSpy).toHaveBeenCalled(); // human summary printed
     } finally {
       await fixture.teardown();

@@ -25,7 +25,7 @@ describe("runMigration", () => {
       expect(await db.select().from(roles)).toHaveLength(2);
       expect(await db.select().from(rounds)).toHaveLength(1);
       expect(await db.select().from(ranks)).toHaveLength(2);
-      expect(await db.select().from(crimes)).toHaveLength(5);
+      expect(await db.select().from(crimes)).toHaveLength(6);
       expect(await db.select().from(items)).toHaveLength(2);
       expect(await db.select().from(players)).toHaveLength(6);
       expect(await db.select().from(gangs)).toHaveLength(1);

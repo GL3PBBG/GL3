@@ -14,7 +14,7 @@ describe("createIsolatedMysqlFixture", () => {
       const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM users");
       expect(rows[0]?.n).toBe(6);
       const [crimeRows] = await pool.query<mysql.RowDataPacket[]>("SELECT C_id FROM crimes ORDER BY C_id");
-      expect(crimeRows.map((r) => r.C_id)).toEqual([1, 2, 3, 5, 6]); // the id-4 gap
+      expect(crimeRows.map((r) => r.C_id)).toEqual([1, 2, 3, 5, 6, 16]); // the id-4 gap
       await pool.end();
     } finally {
       await fixture.teardown();

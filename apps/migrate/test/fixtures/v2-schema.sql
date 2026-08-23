@@ -1,124 +1,135 @@
--- Reconstructed from SPEC.md §1.2 (V2's install/schema.sql is not checked
--- out in this repo). See "Known unknowns" in the M4 plan for every column
--- this file infers rather than quotes directly from SPEC.
+-- Mirrors V2's real install/schema.sql (ChristopherDay/Gangster-Legends-V2
+-- @master, last pushed 2024-05-05) plus the DDL its modules/installed/
+-- {inventory,membership,rounds}/schema.sql files re-create — column names,
+-- nullability, defaults and primary keys verbatim. Earlier revisions of this
+-- file inferred plausible-looking names from SPEC prose (UT_key, S_key,
+-- M_sender, MR_label, ...) that exist in no V2 release, which the migrator
+-- then quietly matched; keeping this file byte-honest is what stops that
+-- class of bug from coming back.
+--
+-- Deliberate deviations from upstream, all test-motivated:
+--   * blackjackHands — not a V2 table at all; a stand-in custom module table
+--     so preflight has a real "unknown table" to detect.
+--   * forumAccess / topicReads — upstream core tables the migrator does not
+--     migrate; a real dump reports them (with blackjackHands) as unknown.
+--   * forums.F_id has no AUTO_INCREMENT (gang forums use negative ids by
+--     convention, inserted explicitly — see the seed).
 
 CREATE TABLE users (
   U_id INT(11) NOT NULL AUTO_INCREMENT,
-  U_name VARCHAR(30) NOT NULL,
-  U_email VARCHAR(255) DEFAULT NULL,
-  U_password CHAR(64) NOT NULL,
-  U_userLevel INT(11) NOT NULL DEFAULT 1,
-  U_status INT(11) NOT NULL DEFAULT 1,
+  U_name VARCHAR(30) DEFAULT NULL,
+  U_email VARCHAR(100) DEFAULT NULL,
+  U_password VARCHAR(255) NOT NULL DEFAULT '',
+  U_userLevel INT(1) DEFAULT NULL,
+  U_status INT(1) DEFAULT NULL,
   U_round INT(11) NOT NULL DEFAULT 1,
   PRIMARY KEY (U_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE userStats (
   US_id INT(11) NOT NULL,
-  US_money INT(11) NOT NULL DEFAULT 0,
-  US_bank INT(11) NOT NULL DEFAULT 0,
-  US_bullets INT(11) NOT NULL DEFAULT 0,
+  US_shotBy INT(11) NOT NULL DEFAULT 0,
+  US_health INT(11) NOT NULL DEFAULT 0,
   US_exp INT(11) NOT NULL DEFAULT 0,
-  US_health INT(11) NOT NULL DEFAULT 100,
-  US_backfire INT(11) NOT NULL DEFAULT 0,
+  US_money INT(11) NOT NULL DEFAULT 250,
+  US_bank INT(11) NOT NULL DEFAULT 0,
+  US_bullets INT(11) NOT NULL DEFAULT 100,
+  US_backfire INT(11) NOT NULL DEFAULT 50,
   US_points INT(11) NOT NULL DEFAULT 0,
+  US_pic VARCHAR(200) NOT NULL DEFAULT 'themes/default/images/default-profile-picture.png',
+  US_bio VARCHAR(1000) NOT NULL DEFAULT '0',
   US_weapon INT(11) NOT NULL DEFAULT 0,
   US_armor INT(11) NOT NULL DEFAULT 0,
   US_rank INT(11) NOT NULL DEFAULT 1,
   US_gang INT(11) NOT NULL DEFAULT 0,
-  US_location INT(11) DEFAULT NULL,
-  US_pic VARCHAR(255) DEFAULT NULL,
-  US_bio TEXT,
-  US_shotBy INT(11) DEFAULT NULL,
-  US_crimes VARCHAR(500) NOT NULL DEFAULT '35-25-15-5-5',
+  US_location INT(11) NOT NULL DEFAULT 1,
+  US_crimes VARCHAR(255) NOT NULL DEFAULT '35-25-15-5-5-5-5-5-5-5-5-5-5-5-5',
   PRIMARY KEY (US_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- No primary key at all upstream — (UT_user, UT_desc) is unique only by
+-- convention; rows are auto-created on first use.
 CREATE TABLE userTimers (
-  UT_id INT(11) NOT NULL AUTO_INCREMENT,
-  UT_user INT(11) NOT NULL,
-  UT_key VARCHAR(50) NOT NULL,
-  UT_time INT(11) NOT NULL,
-  PRIMARY KEY (UT_id),
-  KEY UT_user (UT_user)
+  UT_user INT(11) NOT NULL DEFAULT 0,
+  UT_desc VARCHAR(32) DEFAULT NULL,
+  UT_time INT(11) NOT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE ranks (
   R_id INT(11) NOT NULL AUTO_INCREMENT,
-  R_name VARCHAR(50) NOT NULL,
-  R_exp INT(11) NOT NULL,
+  R_name VARCHAR(100) DEFAULT NULL,
+  R_exp INT(11) NOT NULL DEFAULT 0,
+  R_limit INT(11) NOT NULL DEFAULT 0,
   R_cashReward INT(11) NOT NULL DEFAULT 0,
+  R_health INT(11) NOT NULL DEFAULT 0,
   R_bulletReward INT(11) NOT NULL DEFAULT 0,
-  R_health INT(11) NOT NULL DEFAULT 100,
   PRIMARY KEY (R_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE moneyRanks (
   MR_id INT(11) NOT NULL AUTO_INCREMENT,
-  MR_label VARCHAR(50) NOT NULL,
-  MR_threshold INT(11) NOT NULL,
+  MR_desc VARCHAR(128) DEFAULT NULL,
+  MR_money INT(11) DEFAULT NULL,
   PRIMARY KEY (MR_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE userRoles (
   UR_id INT(11) NOT NULL AUTO_INCREMENT,
-  UR_name VARCHAR(50) NOT NULL,
-  UR_color VARCHAR(20) DEFAULT NULL,
+  UR_desc VARCHAR(128) DEFAULT NULL,
+  UR_color VARCHAR(7) NOT NULL,
   PRIMARY KEY (UR_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE roleAccess (
-  RA_id INT(11) NOT NULL AUTO_INCREMENT,
   RA_role INT(11) NOT NULL,
-  RA_module VARCHAR(50) NOT NULL,
-  PRIMARY KEY (RA_id)
+  RA_module VARCHAR(128) NOT NULL,
+  PRIMARY KEY (RA_role, RA_module)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
--- RND_ prefix, not R_ — see "Known unknowns" item 1.
 CREATE TABLE rounds (
-  RND_id INT(11) NOT NULL AUTO_INCREMENT,
-  RND_name VARCHAR(50) NOT NULL,
-  RND_start INT(11) NOT NULL,
-  RND_end INT(11) DEFAULT NULL,
-  PRIMARY KEY (RND_id)
+  R_id INT(11) NOT NULL AUTO_INCREMENT,
+  R_name VARCHAR(128) DEFAULT NULL,
+  R_start INT(11) DEFAULT NULL,
+  R_end INT(11) DEFAULT NULL,
+  PRIMARY KEY (R_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- No description column upstream — GL3's crimes.description is an addition.
 CREATE TABLE crimes (
   C_id INT(11) NOT NULL AUTO_INCREMENT,
-  C_name VARCHAR(100) NOT NULL,
-  C_description TEXT,
-  C_cooldown INT(11) NOT NULL DEFAULT 60,
+  C_name VARCHAR(120) DEFAULT NULL,
+  C_cooldown INT(11) NOT NULL DEFAULT 0,
   C_money INT(11) NOT NULL DEFAULT 0,
   C_maxMoney INT(11) NOT NULL DEFAULT 0,
   C_bullets INT(11) NOT NULL DEFAULT 0,
   C_maxBullets INT(11) NOT NULL DEFAULT 0,
-  C_exp INT(11) NOT NULL DEFAULT 0,
+  C_exp INT(11) NOT NULL DEFAULT 1,
   C_level INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (C_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE locations (
   L_id INT(11) NOT NULL AUTO_INCREMENT,
-  L_name VARCHAR(100) NOT NULL,
+  L_name VARCHAR(120) DEFAULT NULL,
   L_cost INT(11) NOT NULL DEFAULT 0,
-  L_cooldown INT(11) NOT NULL DEFAULT 0,
   L_bullets INT(11) NOT NULL DEFAULT 0,
-  L_bulletCost INT(11) NOT NULL DEFAULT 0,
+  L_bulletCost INT(11) NOT NULL DEFAULT 100,
+  L_cooldown INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (L_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE cars (
   CA_id INT(11) NOT NULL AUTO_INCREMENT,
-  CA_name VARCHAR(100) NOT NULL,
+  CA_name VARCHAR(255) DEFAULT NULL,
   CA_value INT(11) NOT NULL DEFAULT 0,
-  CA_theftChance INT(11) NOT NULL DEFAULT 1,
+  CA_theftChance INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (CA_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE theft (
   T_id INT(11) NOT NULL AUTO_INCREMENT,
-  T_name VARCHAR(100) NOT NULL,
-  T_chance INT(11) NOT NULL,
+  T_name VARCHAR(255) DEFAULT NULL,
+  T_chance INT(11) NOT NULL DEFAULT 0,
   T_maxDamage INT(11) NOT NULL DEFAULT 0,
   T_worstCar INT(11) NOT NULL DEFAULT 0,
   T_bestCar INT(11) NOT NULL DEFAULT 0,
@@ -127,90 +138,89 @@ CREATE TABLE theft (
 
 CREATE TABLE weapons (
   W_id INT(11) NOT NULL AUTO_INCREMENT,
-  W_name VARCHAR(100) NOT NULL,
+  W_name VARCHAR(100) DEFAULT NULL,
   W_accuracy INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (W_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- I_type is an int id into the `itemTypes` settings registry, not a string.
 CREATE TABLE items (
   I_id INT(11) NOT NULL AUTO_INCREMENT,
-  I_name VARCHAR(100) NOT NULL,
-  I_type VARCHAR(50) NOT NULL,
+  I_name VARCHAR(128) NOT NULL,
+  I_type INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (I_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+-- IE_value is a VARCHAR upstream — numeric strings like '15'.
 CREATE TABLE itemEffects (
-  IE_id INT(11) NOT NULL AUTO_INCREMENT,
+  IE_effect VARCHAR(32) NOT NULL,
   IE_item INT(11) NOT NULL,
-  IE_effect VARCHAR(50) NOT NULL,
-  IE_value INT(11) NOT NULL DEFAULT 0,
-  PRIMARY KEY (IE_id),
-  KEY IE_item (IE_item)
+  IE_value VARCHAR(128) NOT NULL,
+  IE_desc VARCHAR(128) DEFAULT NULL,
+  PRIMARY KEY (IE_effect, IE_item)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE itemMeta (
-  IM_id INT(11) NOT NULL AUTO_INCREMENT,
   IM_item INT(11) NOT NULL,
-  IM_key VARCHAR(50) NOT NULL,
-  IM_value VARCHAR(255) DEFAULT NULL,
-  PRIMARY KEY (IM_id),
-  KEY IM_item (IM_item)
+  IM_meta VARCHAR(32) NOT NULL,
+  IM_value TEXT,
+  PRIMARY KEY (IM_item, IM_meta)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
--- Recognised V2 core table, migrated into p_membership_packages by the
--- `membership` plugin (Task 10). PM_desc, not PM_name -- verified against
--- install/schema.sql of ChristopherDay/Gangster-Legends-V2@master; this
--- fixture had it wrong (the PR_owner defect class again).
 CREATE TABLE premiumMembership (
   PM_id INT(11) NOT NULL AUTO_INCREMENT,
-  PM_desc VARCHAR(100) NOT NULL,
+  PM_desc VARCHAR(255) NOT NULL,
   PM_seconds INT(11) NOT NULL,
   PM_cost INT(11) NOT NULL,
   PRIMARY KEY (PM_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- Keyed by S_desc (V2's settings class does WHERE S_desc = :desc).
 CREATE TABLE settings (
-  S_key VARCHAR(100) NOT NULL,
+  S_id INT(11) NOT NULL AUTO_INCREMENT,
+  S_desc VARCHAR(255) DEFAULT NULL,
   S_value TEXT,
-  PRIMARY KEY (S_key)
+  PRIMARY KEY (S_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE gangs (
   G_id INT(11) NOT NULL AUTO_INCREMENT,
-  G_name VARCHAR(100) NOT NULL,
-  G_boss INT(11) NOT NULL,
-  G_underboss INT(11) DEFAULT NULL,
+  G_name VARCHAR(120) DEFAULT NULL,
   G_bank INT(11) NOT NULL DEFAULT 0,
   G_money INT(11) NOT NULL DEFAULT 0,
+  G_bullets INT(11) NOT NULL DEFAULT 0,
+  G_info TEXT,
+  G_desc TEXT,
+  G_location INT(11) NOT NULL DEFAULT 0,
+  G_boss INT(11) NOT NULL DEFAULT 0,
+  G_underboss INT(11) NOT NULL DEFAULT 0,
   G_level INT(11) NOT NULL DEFAULT 1,
-  G_location INT(11) DEFAULT NULL,
   PRIMARY KEY (G_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE gangPermissions (
   GP_id INT(11) NOT NULL AUTO_INCREMENT,
   GP_user INT(11) NOT NULL,
-  GP_access VARCHAR(50) NOT NULL,
+  GP_access VARCHAR(128) NOT NULL,
   PRIMARY KEY (GP_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE gangInvites (
   GI_id INT(11) NOT NULL AUTO_INCREMENT,
-  GI_gang INT(11) NOT NULL,
   GI_user INT(11) NOT NULL,
-  GI_invitedBy INT(11) NOT NULL,
-  GI_time INT(11) NOT NULL,
+  GI_gangUser INT(11) NOT NULL,
+  GI_gang INT(11) NOT NULL,
   PRIMARY KEY (GI_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE gangLogs (
   GL_id INT(11) NOT NULL AUTO_INCREMENT,
   GL_gang INT(11) NOT NULL,
-  GL_user INT(11) DEFAULT NULL,
-  GL_message VARCHAR(255) NOT NULL,
   GL_time INT(11) NOT NULL,
+  GL_user INT(11) NOT NULL,
+  GL_log VARCHAR(255) NOT NULL,
   PRIMARY KEY (GL_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE userInventory (
   UI_user INT(11) NOT NULL,
@@ -221,10 +231,10 @@ CREATE TABLE userInventory (
 
 CREATE TABLE garage (
   GA_id INT(11) NOT NULL AUTO_INCREMENT,
-  GA_user INT(11) NOT NULL,
-  GA_car INT(11) NOT NULL,
+  GA_uid INT(11) NOT NULL DEFAULT 0,
+  GA_car INT(11) NOT NULL DEFAULT 0,
   GA_damage INT(11) NOT NULL DEFAULT 0,
-  GA_location INT(11) DEFAULT NULL,
+  GA_location INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (GA_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
@@ -241,53 +251,56 @@ CREATE TABLE IF NOT EXISTS `properties` (
   `PR_profit` INT(11) NOT NULL DEFAULT 0
 ) ENGINE = InnoDB;
 
+-- No timestamp column upstream — B_id/B_user/B_userToKill/B_cost only.
 CREATE TABLE bounties (
   B_id INT(11) NOT NULL AUTO_INCREMENT,
-  B_user INT(11) NOT NULL,
-  B_userToKill INT(11) NOT NULL,
-  B_cost INT(11) NOT NULL,
-  B_time INT(11) NOT NULL,
+  B_user INT(11) NOT NULL DEFAULT 0,
+  B_userToKill INT(11) NOT NULL DEFAULT 0,
+  B_cost INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (B_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE detectives (
   D_id INT(11) NOT NULL AUTO_INCREMENT,
-  D_user INT(11) NOT NULL,
-  D_target INT(11) NOT NULL,
-  D_start INT(11) NOT NULL,
-  D_end INT(11) NOT NULL,
-  D_success INT(11) DEFAULT NULL,
+  D_user INT(11) NOT NULL DEFAULT 0,
+  D_userToFind INT(11) NOT NULL DEFAULT 0,
+  D_detectives INT(11) NOT NULL DEFAULT 0,
+  D_start INT(11) NOT NULL DEFAULT 0,
+  D_end INT(11) NOT NULL DEFAULT 0,
+  D_success INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (D_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+-- M_sid = sender, M_uid = recipient; 0 (not NULL) is the system sentinel on
+-- M_sid and the no-parent sentinel on M_parent.
 CREATE TABLE mail (
   M_id INT(11) NOT NULL AUTO_INCREMENT,
-  M_parent INT(11) DEFAULT NULL,
-  M_sender INT(11) DEFAULT NULL,
-  M_recipient INT(11) NOT NULL,
-  M_subject VARCHAR(255) NOT NULL,
-  M_body TEXT,
-  M_read INT(11) NOT NULL DEFAULT 0,
+  M_time INT(11) NOT NULL DEFAULT 0,
+  M_uid INT(11) NOT NULL DEFAULT 0,
+  M_sid INT(11) NOT NULL DEFAULT 0,
+  M_subject VARCHAR(120) DEFAULT NULL,
+  M_parent INT(11) NOT NULL DEFAULT 0,
+  M_text TEXT,
   M_type INT(11) NOT NULL DEFAULT 0,
-  M_time INT(11) NOT NULL,
+  M_read INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (M_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE notifications (
   N_id INT(11) NOT NULL AUTO_INCREMENT,
-  N_user INT(11) NOT NULL,
-  N_body VARCHAR(255) NOT NULL,
+  N_uid INT(11) NOT NULL DEFAULT 0,
+  N_time INT(11) NOT NULL DEFAULT 0,
+  N_text TEXT,
   N_read INT(11) NOT NULL DEFAULT 0,
-  N_time INT(11) NOT NULL,
   PRIMARY KEY (N_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 CREATE TABLE gameNews (
   GN_id INT(11) NOT NULL AUTO_INCREMENT,
-  GN_author INT(11) DEFAULT NULL,
-  GN_title VARCHAR(255) NOT NULL,
-  GN_body TEXT,
-  GN_time INT(11) NOT NULL,
+  GN_author INT(11) NOT NULL DEFAULT 0,
+  GN_title VARCHAR(120) DEFAULT NULL,
+  GN_text TEXT,
+  GN_date INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (GN_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
@@ -299,6 +312,13 @@ CREATE TABLE forums (
   F_name VARCHAR(255) NOT NULL,
   F_sort INT(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (F_id)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+-- Upstream core table, empty here: real dumps carry it, the migrator does
+-- not migrate it, so preflight reports it as an unknown table.
+CREATE TABLE forumAccess (
+  FA_role INT(11),
+  FA_forum INT(11)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 -- T_type is a bitmask: 1 = sticky, 2 = important. Both bits can be set on one
@@ -316,19 +336,25 @@ CREATE TABLE topics (
   PRIMARY KEY (T_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+-- Upstream core table, empty here — same preflight treatment as forumAccess.
+CREATE TABLE topicReads (
+  TR_topic INT(11),
+  TR_user INT(11)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
 CREATE TABLE posts (
   P_id INT(11) NOT NULL AUTO_INCREMENT,
+  P_topic INT(11) NOT NULL,
   P_date INT(11) NOT NULL,
   P_user INT(11) NOT NULL,
   P_body TEXT,
-  P_topic INT(11) NOT NULL,
   PRIMARY KEY (P_id)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
--- A genuine third-party/custom module table (e.g. a casino sub-module),
+-- A genuinely third-party/custom module table (e.g. a casino sub-module),
 -- present in a real dump but never core V2. Preflight (Task 9) must report
--- this as "custom module table, not migrated" — the only KNOWN_TABLES entry
--- left in that bucket now that premiumMembership migrates (Task 10).
+-- this as "custom module table, not migrated" — the KNOWN_TABLES entry
+-- left in that bucket alongside forumAccess/topicReads.
 CREATE TABLE blackjackHands (
   BJ_id INT(11) NOT NULL AUTO_INCREMENT,
   BJ_user INT(11) NOT NULL,

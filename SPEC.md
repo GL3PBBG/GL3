@@ -42,7 +42,7 @@ Audited from `install/schema.sql`, `install/data.sql`, per-module `schema.sql` f
 |---|---|---|
 | `users` | Auth + account | `U_name` (30ch), `U_email`, `U_password` (legacy sha256), `U_userLevel` (1=user, admin levels), `U_status`, `U_round` (added by rounds module) |
 | `userStats` | Gameplay state, 1:1 with users, PK = user id | `US_money`, `US_bank`, `US_bullets`, `US_exp`, `US_health`, `US_backfire`, `US_points` (premium currency), `US_weapon`/`US_armor` (item refs), `US_rank`, `US_gang` (0 = none), `US_location`, `US_pic`, `US_bio`, `US_shotBy`, and `US_crimes` — see quirk below |
-| `userTimers` | Open-ended per-user key→unix-time cooldowns; rows auto-created on first use | Observed keys in source: `jail`, `hospital`, `crime`, `membership`, `sentMail`, `signup`, `killed`, `superMax`, `laston`, `forumMute`, `forumTopic`, `forumPost`, `glDirVote`, `count`. Custom modules add arbitrary keys — migrate ALL rows, known or not |
+| `userTimers` | Open-ended per-user key→unix-time cooldowns; rows auto-created on first use | Columns `UT_user`/`UT_desc`/`UT_time` — the key lives in **`UT_desc`**, no PK at all. Observed keys in source: `jail`, `hospital`, `crime`, `membership`, `sentMail`, `signup`, `killed`, `superMax`, `laston`, `forumMute`, `forumTopic`, `forumPost`, `glDirVote`, `count`. Custom modules add arbitrary keys — migrate ALL rows, known or not |
 | `ranks` | Rank ladder | `R_exp` threshold, `R_cashReward`, `R_bulletReward`, `R_health` |
 | `moneyRanks` | Display labels for wealth brackets | pure content |
 | `userRoles` / `roleAccess` | Role → module-name ACL; `RA_module='*'` = admin wildcard | module referenced by string name |
@@ -61,23 +61,23 @@ Audited from `install/schema.sql`, `install/data.sql`, per-module `schema.sql` f
 | `weapons` | Weapon catalog | `W_accuracy` only; damage lives in kill module logic |
 | `items` + `itemEffects` + `itemMeta` | Inventory item defs | EAV pattern: `itemEffects(IE_effect, IE_item, IE_value)` e.g. effect rows for heal/armor; `itemMeta` freeform. GL3: JSONB `effects`/`meta` on `items` |
 | `premiumMembership` | Membership tiers | duration `PM_seconds`, cost in points. Migrates to the `membership` plugin's `p_membership_packages` (`feat/membership`) — previously listed here but unmigrated |
-| `settings` | Key-value game config | e.g. `pointsName`, `gangName`, `detectiveReport` — migrate verbatim to `settings(key, value)` |
+| `settings` | Key-value game config | Keyed by **`S_desc`** (`S_id` is a surrogate PK; `class/settings.php` does `WHERE S_desc = :desc`), value in `S_value` (JSON-encoded where structured, e.g. the `itemTypes` registry `items.I_type` int-ids resolve through) — migrate verbatim to `settings(key, value)` |
 
 **Social & economy state**
 
 | V2 table | Purpose | Notes |
 |---|---|---|
-| `gangs` | Gang core | `G_boss`/`G_underboss` user refs, `G_bank`+`G_money` two balances, `G_level`, `G_location` |
+| `gangs` | Gang core | `G_boss`/`G_underboss` user refs, `G_bank`+`G_money` two balances, `G_bullets`, `G_desc`/`G_info` text, `G_level`, `G_location` |
 | `gangPermissions` | Per-member permission strings | **No gang column** — only `GP_user` + `GP_access`; the gang is implied by the user's `US_gang`. Migrator derives `gang_id` from membership at migration time; permissions of gangless users are dropped with a report entry |
-| `gangInvites`, `gangLogs` | Invites; append-only gang audit log | `GL_time` unix int |
+| `gangInvites`, `gangLogs` | Invites; append-only gang audit log | `GI_user` invited / `GI_gangUser` inviter (no timestamp column); `GL_time` unix int, `GL_log` message, `GL_user` 0 = system entry |
 | `userInventory` | (user, item, qty) composite PK | straightforward |
 | `garage` | Player cars | `GA_damage` %, `GA_location` — cars are location-bound |
 | `properties` | Ownable per-location businesses | **`PR_module` varchar(128) names the module implementing the property** — string coupling to plugin ids; keep as `plugin_id` string in GL3. Owner column is **`PR_user`** (`NOT NULL DEFAULT 0`), where `0` = unowned and `-1` = closed. No unique constraint: the logical key is `(PR_location, PR_module)`, several properties per town |
-| `bounties` | Open contracts | `B_user` placer, `B_userToKill`, `B_cost` |
-| `detectives` | Searches for hiding players | `D_start`/`D_end` window, `D_success` |
-| `mail` | PMs, threaded via `M_parent` | `M_type`, `M_read` int-bools |
-| `notifications` | Per-user feed | `N_read` int-bool |
-| `gameNews` | Broadcast news posts | author user ref |
+| `bounties` | Open contracts | `B_user` placer, `B_userToKill`, `B_cost` — no claimant, no timestamp column |
+| `detectives` | Searches for hiding players | `D_userToFind` target, `D_detectives` hired count, `D_start`/`D_end` window, `D_success` (0/1, rolled at insert — not a pending state) |
+| `mail` | PMs, threaded via `M_parent` | `M_sid` sender / `M_uid` recipient (0 = system on `M_sid`; 0 = no parent on `M_parent`), body in `M_text`; `M_type`, `M_read` int-bools |
+| `notifications` | Per-user feed | `N_uid` player, `N_text` body; `N_read` int-bool |
+| `gameNews` | Broadcast news posts | `GN_author` (0 = system), body in `GN_text`, `GN_date` |
 | `forums`, `forumAccess`, `topics`, `posts`, `topicReads` | Forum | `T_type` sticky, `T_status` locked; `forumAccess` role-gated |
 
 ### 1.3 Module/hook system (drives the GL3 plugin API)

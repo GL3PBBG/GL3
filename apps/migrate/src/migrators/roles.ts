@@ -4,19 +4,19 @@ import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
 import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
-interface UserRoleRow { UR_id: number; UR_name: string; UR_color: string | null; }
+interface UserRoleRow { UR_id: number; UR_desc: string | null; UR_color: string | null; }
 interface RoleAccessRow { RA_role: number; RA_module: string; }
 
 export async function migrateRoles(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [roleRows] = await pool.query<(UserRoleRow & mysql.RowDataPacket)[]>(
-    "SELECT UR_id, UR_name, UR_color FROM userRoles",
+    "SELECT UR_id, UR_desc, UR_color FROM userRoles",
   );
 
   for (const row of roleRows) {
     bumpTable(report, "userRoles", "read");
     const { v3Id } = await getOrCreateV3Id(exec, "userRoles", row.UR_id);
-    await exec.insert(roles).values({ id: v3Id, name: row.UR_name, color: row.UR_color })
-      .onConflictDoUpdate({ target: roles.id, set: { name: row.UR_name, color: row.UR_color } });
+    await exec.insert(roles).values({ id: v3Id, name: row.UR_desc ?? "", color: row.UR_color })
+      .onConflictDoUpdate({ target: roles.id, set: { name: row.UR_desc ?? "", color: row.UR_color } });
     bumpTable(report, "userRoles", "written");
   }
 

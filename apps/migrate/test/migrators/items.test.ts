@@ -20,9 +20,12 @@ describe("migrateItems", () => {
       const rows = await db.select().from(items);
       expect(rows).toHaveLength(2);
       const bat = rows.find((i) => i.name === "Baseball Bat");
+      // I_type 1 resolves through the itemTypes settings registry to "weapon".
+      expect(bat?.itemType).toBe("weapon");
       expect(bat?.effects).toEqual({ damage: 15 });
       expect(bat?.meta).toEqual({ rarity: "common" });
       const vest = rows.find((i) => i.name === "Kevlar Vest");
+      expect(vest?.itemType).toBe("armor");
       expect(vest?.effects).toEqual({ armor: 20 });
       expect(vest?.meta).toEqual({});
 

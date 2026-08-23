@@ -14,7 +14,7 @@ import { migrateBountiesAndDetectives } from "../../src/migrators/bounties-detec
 import { lookupV3Id } from "../../src/id-map.js";
 
 describe("migrateBountiesAndDetectives", () => {
-  it("migrates open bounties (claimed_by always null) and single-detective searches", async () => {
+  it("migrates open bounties (claimed_by always null, created_at defaulted) and detective searches with their hired count", async () => {
     const fixture = await createIsolatedMysqlFixture();
     const target = await createIsolatedPgTarget();
     try {
@@ -40,7 +40,8 @@ describe("migrateBountiesAndDetectives", () => {
 
       const detectiveRows = await db.select().from(detectiveSearches);
       expect(detectiveRows).toHaveLength(1);
-      expect(detectiveRows[0]).toMatchObject({ playerId: vitoId, targetPlayerId: soldierId, detectives: 1, succeeded: null });
+      // D_detectives = 2 hired, D_success = 0 (rolled at insert, failed).
+      expect(detectiveRows[0]).toMatchObject({ playerId: vitoId, targetPlayerId: soldierId, detectives: 2, succeeded: false });
 
       await pool.end();
       await sql.end();

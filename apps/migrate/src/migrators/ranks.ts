@@ -4,8 +4,8 @@ import { getOrCreateV3Id } from "../id-map.js";
 import { bumpTable, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
-interface RankRow { R_id: number; R_name: string; R_exp: number; R_cashReward: number; R_bulletReward: number; R_health: number; }
-interface MoneyRankRow { MR_id: number; MR_label: string; MR_threshold: number; }
+interface RankRow { R_id: number; R_name: string | null; R_exp: number; R_cashReward: number; R_bulletReward: number; R_health: number; }
+interface MoneyRankRow { MR_id: number; MR_desc: string | null; MR_money: number | null; }
 
 export async function migrateRanks(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [rankRows] = await pool.query<(RankRow & mysql.RowDataPacket)[]>(
@@ -15,7 +15,7 @@ export async function migrateRanks(pool: mysql.Pool, exec: Executor, report: Mig
     bumpTable(report, "ranks", "read");
     const { v3Id } = await getOrCreateV3Id(exec, "ranks", row.R_id);
     const values = {
-      id: v3Id, name: row.R_name, expRequired: BigInt(row.R_exp),
+      id: v3Id, name: row.R_name ?? "", expRequired: BigInt(row.R_exp),
       cashReward: BigInt(row.R_cashReward), bulletReward: row.R_bulletReward, maxHealth: row.R_health,
     };
     await exec.insert(ranks).values(values).onConflictDoUpdate({ target: ranks.id, set: values });
@@ -23,12 +23,12 @@ export async function migrateRanks(pool: mysql.Pool, exec: Executor, report: Mig
   }
 
   const [moneyRankRows] = await pool.query<(MoneyRankRow & mysql.RowDataPacket)[]>(
-    "SELECT MR_id, MR_label, MR_threshold FROM moneyRanks",
+    "SELECT MR_id, MR_desc, MR_money FROM moneyRanks",
   );
   for (const row of moneyRankRows) {
     bumpTable(report, "moneyRanks", "read");
     const { v3Id } = await getOrCreateV3Id(exec, "moneyRanks", row.MR_id);
-    const values = { id: v3Id, label: row.MR_label, threshold: BigInt(row.MR_threshold) };
+    const values = { id: v3Id, label: row.MR_desc ?? "", threshold: BigInt(row.MR_money ?? 0) };
     await exec.insert(moneyRanks).values(values).onConflictDoUpdate({ target: moneyRanks.id, set: values });
     bumpTable(report, "moneyRanks", "written");
   }

@@ -1,5 +1,5 @@
 -- Roles
-INSERT INTO userRoles (UR_id, UR_name, UR_color) VALUES
+INSERT INTO userRoles (UR_id, UR_desc, UR_color) VALUES
   (1, 'Player', '#ffffff'),
   (2, 'Admin', '#ff0000');
 INSERT INTO roleAccess (RA_role, RA_module) VALUES
@@ -8,23 +8,27 @@ INSERT INTO roleAccess (RA_role, RA_module) VALUES
   (99, 'ghost'); -- orphan: role 99 does not exist
 
 -- Rounds
-INSERT INTO rounds (RND_id, RND_name, RND_start, RND_end) VALUES
+INSERT INTO rounds (R_id, R_name, R_start, R_end) VALUES
   (1, 'Round 1', 1700000000, NULL);
 
 -- Content
 INSERT INTO ranks (R_id, R_name, R_exp, R_cashReward, R_bulletReward, R_health) VALUES
   (1, 'Rookie', 0, 0, 10, 100),
   (2, 'Soldier', 1000, 500, 20, 120);
-INSERT INTO moneyRanks (MR_id, MR_label, MR_threshold) VALUES
+INSERT INTO moneyRanks (MR_id, MR_desc, MR_money) VALUES
   (1, 'Poor', 0), (2, 'Rich', 1000000);
 -- Explicit gap at id 4: SPEC §1.2 quirk — crime 4 was deleted, leaving a
 -- dead position in every US_crimes string that still has an index 3.
+-- Id 16 sits beyond every position of V2's 15-wide US_crimes default
+-- ('35-25-15-5-5-…-5'), exercising the crime-skill "neither the player's
+-- string nor the schema default reaches this crime" branch.
 INSERT INTO crimes (C_id, C_name, C_cooldown, C_money, C_maxMoney, C_bullets, C_maxBullets, C_exp, C_level) VALUES
   (1, 'Pickpocket', 60, 10, 50, 0, 0, 2, 0),
   (2, 'Shoplifting', 90, 20, 80, 0, 0, 3, 0),
   (3, 'Mugging', 120, 40, 150, 1, 2, 5, 1),
   (5, 'Burglary', 300, 200, 800, 0, 0, 10, 3),
-  (6, 'Grand Theft Auto', 600, 500, 2000, 0, 0, 20, 5);
+  (6, 'Grand Theft Auto', 600, 500, 2000, 0, 0, 20, 5),
+  (16, 'Deep Web Heist', 3600, 5000, 20000, 0, 0, 100, 8);
 INSERT INTO locations (L_id, L_name, L_cost, L_cooldown, L_bullets, L_bulletCost) VALUES
   (1, 'New York', 0, 0, 500, 5),
   (2, 'Chicago', 100, 60, 300, 6);
@@ -34,20 +38,24 @@ INSERT INTO theft (T_id, T_name, T_chance, T_maxDamage, T_worstCar, T_bestCar) V
   (1, 'Amateur', 60, 30, 1000, 10000);
 INSERT INTO weapons (W_id, W_name, W_accuracy) VALUES
   (1, 'Pistol', 60), (2, 'Shotgun', 45);
+-- I_type 1/2 index into the itemTypes registry seeded under settings below
+-- (1 = weapon, 2 = armor) — V2 stores int ids, not type strings.
 INSERT INTO items (I_id, I_name, I_type) VALUES
-  (1, 'Baseball Bat', 'weapon'), (2, 'Kevlar Vest', 'armor');
+  (1, 'Baseball Bat', 1), (2, 'Kevlar Vest', 2);
 INSERT INTO itemEffects (IE_item, IE_effect, IE_value) VALUES
-  (1, 'damage', 15), (2, 'armor', 20),
-  (99, 'orphan', 1); -- orphan: item 99 does not exist
-INSERT INTO itemMeta (IM_item, IM_key, IM_value) VALUES
+  (1, 'damage', '15'), (2, 'armor', '20'),
+  (99, 'orphan', '1'); -- orphan: item 99 does not exist
+INSERT INTO itemMeta (IM_item, IM_meta, IM_value) VALUES
   (1, 'rarity', 'common');
 INSERT INTO premiumMembership (PM_id, PM_desc, PM_seconds, PM_cost) VALUES
   (1, 'VIP Week', 604800, 500);
 -- The five bullet options plus the restock cursor, and the three detective
 -- knobs, are V2's flat keys; GL3 namespaces every plugin setting as
 -- `<pluginId>.<key>`, so migrateSettings renames these nine rather than
--- copying them verbatim like the rest.
-INSERT INTO settings (S_key, S_value) VALUES
+-- copying them verbatim like the rest. itemTypes stays V2-side only: the
+-- items migrator resolves I_type through it, and GL3 stores the resolved
+-- type string on each item row instead (settings SKIPPED_KEYS).
+INSERT INTO settings (S_desc, S_value) VALUES
   ('pointsName', 'Respect Points'),
   ('gangName', 'Family'),
   ('detectiveReport', '1'),
@@ -59,7 +67,8 @@ INSERT INTO settings (S_key, S_value) VALUES
   ('maxBulletStock', '25000'),
   ('maxBulletCost', '900'),
   ('maxBulletBuy', '250'),
-  ('lastBulletRestock', '1420070400');
+  ('lastBulletRestock', '1420070400'),
+  ('itemTypes', '[{"id":1,"name":"Weapon","type":"weapon"},{"id":2,"name":"Armor","type":"armor"}]');
 
 -- Users. Legacy passwords are sha256(U_id . plaintext) — SPEC §1.1/§4.3.
 -- Plaintext noted per row for the Task 31 login end-to-end test; never
@@ -78,20 +87,23 @@ INSERT INTO users (U_id, U_name, U_email, U_password, U_userLevel, U_status, U_r
 -- userStats. US_gang: 1 = DonVito's gang (id 1), but DonVito's OWN row is
 -- US_gang = 0 — the boss is deliberately not a member of his own gang
 -- (§4.2 item 5 cross-check). GhostGangMember's US_gang = 99, a gang that
--- does not exist (orphan membership, §4.2 item 4).
-INSERT INTO userStats (US_id, US_money, US_bank, US_bullets, US_exp, US_health, US_backfire, US_points, US_weapon, US_armor, US_rank, US_gang, US_location, US_pic, US_bio, US_crimes) VALUES
-  (1, 2100000000, 500000, 1000, 5000, 100, 0, 100, 1, 2, 2, 0, 1, NULL, 'Head of the family', '50-40-30'),
-  (2, 800000, 200000, 500, 3000, 100, 0, 50, 0, 0, 2, 1, 1, NULL, NULL, '20-20-20-20-20-20'),
-  (3, 15000, 5000, 100, 800, 100, 0, 0, 0, 0, 1, 1, 2, NULL, NULL, '10'),
-  (4, 500, 0, 20, 50, 100, 0, 0, 0, 0, 1, 0, 1, NULL, NULL, '35-25-15-5-5'),
-  (5, 100, 0, 10, 10, 100, 0, 0, 0, 0, 1, 99, 1, NULL, NULL, '35-25-15-5-5'),
-  (6, 250, 0, 5, 5, 100, 0, 0, 0, 0, 1, 0, 1, NULL, NULL, '35-25-15-5-5');
+-- does not exist (orphan membership, §4.2 item 4). US_pic is omitted —
+-- V2's column is NOT NULL with a default path. US_bio is NOT NULL DEFAULT
+-- '0' upstream; '0' is what a real dump holds for everyone but user 1.
+INSERT INTO userStats (US_id, US_money, US_bank, US_bullets, US_exp, US_health, US_backfire, US_points, US_weapon, US_armor, US_rank, US_gang, US_location, US_bio, US_crimes) VALUES
+  (1, 2100000000, 500000, 1000, 5000, 100, 0, 100, 1, 2, 2, 0, 1, 'Head of the family', '50-40-30'),
+  (2, 800000, 200000, 500, 3000, 100, 0, 50, 0, 0, 2, 1, 1, '0', '20-20-20-20-20-20'),
+  (3, 15000, 5000, 100, 800, 100, 0, 0, 0, 0, 1, 1, 2, '0', '10'),
+  (4, 500, 0, 20, 50, 100, 0, 0, 0, 0, 1, 0, 1, '0', '35-25-15-5-5'),
+  (5, 100, 0, 10, 10, 100, 0, 0, 0, 0, 1, 99, 1, '0', '35-25-15-5-5'),
+  (6, 250, 0, 5, 5, 100, 0, 0, 0, 0, 1, 0, 1, '0', '35-25-15-5-5');
 
--- Timers. user 999 does not exist (orphan). 'jail'/'hospital' are the two
--- keys promoted to typed player_stats columns; 'someCustomModuleKey' is not
--- in SPEC §1.2's observed-keys list and must still migrate (§1.2: "Custom
--- modules add arbitrary keys — migrate ALL rows, known or not").
-INSERT INTO userTimers (UT_user, UT_key, UT_time) VALUES
+-- Timers (keyed by UT_desc). user 999 does not exist (orphan). 'jail'/
+-- 'hospital' are the two keys promoted to typed player_stats columns;
+-- 'someCustomModuleKey' is not in SPEC §1.2's observed-keys list and must
+-- still migrate (§1.2: "Custom modules add arbitrary keys — migrate ALL
+-- rows, known or not").
+INSERT INTO userTimers (UT_user, UT_desc, UT_time) VALUES
   (1, 'jail', 2100000000),        -- future (year 2036) — maps to player_stats.jailed_until
   (1, 'hospital', 1000000000),    -- past — dropped
   (3, 'crime', 2100000000),       -- future — generic player_timers row
@@ -99,29 +111,29 @@ INSERT INTO userTimers (UT_user, UT_key, UT_time) VALUES
   (999, 'crime', 2100000000);     -- orphan: user 999 does not exist
 
 -- Gangs. G_boss=1 (DonVito) but DonVito's own userStats.US_gang=0 above.
-INSERT INTO gangs (G_id, G_name, G_boss, G_underboss, G_bank, G_money, G_level, G_location) VALUES
-  (1, 'The Family', 1, 2, 900000000, 500, 5, 1);
+INSERT INTO gangs (G_id, G_name, G_bank, G_money, G_bullets, G_info, G_desc, G_location, G_boss, G_underboss, G_level) VALUES
+  (1, 'The Family', 900000000, 500, 25000, 'Vito runs this city. Respect the Family above all.', 'The preeminent crime family', 1, 1, 2, 5);
 
 INSERT INTO gangPermissions (GP_user, GP_access) VALUES
   (3, 'kick'),   -- Soldier, US_gang=1 — migrates normally
   (4, 'invite'), -- LoneWolf, US_gang=0 — dropped, gangless (§1.2 quirk)
   (999, 'ghost'); -- orphan: user 999 does not exist
 
-INSERT INTO gangInvites (GI_gang, GI_user, GI_invitedBy, GI_time) VALUES
-  (1, 4, 1, 1700000100),
-  (99, 4, 1, 1700000100); -- orphan: gang 99 does not exist
+INSERT INTO gangInvites (GI_gang, GI_user, GI_gangUser) VALUES
+  (1, 4, 1),
+  (99, 4, 1); -- orphan: gang 99 does not exist
 
-INSERT INTO gangLogs (GL_gang, GL_user, GL_message, GL_time) VALUES
-  (1, 1, 'Founded the family', 1700000000),
-  (1, NULL, 'System: round started', 1700000050), -- system log, no user — not an orphan
-  (99, 1, 'Ghost log', 1700000000); -- orphan: gang 99 does not exist
+INSERT INTO gangLogs (GL_gang, GL_time, GL_user, GL_log) VALUES
+  (1, 1700000000, 1, 'Founded the family'),
+  (1, 1700000050, 0, 'System: round started'), -- system log, GL_user=0 — not an orphan
+  (99, 1700000000, 1, 'Ghost log'); -- orphan: gang 99 does not exist
 
 -- Inventory / garage / properties
 INSERT INTO userInventory (UI_user, UI_item, UI_qty) VALUES
   (1, 1, 5),
   (4, 99, 1),  -- orphan: item 99 does not exist
   (88, 1, 1);  -- orphan: user 88 does not exist
-INSERT INTO garage (GA_user, GA_car, GA_damage, GA_location) VALUES
+INSERT INTO garage (GA_uid, GA_car, GA_damage, GA_location) VALUES
   (1, 1, 10, 1),
   (77, 1, 0, 1); -- orphan: user 77 does not exist
 -- Only locations 1 and 2 are seeded above. Task 4 re-keyed the plugin table
@@ -137,23 +149,28 @@ INSERT INTO properties (PR_location, PR_module, PR_user, PR_cost, PR_profit) VAL
   (2, 'bullets', -1, 250, 0),    -- PR_user = -1: closed, migrates as unowned
   (99, 'casino', 1, 5000, 100);  -- orphan: location 99 does not exist
 
--- Social
-INSERT INTO bounties (B_user, B_userToKill, B_cost, B_time) VALUES
-  (1, 3, 1000, 1700000200),
-  (1, 999, 1000, 1700000200); -- orphan: target 999 does not exist
-INSERT INTO detectives (D_user, D_target, D_start, D_end, D_success) VALUES
-  (1, 3, 1700000000, 2100000000, NULL);
-INSERT INTO mail (M_id, M_parent, M_sender, M_recipient, M_subject, M_body, M_read, M_type, M_time) VALUES
-  (1, NULL, 1, 3, 'Hi', 'Welcome to the family.', 1, 0, 1700000300),
+-- Social. Bounties carry no timestamp upstream; detectives carry the hired
+-- count (D_detectives = 2) and a D_success flag rolled at insert time
+-- (0 here = the search will fail).
+INSERT INTO bounties (B_user, B_userToKill, B_cost) VALUES
+  (1, 3, 1000),
+  (1, 999, 1000); -- orphan: target 999 does not exist
+INSERT INTO detectives (D_user, D_userToFind, D_detectives, D_start, D_end, D_success) VALUES
+  (1, 3, 2, 1700000000, 2100000000, 0);
+-- M_sid = sender, M_uid = recipient; 0 = system sentinel on M_sid, and the
+-- no-parent sentinel on M_parent (message 2's M_parent = 1 threads it under
+-- message 1).
+INSERT INTO mail (M_id, M_parent, M_sid, M_uid, M_subject, M_text, M_read, M_type, M_time) VALUES
+  (1, 0, 1, 3, 'Hi', 'Welcome to the family.', 1, 0, 1700000300),
   (2, 1, 3, 1, 'Re: Hi', 'Thanks, boss.', 0, 0, 1700000400),  -- thread root walks to message 1
-  (3, NULL, NULL, 1, 'System notice', 'Server maintenance tonight.', 0, 1, 1700000500), -- system mail, no sender
-  (4, NULL, 1, 999, 'Lost', 'nobody home', 0, 0, 1700000600); -- orphan: recipient 999 does not exist
-INSERT INTO notifications (N_user, N_body, N_read, N_time) VALUES
+  (3, 0, 0, 1, 'System notice', 'Server maintenance tonight.', 0, 1, 1700000500), -- system mail, M_sid=0
+  (4, 0, 1, 999, 'Lost', 'nobody home', 0, 0, 1700000600); -- orphan: recipient 999 does not exist
+INSERT INTO notifications (N_uid, N_text, N_read, N_time) VALUES
   (1, 'Welcome to GL3', 0, 1700000000),
   (999, 'Ghost notification', 0, 1700000000); -- orphan: user 999 does not exist
-INSERT INTO gameNews (GN_author, GN_title, GN_body, GN_time) VALUES
+INSERT INTO gameNews (GN_author, GN_title, GN_text, GN_date) VALUES
   (1, 'Season 1 begins', 'Good luck.', 1700000000),
-  (NULL, 'System announcement', 'Automated post.', 1700000100); -- system news, no author
+  (0, 'System announcement', 'Automated post.', 1700000100); -- system news, GN_author=0
 
 -- Forum. F_id -1 is a gang forum (negative id convention) — deferred
 -- cluster-wide, so it and anything filed under it must be skipped, not

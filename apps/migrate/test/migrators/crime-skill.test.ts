@@ -41,6 +41,7 @@ describe("migrateCrimeSkill", () => {
       const crime3 = (await lookupV3Id(db, "crimes", 3))!;
       const crime5 = (await lookupV3Id(db, "crimes", 5))!;
       const crime6 = (await lookupV3Id(db, "crimes", 6))!;
+      const crime16 = (await lookupV3Id(db, "crimes", 16))!;
 
       async function chanceFor(playerId: string, crimeId: string): Promise<string | undefined> {
         const [row] = await db.select().from(playerCrimeSkill)
@@ -48,21 +49,25 @@ describe("migrateCrimeSkill", () => {
         return row?.chance;
       }
 
-      // DonVito: direct values for 1-3, fallback-to-base for 5, nothing for 6.
+      // DonVito: direct values for 1-3, fallback-to-base for 5 and 6 (V2's
+      // real 15-wide schema default reaches both), nothing for 16 — beyond
+      // every position of both his string and the default.
       expect(await chanceFor(vitoId, crime1)).toBe("50.00");
       expect(await chanceFor(vitoId, crime3)).toBe("30.00");
       expect(await chanceFor(vitoId, crime5)).toBe("5.00"); // base default index 4
-      expect(await chanceFor(vitoId, crime6)).toBeUndefined();
+      expect(await chanceFor(vitoId, crime6)).toBe("5.00"); // base default index 5
+      expect(await chanceFor(vitoId, crime16)).toBeUndefined();
 
       // Underboss: every index direct, including the dropped id-4 gap.
       expect(await chanceFor(underbossId, crime1)).toBe("20.00");
       expect(await chanceFor(underbossId, crime6)).toBe("20.00");
       expect(report.droppedCrimePositions).toContainEqual({ playerV2Id: 2, position: 3 });
 
-      // Soldier: direct for 1, fallback-to-base for 2/3/5, nothing for 6.
+      // Soldier: direct for 1, fallback-to-base for 2/3/5/6, nothing for 16.
       expect(await chanceFor(soldierId, crime1)).toBe("10.00");
       expect(await chanceFor(soldierId, crime2)).toBe("25.00"); // base default index 1
-      expect(await chanceFor(soldierId, crime6)).toBeUndefined();
+      expect(await chanceFor(soldierId, crime6)).toBe("5.00");
+      expect(await chanceFor(soldierId, crime16)).toBeUndefined();
 
       await pool.end();
       await sql.end();

@@ -6,8 +6,9 @@ import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
 interface GangRow {
-  G_id: number; G_name: string; G_boss: number; G_underboss: number | null;
-  G_bank: number; G_money: number; G_level: number; G_location: number | null;
+  G_id: number; G_name: string | null; G_boss: number; G_underboss: number;
+  G_bank: number; G_money: number; G_bullets: number; G_desc: string | null; G_info: string | null;
+  G_level: number; G_location: number;
 }
 interface GangMembershipRow { US_id: number; US_gang: number; }
 
@@ -23,7 +24,7 @@ async function ensureMember(exec: Executor, gangId: string, playerId: string): P
 
 export async function migrateGangs(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [gangRows] = await pool.query<(GangRow & mysql.RowDataPacket)[]>(
-    "SELECT G_id, G_name, G_boss, G_underboss, G_bank, G_money, G_level, G_location FROM gangs",
+    "SELECT G_id, G_name, G_boss, G_underboss, G_bank, G_money, G_bullets, G_desc, G_info, G_level, G_location FROM gangs",
   );
 
   const gangIdByV2 = new Map<number, string>();
@@ -34,6 +35,7 @@ export async function migrateGangs(pool: mysql.Pool, exec: Executor, report: Mig
 
     const bossPlayerId = await lookupV3Id(exec, "users", row.G_boss);
     if (!bossPlayerId) recordOrphan(report, "gangs", row.G_id, `boss ${row.G_boss} does not exist`);
+    // G_underboss/G_location are NOT NULL DEFAULT 0 — 0 means "none".
     const underbossPlayerId = row.G_underboss ? await lookupV3Id(exec, "users", row.G_underboss) : null;
     if (row.G_underboss && !underbossPlayerId) {
       recordOrphan(report, "gangs", row.G_id, `underboss ${row.G_underboss} does not exist`);
@@ -41,7 +43,8 @@ export async function migrateGangs(pool: mysql.Pool, exec: Executor, report: Mig
     const locationId = row.G_location ? await lookupV3Id(exec, "locations", row.G_location) : null;
 
     const values = {
-      id: gangId, name: row.G_name, bank: BigInt(row.G_bank), cash: BigInt(row.G_money),
+      id: gangId, name: row.G_name ?? "", description: row.G_desc ?? "", info: row.G_info ?? "",
+      bank: BigInt(row.G_bank), cash: BigInt(row.G_money), bullets: BigInt(row.G_bullets),
       level: row.G_level, locationId, bossPlayerId, underbossPlayerId,
     };
     await exec.insert(gangs).values(values).onConflictDoUpdate({ target: gangs.id, set: values });

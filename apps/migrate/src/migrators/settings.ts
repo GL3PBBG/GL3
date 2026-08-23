@@ -3,7 +3,9 @@ import { settings } from "../../../server/src/db/schema/index.js";
 import { bumpTable, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
-interface SettingRow { S_key: string; S_value: string | null; }
+// V2's settings table keys rows by the S_desc column (class/settings.php:
+// SELECT ... WHERE S_desc = :desc) — S_desc is the key, S_value the value.
+interface SettingRow { S_desc: string; S_value: string | null; }
 
 /**
  * V2's settings are flat; GL3 namespaces every plugin setting as
@@ -38,9 +40,12 @@ const RENAMES: Readonly<Record<string, string>> = {
  * content (Task 10, `p_membership_packages`), but nothing in GL3's
  * `membership` plugin reads either of these two settings keys — the page
  * name and link text are hardcoded, not admin-configurable — so, unlike the
- * nine renamed above, these are dead and simply skipped.
+ * nine renamed above, these are dead and simply skipped. `itemTypes` is
+ * V2-side-only configuration (the int→name registry the items migrator maps
+ * I_type through); GL3 stores the type string on each item row instead, so
+ * copying the registry across would be dead weight.
  */
-const SKIPPED_KEYS = new Set(["membershipLinkName", "membershipName"]);
+const SKIPPED_KEYS = new Set(["membershipLinkName", "membershipName", "itemTypes"]);
 
 /**
  * No id_map here: settings.key is a natural key, identical on both sides for
@@ -50,14 +55,14 @@ const SKIPPED_KEYS = new Set(["membershipLinkName", "membershipName"]);
  * target row.
  */
 export async function migrateSettings(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
-  const [rows] = await pool.query<(SettingRow & mysql.RowDataPacket)[]>("SELECT S_key, S_value FROM settings");
+  const [rows] = await pool.query<(SettingRow & mysql.RowDataPacket)[]>("SELECT S_desc, S_value FROM settings");
   for (const row of rows) {
     bumpTable(report, "settings", "read");
-    if (SKIPPED_KEYS.has(row.S_key)) {
+    if (SKIPPED_KEYS.has(row.S_desc)) {
       bumpTable(report, "settings", "skipped");
       continue;
     }
-    const key = RENAMES[row.S_key] ?? row.S_key;
+    const key = RENAMES[row.S_desc] ?? row.S_desc;
     await exec.insert(settings).values({ key, value: row.S_value ?? "" })
       .onConflictDoUpdate({ target: settings.key, set: { value: row.S_value ?? "" } });
     bumpTable(report, "settings", "written");

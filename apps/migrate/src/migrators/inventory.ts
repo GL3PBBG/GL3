@@ -6,7 +6,7 @@ import { bumpTable, recordOrphan, type MigrationReport } from "../report.js";
 import type { Executor } from "../pg/types.js";
 
 interface InventoryRow { UI_user: number; UI_item: number; UI_qty: number; }
-interface GarageRow { GA_id: number; GA_user: number; GA_car: number; GA_damage: number; GA_location: number | null; }
+interface GarageRow { GA_id: number; GA_uid: number; GA_car: number; GA_damage: number; GA_location: number; }
 
 export async function migrateInventory(pool: mysql.Pool, exec: Executor, report: MigrationReport): Promise<void> {
   const [invRows] = await pool.query<(InventoryRow & mysql.RowDataPacket)[]>(
@@ -32,19 +32,19 @@ export async function migrateInventory(pool: mysql.Pool, exec: Executor, report:
   }
 
   const [garageRows] = await pool.query<(GarageRow & mysql.RowDataPacket)[]>(
-    "SELECT GA_id, GA_user, GA_car, GA_damage, GA_location FROM garage",
+    "SELECT GA_id, GA_uid, GA_car, GA_damage, GA_location FROM garage",
   );
   for (const row of garageRows) {
     bumpTable(report, "garage", "read");
-    const playerId = await lookupV3Id(exec, "users", row.GA_user);
+    const playerId = await lookupV3Id(exec, "users", row.GA_uid);
     if (!playerId) {
-      recordOrphan(report, "garage", row.GA_user, `user ${row.GA_user} does not exist`);
+      recordOrphan(report, "garage", row.GA_uid, `user ${row.GA_uid} does not exist`);
       bumpTable(report, "garage", "skipped");
       continue;
     }
     const carId = await lookupV3Id(exec, "cars", row.GA_car);
     if (!carId) {
-      recordOrphan(report, "garage", row.GA_user, `car ${row.GA_car} does not exist`);
+      recordOrphan(report, "garage", row.GA_uid, `car ${row.GA_car} does not exist`);
       bumpTable(report, "garage", "skipped");
       continue;
     }

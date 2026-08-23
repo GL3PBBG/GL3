@@ -11,7 +11,9 @@ describe("fingerprintV2Schema", () => {
       const result = await fingerprintV2Schema(pool);
       expect(result.ok).toBe(true);
       expect(result.missingTables).toEqual([]);
-      expect(result.unknownTables.sort()).toEqual(["blackjackHands"]);
+      // forumAccess/topicReads are real upstream core tables the migrator
+      // does not migrate; a real dump reports them alongside the custom one.
+      expect(result.unknownTables.sort()).toEqual(["blackjackHands", "forumAccess", "topicReads"]);
       await pool.end();
     } finally {
       await fixture.teardown();
