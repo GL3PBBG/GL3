@@ -36,9 +36,9 @@ describe("buildNav", () => {
       { admin: false },
     );
     const crimes = nav.find((c) => c.id === "crimes")!;
-    expect(crimes.items.map((i) => i.label)).toEqual(["Crimes", "Car theft"]);
-    const town = nav.find((c) => c.id === "town")!;
-    expect(town.items.map((i) => i.label)).toContain("Membership");
+    expect(crimes.items.map((i) => i.label)).toEqual(["Crimes", "Combat", "Bounties", "Detectives", "Heists", "Car theft"]);
+    const account = nav.find((c) => c.id === "account")!;
+    expect(account.items.map((i) => i.label)).toContain("Membership");
     // No unmapped plugin pages, so no trailing catch-all category.
     expect(nav.some((c) => c.id === "more")).toBe(false);
   });
@@ -78,6 +78,27 @@ describe("category and label lookup", () => {
     expect(categoryForPath(nav, "/jail")?.id).toBe("town");
     expect(categoryForPath(nav, "/hospital")?.id).toBe("town");
     expect(categoryForPath(nav, "/crimes")?.id).toBe("crimes");
+  });
+
+  it("folds the old Actions destinations into Crimes and drops the empty category", () => {
+    expect(nav.some((c) => c.id === "actions")).toBe(false);
+    for (const path of ["/combat", "/bounties", "/detectives", "/oc"]) {
+      expect(categoryForPath(nav, path)?.id).toBe("crimes");
+    }
+  });
+
+  it("renders Actions only when a plugin page routes into it", () => {
+    // The routing table is injectable — the seam a server-declared category
+    // field (phase two) plugs into — so route an arena page the way its
+    // plugin would and prove the category materializes in place, between
+    // Crimes and Town.
+    const nav = buildNav([entry("pvp.arena", "Arena", 50)], {
+      admin: false,
+      pluginCategory: { "pvp.arena": "actions" },
+    });
+    const actions = nav.find((c) => c.id === "actions");
+    expect(actions?.items.map((i) => i.label)).toEqual(["Arena"]);
+    expect(nav.indexOf(actions!)).toBe(nav.findIndex((c) => c.id === "town") - 1);
   });
 
   it("resolves subroutes to their section's category", () => {

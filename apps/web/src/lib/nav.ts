@@ -10,7 +10,9 @@
  *
  * Jail and Hospital live in Town, not Crimes: they are places you are taken
  * to and buy your way out of — town services, in the government sense —
- * rather than things you do.
+ * rather than things you do. Actions has no core items at all: it exists for
+ * a plugin page that belongs between Crimes and Town, and buildNav drops it
+ * when nothing does.
  */
 
 export interface NavEntry {
@@ -36,18 +38,19 @@ const CRIMES: NavCategory = {
   label: "Crimes",
   items: [
     { to: "/crimes", label: "Crimes" },
-  ],
-};
-
-const ACTIONS: NavCategory = {
-  id: "actions",
-  label: "Actions",
-  items: [
     { to: "/combat", label: "Combat" },
     { to: "/bounties", label: "Bounties" },
     { to: "/detectives", label: "Detectives" },
     { to: "/oc", label: "Heists" },
   ],
+};
+
+/* Plugin-only: rendered between Crimes and Town when a plugin page routes
+   here (PLUGIN_CATEGORY below), dropped entirely when none does. */
+const ACTIONS: NavCategory = {
+  id: "actions",
+  label: "Actions",
+  items: [],
 };
 
 const TOWN: NavCategory = {
@@ -98,12 +101,13 @@ const ACCOUNT: NavCategory = {
  * this map only routes it. Pages not named here fall into a trailing "More"
  * category rather than being dropped or silently misfiled, because the menu
  * model has no category field yet (see MenuEntrySchema) — this map is the
- * phase-one stand-in for it.
+ * phase-one stand-in for it, and buildNav's `pluginCategory` option is where
+ * a server-declared field will take over.
  */
-const PLUGIN_CATEGORY: Readonly<Record<string, string>> = {
+export const PLUGIN_CATEGORY: Readonly<Record<string, string>> = {
   "theft.index": "crimes",
   "theft.garage": "town",
-  "membership.index": "town",
+  "membership.index": "account",
 };
 
 /** The menu entries the plugins endpoint returns — `MenuItem` from shared. */
@@ -123,7 +127,7 @@ export interface PluginMenuEntry {
  */
 export function buildNav(
   pluginLinks: readonly PluginMenuEntry[],
-  options: { admin: boolean },
+  options: { admin: boolean; pluginCategory?: Readonly<Record<string, string>> },
 ): NavCategory[] {
   // Assembled mutable, returned frozen-shaped: plugin entries get pushed in
   // below, which NavCategory's readonly items cannot express.
@@ -134,6 +138,7 @@ export function buildNav(
     ),
   );
   const extra: NavEntry[] = [];
+  const pluginCategory = options.pluginCategory ?? PLUGIN_CATEGORY;
   for (const entry of pluginLinks) {
     // Raw pageId, not its encoding: this is the same literal a `menu.badges`
     // subscriber writes and the same value navKeyFor decodes the location
@@ -141,7 +146,7 @@ export function buildNav(
     // encoding happens at the very edge, in linkFor, where the router needs
     // it — nowhere in between.
     const to = `/plugins/${entry.pageId}`;
-    const target = byId.get(PLUGIN_CATEGORY[entry.pageId] ?? "");
+    const target = byId.get(pluginCategory[entry.pageId] ?? "");
     if (target !== undefined) target.items.push({ to, label: entry.label });
     else extra.push({ to, label: entry.label });
   }
@@ -149,7 +154,10 @@ export function buildNav(
     const account = byId.get("account")!;
     account.items = account.items.filter((item) => item.to !== "/admin");
   }
-  const categories = [...byId.values()];
+  // Empty categories do not render: Actions exists as a plugin target, so
+  // with nothing routed to it, it must vanish rather than sit as a header
+  // with nothing under it.
+  const categories = [...byId.values()].filter((c) => c.items.length > 0);
   if (extra.length > 0) categories.push({ id: "more", label: "More", items: extra });
   return categories;
 }
