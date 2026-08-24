@@ -43,7 +43,7 @@ game? `GL3_PROFILE=framework` boots the openPBBG-shaped platform instead
 The same file without the profile is the development database pair:
 `docker compose up -d` (what `npm run db:up` runs) starts only Postgres and
 Redis. CI publishes the images to GHCR on every push to `main`
-(`ghcr.io/rondlite/gl3-server`, `ghcr.io/rondlite/gl3-web`).
+(`ghcr.io/gl3pbbg/gl3-server`, `ghcr.io/gl3pbbg/gl3-web`).
 
 ## Quick start (from source)
 

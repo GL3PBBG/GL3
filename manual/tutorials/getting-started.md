@@ -13,7 +13,7 @@
 ## 1. Clone and install
 
 ```sh
-git clone https://github.com/rondlite/GL3.git
+git clone https://github.com/GL3PBBG/GL3.git
 cd GL3
 npm install
 ```

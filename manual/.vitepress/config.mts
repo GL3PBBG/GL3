@@ -62,9 +62,9 @@ export default defineConfig({
         ],
       },
     ],
-    socialLinks: [{ icon: 'github', link: 'https://github.com/rondlite/GL3' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/GL3PBBG/GL3' }],
     editLink: {
-      pattern: 'https://github.com/rondlite/GL3/edit/main/manual/:path',
+      pattern: 'https://github.com/GL3PBBG/GL3/edit/main/manual/:path',
       text: 'Edit this page',
     },
   },

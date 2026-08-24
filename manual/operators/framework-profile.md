@@ -65,6 +65,6 @@ skips those sections and says so in the report:
 gl3-migrate --mysql mysql://user:pass@host/openpbbg_db --pg postgres://...
 ```
 
-The [migrator README](https://github.com/rondlite/GL3/tree/main/apps/migrate)
+The [migrator README](https://github.com/GL3PBBG/GL3/tree/main/apps/migrate)
 documents the report fields (`missingSourceTables`,
 `absentTargetTables`) both sides produce.

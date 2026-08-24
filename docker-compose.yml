@@ -54,7 +54,7 @@ services:
   # reviving it after it exits 0.
   migrate:
     profiles: ["app"]
-    image: ghcr.io/rondlite/gl3-server:latest
+    image: ghcr.io/gl3pbbg/gl3-server:latest
     command: ["node", "apps/server/dist/db/migrate.js"]
     environment:
       DATABASE_URL: postgres://gl3:gl3@postgres:5432/gl3
@@ -92,7 +92,7 @@ services:
 
   server:
     profiles: ["app"]
-    image: ghcr.io/rondlite/gl3-server:latest
+    image: ghcr.io/gl3pbbg/gl3-server:latest
     environment:
       DATABASE_URL: postgres://gl3:gl3@postgres:5432/gl3
       REDIS_URL: redis://redis:6379
@@ -124,7 +124,7 @@ services:
 
   web:
     profiles: ["app"]
-    image: ghcr.io/rondlite/gl3-web:latest
+    image: ghcr.io/gl3pbbg/gl3-web:latest
     restart: unless-stopped
 
   router:

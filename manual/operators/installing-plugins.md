@@ -165,7 +165,7 @@ spec:
                 secretKeyRef: { name: npm-creds, key: token }
       containers:
         - name: server
-          image: ghcr.io/rondlite/gl3-server:latest
+          image: ghcr.io/gl3pbbg/gl3-server:latest
           env:
             - name: PLUGIN_PACKAGES
               value: "@acme/plugin-x"
@@ -225,7 +225,7 @@ services:
     restart: "no"                 # one-shot: runs, installs, exits
 
   server:
-    image: ghcr.io/rondlite/gl3-server:latest
+    image: ghcr.io/gl3pbbg/gl3-server:latest
     depends_on:
       install-plugins:
         condition: service_completed_successfully
