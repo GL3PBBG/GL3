@@ -1,0 +1,17 @@
+# App-profile companion for a host that also runs the dev stack.
+#
+# The dev mode (`docker compose up -d --wait`) publishes 5432/6379 so local
+# tests reach the dev databases; two compose projects cannot both bind the
+# same host port. The app profile's postgres and redis need no host ports at
+# all — only the router's GL3_PORT is public — and leaving them unpublished is
+# also safer: dev tooling pointed at localhost can never reach the live game
+# (whose `gl3` database a test-suite reset would truncate) by accident.
+#
+# Apply with:
+#   docker compose -f docker-compose.yml -f deploy/compose.no-db-ports.yml \
+#     -p gl3-app --profile app up -d
+services:
+  postgres:
+    ports: !override []
+  redis:
+    ports: !override []

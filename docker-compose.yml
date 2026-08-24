@@ -69,6 +69,27 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Premium plugins install here (manual/operators/installing-plugins.md's
+  # init-container pattern): idempotent `npm install` into the plugins-data
+  # volume on every `up`, so bumping a version is just `up` again. The token
+  # comes from GL3_NPM_TOKEN in .env — never baked into the image. The scope
+  # mappings must ride along or npm falls back to npmjs.org and 404s.
+  plugins:
+    profiles: ["app"]
+    image: node:22-alpine
+    working_dir: /data/plugins
+    command:
+      - sh
+      - -c
+      - |
+        printf '%s\n' '@gl3:registry=https://npm.gl3.dev' '@gl3-plugins:registry=https://npm.gl3.dev' "//npm.gl3.dev/:_authToken=$$GL3_NPM_TOKEN" > .npmrc
+        npm install --no-save --no-audit --no-fund --prefix /data/plugins @gl3-plugins/market
+    environment:
+      GL3_NPM_TOKEN: ${GL3_NPM_TOKEN:?set GL3_NPM_TOKEN in .env — the npm.gl3.dev access token}
+    volumes:
+      - plugins-data:/data/plugins
+    restart: "no"
+
   server:
     profiles: ["app"]
     image: ghcr.io/rondlite/gl3-server:latest
@@ -80,13 +101,21 @@ services:
       # full (default) = the gangster game; framework = the game-agnostic
       # engine (openPBBG-shaped), gameplay plugins addable via PLUGIN_IDS.
       GL3_PROFILE: ${GL3_PROFILE:-full}
+      # Premium/out-of-image plugins, resolved from the plugins service's
+      # volume — never PLUGIN_IDS, which only picks among plugins compiled
+      # into the image. Naming a package here is the enabling act.
+      PLUGIN_PACKAGES: ${PLUGIN_PACKAGES:-@gl3-plugins/market}
+      PLUGIN_DIR: /data/plugins
       # EMAIL_DRIVER defaults to log: verification links print to
       # `docker compose --profile app logs server`, which is the whole signup
       # flow for a private instance. Switch to resend for real mail (see
       # .env.example).
     volumes:
       - ./var/assets:/app/var/assets
+      - plugins-data:/data/plugins:ro
     depends_on:
+      plugins:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       redis:
@@ -114,3 +143,4 @@ services:
 
 volumes:
   postgres-data:
+  plugins-data:
