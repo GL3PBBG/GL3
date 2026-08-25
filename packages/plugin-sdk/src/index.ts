@@ -58,3 +58,11 @@ export {
 } from "./manifest.js";
 export { route, type PluginRoute, type RouteDef, type RouteResult } from "./route.js";
 export { hasPermission } from "./authz.js";
+export {
+  settlePool,
+  type Pool,
+  type TrainedAttr,
+  type ActionCost,
+  type AttributePoolDecl,
+  type PoolSettlement,
+} from "./attributes.js";
