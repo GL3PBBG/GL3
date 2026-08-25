@@ -48,6 +48,28 @@ export const killResolved = filterPoint<KillResolved>("combat.killResolved", "pr
 const ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
 
 /**
+ * Duplicated from `@gl3/plugin-crimes` rather than shared through the SDK —
+ * two implementations of one small job, not worth widening the SDK's public
+ * surface (and the version bump that would come with it) for. Keep the two
+ * in sync by hand if the pool set ever changes.
+ */
+const POOLS = ["energy", "will", "brave", "nerve"] as const satisfies readonly Pool[];
+
+/**
+ * Positive-amount entries only, in fixed pool order. `costs` comes back from
+ * `core.actionCost` with whatever subscribers chose to add; an empty or
+ * all-zero map is what "no attribute plugin installed" (or "installed but
+ * this action is unpriced") looks like. Typed against the fixed `POOLS`
+ * tuple rather than `Object.entries` + a cast — `packages/*` forbids casts,
+ * and `Object.entries` widens the key back to `string` regardless.
+ */
+function pricedEntries(costs: Partial<Record<Pool, number>>): [Pool, number][] {
+  return POOLS
+    .map((pool) => [pool, costs[pool]] as const)
+    .filter((entry): entry is [Pool, number] => typeof entry[1] === "number" && entry[1] > 0);
+}
+
+/**
  * One player's elapsed sentence, cleared inside the caller's lock. Duplicates
  * core's `settleHospital` because a plugin may not import from `apps/server`;
  * kept to the same two statements so the two cannot diverge in behaviour.
@@ -346,13 +368,13 @@ const attackRoute = route({
       // mechanism without this pool being double-charged for a shot that
       // was never going to fire.
       const cost = await ctx.filters.apply(coreActionCost, { action: "combat.attack", costs: {} });
-      const priced = Object.entries(cost.costs).filter(([, amount]) => (amount ?? 0) > 0);
+      const priced = pricedEntries(cost.costs);
       if (priced.length > 0) {
         // `tx.locks.player([player.id, params.targetId])` is already this
         // transaction's first statement, so the attacker's row is held
         // FOR UPDATE — no new lock, no new lock-graph edge.
         for (const [pool, amount] of priced) {
-          await tx.attributes.spend(player.id, pool as Pool, amount ?? 0);
+          await tx.attributes.spend(player.id, pool, amount);
         }
       }
 

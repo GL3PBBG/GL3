@@ -211,6 +211,14 @@ export interface PluginTx {
    * Pools are NOT money: no ledger row, no `applyBalanceChange`, and nothing
    * in `test/economy-invariant.test.ts`. Rule 3 governs balances, and a pool
    * with a regen faucet cannot satisfy a `sum(ledger) == balance` invariant.
+   *
+   * `setMax` is deliberately not settle-then-clamp: it never lowers `current`
+   * to fit a shrunk `max`, and `settlePool`'s `current >= seeded` branch then
+   * freezes that over-max value indefinitely rather than draining it back
+   * down over time. This is intentional, not an oversight — an admin who
+   * lowers a max is not expected to also punish whoever was already above
+   * it — and `settle-pool.test.ts` asserts the freeze as the documented
+   * behaviour, not a bug to fix.
    */
   readonly attributes: {
     read(playerId: string): Promise<PlayerAttributes>;

@@ -49,9 +49,12 @@ describe("settlePool", () => {
   });
 
   it("jumps the stamp to now for an already-full pool so it accrues no debt", () => {
-    const out = settlePool(100, 100, T0, at(600), DECL);
+    // 605s, deliberately NOT a multiple of the 60s interval: at an exact
+    // multiple the interval math alone reproduces `now`, so a test using one
+    // (e.g. 600) passes even with the `current >= seeded` branch deleted.
+    const out = settlePool(100, 100, T0, at(605), DECL);
     expect(out.value).toBe(100);
-    expect(out.stamp).toEqual(at(600));
+    expect(out.stamp).toEqual(at(605));
   });
 
   it("does not claw back a value above an admin-lowered max", () => {

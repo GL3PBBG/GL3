@@ -77,8 +77,28 @@ export async function runPluginJob(
     // ever needs a type another plugin declares, this signature is what has
     // to widen.
     propertyTypes: collectPropertyTypes([manifest]),
-    // Same narrowing as propertyTypes above: a job sees only its own plugin's
-    // declarations today.
+    // NOT like propertyTypes/installedPluginIds below — those are
+    // informational registries, but `attributePools` is a behavioural input
+    // to `settlePool`. Narrowed to this one manifest, the same way, but the
+    // consequence is sharper: a gameplay plugin (crimes, combat) does not
+    // declare a pool, so inside ITS job `settleAll` resolves every pool to
+    // `null` and `settlePool` takes the `decl === null` no-op branch — it
+    // reads raw, unsettled `player_stats` columns. The regen clock does not
+    // run inside any job.
+    //
+    // Crimes is correct today only by coupling, not by construction: its
+    // route pre-check calls `tx.attributes.read` in its own committed
+    // transaction immediately before the job is enqueued, so by the time the
+    // job reads the row the settle is already persisted. That coupling is
+    // load-bearing — do not remove the route-side read without replacing
+    // what it does here.
+    //
+    // Any future plugin that calls `tx.attributes.read` or `.grant` from its
+    // OWN job, without an equivalent pre-settle, gets a frozen clock — worse,
+    // a `grant` against an unseeded `max` of `0` clamps to `0` and is a
+    // silent no-op. If that ever bites, the fix is widening `runPluginJob`
+    // to take the full manifest list (as `propertyTypes`/`installedPluginIds`
+    // could be widened too), not special-casing this call.
     attributePools: collectAttributePools([manifest]),
     // Same narrowing as propertyTypes above: a job sees only its own plugin's
     // id today. No job calls buildRegistry yet.

@@ -318,6 +318,8 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                     await tx.update(playerStats).set({ nerve: current.nerve - amount }).where(eq(playerStats.playerId, playerId));
                     return;
                   }
+                  default:
+                    assertUnreachableAttribute("invalid_pool", pool);
                 }
               },
               grant: async (playerId: string, pool: Pool, amount: number) => {
@@ -345,6 +347,8 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                     await tx.update(playerStats).set({ nerve: next }).where(eq(playerStats.playerId, playerId));
                     return;
                   }
+                  default:
+                    assertUnreachableAttribute("invalid_pool", pool);
                 }
               },
               setMax: async (playerId: string, pool: Pool, value: number) => {
@@ -362,6 +366,8 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                   case "nerve":
                     await tx.update(playerStats).set({ nerveMax: value }).where(eq(playerStats.playerId, playerId));
                     return;
+                  default:
+                    assertUnreachableAttribute("invalid_pool", pool);
                 }
               },
               train: async (playerId: string, attr: TrainedAttr, delta: bigint) => {
@@ -398,6 +404,8 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                     if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
                     return updated.value;
                   }
+                  default:
+                    assertUnreachableAttribute("invalid_attribute", attr);
                 }
               },
             };
@@ -554,6 +562,22 @@ async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash
 /** Narrows the SDK's `string` to core's `GangPermission` without a cast. */
 function isGangPermission(value: string): value is GangPermission {
   return GANG_PERMISSIONS.some((permission) => permission === value);
+}
+
+/**
+ * `pool`/`attr` arrive as SDK-typed `Pool`/`TrainedAttr`, but nothing
+ * zod-validates them between a plugin route body and `spend`/`grant`/
+ * `setMax`/`train` below — an out-of-union string is a live runtime
+ * possibility, not just a type-level one. Without a `default` case, each
+ * switch fell through silently: the action ran, matched no case, and
+ * returned as if it had succeeded — a free action, unspent and unlogged.
+ * This throws instead, and doubles as a compile-time exhaustiveness check:
+ * TS only accepts `value` as `never` once every real case above is already
+ * handled, so deleting a case without updating the switch is a type error
+ * here too, not just a silent runtime gap.
+ */
+function assertUnreachableAttribute(code: string, value: never): never {
+  throw new PluginError(code, 400, { value: String(value) });
 }
 
 /**
