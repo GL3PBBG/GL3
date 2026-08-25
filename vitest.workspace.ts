@@ -302,6 +302,7 @@ export default defineWorkspace([
       include: [
         "test/assets-routes.test.ts",
         "test/attribute-pools.test.ts",
+        "test/attributes-tx.test.ts",
         "test/framework-profile.test.ts",
         "test/auth-reset.test.ts",
         "test/auth-verify.test.ts",

@@ -1,7 +1,7 @@
 import type { GameEvent } from "@gl3/shared";
 import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type { AttributePoolDecl, Pool } from "./attributes.js";
+import type { AttributePoolDecl, PlayerAttributes, Pool, TrainedAttr } from "./attributes.js";
 import type { FilterPoint } from "./filters.js";
 import type { AssetSlot, PropertyTypeDecl } from "./manifest.js";
 
@@ -192,6 +192,32 @@ export interface PluginTx {
     get(playerId: string, key: string): Promise<Date | null>;
     set(playerId: string, key: string, expiresAt: Date): Promise<void>;
     clear(playerId: string, key: string): Promise<boolean>;
+  };
+  /**
+   * The MCCodes-parity attributes on core's `player_stats` row.
+   *
+   * CONTRACT: the caller already holds that row through `tx.locks.player`.
+   * Every method here reads and writes it without taking a lock of its own —
+   * which is exactly what keeps this surface free of a lock-graph edge
+   * (NOTES.md rule 6). Calling one of these without the lock is a race, not
+   * an error anything can detect for you.
+   *
+   * `read` settles regen lazily and writes back only when a value changed.
+   * `spend` on an insufficient pool throws rather than clamping: an action
+   * that cannot be paid for must not half-happen. There is no refund
+   * machinery — a failed action rolls its transaction back and the spend with
+   * it.
+   *
+   * Pools are NOT money: no ledger row, no `applyBalanceChange`, and nothing
+   * in `test/economy-invariant.test.ts`. Rule 3 governs balances, and a pool
+   * with a regen faucet cannot satisfy a `sum(ledger) == balance` invariant.
+   */
+  readonly attributes: {
+    read(playerId: string): Promise<PlayerAttributes>;
+    spend(playerId: string, pool: Pool, amount: number): Promise<void>;
+    grant(playerId: string, pool: Pool, amount: number): Promise<void>;
+    setMax(playerId: string, pool: Pool, value: number): Promise<void>;
+    train(playerId: string, attr: TrainedAttr, delta: bigint): Promise<bigint>;
   };
   /**
    * Reads core's three-layer gang permission mask

@@ -19,6 +19,17 @@ export interface PoolSettlement {
   readonly stamp: Date | null;
 }
 
+/** The full settled row `tx.attributes.read` hands back. */
+export interface PlayerAttributes {
+  readonly energy: number; readonly energyMax: number;
+  readonly will: number; readonly willMax: number;
+  readonly brave: number; readonly braveMax: number;
+  readonly nerve: number; readonly nerveMax: number;
+  readonly level: number;
+  readonly strength: bigint; readonly agility: bigint;
+  readonly guard: bigint; readonly labour: bigint;
+}
+
 /**
  * Lazy regen, pure. There is no cron anywhere in GL3 — this is applied under
  * the player-row lock a caller already holds (`ensureCurrentRound` and the

@@ -1,16 +1,19 @@
 import type {
   AssetSlot, AttributePoolDecl, BoundFilterSubscription, CoreEventInput, JobContext,
-  PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx, Pool, PropertyTypeDecl,
+  PlayerAttributes, PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx, Pool,
+  PropertyTypeDecl, TrainedAttr,
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
   InsufficientGangFundsError as SdkInsufficientGangFundsError,
   JobAlreadyAppliedError,
+  PluginError,
   runFilterChain,
+  settlePool,
 } from "@gl3/plugin-sdk";
 import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
 import type { Queue } from "bullmq";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { StorageDriver } from "../assets/driver.js";
@@ -236,6 +239,169 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               return deleted.length > 0;
             },
           },
+          // See PluginTx's `attributes` doc comment (packages/plugin-sdk/src/ctx.ts):
+          // the caller already holds the player row via `tx.locks.player`, so
+          // nothing here takes a lock of its own. Written as explicit
+          // per-pool/per-attr blocks rather than a loop over computed column
+          // names — a dynamic `row[pool]` / `row[`${pool}Max`]` lookup fights
+          // strict mode for no real gain here, and four short blocks are
+          // easier to typecheck AND read than one clever one.
+          attributes: (() => {
+            const settleAll = async (playerId: string): Promise<PlayerAttributes> => {
+              const [row] = await tx.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+              if (!row) throw new Error(`player_stats row missing for ${playerId}`);
+
+              const now = new Date();
+              const energyOut = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, options.attributePools.get("energy") ?? null);
+              const willOut = settlePool(row.will, row.willMax, row.willRegenAt, now, options.attributePools.get("will") ?? null);
+              const braveOut = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, options.attributePools.get("brave") ?? null);
+              const nerveOut = settlePool(row.nerve, row.nerveMax, row.nerveRegenAt, now, options.attributePools.get("nerve") ?? null);
+
+              const patch: Partial<{
+                energy: number; energyMax: number; energyRegenAt: Date | null;
+                will: number; willMax: number; willRegenAt: Date | null;
+                brave: number; braveMax: number; braveRegenAt: Date | null;
+                nerve: number; nerveMax: number; nerveRegenAt: Date | null;
+              }> = {};
+              if (energyOut.value !== row.energy) patch.energy = energyOut.value;
+              if (energyOut.max !== row.energyMax) patch.energyMax = energyOut.max;
+              if (energyOut.stamp?.getTime() !== row.energyRegenAt?.getTime()) patch.energyRegenAt = energyOut.stamp;
+              if (willOut.value !== row.will) patch.will = willOut.value;
+              if (willOut.max !== row.willMax) patch.willMax = willOut.max;
+              if (willOut.stamp?.getTime() !== row.willRegenAt?.getTime()) patch.willRegenAt = willOut.stamp;
+              if (braveOut.value !== row.brave) patch.brave = braveOut.value;
+              if (braveOut.max !== row.braveMax) patch.braveMax = braveOut.max;
+              if (braveOut.stamp?.getTime() !== row.braveRegenAt?.getTime()) patch.braveRegenAt = braveOut.stamp;
+              if (nerveOut.value !== row.nerve) patch.nerve = nerveOut.value;
+              if (nerveOut.max !== row.nerveMax) patch.nerveMax = nerveOut.max;
+              if (nerveOut.stamp?.getTime() !== row.nerveRegenAt?.getTime()) patch.nerveRegenAt = nerveOut.stamp;
+
+              if (Object.keys(patch).length > 0) {
+                await tx.update(playerStats).set(patch).where(eq(playerStats.playerId, playerId));
+              }
+
+              return {
+                energy: energyOut.value, energyMax: energyOut.max,
+                will: willOut.value, willMax: willOut.max,
+                brave: braveOut.value, braveMax: braveOut.max,
+                nerve: nerveOut.value, nerveMax: nerveOut.max,
+                level: row.level,
+                strength: row.strength, agility: row.agility,
+                guard: row.guard, labour: row.labour,
+              };
+            };
+
+            return {
+              read: settleAll,
+              spend: async (playerId: string, pool: Pool, amount: number) => {
+                if (amount < 0) throw new PluginError("invalid_amount", 400);
+                if (amount === 0) return;
+                const current = await settleAll(playerId);
+                switch (pool) {
+                  case "energy": {
+                    if (current.energy < amount) throw new PluginError("insufficient_energy", 409);
+                    await tx.update(playerStats).set({ energy: current.energy - amount }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "will": {
+                    if (current.will < amount) throw new PluginError("insufficient_will", 409);
+                    await tx.update(playerStats).set({ will: current.will - amount }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "brave": {
+                    if (current.brave < amount) throw new PluginError("insufficient_brave", 409);
+                    await tx.update(playerStats).set({ brave: current.brave - amount }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "nerve": {
+                    if (current.nerve < amount) throw new PluginError("insufficient_nerve", 409);
+                    await tx.update(playerStats).set({ nerve: current.nerve - amount }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                }
+              },
+              grant: async (playerId: string, pool: Pool, amount: number) => {
+                if (amount < 0) throw new PluginError("invalid_amount", 400);
+                if (amount === 0) return;
+                const current = await settleAll(playerId);
+                switch (pool) {
+                  case "energy": {
+                    const next = Math.min(current.energyMax, current.energy + amount);
+                    await tx.update(playerStats).set({ energy: next }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "will": {
+                    const next = Math.min(current.willMax, current.will + amount);
+                    await tx.update(playerStats).set({ will: next }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "brave": {
+                    const next = Math.min(current.braveMax, current.brave + amount);
+                    await tx.update(playerStats).set({ brave: next }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                  case "nerve": {
+                    const next = Math.min(current.nerveMax, current.nerve + amount);
+                    await tx.update(playerStats).set({ nerve: next }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  }
+                }
+              },
+              setMax: async (playerId: string, pool: Pool, value: number) => {
+                if (value < 0) throw new PluginError("invalid_amount", 400);
+                switch (pool) {
+                  case "energy":
+                    await tx.update(playerStats).set({ energyMax: value }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  case "will":
+                    await tx.update(playerStats).set({ willMax: value }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  case "brave":
+                    await tx.update(playerStats).set({ braveMax: value }).where(eq(playerStats.playerId, playerId));
+                    return;
+                  case "nerve":
+                    await tx.update(playerStats).set({ nerveMax: value }).where(eq(playerStats.playerId, playerId));
+                    return;
+                }
+              },
+              train: async (playerId: string, attr: TrainedAttr, delta: bigint) => {
+                switch (attr) {
+                  case "strength": {
+                    const [updated] = await tx.update(playerStats)
+                      .set({ strength: sql`${playerStats.strength} + ${delta}` })
+                      .where(eq(playerStats.playerId, playerId))
+                      .returning({ value: playerStats.strength });
+                    if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
+                    return updated.value;
+                  }
+                  case "agility": {
+                    const [updated] = await tx.update(playerStats)
+                      .set({ agility: sql`${playerStats.agility} + ${delta}` })
+                      .where(eq(playerStats.playerId, playerId))
+                      .returning({ value: playerStats.agility });
+                    if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
+                    return updated.value;
+                  }
+                  case "guard": {
+                    const [updated] = await tx.update(playerStats)
+                      .set({ guard: sql`${playerStats.guard} + ${delta}` })
+                      .where(eq(playerStats.playerId, playerId))
+                      .returning({ value: playerStats.guard });
+                    if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
+                    return updated.value;
+                  }
+                  case "labour": {
+                    const [updated] = await tx.update(playerStats)
+                      .set({ labour: sql`${playerStats.labour} + ${delta}` })
+                      .where(eq(playerStats.playerId, playerId))
+                      .returning({ value: playerStats.labour });
+                    if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
+                    return updated.value;
+                  }
+                }
+              },
+            };
+          })(),
           /**
            * `tx`, never `db`. Defined inside this closure, so every call
            * reads through the live transaction — which is what makes a

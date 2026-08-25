@@ -64,5 +64,6 @@ export {
   type TrainedAttr,
   type ActionCost,
   type AttributePoolDecl,
+  type PlayerAttributes,
   type PoolSettlement,
 } from "./attributes.js";
