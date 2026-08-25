@@ -2,6 +2,7 @@ import type { FilterPoint, PlayerSnapshot, PluginCtx, PluginManifest } from "@gl
 import { runFilterChain } from "@gl3/plugin-sdk";
 import { collectAssetSlots } from "./asset-slots.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
+import { collectAttributePools } from "./attribute-pools.js";
 import { collectPropertyTypes } from "./property-types.js";
 import { collectFilters } from "./routes.js";
 
@@ -12,9 +13,10 @@ export interface CoreFilters {
 /**
  * The core-route-facing counterpart of `registerPluginRoutes`'s per-request
  * ctx build: same option collection (`collectFilters`, `collectPropertyTypes`,
- * `collectAssetSlots`, `installedPluginIds`), but built once at load time and
- * reused across every `apply` call — there is no per-request boundary here,
- * since core routes (not plugin routes) are the caller.
+ * `collectAttributePools`, `collectAssetSlots`, `installedPluginIds`), but
+ * built once at load time and reused across every `apply` call — there is no
+ * per-request boundary here, since core routes (not plugin routes) are the
+ * caller.
  *
  * `player` differs per call, so the per-owner ctx built inside one `apply`
  * is memoized only for the lifetime of that call, never across calls — a
@@ -24,6 +26,7 @@ export interface CoreFilters {
 export function buildCoreFilters(deps: PluginCtxDeps, manifests: readonly PluginManifest[]): CoreFilters {
   const bound = collectFilters(manifests);
   const propertyTypes = collectPropertyTypes(manifests);
+  const attributePools = collectAttributePools(manifests);
   const installedPluginIds = new Set(manifests.map((m) => m.id));
   const assetSlots = collectAssetSlots(manifests);
 
@@ -41,6 +44,7 @@ export function buildCoreFilters(deps: PluginCtxDeps, manifests: readonly Plugin
             job: null,
             filters: bound,
             propertyTypes,
+            attributePools,
             installedPluginIds,
             assetSlots,
           });

@@ -1,6 +1,6 @@
 import type {
-  AssetSlot, BoundFilterSubscription, CoreEventInput, JobContext, PlayerSnapshot, PluginCtx,
-  PluginEventInput, PluginTx, PropertyTypeDecl,
+  AssetSlot, AttributePoolDecl, BoundFilterSubscription, CoreEventInput, JobContext,
+  PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx, Pool, PropertyTypeDecl,
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
@@ -64,6 +64,7 @@ export interface PluginCtxOptions {
   job: JobContext | null;
   filters: readonly BoundFilterSubscription[];
   propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
+  attributePools: ReadonlyMap<Pool, AttributePoolDecl>;
   installedPluginIds: ReadonlySet<string>;
   /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
   assetSlots: ReadonlyMap<string, AssetSlot>;
@@ -346,6 +347,10 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     propertyTypes: {
       get: (id) => options.propertyTypes.get(id) ?? null,
       list: () => [...options.propertyTypes.values()],
+    },
+    attributePools: {
+      get: (pool) => options.attributePools.get(pool) ?? null,
+      list: () => [...options.attributePools.values()],
     },
     installedPluginIds: options.installedPluginIds,
     assetSlots: {

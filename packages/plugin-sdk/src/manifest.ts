@@ -1,4 +1,6 @@
+import { PoolSchema } from "@gl3/shared";
 import { z } from "zod";
+import type { AttributePoolDecl } from "./attributes.js";
 import { PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
 import type { FilterPoint, FilterSubscription } from "./filters.js";
 import { PageSchemaSchema, type PageSchema } from "./pages.js";
@@ -149,6 +151,7 @@ export interface PluginManifestInput {
   provides?: FilterPoint<unknown>[];
   providesProperties?: PropertyTypeDecl[];
   providesAssets?: AssetSlotDecl[];
+  providesAttributes?: AttributePoolDecl[];
   filters?: FilterSubscription[];
 }
 
@@ -168,6 +171,7 @@ export interface PluginManifest {
   provides: FilterPoint<unknown>[];
   providesProperties: PropertyTypeDecl[];
   providesAssets: AssetSlotDecl[];
+  providesAttributes: AttributePoolDecl[];
   filters: FilterSubscription[];
 }
 
@@ -240,6 +244,16 @@ const InputSchema = z
     provides: z.array(z.custom<FilterPoint<unknown>>()).optional(),
     providesProperties: z.array(PropertyTypeDeclSchema).optional(),
     providesAssets: z.array(AssetSlotDeclSchema).optional(),
+    providesAttributes: z
+      .array(
+        z.object({
+          pool: PoolSchema,
+          defaultMax: z.number().int().positive(),
+          regenAmount: z.number().int().nonnegative(),
+          regenIntervalSeconds: z.number().int().positive(),
+        }),
+      )
+      .optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
   .strict()
@@ -356,6 +370,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     provides: parsed.provides ?? [],
     providesProperties: parsed.providesProperties ?? [],
     providesAssets: parsed.providesAssets ?? [],
+    providesAttributes: parsed.providesAttributes ?? [],
     filters: parsed.filters ?? [],
   };
 }

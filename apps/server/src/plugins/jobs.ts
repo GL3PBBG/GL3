@@ -5,6 +5,7 @@ import type { Redis } from "ioredis";
 import { createRng } from "../game/rng.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
 import { collectAssetSlots } from "./asset-slots.js";
+import { collectAttributePools } from "./attribute-pools.js";
 import { collectPropertyTypes } from "./property-types.js";
 
 /**
@@ -76,6 +77,9 @@ export async function runPluginJob(
     // ever needs a type another plugin declares, this signature is what has
     // to widen.
     propertyTypes: collectPropertyTypes([manifest]),
+    // Same narrowing as propertyTypes above: a job sees only its own plugin's
+    // declarations today.
+    attributePools: collectAttributePools([manifest]),
     // Same narrowing as propertyTypes above: a job sees only its own plugin's
     // id today. No job calls buildRegistry yet.
     installedPluginIds: new Set([manifest.id]),

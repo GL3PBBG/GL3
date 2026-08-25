@@ -1,6 +1,7 @@
 import type { GameEvent } from "@gl3/shared";
 import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { AttributePoolDecl, Pool } from "./attributes.js";
 import type { FilterPoint } from "./filters.js";
 import type { AssetSlot, PropertyTypeDecl } from "./manifest.js";
 
@@ -254,6 +255,16 @@ export interface PluginCtx {
   readonly propertyTypes: {
     get(id: string): PropertyTypeDecl | null;
     list(): readonly PropertyTypeDecl[];
+  };
+  /**
+   * Every attribute pool declared by any installed plugin, from the loader's
+   * registry — the same read-only manifest-data shape as `propertyTypes`, and
+   * on every plugin's ctx for the same reason: a plugin needs a pool's regen
+   * rate without taking a dependency on whichever plugin declared it.
+   */
+  readonly attributePools: {
+    get(pool: Pool): AttributePoolDecl | null;
+    list(): readonly AttributePoolDecl[];
   };
   /**
    * Every installed plugin's id, from the loader's manifest list — the same
