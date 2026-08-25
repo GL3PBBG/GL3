@@ -1,6 +1,6 @@
 import {
-  coreDashboard, definePlugin, on, PluginError, route,
-  type PageSchema, type PluginCtx, type RankUpResult,
+  coreActionCost, coreDashboard, definePlugin, on, PluginError, route,
+  type PageSchema, type PluginCtx, type Pool, type RankUpResult,
 } from "@gl3/plugin-sdk";
 import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -27,6 +27,38 @@ const DEFAULT_CRIME_CHANCE = "35.00";
 /** V2 crimes.hooks.php: ceil(C_cooldown * 0.75) while the membership timer runs. */
 function memberCooldown(base: number, member: boolean): number {
   return member ? Math.ceil(base * 0.75) : base;
+}
+
+const POOLS = ["energy", "will", "brave", "nerve"] as const satisfies readonly Pool[];
+
+/**
+ * Positive-amount entries only, in fixed pool order — what's actually worth
+ * locking and spending over. `costs` comes back from `core.actionCost` with
+ * whatever subscribers chose to add; an empty or all-zero map is what "no
+ * attribute plugin installed" (or "installed but this action is unpriced")
+ * looks like, and that's the case `priced.length > 0` guards on below.
+ */
+function pricedEntries(costs: Partial<Record<Pool, number>>): [Pool, number][] {
+  return POOLS
+    .map((pool) => [pool, costs[pool]] as const)
+    .filter((entry): entry is [Pool, number] => typeof entry[1] === "number" && entry[1] > 0);
+}
+
+/**
+ * Narrows the job data's `costs` field back into `Partial<Record<Pool,
+ * number>>`. The route is the only writer of this field (it enqueues exactly
+ * what `pricedEntries` returned), but job data crosses a queue as JSON, so
+ * this reads it back as `unknown` and validates rather than casting.
+ */
+function readCosts(value: unknown): Partial<Record<Pool, number>> {
+  if (typeof value !== "object" || value === null) return {};
+  const record = value as Record<string, unknown>;
+  const out: Partial<Record<Pool, number>> = {};
+  for (const pool of POOLS) {
+    const amount = record[pool];
+    if (typeof amount === "number") out[pool] = amount;
+  }
+  return out;
 }
 
 const declareBenefit = on(membershipBenefits, (_ctx, list) => [
@@ -125,6 +157,32 @@ const commitRoute = route({
     const crime = pre.crime;
     if (crime === null) throw new PluginError("crime_not_found", 404);
 
+    // Order: crime lookup, then what this attempt costs, then the cooldown
+    // claim — a player who cannot pay is refused before the cooldown burns
+    // (matching the typo/unknown-crime checks above, which already cost
+    // nothing), and a player who can pay is charged exactly once,
+    // authoritatively, in the job below rather than here.
+    const resolvedCost = await ctx.filters.apply(coreActionCost, { action: "crimes.commit", costs: {} });
+    const priced = pricedEntries(resolvedCost.costs);
+
+    if (priced.length > 0) {
+      // tx.attributes.read SETTLES (lazily regenerates and writes back), so
+      // the caller must already hold the row — same contract every other
+      // tx.attributes caller follows. The funds check itself runs AFTER this
+      // transaction commits, not inside it: the settle is real bookkeeping
+      // about the player's pool, independent of whether this particular
+      // attempt can afford to run, and rolling it back on a 409 would mean
+      // an always-broke player's pool never gets seeded until some other
+      // route happens to touch it.
+      const attrs = await ctx.transaction(async (tx) => {
+        await tx.locks.player([player.id]);
+        return tx.attributes.read(player.id);
+      });
+      for (const [pool, amount] of priced) {
+        if (attrs[pool] < amount) throw new PluginError(`insufficient_${pool}`, 409);
+      }
+    }
+
     const won = await ctx.cooldown.acquire("crime", player.id, memberCooldown(crime.cooldownSeconds, pre.member));
     if (!won) {
       const retryAfter = await ctx.cooldown.peek("crime", player.id);
@@ -137,7 +195,14 @@ const commitRoute = route({
     }
 
     try {
-      const jobId = await ctx.jobs.enqueue("commit", { playerId: player.id, crimeId });
+      // The job cannot re-resolve this itself: a job's `ctx.filters` only
+      // ever sees its OWN plugin's subscriptions (apps/server/src/plugins/
+      // jobs.ts builds it from the single job-owning manifest), never a
+      // sibling attribute plugin's — so the figure resolved above travels
+      // through as job data, the same way playerId/crimeId already do.
+      const jobId = await ctx.jobs.enqueue("commit", {
+        playerId: player.id, crimeId, costs: Object.fromEntries(priced),
+      });
       return { status: 202, body: { jobId, accepted: true } };
     } catch (error) {
       try {
@@ -159,6 +224,7 @@ const commitRoute = route({
 async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise<void> {
   const playerId = String(data["playerId"]);
   const crimeId = String(data["crimeId"]);
+  const priced = pricedEntries(readCosts(data["costs"]));
   const rng = ctx.job?.rng;
   if (rng === undefined) throw new Error("commit job ran without a seeded rng");
 
@@ -197,6 +263,21 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     const exp = success ? crime.expReward : 0n;
     const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
     const jailed = jailRoll < crime.jailChancePercent;
+
+    // Authoritative spend (core.actionCost) — inside the same transaction as
+    // the idempotency claim above, so a BullMQ redelivery never double-charges
+    // (rule 1). The route already pre-checked funds; this is what actually
+    // moves them, regardless of success/failure below (spending energy on an
+    // attempt, not a result, matches the pool's meaning). Skipped entirely
+    // when nothing is priced — that single guard is what keeps an install
+    // with no attribute plugin from taking a lock or touching a regen clock
+    // this job never used to touch.
+    if (priced.length > 0) {
+      await tx.locks.player([playerId]);
+      for (const [pool, amount] of priced) {
+        await tx.attributes.spend(playerId, pool, amount);
+      }
+    }
 
     await tx.db.insert(crimeLog).values({
       id: uuidv7(), playerId, crimeId, success, payout, jobId: ctx.job!.id,
