@@ -75,7 +75,14 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   );
 
   app.get("/health", async () => ({ status: "ok" }));
-  registerAuthRoutes(app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix);
+  // `loaded` (below) is not assigned until well after this call — pass a
+  // thunk, not `loaded.manifests` itself, so /api/auth/me reads the
+  // post-loadPlugins binding at request time rather than throwing
+  // "Cannot access 'loaded' before initialization" at boot.
+  registerAuthRoutes(
+    app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix,
+    () => loaded!.manifests,
+  );
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;

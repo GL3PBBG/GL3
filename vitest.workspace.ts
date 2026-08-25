@@ -305,6 +305,7 @@ export default defineWorkspace([
         "test/attribute-pools.test.ts",
         "test/attributes-tx.test.ts",
         "test/attributes-opt-in.test.ts",
+        "test/auth-me-attributes.test.ts",
         "test/framework-profile.test.ts",
         "test/auth-reset.test.ts",
         "test/auth-verify.test.ts",

@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
+import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
@@ -12,6 +13,7 @@ import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
+import { collectAttributePools } from "../plugins/attribute-pools.js";
 import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
 import { clearBanned, isBanned, markBanned } from "./ban.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
@@ -53,6 +55,15 @@ function uniqueViolation(err: unknown): postgres.PostgresError | null {
 export function registerAuthRoutes(
   app: FastifyInstance, config: Config, db: Db, redis: Redis, mail: MailDriver,
   rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
+  // A THUNK, not the list itself: this function is called from app.ts before
+  // the loader's `loaded` binding is assigned (buildApp assigns it further
+  // down, then loads plugin routes). A closure captures the BINDING, not the
+  // value at call time, so it observes the post-loadPlugins assignment when
+  // /api/auth/me actually runs a request — long after buildApp has returned.
+  // Defaults to an empty list so every other caller (most test files build
+  // their own app via `buildApp`, which always supplies this) keeps working
+  // with no attribute pools declared.
+  manifests: () => readonly PluginManifest[] = () => [],
 ): void {
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const token = bearer(request);
@@ -328,6 +339,13 @@ export function registerAuthRoutes(
       cash: playerStats.cash, bank: playerStats.bank,
       points: playerStats.points,
       bullets: playerStats.bullets, exp: playerStats.exp,
+      energy: playerStats.energy, energyMax: playerStats.energyMax, energyRegenAt: playerStats.energyRegenAt,
+      will: playerStats.will, willMax: playerStats.willMax, willRegenAt: playerStats.willRegenAt,
+      brave: playerStats.brave, braveMax: playerStats.braveMax, braveRegenAt: playerStats.braveRegenAt,
+      nerve: playerStats.nerve, nerveMax: playerStats.nerveMax, nerveRegenAt: playerStats.nerveRegenAt,
+      level: playerStats.level,
+      strength: playerStats.strength, agility: playerStats.agility,
+      guard: playerStats.guard, labour: playerStats.labour,
     }).from(players)
       .innerJoin(playerStats, eq(playerStats.playerId, players.id))
       .where(eq(players.id, playerId));
@@ -335,12 +353,41 @@ export function registerAuthRoutes(
     if (!row) return reply.code(404).send({ error: "player_not_found" });
 
     const grants = await loadGrants(db, playerId);
+
+    // Display-only settle: pure, in memory, writes nothing. Core takes no
+    // lock, opens no transaction and runs no clock — the authoritative write
+    // happens on the next plugin action via tx.attributes. Absent entirely
+    // when no pool is declared, which keeps a V2 install's payload
+    // byte-identical to what it served before this feature existed.
+    const pools = collectAttributePools(manifests());
+    const attributes = pools.size === 0 ? undefined : (() => {
+      const now = new Date();
+      const energy = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, pools.get("energy") ?? null);
+      const will = settlePool(row.will, row.willMax, row.willRegenAt, now, pools.get("will") ?? null);
+      const brave = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, pools.get("brave") ?? null);
+      const nerve = settlePool(row.nerve, row.nerveMax, row.nerveRegenAt, now, pools.get("nerve") ?? null);
+      return {
+        energy: energy.value, energyMax: energy.max,
+        will: will.value, willMax: will.max,
+        brave: brave.value, braveMax: brave.max,
+        nerve: nerve.value, nerveMax: nerve.max,
+        level: row.level,
+        strength: row.strength.toString(), agility: row.agility.toString(),
+        guard: row.guard.toString(), labour: row.labour.toString(),
+        energyRegenAt: energy.stamp?.toISOString() ?? null,
+        willRegenAt: will.stamp?.toISOString() ?? null,
+        braveRegenAt: brave.stamp?.toISOString() ?? null,
+        nerveRegenAt: nerve.stamp?.toISOString() ?? null,
+      };
+    })();
+
     return reply.send({
       playerId, username: row.username,
       cash: row.cash.toString(), bank: row.bank.toString(),
       points: row.points.toString(),
       bullets: row.bullets.toString(), exp: row.exp.toString(),
       grants,
+      ...(attributes ? { attributes } : {}),
     });
   });
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IdSchema, noNulByte } from "../primitives.js";
+import { PlayerAttributesDtoSchema } from "./attributes.js";
 
 /** V2 capped usernames at 30 chars (SPEC §1.2 users.U_name); GL3 keeps that ceiling. */
 export const RegisterRequestSchema = z.object({
@@ -61,5 +62,8 @@ export const MeResponseSchema = z.object({
   bullets: z.string(),
   exp: z.string(),
   grants: z.array(z.string()),
+  // Absent entirely (not null) when no plugin declares an attribute pool —
+  // see PlayerAttributesDtoSchema.
+  attributes: PlayerAttributesDtoSchema.optional(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;

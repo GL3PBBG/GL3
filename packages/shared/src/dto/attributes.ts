@@ -19,3 +19,26 @@ export interface ActionCost {
   readonly action: string;
   costs: Partial<Record<Pool, number>>;
 }
+
+/**
+ * The caller's own attributes, on `/api/auth/me`. OPTIONAL: absent entirely
+ * when no plugin declares a pool, so an install with no attribute plugin
+ * serves a byte-identical payload to the one it served before this feature
+ * existed, and an old client sees nothing new.
+ *
+ * Trained stats are decimal strings — they are `bigint` in Postgres and a
+ * JSON number would reintroduce floating point.
+ */
+export const PlayerAttributesDtoSchema = z.object({
+  energy: z.number().int(), energyMax: z.number().int(),
+  will: z.number().int(), willMax: z.number().int(),
+  brave: z.number().int(), braveMax: z.number().int(),
+  nerve: z.number().int(), nerveMax: z.number().int(),
+  level: z.number().int(),
+  strength: z.string(), agility: z.string(), guard: z.string(), labour: z.string(),
+  energyRegenAt: z.string().datetime().nullable(),
+  willRegenAt: z.string().datetime().nullable(),
+  braveRegenAt: z.string().datetime().nullable(),
+  nerveRegenAt: z.string().datetime().nullable(),
+});
+export type PlayerAttributesDto = z.infer<typeof PlayerAttributesDtoSchema>;
