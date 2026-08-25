@@ -69,6 +69,33 @@ export const playerStats = pgTable("player_stats", {
   exp: bigint("exp", { mode: "bigint" }).notNull().default(sql`0`),
   health: integer("health").notNull().default(100),
   backfire: integer("backfire").notNull().default(0),
+  // MCCodes-parity attributes (spec 2026-08-25-player-attributes). Every one
+  // is inert until a plugin declares the pool through `providesAttributes` —
+  // an all-zero row spends nothing and runs no clock. They live here rather
+  // than in a table of their own precisely because this row is already locked
+  // by `tx.locks.player`, so they add no lock-graph edge (NOTES.md rule 6).
+  energy: integer("energy").notNull().default(0),
+  energyMax: integer("energy_max").notNull().default(0),
+  will: integer("will").notNull().default(0),
+  willMax: integer("will_max").notNull().default(0),
+  brave: integer("brave").notNull().default(0),
+  braveMax: integer("brave_max").notNull().default(0),
+  nerve: integer("nerve").notNull().default(0),
+  nerveMax: integer("nerve_max").notNull().default(0),
+  // bigint, not integer: MCCodes players grind these past 2^31.
+  strength: bigint("strength", { mode: "bigint" }).notNull().default(sql`0`),
+  agility: bigint("agility", { mode: "bigint" }).notNull().default(sql`0`),
+  guard: bigint("guard", { mode: "bigint" }).notNull().default(sql`0`),
+  labour: bigint("labour", { mode: "bigint" }).notNull().default(sql`0`),
+  level: integer("level").notNull().default(1),
+  // NULLABLE, never defaultNow(): null means the clock has never started, so
+  // the first settle stamps it and accrues nothing. A player migrated from a
+  // decade-old dump must not regenerate ten years of energy on first read —
+  // the properties cluster shipped exactly that bug with `last_claimed_at`.
+  energyRegenAt: timestamp("energy_regen_at", { withTimezone: true }),
+  willRegenAt: timestamp("will_regen_at", { withTimezone: true }),
+  braveRegenAt: timestamp("brave_regen_at", { withTimezone: true }),
+  nerveRegenAt: timestamp("nerve_regen_at", { withTimezone: true }),
   rankId: uuid("rank_id").references(() => ranks.id, { onDelete: "set null" }),
   gangId: uuid("gang_id").references((): AnyPgColumn => gangs.id, { onDelete: "set null" }),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),

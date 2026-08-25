@@ -286,6 +286,7 @@ export default defineWorkspace([
         "test/rounds-standings.test.ts",
         "test/assets-service.test.ts",
         "test/asset-sweep.test.ts",
+        "test/player-attributes-schema.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
