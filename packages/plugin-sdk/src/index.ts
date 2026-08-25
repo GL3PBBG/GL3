@@ -18,6 +18,7 @@ export {
   coreHud,
   coreMenuBadges,
   coreMoneyFormat,
+  coreActionCost,
 } from "./core-points.js";
 export type {
   CoreEventInput,

@@ -300,6 +300,7 @@ export default defineWorkspace([
       name: "@gl3/server",
       root: "./apps/server",
       include: [
+        "test/action-cost-point.test.ts",
         "test/assets-routes.test.ts",
         "test/attribute-pools.test.ts",
         "test/attributes-tx.test.ts",

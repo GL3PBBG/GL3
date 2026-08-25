@@ -1,4 +1,4 @@
-import type { DashboardWidget, HudEntry, MenuBadge, MoneyFormat, ProfileViewValue } from "@gl3/shared";
+import type { ActionCost, DashboardWidget, HudEntry, MenuBadge, MoneyFormat, ProfileViewValue } from "@gl3/shared";
 import { filterPoint } from "./filters.js";
 
 /**
@@ -39,3 +39,17 @@ export const coreHud = filterPoint<HudEntry[]>("core.hud", "collect");
  */
 export const coreMenuBadges = filterPoint<MenuBadge[]>("core.menuBadges", "collect");
 export const coreMoneyFormat = filterPoint<MoneyFormat>("core.moneyFormat", "collect");
+
+/**
+ * What an action costs in attribute pools. The acting plugin seeds
+ * `{ action, costs: {} }` and applies the chain; subscribers add to `costs`.
+ * With nothing subscribed the map stays empty and the action is free, which
+ * is the state of every install with no attribute plugin loaded.
+ *
+ * POLICY IS "propagate", unlike the five UI points above, and the difference
+ * is load-bearing. Those five are seams that should degrade rather than break
+ * someone's page, so a throwing subscriber is logged and dropped. Dropping a
+ * throwing subscriber HERE would mean the action runs FREE — a silently
+ * mispriced economy rather than a visible failure. A throw must abort.
+ */
+export const coreActionCost = filterPoint<ActionCost>("core.actionCost", "propagate");
