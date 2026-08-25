@@ -1,4 +1,6 @@
-import { definePlugin, filterPoint, on, PluginError, type PluginTx, route } from "@gl3/plugin-sdk";
+import {
+  coreActionCost, definePlugin, filterPoint, on, PluginError, type Pool, type PluginTx, route,
+} from "@gl3/plugin-sdk";
 import { and, desc, eq, gt, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uuidv7 } from "uuidv7";
@@ -331,6 +333,27 @@ const attackRoute = route({
       const weapon = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
         throw new PluginError("insufficient_bullets", 409);
+      }
+
+      // Priced here, deliberately last: AFTER every check above that can
+      // refuse with a 4xx (target/legality checks, the underground/
+      // detective-report gate, and insufficient_bullets just above), and
+      // immediately BEFORE the first mutation of game state (the bullets
+      // deduction right below). Energy is a regenerating resource, not the
+      // anti-probe cooldown — the cooldown was already claimed before this
+      // transaction opened and deliberately burns on every one of those
+      // refusals, so eligibility probing stays priced through that
+      // mechanism without this pool being double-charged for a shot that
+      // was never going to fire.
+      const cost = await ctx.filters.apply(coreActionCost, { action: "combat.attack", costs: {} });
+      const priced = Object.entries(cost.costs).filter(([, amount]) => (amount ?? 0) > 0);
+      if (priced.length > 0) {
+        // `tx.locks.player([player.id, params.targetId])` is already this
+        // transaction's first statement, so the attacker's row is held
+        // FOR UPDATE — no new lock, no new lock-graph edge.
+        for (const [pool, amount] of priced) {
+          await tx.attributes.spend(player.id, pool as Pool, amount ?? 0);
+        }
       }
 
       await tx.db
