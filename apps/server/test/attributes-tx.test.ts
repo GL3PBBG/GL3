@@ -115,6 +115,11 @@ describe("tx.attributes", () => {
   it("refuses a spend it cannot cover, and moves nothing", async () => {
     const { token } = await registerVerifiedPlayer(app);
     const auth = { authorization: `Bearer ${token}` };
+    // Registration seeds declared pools FULL (spec 2026-08-26 §7 item 7), so
+    // the pool is drained first — the insufficiency this test constructs must
+    // be deliberate, not an accident of the old all-zero starting row.
+    const drain = await app.app.inject({ method: "POST", url: "/api/attrtest/spend", headers: auth, payload: { amount: 10 } });
+    expect(drain.statusCode).toBe(200);
     await app.app.inject({ method: "POST", url: "/api/attrtest/grant", headers: auth, payload: { amount: 3 } });
     const spend = await app.app.inject({ method: "POST", url: "/api/attrtest/spend", headers: auth, payload: { amount: 4 } });
     expect(spend.statusCode).toBe(409);
