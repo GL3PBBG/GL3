@@ -46,6 +46,9 @@ export const playerStats = pgTable("player_stats", {
   rankId: uuid("rank_id"),
   locationId: uuid("location_id"),
   weaponItemId: uuid("weapon_item_id"),
+  // The melee-only second weapon slot (B0, migration 0019) — the equip route
+  // gates it to melee-model items.
+  weaponMeleeItemId: uuid("weapon_melee_item_id"),
   armorItemId: uuid("armor_item_id"),
 });
 

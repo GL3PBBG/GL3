@@ -58,6 +58,17 @@ export const ArmorEffectsSchema = z.object({
 });
 
 /**
+ * A melee weapon's whole effects (C6's marker, B0's slot gate): `power` IS
+ * the melee model — such an item carries no damage range for the firearm
+ * schema above to require, which is what makes the two models unambiguous.
+ * Combat resolves it as power × strength ÷ (guard/1.5); the equip route
+ * allows only this shape into the melee slot.
+ */
+export const MeleeEffectsSchema = z.object({
+  power: z.number().int().positive(),
+});
+
+/**
  * OPEN, unlike the weapon and armor schemas: a consumable's effects name a
  * `kind` in the `inventory.itemEffects` registry and carry whatever config
  * that kind's def reads, so this plugin cannot enumerate the keys. `.passthrough()`
@@ -74,6 +85,7 @@ export const ConsumableEffectsSchema = z.object({
 
 export type WeaponEffects = z.infer<typeof WeaponEffectsSchema>;
 export type ArmorEffects = z.infer<typeof ArmorEffectsSchema>;
+export type MeleeEffects = z.infer<typeof MeleeEffectsSchema>;
 export type ConsumableEffects = z.infer<typeof ConsumableEffectsSchema>;
 
 export const ITEM_TYPE_WEAPON = "weapon";
@@ -97,6 +109,12 @@ export const ITEM_TYPE_CONSUMABLE = "consumable";
 export function readEffects(itemType: string, effects: unknown): unknown {
   switch (itemType) {
     case ITEM_TYPE_WEAPON: {
+      // Melee first, matching combat's loadWeapon: `power` is the melee
+      // marker and such items fail the firearm schema below (no damage
+      // range) — without this branch a melee weapon would list as `null`,
+      // "unusable", when it is the one item type the melee slot accepts.
+      const melee = MeleeEffectsSchema.safeParse(effects);
+      if (melee.success) return melee.data;
       const parsed = WeaponEffectsSchema.safeParse(effects);
       return parsed.success ? parsed.data : null;
     }

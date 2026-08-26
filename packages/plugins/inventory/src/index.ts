@@ -11,6 +11,7 @@ import {
   ITEM_TYPE_ARMOR,
   ITEM_TYPE_CONSUMABLE,
   ITEM_TYPE_WEAPON,
+  MeleeEffectsSchema,
   readEffects,
   WeaponEffectsSchema,
 } from "./effects.js";
@@ -63,6 +64,7 @@ const listRoute = route({
       const [stats] = await tx.db
         .select({
           weaponItemId: playerStats.weaponItemId,
+          weaponMeleeItemId: playerStats.weaponMeleeItemId,
           armorItemId: playerStats.armorItemId,
         })
         .from(playerStats)
@@ -134,6 +136,7 @@ const listRoute = route({
         }),
         equipped: {
           weaponItemId: stats?.weaponItemId ?? null,
+          weaponMeleeItemId: stats?.weaponMeleeItemId ?? null,
           armorItemId: stats?.armorItemId ?? null,
         },
       },
@@ -142,13 +145,14 @@ const listRoute = route({
 });
 
 /**
- * `.optional().nullable()` on both, because `undefined` and `null` mean
+ * `.optional().nullable()` on all three, because `undefined` and `null` mean
  * different things here and must not collapse: an absent key leaves the slot
  * alone, an explicit `null` unequips it. The handler distinguishes them with
  * an `in` check, not a truthiness test.
  */
 const EquipSchema = z.object({
   weaponItemId: z.string().uuid().nullable().optional(),
+  weaponMeleeItemId: z.string().uuid().nullable().optional(),
   armorItemId: z.string().uuid().nullable().optional(),
 });
 
@@ -163,13 +167,14 @@ const equipRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
 
     const wantsWeapon = "weaponItemId" in body;
+    const wantsMelee = "weaponMeleeItemId" in body;
     const wantsArmor = "armorItemId" in body;
 
     return ctx.transaction(async (tx) => {
       // The player's own row only — no second participant, so the single-id
       // form of the standard ascending-order lock. The UPDATE below also
       // takes FOR KEY SHARE on the referenced items row through
-      // player_stats' weapon_item_id/armor_item_id FKs (NOTES.md rule 6);
+      // player_stats' weapon/armor/melee-slot FKs (NOTES.md rule 6);
       // nothing in the codebase locks an items row, so there is no path to
       // invert against.
       await tx.locks.player([player.id]);
@@ -178,14 +183,20 @@ const equipRoute = route({
         .select({
           exp: playerStats.exp,
           weaponItemId: playerStats.weaponItemId,
+          weaponMeleeItemId: playerStats.weaponMeleeItemId,
           armorItemId: playerStats.armorItemId,
         })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       if (!stats) throw new PluginError("unauthorized", 401);
 
-      /** Verifies ownership, slot, and (for weapons) the rank gate. */
-      const validate = async (itemId: string, slot: "weapon" | "armor"): Promise<void> => {
+      /**
+       * Verifies ownership, slot, and (for firearms) the rank gate. The
+       * melee slot is the one place the model is part of the contract
+       * (B0 §2.1): only a melee item — `power` effects — may occupy it, so
+       * the firearm path can trust slot 1's armed-or-empty dichotomy.
+       */
+      const validate = async (itemId: string, slot: "weapon" | "weapon-melee" | "armor"): Promise<void> => {
         const [owned] = await tx.db
           .select({ itemType: items.itemType, effects: items.effects, qty: playerItems.qty })
           .from(playerItems)
@@ -194,17 +205,27 @@ const equipRoute = route({
 
         if (!owned || owned.qty <= 0) throw new PluginError("not_owned", 409);
 
-        const expectedType = slot === "weapon" ? ITEM_TYPE_WEAPON : ITEM_TYPE_ARMOR;
+        const expectedType = slot === "armor" ? ITEM_TYPE_ARMOR : ITEM_TYPE_WEAPON;
         if (owned.itemType !== expectedType) throw new PluginError("wrong_slot", 400);
 
         if (slot === "weapon") {
-          const parsed = WeaponEffectsSchema.safeParse(owned.effects);
-          // A malformed weapon is unusable rather than a 500: the jsonb is an
-          // external boundary and an admin can put anything in it.
-          if (!parsed.success) throw new PluginError("wrong_slot", 400);
-          if (BigInt(parsed.data.minRankExp) > stats.exp) {
-            throw new PluginError("rank_too_low", 409);
+          // A melee item in slot 1 is legal (C6's arm fires it); anything
+          // malformed is unusable rather than a 500: the jsonb is an
+          // external boundary.
+          const melee = MeleeEffectsSchema.safeParse(owned.effects);
+          if (!melee.success) {
+            const parsed = WeaponEffectsSchema.safeParse(owned.effects);
+            if (!parsed.success) throw new PluginError("wrong_slot", 400);
+            if (BigInt(parsed.data.minRankExp) > stats.exp) {
+              throw new PluginError("rank_too_low", 409);
+            }
           }
+        } else if (slot === "weapon-melee") {
+          // The gate itself: melee models only. A firearm here is refused —
+          // combat would never fire it from this slot anyway (defense in
+          // depth both ways).
+          const parsed = MeleeEffectsSchema.safeParse(owned.effects);
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
         } else {
           const parsed = ArmorEffectsSchema.safeParse(owned.effects);
           if (!parsed.success) throw new PluginError("wrong_slot", 400);
@@ -212,17 +233,22 @@ const equipRoute = route({
       };
 
       const nextWeapon = wantsWeapon ? (body.weaponItemId ?? null) : stats.weaponItemId;
+      const nextMelee = wantsMelee ? (body.weaponMeleeItemId ?? null) : stats.weaponMeleeItemId;
       const nextArmor = wantsArmor ? (body.armorItemId ?? null) : stats.armorItemId;
 
       if (wantsWeapon && body.weaponItemId != null) await validate(body.weaponItemId, "weapon");
+      if (wantsMelee && body.weaponMeleeItemId != null) await validate(body.weaponMeleeItemId, "weapon-melee");
       if (wantsArmor && body.armorItemId != null) await validate(body.armorItemId, "armor");
 
       await tx.db
         .update(playerStats)
-        .set({ weaponItemId: nextWeapon, armorItemId: nextArmor })
+        .set({ weaponItemId: nextWeapon, weaponMeleeItemId: nextMelee, armorItemId: nextArmor })
         .where(eq(playerStats.playerId, player.id));
 
-      return { status: 200, body: { weaponItemId: nextWeapon, armorItemId: nextArmor } };
+      return {
+        status: 200,
+        body: { weaponItemId: nextWeapon, weaponMeleeItemId: nextMelee, armorItemId: nextArmor },
+      };
     });
   },
 });

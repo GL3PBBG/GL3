@@ -44,7 +44,7 @@ describe("GET /api/inventory", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ items: [], equipped: { weaponItemId: null, armorItemId: null } });
+    expect(res.json()).toEqual({ items: [], equipped: { weaponItemId: null, weaponMeleeItemId: null, armorItemId: null } });
   });
 
   it("lists owned items with their effects, and hides zero-qty rows", async () => {
@@ -163,7 +163,7 @@ describe("PUT /api/inventory/equip", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ weaponItemId: pistol, armorItemId: vest });
+    expect(res.json()).toEqual({ weaponItemId: pistol, weaponMeleeItemId: null, armorItemId: vest });
   });
 
   it("unequips with an explicit null and leaves an absent slot alone", async () => {
@@ -184,7 +184,7 @@ describe("PUT /api/inventory/equip", () => {
     });
 
     // weapon cleared by the explicit null; armor untouched because absent.
-    expect(res.json()).toEqual({ weaponItemId: null, armorItemId: vest });
+    expect(res.json()).toEqual({ weaponItemId: null, weaponMeleeItemId: null, armorItemId: vest });
   });
 
   it("409s an item the player does not own", async () => {
@@ -229,6 +229,85 @@ describe("PUT /api/inventory/equip", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "rank_too_low" });
+  });
+});
+
+describe("PUT /api/inventory/equip — the melee slot (B0)", () => {
+  it("equips a melee item into the melee slot beside a firearm", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const knife = await seedItem("weapon", { power: 10 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, knife, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol, weaponMeleeItemId: knife },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ weaponItemId: pistol, weaponMeleeItemId: knife, armorItemId: null });
+
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.weaponMeleeItemId).toBe(knife);
+
+    // The list route surfaces the slot, and a melee item lists its power —
+    // not nulled as an unparsable firearm.
+    const list = await app.inject({
+      method: "GET", url: "/api/inventory",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(list.json().equipped).toEqual({ weaponItemId: pistol, weaponMeleeItemId: knife, armorItemId: null });
+    const listed = list.json().items.find((i: { itemId: string }) => i.itemId === knife);
+    expect(listed.effects).toEqual({ power: 10 });
+  });
+
+  it("400s a firearm in the melee slot — melee models only (spec §2.1's gate)", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    await grant(playerId, pistol, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponMeleeItemId: pistol },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "wrong_slot" });
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.weaponMeleeItemId).toBeNull();
+  });
+
+  it("unequips the melee slot with an explicit null, leaving the firearm alone", async () => {
+    const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
+    const knife = await seedItem("weapon", { power: 10 });
+    await grant(playerId, pistol, 1);
+    await grant(playerId, knife, 1);
+    await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: pistol, weaponMeleeItemId: knife },
+    });
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponMeleeItemId: null },
+    });
+    expect(res.json()).toEqual({ weaponItemId: pistol, weaponMeleeItemId: null, armorItemId: null });
+  });
+
+  it("still accepts a melee item in slot 1 (C6's arm) and a melee item in the melee slot together", async () => {
+    const bat = await seedItem("weapon", { power: 12 });
+    const knife = await seedItem("weapon", { power: 10 });
+    await grant(playerId, bat, 1);
+    await grant(playerId, knife, 1);
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: bat, weaponMeleeItemId: knife },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ weaponItemId: bat, weaponMeleeItemId: knife, armorItemId: null });
   });
 });
 
