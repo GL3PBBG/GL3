@@ -120,6 +120,20 @@ export function Inventory(): JSX.Element {
               ) : null}
             </li>
             <li className={styles.row}>
+              <span>Melee: {equipped.weaponMeleeItemId
+                ? items.find((i) => i.itemId === equipped.weaponMeleeItemId)?.name ?? "unknown"
+                : "none"}</span>
+              {equipped.weaponMeleeItemId ? (
+                <button
+                  type="button"
+                  disabled={equip.isPending}
+                  onClick={() => equip.mutate({ weaponMeleeItemId: null })}
+                >
+                  Unequip
+                </button>
+              ) : null}
+            </li>
+            <li className={styles.row}>
               <span>Armor: {equipped.armorItemId
                 ? items.find((i) => i.itemId === equipped.armorItemId)?.name ?? "unknown"
                 : "none"}</span>
@@ -151,6 +165,18 @@ export function Inventory(): JSX.Element {
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
                   <ItemActions item={item} />
+                  {/* Melee-model items (a bare {power} in the effects) get a
+                      second destination: the melee slot, which accepts only
+                      those (B0). Firearms keep the single Equip. */}
+                  {typeof item.effects === "object" && item.effects !== null && "power" in item.effects ? (
+                    <button
+                      type="button"
+                      disabled={equip.isPending || item.itemId === equipped.weaponMeleeItemId}
+                      onClick={() => equip.mutate({ weaponMeleeItemId: item.itemId })}
+                    >
+                      {item.itemId === equipped.weaponMeleeItemId ? "In melee slot" : "To melee slot"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     disabled={equip.isPending || item.itemId === equipped.weaponItemId}

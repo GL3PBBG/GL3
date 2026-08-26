@@ -43,23 +43,28 @@ export const InventoryResponseSchema = z.object({
   items: z.array(InventoryItemSchema),
   equipped: z.object({
     weaponItemId: z.string().uuid().nullable(),
+    /** The melee-only second weapon slot (B0); NULL when nothing is held. */
+    weaponMeleeItemId: z.string().uuid().nullable(),
     armorItemId: z.string().uuid().nullable(),
   }),
 });
 export type InventoryResponse = z.infer<typeof InventoryResponseSchema>;
 
 /**
- * `.nullable().optional()` on both, mirroring the route: an absent key leaves
- * the slot alone, an explicit `null` unequips it. They must not collapse.
+ * `.nullable().optional()` on all three, mirroring the route: an absent key
+ * leaves the slot alone, an explicit `null` unequips it. They must not
+ * collapse.
  */
 export const EquipRequestSchema = z.object({
   weaponItemId: z.string().uuid().nullable().optional(),
+  weaponMeleeItemId: z.string().uuid().nullable().optional(),
   armorItemId: z.string().uuid().nullable().optional(),
 });
 export type EquipRequest = z.infer<typeof EquipRequestSchema>;
 
 export const EquipResponseSchema = z.object({
   weaponItemId: z.string().uuid().nullable(),
+  weaponMeleeItemId: z.string().uuid().nullable(),
   armorItemId: z.string().uuid().nullable(),
 });
 export type EquipResponse = z.infer<typeof EquipResponseSchema>;

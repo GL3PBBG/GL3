@@ -50,7 +50,8 @@ export function Crimes(): JSX.Element {
             <div className={styles.crimeGrow}>
               <strong>{crime.name}</strong>
               <div className={styles.meta}>
-                {crime.chance}% · <Money value={crime.minPayout} />–<Money value={crime.maxPayout} />{" "}
+                {crime.chance === null ? "chance by stats" : `${crime.chance}%`} ·{" "}
+                <Money value={crime.minPayout} />–<Money value={crime.maxPayout} />{" "}
                 · {crime.cooldownSeconds}s cooldown
               </div>
             </div>
