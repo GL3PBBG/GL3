@@ -252,9 +252,32 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               if (!row) throw new Error(`player_stats row missing for ${playerId}`);
 
               const now = new Date();
-              const energyOut = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, options.attributePools.get("energy") ?? null);
-              const willOut = settlePool(row.will, row.willMax, row.willRegenAt, now, options.attributePools.get("will") ?? null);
-              const braveOut = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, options.attributePools.get("brave") ?? null);
+              // Membership regen bonuses (C spec §1.3): a declaration may set
+              // memberMultiplier and it applies only while the framework
+              // membership timer is live. One timer read per settle, and only
+              // when some declaration opted in — a game with no member-priced
+              // pool never touches the timers table. The raw read (not
+              // membershipUntil) is deliberate: expiry notification stays
+              // membership's job wherever it already runs; a stale past-date
+              // row simply fails the liveness check here.
+              const anyMemberPriced = [...options.attributePools.values()]
+                .some((d) => d.memberMultiplier !== undefined);
+              // Direct select, not the plugin-facing tx.timers facade this
+              // object is still building — same two statements as timers.get.
+              const [memberRow] = anyMemberPriced
+                ? await tx.select({ expiresAt: playerTimers.expiresAt })
+                    .from(playerTimers)
+                    .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, "membership")))
+                : [];
+              const memberLive = memberRow !== undefined && memberRow.expiresAt.getTime() > now.getTime();
+              const multFor = (decl: { memberMultiplier?: number | undefined } | null): number =>
+                memberLive && decl?.memberMultiplier !== undefined ? decl.memberMultiplier : 1;
+              const energyDecl = options.attributePools.get("energy") ?? null;
+              const willDecl = options.attributePools.get("will") ?? null;
+              const braveDecl = options.attributePools.get("brave") ?? null;
+              const energyOut = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, energyDecl, multFor(energyDecl));
+              const willOut = settlePool(row.will, row.willMax, row.willRegenAt, now, willDecl, multFor(willDecl));
+              const braveOut = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, braveDecl, multFor(braveDecl));
 
               const patch: Partial<{
                 energy: number; energyMax: number; energyRegenAt: Date | null;

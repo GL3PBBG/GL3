@@ -19,6 +19,13 @@ export interface AttributePoolDecl {
    */
   readonly regenPercent?: number | undefined;
   readonly regenIntervalSeconds: number;
+  /**
+   * Membership regen bonus (C spec §1.3): the whole per-interval gain scales
+   * by this factor while the framework membership timer is live — MCCodes'
+   * donators regenerate energy at double rate. Applied by the server's settle
+   * (which reads the timer under the player lock), keeping settlePool pure.
+   */
+  readonly memberMultiplier?: number | undefined;
 }
 
 export interface PoolSettlement {

@@ -1,8 +1,13 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, it, beforeAll } from "vitest";
 import { z } from "zod";
 import { definePlugin, route, PluginError, type PluginManifest } from "@gl3/plugin-sdk";
+import { playerStats, playerTimers } from "../src/db/schema/index.js";
+import { testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
+
+const { db } = testDb();
 
 /**
  * A driver plugin: one route per operation, so the test can exercise
@@ -13,7 +18,7 @@ const driverPlugin: PluginManifest = definePlugin({
   version: "1.0.0",
   basePaths: ["/api/attrtest"],
   providesAttributes: [
-    { pool: "energy", defaultMax: 10, regenAmount: 1, regenIntervalSeconds: 60 },
+    { pool: "energy", defaultMax: 10, regenAmount: 1, regenIntervalSeconds: 60, memberMultiplier: 2 },
   ],
   routes: [
     route({
@@ -136,5 +141,28 @@ describe("tx.attributes", () => {
       payload: { delta: "5000000000" },
     });
     expect(res.json().strength).toBe("5000000000");
+  });
+
+  it("regenerates at the declared memberMultiplier only while membership is live", async () => {
+    const { token, playerId } = await registerVerifiedPlayer(app);
+    const auth = { authorization: `Bearer ${token}` };
+    const past = new Date(Date.now() - 120_000); // two 60s intervals at 1/interval
+
+    // No membership timer: base rate — 4 + 2×1 = 6.
+    await db.update(playerStats).set({ energy: 4, energyRegenAt: past }).where(eq(playerStats.playerId, playerId));
+    const base = await app.app.inject({ method: "GET", url: "/api/attrtest/read", headers: auth });
+    expect(base.json().energy).toBe(6);
+
+    // Live membership timer: the same two intervals at ×2 — 4 + 2×2 = 8.
+    await db.insert(playerTimers).values({ playerId, key: "membership", expiresAt: new Date(Date.now() + 3_600_000) });
+    await db.update(playerStats).set({ energy: 4, energyRegenAt: past }).where(eq(playerStats.playerId, playerId));
+    const member = await app.app.inject({ method: "GET", url: "/api/attrtest/read", headers: auth });
+    expect(member.json().energy).toBe(8);
+
+    // An expired timer reads as non-member — no retroactive bonus.
+    await db.update(playerTimers).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(playerTimers.playerId, playerId));
+    await db.update(playerStats).set({ energy: 4, energyRegenAt: past }).where(eq(playerStats.playerId, playerId));
+    const expired = await app.app.inject({ method: "GET", url: "/api/attrtest/read", headers: auth });
+    expect(expired.json().energy).toBe(6);
   });
 });
