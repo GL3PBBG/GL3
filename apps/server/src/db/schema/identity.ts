@@ -113,6 +113,10 @@ export const playerStats = pgTable("player_stats", {
   energyRegenAt: timestamp("energy_regen_at", { withTimezone: true }),
   willRegenAt: timestamp("will_regen_at", { withTimezone: true }),
   braveRegenAt: timestamp("brave_regen_at", { withTimezone: true }),
+  // Lazy hp-regen clock (⅓ of max per 5 minutes) driven by C3's settleHealth
+  // when health_max is set. NULL = the clock never started — same convention
+  // as the pool stamps, so imports regenerate nothing retroactively.
+  healthRegenAt: timestamp("health_regen_at", { withTimezone: true }),
   rankId: uuid("rank_id").references(() => ranks.id, { onDelete: "set null" }),
   gangId: uuid("gang_id").references((): AnyPgColumn => gangs.id, { onDelete: "set null" }),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),

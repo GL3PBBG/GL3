@@ -23,6 +23,13 @@ export const crimes = pgTable("crimes", {
   jailChancePercent: integer("jail_chance_percent").notNull().default(0),
   jailSeconds: integer("jail_seconds").notNull().default(0),
   /**
+   * MCCodes `crimes.crimeBRAVE` — what a commit costs in the brave pool.
+   * Priced iff the brave pool is declared by an installed plugin (audit §7
+   * item 13); 0 means the crime costs no brave, including every GL3-native
+   * crime forever.
+   */
+  braveCost: integer("brave_cost").notNull().default(0),
+  /**
    * MCCodes `crimes.crimePERCFORM`, translated into the sandboxed five-token
    * dialect (LEVEL/CRIMEXP/EXP/WILL/IQ; arithmetic plus
    * min/max/floor/ceil/round/abs). NULL = GL3-native per-player skill chance —

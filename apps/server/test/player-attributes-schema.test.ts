@@ -18,7 +18,7 @@ describe("player_attributes migration", () => {
     const rows = (await db.execute(sql`
       SELECT energy, energy_max, will, will_max, brave, brave_max,
              strength, agility, guard, labour, iq, crime_exp, level, health_max,
-             energy_regen_at, will_regen_at, brave_regen_at
+             energy_regen_at, will_regen_at, brave_regen_at, health_regen_at
       FROM player_stats WHERE player_id = ${playerId}
     `)) as unknown as Record<string, unknown>[];
 
@@ -32,9 +32,18 @@ describe("player_attributes migration", () => {
     }
     expect(Number(row!["level"])).toBe(1);
     expect(row!["health_max"]).toBeNull();
-    for (const col of ["energy_regen_at", "will_regen_at", "brave_regen_at"]) {
+    for (const col of ["energy_regen_at", "will_regen_at", "brave_regen_at", "health_regen_at"]) {
       expect(row![col]).toBeNull();
     }
+  });
+
+  it("defaults crimes.brave_cost to 0 (unpriced for GL3-native games)", async () => {
+    const rows = (await db.execute(sql`
+      INSERT INTO crimes (id, name, cooldown_seconds, min_payout, max_payout)
+      VALUES (${crypto.randomUUID()}, ${"brave_cost_default"}, 60, 10, 20)
+      RETURNING brave_cost
+    `)) as unknown as { brave_cost: number }[];
+    expect(Number(rows[0]!.brave_cost)).toBe(0);
   });
 
   it("adds no foreign key and no index", async () => {
