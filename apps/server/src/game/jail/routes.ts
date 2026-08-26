@@ -4,6 +4,8 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { publishEvent } from "../../bus/publish.js";
+import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
+import { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
@@ -20,9 +22,13 @@ import {
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 
+/** MCCodes' flat bust charge (`jailbust.php:12-18`, audit §7 item 12). */
+const BUST_ENERGY_COST = 10;
+
 export function registerJailRoutes(
   app: FastifyInstance, db: Db, redis: Redis, settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  manifests: () => readonly PluginManifest[] = () => [],
 ): void {
   app.get("/api/jail", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
@@ -163,10 +169,13 @@ export function registerJailRoutes(
   });
 
   /**
-   * Free to attempt. The failure branch — the caller doing the target's kind
-   * of time — is the whole cost, which is why there is no price and no
-   * cooldown. The seed is generated here and never accepted from the client:
-   * a client-chosen seed is a client-chosen outcome.
+   * The failure branch — the caller doing the target's kind of time — is the
+   * whole cost, which is why there is no cooldown. The seed is generated
+   * here and never accepted from the client: a client-chosen seed is a
+   * client-chosen outcome. Since 2026-08-26 (audit §7 item 12) a boot with
+   * the energy pool declared also charges a flat 10 energy per attempt, on
+   * both outcomes — MCCodes' own number; a default install's bust stays
+   * free and byte-identical, because no pool is declared.
    */
   app.post("/api/jail/bust", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
@@ -177,6 +186,8 @@ export function registerJailRoutes(
     const targetId = parsed.data.playerId;
     if (targetId === playerId) return reply.code(409).send({ error: "self_target" });
 
+    const attributePools = collectAttributePools(manifests());
+
     const result = await db.transaction(async (tx) => {
       // ONE sorted call over both players, FIRST statement, before either row
       // is read (NOTES.md rule 6) — same shape as bail above.
@@ -185,6 +196,8 @@ export function registerJailRoutes(
       const [caller] = await tx.select({
         locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
         username: players.username,
+        energy: playerStats.energy, energyMax: playerStats.energyMax,
+        energyRegenAt: playerStats.energyRegenAt,
       })
         .from(playerStats)
         .innerJoin(players, eq(players.id, playerStats.playerId))
@@ -207,6 +220,27 @@ export function registerJailRoutes(
       }
       if ((target.jailedUntil?.getTime() ?? 0) <= Date.now()) return { kind: "free" as const };
 
+      // The attempt charge, on both outcomes, under the lock this transaction
+      // already holds. The lazy settle is persisted with the spend so the
+      // regen bookkeeping and the charge commit atomically; a shortfall 409s
+      // before any state moves. Skipped entirely with no declaration — the
+      // opt-in property.
+      const energyDecl = attributePools.get("energy") ?? null;
+      if (energyDecl !== null) {
+        const settled = settlePool(
+          caller?.energy ?? 0, caller?.energyMax ?? 0, caller?.energyRegenAt ?? null,
+          new Date(), energyDecl,
+        );
+        if (settled.value < BUST_ENERGY_COST) return { kind: "insufficient_energy" as const };
+        await tx.update(playerStats)
+          .set({
+            energy: settled.value - BUST_ENERGY_COST,
+            energyMax: settled.max,
+            energyRegenAt: settled.stamp,
+          })
+          .where(eq(playerStats.playerId, playerId));
+      }
+
       if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
         const until = await sendToJail(tx, playerId, bustFailJailSeconds(settings));
         return { kind: "failed" as const, until, callerName: caller?.username ?? "unknown" };
@@ -227,6 +261,7 @@ export function registerJailRoutes(
     if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
     if (result.kind === "caller_jailed") return reply.code(409).send({ error: "already_jailed" });
+    if (result.kind === "insufficient_energy") return reply.code(409).send({ error: "insufficient_energy" });
 
     // After commit, never inside the transaction (NOTES.md rule 5).
     const at = new Date().toISOString();

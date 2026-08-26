@@ -12,6 +12,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { definePlugin, type PluginManifest } from "@gl3/plugin-sdk";
 
 const { db, sql: conn } = testDb();
 const redisUrl = loadConfig(process.env).redisUrl;
@@ -356,5 +357,84 @@ describe("POST /api/jail/bust", () => {
     expect((await bust(freeCaller, far.playerId)).json()).toMatchObject({ error: "wrong_location" });
     expect((await bust(freeCaller, free.playerId)).json()).toMatchObject({ error: "not_jailed" });
     expect((await bust(freeCaller, freeCaller.playerId)).json()).toMatchObject({ error: "self_target" });
+  });
+});
+
+describe("POST /api/jail/bust — the 10-energy attempt charge (audit §7 item 12)", () => {
+  /** Declares energy so the charge has a pool; registration seeds 12/12. */
+  const declaresEnergy: PluginManifest = definePlugin({
+    id: "bustenergy", version: "1.0.0", basePaths: ["/api/bustenergy"],
+    providesAttributes: [
+      { pool: "energy", defaultMax: 12, regenAmount: 1, regenIntervalSeconds: 60 },
+    ],
+  });
+
+  it("charges 10 energy on both outcomes", async () => {
+    const own = await bootTestServer({ plugins: [declaresEnergy] });
+    try {
+      const buster = await registerOn(own.app, "ChargedBuster");
+      const inmate = await registerOn(own.app, "ChargedInmate");
+      await place(buster, townA);
+      await place(inmate, townA, { jailedUntil: new Date(Date.now() + 300_000) });
+
+      const res = await own.app.inject({
+        method: "POST", url: "/api/jail/bust", headers: auth(buster),
+        payload: { playerId: inmate.playerId },
+      });
+      expect(res.statusCode).toBe(200);
+
+      // Registration seeded 12/12; whichever way the roll went, 10 is gone.
+      const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
+      expect(caller?.energy).toBe(2);
+    } finally {
+      await own.close();
+    }
+  });
+
+  it("409s without moving anything when energy cannot cover the charge", async () => {
+    const own = await bootTestServer({ plugins: [declaresEnergy] });
+    try {
+      const buster = await registerOn(own.app, "BrokeBuster");
+      const inmate = await registerOn(own.app, "StillInmate");
+      await place(buster, townA, { energy: 9 });
+      const inmateUntil = new Date(Date.now() + 300_000);
+      await place(inmate, townA, { jailedUntil: inmateUntil });
+
+      const res = await own.app.inject({
+        method: "POST", url: "/api/jail/bust", headers: auth(buster),
+        payload: { playerId: inmate.playerId },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("insufficient_energy");
+
+      const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
+      expect(caller?.energy).toBe(9);
+      expect(caller?.jailedUntil).toBeNull();
+      const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
+      expect(target?.jailedUntil?.getTime()).toBe(inmateUntil.getTime());
+    } finally {
+      await own.close();
+    }
+  });
+
+  it("stays free on a default boot — no pool declared, byte-identical", async () => {
+    const own = await bootTestServer();
+    try {
+      const buster = await registerOn(own.app, "FreeBuster");
+      const inmate = await registerOn(own.app, "FreeInmate");
+      await place(buster, townA);
+      await place(inmate, townA, { jailedUntil: new Date(Date.now() + 300_000) });
+
+      const res = await own.app.inject({
+        method: "POST", url: "/api/jail/bust", headers: auth(buster),
+        payload: { playerId: inmate.playerId },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
+      expect(caller?.energy).toBe(0);
+    } finally {
+      await own.close();
+    }
   });
 });
