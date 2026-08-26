@@ -26,6 +26,7 @@
     "@gl3/plugin-inventory": "*",
     "@gl3/plugin-mail": "*",
     "@gl3/plugin-membership": "*",
+    "@gl3/plugin-mccodes-attributes": "*",
     "@gl3/plugin-news": "*",
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-oc": "*",

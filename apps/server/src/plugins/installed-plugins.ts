@@ -17,6 +17,7 @@ import plugin_gl3_plugin_combat from "@gl3/plugin-combat";
 import plugin_gl3_plugin_crimes from "@gl3/plugin-crimes";
 import plugin_gl3_plugin_detectives from "@gl3/plugin-detectives";
 import plugin_gl3_plugin_gangs from "@gl3/plugin-gangs";
+import plugin_gl3_plugin_mccodes_attributes from "@gl3/plugin-mccodes-attributes";
 import plugin_gl3_plugin_oc from "@gl3/plugin-oc";
 import plugin_gl3_plugin_properties from "@gl3/plugin-properties";
 import plugin_gl3_plugin_theft from "@gl3/plugin-theft";
@@ -32,6 +33,7 @@ export const INSTALLED_PLUGINS: readonly (readonly [string, PluginManifest])[] =
   ["@gl3/plugin-crimes", plugin_gl3_plugin_crimes],
   ["@gl3/plugin-detectives", plugin_gl3_plugin_detectives],
   ["@gl3/plugin-gangs", plugin_gl3_plugin_gangs],
+  ["@gl3/plugin-mccodes-attributes", plugin_gl3_plugin_mccodes_attributes],
   ["@gl3/plugin-oc", plugin_gl3_plugin_oc],
   ["@gl3/plugin-properties", plugin_gl3_plugin_properties],
   ["@gl3/plugin-theft", plugin_gl3_plugin_theft],
