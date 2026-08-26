@@ -30,6 +30,14 @@ export const crimes = pgTable("crimes", {
    */
   braveCost: integer("brave_cost").notNull().default(0),
   /**
+   * MCCodes `crimes.crimeXP` — granted into player_stats.crime_exp on a
+   * successful commit, the counter's main producer: without it the CRIMEXP
+   * token of an imported success formula stagnates at its imported value
+   * (audit §7 item 4 and item 5's implementation note; migration 0019).
+   * Default 0 = GL3-native crimes grant nothing, byte-identical.
+   */
+  crimeExpReward: bigint("crime_exp_reward", { mode: "bigint" }).notNull().default(sql`0`),
+  /**
    * MCCodes `crimes.crimePERCFORM`, translated into the sandboxed five-token
    * dialect (LEVEL/CRIMEXP/EXP/WILL/IQ; arithmetic plus
    * min/max/floor/ceil/round/abs). NULL = GL3-native per-player skill chance —

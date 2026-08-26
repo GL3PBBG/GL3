@@ -156,9 +156,14 @@ describe("core schema", () => {
     // The orphan rows that FK would have prevented are the sweeper's job.
     // `assets.uploaded_by` is likewise FK-free — provenance only, and a
     // deleted admin must not cascade away the art they uploaded.
-    expect(totalForeignKeys).toBe(37);
+    // 0019_mccodes_migrator_readiness adds ONE set-null FK:
+    // player_stats.weapon_melee_item_id -> items(id), mirroring the firearm
+    // slot exactly — the melee-only second weapon slot (spec
+    // 2026-08-26-mccodes-migrator-design §2.1). Totals move 37->38 and
+    // set-null 13->14, restated here in the same commit, never loosened.
+    expect(totalForeignKeys).toBe(38);
     expect(byRule["c"]).toBe(24); // ON DELETE CASCADE
-    expect(byRule["n"]).toBe(13); // ON DELETE SET NULL
+    expect(byRule["n"]).toBe(14); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
       SELECT confdeltype FROM pg_constraint WHERE conname = 'player_stats_player_id_players_id_fk'

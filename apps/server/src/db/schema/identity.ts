@@ -121,6 +121,15 @@ export const playerStats = pgTable("player_stats", {
   gangId: uuid("gang_id").references((): AnyPgColumn => gangs.id, { onDelete: "set null" }),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),
   weaponItemId: uuid("weapon_item_id").references(() => items.id, { onDelete: "set null" }),
+  /**
+   * The melee-only second weapon slot (migration 0019, spec
+   * 2026-08-26-mccodes-migrator-design §2.1). Slot 1 stays the firearm slot
+   * and stays authoritative when armed; this slot only ever holds a
+   * melee-model weapon and only fires when slot 1 is empty — NULL is a
+   * no-op on every read path, so GL3-native and V2-migrated games stay
+   * byte-identical. FK mirrors weapon_item_id exactly.
+   */
+  weaponMeleeItemId: uuid("weapon_melee_item_id").references(() => items.id, { onDelete: "set null" }),
   armorItemId: uuid("armor_item_id").references(() => items.id, { onDelete: "set null" }),
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
