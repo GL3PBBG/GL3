@@ -42,6 +42,9 @@ export const playerStats = pgTable("player_stats", {
   gangId: uuid("gang_id"),
   locationId: uuid("location_id"),
   weaponItemId: uuid("weapon_item_id"),
+  // The melee-only second weapon slot (B0, migration 0019): fires only when
+  // the firearm slot above is empty, and only if the row is a melee model.
+  weaponMeleeItemId: uuid("weapon_melee_item_id"),
   armorItemId: uuid("armor_item_id"),
   jailedUntil: timestamp("jailed_until", { withTimezone: true }),
   hospitalUntil: timestamp("hospital_until", { withTimezone: true }),

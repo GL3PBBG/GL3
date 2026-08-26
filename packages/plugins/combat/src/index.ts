@@ -386,7 +386,28 @@ const attackRoute = route({
         await tx.attributes.spend(player.id, "energy", initiation);
       }
 
-      const weapon = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
+      const slot1 = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
+
+      // B0 §2.1 precedence: slot 1 (the firearm slot) is authoritative — a
+      // weapon there decides the model (gun → firearm path; a melee item →
+      // C6's melee arm). The melee slot fires only when slot 1 is EMPTY.
+      // Both armed = the firearm resolves the action: MCCodes' random
+      // both-weapons-per-round is dead by audit item 9, and this documented
+      // divergence keeps every GL3-native and V2-migrated boot byte-identical
+      // (their melee slot is forever NULL). The equip route gates this slot
+      // to melee models; a hand-edited non-melee row is an external boundary
+      // and means "unarmed", never a firearm firing from the melee slot.
+      let weapon = slot1;
+      if (attacker.weaponItemId === null && attacker.weaponMeleeItemId !== null) {
+        const offhand = await loadWeapon(tx, attacker.weaponMeleeItemId, config, PRISTINE);
+        if (offhand.model === "melee") weapon = offhand;
+      }
+      // Which item the log rows credit: slot 1 when armed, else the melee
+      // slot when it actually fired, else fists.
+      const weaponUsedItemId = attacker.weaponItemId !== null
+        ? attacker.weaponItemId
+        : weapon.model === "melee" ? attacker.weaponMeleeItemId : null;
+
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
         throw new PluginError("insufficient_bullets", 409);
       }
@@ -479,7 +500,7 @@ const attackRoute = route({
           hit: false,
           damage: 0,
           fatal: false,
-          weaponItemId: attacker.weaponItemId,
+          weaponItemId: weaponUsedItemId,
           payout: 0n,
         });
 
@@ -576,7 +597,7 @@ const attackRoute = route({
         hit: outcome.hit,
         damage: outcome.damage,
         fatal: killed,
-        weaponItemId: attacker.weaponItemId,
+        weaponItemId: weaponUsedItemId,
         payout,
       });
 
