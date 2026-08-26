@@ -39,3 +39,14 @@ export async function lookupV3Id(exec: Executor, v2Table: string, v2Id: number):
   const row = await findMapping(exec, v2Table, v2Id);
   return row?.v3Id ?? null;
 }
+
+/**
+ * Records a mapping the migrator itself DERIVED rather than generated —
+ * cluster B's synthetic keys (e.g. "mc_user_level" 2 -> the imported
+ * Administrator role's uuid). Upsert-shaped so a re-run converges on the
+ * same value `getOrCreateV3Id` already stored or will store.
+ */
+export async function setV3Id(exec: Executor, v2Table: string, v2Id: number, v3Id: string): Promise<void> {
+  await exec.insert(idMap).values({ v2Table, v2Id, v3Id })
+    .onConflictDoUpdate({ target: [idMap.v2Table, idMap.v2Id], set: { v3Id } });
+}

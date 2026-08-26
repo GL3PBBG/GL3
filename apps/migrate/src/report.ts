@@ -4,6 +4,15 @@ export interface TableReport { table: string; read: number; written: number; ski
 export interface OrphanEntry { table: string; v2Id: number; reason: string; }
 export interface DroppedCrimePosition { playerV2Id: number; position: number; }
 
+/** B: per-value entries an admin must act on, not just counts. */
+export interface BankFoldSplit { v2Id: number; bank: number; cyber: number; folded: string; }
+export interface PercformReject { crimeV2Id: number; original: string; }
+export interface EquipMerge { playerV2Id: number; kept: number; dropped: number; }
+export interface LoginNameDivergence { v2Id: number; username: string; loginName: string; }
+export interface DroppedProgress { playerV2Id: number; kind: string; detail: string; }
+export interface StoleSentinel { logV2Id: number; attacker: number; attacked: number; stole: number; }
+export interface DroppedColumns { table: string; columns: string[]; rows: number; }
+
 export interface MigrationReport {
   dryRun: boolean;
   startedAt: string;
@@ -31,6 +40,16 @@ export interface MigrationReport {
   droppedCrimePositions: DroppedCrimePosition[];
   bossNotInGang: Array<{ gangV2Id: number; bossV2Id: number }>;
   underbossNotInGang: Array<{ gangV2Id: number; underbossV2Id: number }>;
+  /** B (cluster B): the MCCodes dialect's per-value entries. Empty for V2. */
+  bankFoldSplits: BankFoldSplit[];
+  percformRejects: PercformReject[];
+  equipMerges: EquipMerge[];
+  loginNameDivergences: LoginNameDivergence[];
+  droppedProgress: DroppedProgress[];
+  stoleSentinels: StoleSentinel[];
+  droppedColumns: DroppedColumns[];
+  /** Tables keyed by row ordinal in id_map — re-runs assume a fixed source. */
+  ordinalKeyedTables: string[];
 }
 
 export function createReport(dryRun: boolean): MigrationReport {
@@ -48,6 +67,14 @@ export function createReport(dryRun: boolean): MigrationReport {
     droppedCrimePositions: [],
     bossNotInGang: [],
     underbossNotInGang: [],
+    bankFoldSplits: [],
+    percformRejects: [],
+    equipMerges: [],
+    loginNameDivergences: [],
+    droppedProgress: [],
+    stoleSentinels: [],
+    droppedColumns: [],
+    ordinalKeyedTables: [],
   };
 }
 
@@ -84,6 +111,46 @@ export function recordDroppedCrimePosition(report: MigrationReport, playerV2Id: 
   report.droppedCrimePositions.push({ playerV2Id, position });
 }
 
+export function recordBankFoldSplit(report: MigrationReport, entry: BankFoldSplit): void {
+  report.bankFoldSplits.push(entry);
+}
+
+export function recordPercformReject(report: MigrationReport, crimeV2Id: number, original: string): void {
+  report.percformRejects.push({ crimeV2Id, original });
+}
+
+export function recordEquipMerge(report: MigrationReport, playerV2Id: number, kept: number, dropped: number): void {
+  report.equipMerges.push({ playerV2Id, kept, dropped });
+}
+
+export function recordLoginNameDivergence(report: MigrationReport, entry: LoginNameDivergence): void {
+  report.loginNameDivergences.push(entry);
+}
+
+export function recordDroppedProgress(report: MigrationReport, playerV2Id: number, kind: string, detail: string): void {
+  report.droppedProgress.push({ playerV2Id, kind, detail });
+}
+
+export function recordStoleSentinel(report: MigrationReport, entry: StoleSentinel): void {
+  report.stoleSentinels.push(entry);
+}
+
+/** Table-level dropped columns, recorded ONCE per table (with the row count
+ *  the table read), not per row — §4's drops are table-level facts. */
+export function recordDroppedColumns(report: MigrationReport, table: string, columns: string[], rows: number): void {
+  const existing = report.droppedColumns.find((d) => d.table === table);
+  if (existing) {
+    existing.columns = [...new Set([...existing.columns, ...columns])];
+    existing.rows = Math.max(existing.rows, rows);
+  } else {
+    report.droppedColumns.push({ table, columns: [...columns], rows });
+  }
+}
+
+export function recordOrdinalKeyedTable(report: MigrationReport, table: string): void {
+  if (!report.ordinalKeyedTables.includes(table)) report.ordinalKeyedTables.push(table);
+}
+
 export function finishReport(report: MigrationReport): void {
   report.finishedAt = new Date().toISOString();
   report.durationMs = new Date(report.finishedAt).getTime() - new Date(report.startedAt).getTime();
@@ -117,6 +184,33 @@ export function formatHumanSummary(report: MigrationReport): string {
   }
   if (report.bossNotInGang.length > 0 || report.underbossNotInGang.length > 0) {
     lines.push(`${report.bossNotInGang.length} boss / ${report.underbossNotInGang.length} underboss row(s) added to their own gang`);
+  }
+  // Cluster B's per-value entries — each line names something an admin acts on.
+  if (report.bankFoldSplits.length > 0) {
+    lines.push(`${report.bankFoldSplits.length} player bank fold(s): bank + cyber -> player_stats.bank (splits in the report file)`);
+  }
+  if (report.percformRejects.length > 0) {
+    lines.push(`${report.percformRejects.length} crimePERCFORM(s) outside the dialect -> imported NULL (originals in the report file)`);
+  }
+  if (report.equipMerges.length > 0) {
+    lines.push(`${report.equipMerges.length} equipped-weapon collision(s): primary kept, secondary reported`);
+  }
+  if (report.loginNameDivergences.length > 0) {
+    lines.push(`${report.loginNameDivergences.length} player(s) whose login_name differed from username (list in the report file)`);
+  }
+  if (report.droppedProgress.length > 0) {
+    lines.push(`${report.droppedProgress.length} in-flight progress row(s) dropped (details in the report file)`);
+  }
+  if (report.stoleSentinels.length > 0) {
+    lines.push(`${report.stoleSentinels.length} attacklog stole sentinel(s) recorded for the KO-outcome wave`);
+  }
+  if (report.droppedColumns.length > 0) {
+    for (const d of report.droppedColumns) {
+      lines.push(`${d.table}: dropped columns [${d.columns.join(", ")}] across ${d.rows} row(s)`);
+    }
+  }
+  if (report.ordinalKeyedTables.length > 0) {
+    lines.push(`Ordinal-keyed (PK-less) tables: ${report.ordinalKeyedTables.join(", ")} — re-runs assume a fixed source`);
   }
   return lines.join("\n");
 }
