@@ -6,6 +6,7 @@ import { createRng } from "../game/rng.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
 import { collectAssetSlots } from "./asset-slots.js";
 import { collectAttributePools } from "./attribute-pools.js";
+import { collectExpRouters } from "./exp-routers.js";
 import { collectPropertyTypes } from "./property-types.js";
 
 /**
@@ -57,6 +58,11 @@ export function createPluginQueues(
  */
 export async function runPluginJob(
   deps: PluginCtxDeps, manifest: PluginManifest, name: string, job: PluginJobLike,
+  // The widening jobs.ts's own narrowing comment prescribed: exp routing is
+  // cross-plugin by nature — crimes' job must see the progression plugin's
+  // claimant — so a caller with the full boot list passes it here. Defaults
+  // to the single manifest for every caller that has nothing routed.
+  allManifests: readonly PluginManifest[] = [manifest],
 ): Promise<void> {
   const entry = manifest.jobs[name];
   if (entry === undefined) throw new Error(`plugin "${manifest.id}" has no job "${name}"`);
@@ -107,6 +113,10 @@ export async function runPluginJob(
     // resolving art for a core table (`items`) is the realistic case, another
     // plugin's is not.
     assetSlots: collectAssetSlots([manifest]),
+    // NOT narrowed: exp routing is behavioural and cross-plugin — the crimes
+    // job diverts exp to the progression plugin's claimant. Every other
+    // registry above stays narrowed on purpose (their comments rule).
+    expRouter: collectExpRouters(allManifests),
   });
 
   try {
@@ -129,7 +139,7 @@ export function createPluginWorkers(
     for (const name of Object.keys(manifest.jobs)) {
       const worker = new Worker(
         pluginQueueName(prefix, manifest.id, name),
-        async (job) => { await runPluginJob(deps, manifest, name, job); },
+        async (job) => { await runPluginJob(deps, manifest, name, job, manifests); },
         // concurrency:5 matches core's deleted crime worker (`startCrimeWorker`,
         // same reasoning as the `defaultJobOptions` block in
         // `createPluginQueues` above) — BullMQ's default is 1 (serial), which

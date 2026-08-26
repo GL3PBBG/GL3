@@ -6,6 +6,7 @@ import { publishEvent } from "../../bus/publish.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats, ranks } from "../../db/schema/index.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
+import { settleHealth } from "../health-settle.js";
 
 export interface HospitalStatus {
   hospitalised: boolean;
@@ -78,15 +79,37 @@ export async function settleHospital(tx: Tx, playerId: string): Promise<Hospital
 async function settleHospitalTx(
   tx: Tx, playerId: string,
 ): Promise<{ status: HospitalStatus; discharged: boolean }> {
-  const [row] = await tx.select({ hospitalUntil: playerStats.hospitalUntil })
+  const [row] = await tx.select({
+    hospitalUntil: playerStats.hospitalUntil,
+    health: playerStats.health,
+    healthMax: playerStats.healthMax,
+    healthRegenAt: playerStats.healthRegenAt,
+  })
     .from(playerStats).where(eq(playerStats.playerId, playerId));
   if (!row) return { status: FREE, discharged: false };
+
+  // MCCodes hp regen (audit §1.1, C spec §4.3): ⅓ of max per 5 minutes,
+  // lazily, whenever the progression plugin owns the cap — a set health_max.
+  // NULL max is rank-derived GL3-native health: untouched, byte-identical.
+  // Regen runs even while admitted (MCCodes regenerates always); a discharge
+  // below overwrites it with the full restore anyway.
+  if (row.healthMax !== null) {
+    const settled = settleHealth(row.health, row.healthMax, row.healthRegenAt, new Date());
+    if (settled.health !== row.health
+        || settled.stamp?.getTime() !== row.healthRegenAt?.getTime()) {
+      await tx.update(playerStats)
+        .set({ health: settled.health, healthRegenAt: settled.stamp })
+        .where(eq(playerStats.playerId, playerId));
+    }
+  }
 
   const status = statusFrom(row.hospitalUntil);
   if (status.hospitalised) return { status, discharged: false }; // still admitted
   if (row.hospitalUntil === null) return { status: FREE, discharged: false };
 
-  const maxHealth = await maxHealthFor(tx, playerId);
+  // The discharge restore fills to the LIVE cap: the progression-owned
+  // health_max when set, the rank cap otherwise.
+  const maxHealth = row.healthMax ?? await maxHealthFor(tx, playerId);
   const cleared = await tx.update(playerStats)
     .set({ hospitalUntil: null, health: maxHealth })
     .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.hospitalUntil)))

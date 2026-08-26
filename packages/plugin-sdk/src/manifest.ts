@@ -152,8 +152,31 @@ export interface PluginManifestInput {
   providesProperties?: PropertyTypeDecl[];
   providesAssets?: AssetSlotDecl[];
   providesAttributes?: AttributePoolDecl[];
+  /**
+   * Claim exp routing for this plugin (C spec §1.2): when present, every
+   * `tx.economy.applyExpAndRankUp` call in the boot diverts to this handler
+   * INSIDE the caller's transaction, and the rank ladder receives nothing —
+   * the economy guard that keeps reward-bearing ranks silent on an MCCodes
+   * profile. At most one plugin may carry it; the server's registry fails
+   * the boot on a second claimant. Presence IS the claim — no separate
+   * boolean.
+   */
+  applyExp?: ExpApplier;
   filters?: FilterSubscription[];
 }
+
+/**
+ * The exp-routing claimant's handler: applies `expGain` to its own
+ * progression model (levels, grants, events). Runs inside the caller's
+ * transaction under whatever lock that caller holds — same trust shape as
+ * `routes` and `jobs`, and the reason routing is a manifest function rather
+ * than a filter (filters never run inside transactions).
+ */
+export type ExpApplier = (
+  tx: import("./ctx.js").PluginTx,
+  playerId: string,
+  expGain: bigint,
+) => Promise<void>;
 
 /** The normalised manifest every consumer sees: no field is ever `undefined`. */
 export interface PluginManifest {
@@ -172,6 +195,7 @@ export interface PluginManifest {
   providesProperties: PropertyTypeDecl[];
   providesAssets: AssetSlotDecl[];
   providesAttributes: AttributePoolDecl[];
+  applyExp: ExpApplier | null;
   filters: FilterSubscription[];
 }
 
@@ -257,6 +281,9 @@ const InputSchema = z
         }),
       )
       .optional(),
+    // Function-bearing, so a z.custom placeholder like routes — the type is
+    // enforced by `PluginManifestInput`, the runtime shape by the loader.
+    applyExp: z.custom<ExpApplier>().optional(),
     filters: z.array(z.custom<FilterSubscription>()).optional(),
   })
   .strict()
@@ -374,6 +401,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     providesProperties: parsed.providesProperties ?? [],
     providesAssets: parsed.providesAssets ?? [],
     providesAttributes: parsed.providesAttributes ?? [],
+    applyExp: parsed.applyExp ?? null,
     filters: parsed.filters ?? [],
   };
 }

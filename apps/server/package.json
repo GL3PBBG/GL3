@@ -29,6 +29,7 @@
     "@gl3/plugin-mccodes-attributes": "*",
     "@gl3/plugin-gym": "*",
     "@gl3/plugin-houses": "*",
+    "@gl3/plugin-progression": "*",
     "@gl3/plugin-news": "*",
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-oc": "*",

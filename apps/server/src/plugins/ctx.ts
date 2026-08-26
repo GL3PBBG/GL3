@@ -1,5 +1,5 @@
 import type {
-  AssetSlot, AttributePoolDecl, BoundFilterSubscription, CoreEventInput, JobContext,
+  AssetSlot, AttributePoolDecl, BoundFilterSubscription, CoreEventInput, ExpApplier, JobContext,
   PlayerAttributes, PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx, Pool,
   PropertyTypeDecl, TrainedAttr,
 } from "@gl3/plugin-sdk";
@@ -68,6 +68,8 @@ export interface PluginCtxOptions {
   filters: readonly BoundFilterSubscription[];
   propertyTypes: ReadonlyMap<string, PropertyTypeDecl>;
   attributePools: ReadonlyMap<Pool, AttributePoolDecl>;
+  /** The single exp-routing claimant, or null (collectExpRouters). */
+  expRouter: ExpApplier | null;
   installedPluginIds: ReadonlySet<string>;
   /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
   assetSlots: ReadonlyMap<string, AssetSlot>;
@@ -189,6 +191,19 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               if (fresh) bufferScore("exp", playerId, fresh.exp);
             },
             applyExpAndRankUp: async (playerId, expGain) => {
+              // Exp routing (C spec §1.2): a claimant applies exp to its own
+              // ladder INSIDE this transaction and the rank path never runs —
+              // reward-bearing ranks stay silent on an MCCodes-profile boot.
+              // RankUpResult is a rank concept; a routed boot has none, so
+              // the caller's promotion is null and its rankedUp event does
+              // not fire. The claimant publishes its own levelUp events.
+              if (options.expRouter !== null) {
+                if (expGain === 0n) return null;
+                await options.expRouter(pluginTx, playerId, expGain);
+                const fresh = await freshStats(tx, playerId);
+                if (fresh) bufferScore("exp", playerId, fresh.exp);
+                return null;
+              }
               const result = await applyExpAndRankUp(tx, playerId, expGain);
               // Same reasoning as addExp above: core's applyExpAndRankUp
               // (economy/ranks.ts) is itself a no-op on a zero gain — no

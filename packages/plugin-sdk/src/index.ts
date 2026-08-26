@@ -52,6 +52,7 @@ export {
   type PluginManifest,
   type PluginManifestInput,
   type PluginMigration,
+  type ExpApplier,
   type PropertyTypeDecl,
   type AssetSlotDecl,
   type AssetSlot,

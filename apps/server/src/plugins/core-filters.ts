@@ -45,6 +45,9 @@ export function buildCoreFilters(deps: PluginCtxDeps, manifests: readonly Plugin
             filters: bound,
             propertyTypes,
             attributePools,
+            // Filter appliers are display-only — exp routing applies only in
+            // gameplay routes and jobs, never here.
+            expRouter: null,
             installedPluginIds,
             assetSlots,
           });

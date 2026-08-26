@@ -82,6 +82,9 @@ export const GameEventSchema = z.discriminatedUnion("type", [
     ...base, type: z.literal("player.rankedUp"),
     rankId: IdSchema, rankName: z.string(), cashReward: MoneySchema, bulletReward: MoneySchema, maxHealth: z.number().int().positive(),
   }),
+  // actor = the player who leveled up (the MCCodes ladder; fires only on a
+  // boot whose exp routing is claimed — rankedUp never fires there).
+  z.object({ ...base, type: z.literal("player.levelUp"), level: z.number().int().positive() }),
   // actor = the account holder. Private audience — bank state is not broadcast.
   z.object({
     ...base, type: z.literal("bank.transacted"),
