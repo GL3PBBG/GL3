@@ -30,3 +30,23 @@ export function verifyLegacyPassword(storedHash: string, legacyV2Id: number, pla
   if (stored.length !== computed.length) return false;
   return timingSafeEqual(Buffer.from(stored, "utf8"), Buffer.from(computed, "utf8"));
 }
+
+/**
+ * MCCodes `global_func.php::encode_password()`: md5(pass_salt . md5(password)).
+ * An empty/NULL salt means the older unsalted md5(password) form — MCCodes'
+ * own login auto-migrated those rows in place (authenticate.php:56-70), so a
+ * real dump contains both. Spec 2026-08-26-mccodes-mechanics-audit §7 item 10.
+ */
+export function legacyMccodesHash(salt: string, plaintext: string): string {
+  const inner = createHash("md5").update(plaintext).digest("hex");
+  if (salt === "") return inner;
+  return createHash("md5").update(salt + inner).digest("hex");
+}
+
+export function verifyLegacyMccodesPassword(storedHash: string, salt: string, plaintext: string): boolean {
+  const computed = legacyMccodesHash(salt, plaintext);
+  // Same dump hygiene as the V2 verifier: uppercase hex, surrounding whitespace.
+  const stored = storedHash.trim().toLowerCase();
+  if (stored.length !== computed.length) return false;
+  return timingSafeEqual(Buffer.from(stored, "utf8"), Buffer.from(computed, "utf8"));
+}

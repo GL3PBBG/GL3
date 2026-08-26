@@ -10,7 +10,7 @@ import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
-import { hashPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
+import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { collectAttributePools } from "../plugins/attribute-pools.js";
@@ -99,6 +99,33 @@ export function registerAuthRoutes(
     const playerId = uuidv7();
     const passwordHash = await hashPassword(parsed.data.password);
 
+    // Declared pools start FULL (spec 2026-08-26 §7 item 7): MCCodes'
+    // register.php hands a new player 12/12 energy, 5/5 brave, 100/100 will,
+    // and a GL3 game running the pool family must match that feel — a fresh
+    // player who cannot act until a regen cycle passes has a broken first
+    // minute. Only DECLARED pools are seeded: an install with no attribute
+    // plugin keeps writing the all-zero row, opt-in property intact. Stamps
+    // stay NULL — the clock starts on first read and accrues nothing, which
+    // settlePool's null-stamp branch already handles.
+    const attributePools = collectAttributePools(manifests());
+    const seededStats: Partial<typeof playerStats.$inferInsert> = {};
+    for (const [pool, decl] of attributePools) {
+      switch (pool) {
+        case "energy":
+          seededStats.energy = decl.defaultMax;
+          seededStats.energyMax = decl.defaultMax;
+          break;
+        case "will":
+          seededStats.will = decl.defaultMax;
+          seededStats.willMax = decl.defaultMax;
+          break;
+        case "brave":
+          seededStats.brave = decl.defaultMax;
+          seededStats.braveMax = decl.defaultMax;
+          break;
+      }
+    }
+
     try {
       await db.transaction(async (tx) => {
         await tx.insert(players).values({
@@ -107,7 +134,7 @@ export function registerAuthRoutes(
           email: parsed.data.email,
           passwordHash,
         });
-        await tx.insert(playerStats).values({ playerId });
+        await tx.insert(playerStats).values({ playerId, ...seededStats });
 
         // A player who registers halfway through a round competes on progress
         // from the moment they join, not from zero. There is no round id in
@@ -209,6 +236,20 @@ export function registerAuthRoutes(
           .set({ passwordHash: upgraded, legacyPasswordSha256: null })
           .where(eq(players.id, player.id));
         request.log.info({ event: "auth.legacy_upgraded", playerId: player.id });
+      }
+    } else if (player.legacyMccodesHash !== null) {
+      // MCCodes formula (spec 2026-08-26 §7 item 10): md5(pass_salt . md5(pw)),
+      // with an empty/NULL salt meaning the older unsalted md5(pw) form. Same
+      // lazy-upgrade flow as the V2 branch above.
+      authenticated = verifyLegacyMccodesPassword(
+        player.legacyMccodesHash, player.legacyMccodesSalt ?? "", parsed.data.password,
+      );
+      if (authenticated) {
+        const upgraded = await hashPassword(parsed.data.password);
+        await db.update(players)
+          .set({ passwordHash: upgraded, legacyMccodesHash: null, legacyMccodesSalt: null })
+          .where(eq(players.id, player.id));
+        request.log.info({ event: "auth.legacy_upgraded", playerId: player.id, legacy: "mccodes" });
       }
     }
 
@@ -325,7 +366,9 @@ export function registerAuthRoutes(
     const playerId = await consumeResetToken(redis, parsed.data.token);
     if (!playerId) return reply.code(400).send({ error: "invalid_token" });
     const passwordHash = await hashPassword(parsed.data.password);
-    await db.update(players).set({ passwordHash, legacyPasswordSha256: null }).where(eq(players.id, playerId));
+    await db.update(players)
+      .set({ passwordHash, legacyPasswordSha256: null, legacyMccodesHash: null, legacyMccodesSalt: null })
+      .where(eq(players.id, playerId));
     await destroyAllSessions(redis, playerId);
     return reply.code(200).send({});
   });

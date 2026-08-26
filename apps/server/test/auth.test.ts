@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { legacyHash } from "../src/auth/password.js";
+import { legacyHash, legacyMccodesHash } from "../src/auth/password.js";
 import { players, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -101,6 +101,60 @@ describe("POST /api/auth/login — legacy V2 upgrade (SPEC §4.3)", () => {
     expect(res.statusCode).toBe(401);
     const [row] = await db.select().from(players).where(sql`${players.id} = ${legacyPlayerId}`);
     expect(row?.legacyPasswordSha256).not.toBeNull();
+  });
+});
+
+describe("POST /api/auth/login — legacy MCCodes upgrade (spec 2026-08-26 §7 item 10)", () => {
+  const legacyPlayerId = uuidv7();
+
+  beforeEach(async () => {
+    await db.insert(players).values({
+      id: legacyPlayerId,
+      username: "MccOldTimer",
+      passwordHash: null,
+      legacyMccodesHash: legacyMccodesHash("abcd1234", "oldpassword"),
+      legacyMccodesSalt: "abcd1234",
+    });
+    await db.insert(playerStats).values({ playerId: legacyPlayerId });
+  });
+
+  it("logs in with the MCCodes password and upgrades the hash to argon2id", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/login",
+      payload: { username: "MccOldTimer", password: "oldpassword" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const [row] = await db.select().from(players).where(sql`${players.id} = ${legacyPlayerId}`);
+    expect(row?.passwordHash?.startsWith("$argon2id$")).toBe(true);
+    expect(row?.legacyMccodesHash).toBeNull();
+    expect(row?.legacyMccodesSalt).toBeNull();
+  });
+
+  it("accepts the unsalted md5 form too (NULL salt)", async () => {
+    const unsaltedId = uuidv7();
+    await db.insert(players).values({
+      id: unsaltedId,
+      username: "MccOlderTimer",
+      passwordHash: null,
+      legacyMccodesHash: legacyMccodesHash("", "ancientpassword"),
+      legacyMccodesSalt: null,
+    });
+    await db.insert(playerStats).values({ playerId: unsaltedId });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/auth/login",
+      payload: { username: "MccOlderTimer", password: "ancientpassword" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects a wrong password without clearing the legacy columns", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/auth/login", payload: { username: "MccOldTimer", password: "nope" } });
+    expect(res.statusCode).toBe(401);
+    const [row] = await db.select().from(players).where(sql`${players.id} = ${legacyPlayerId}`);
+    expect(row?.legacyMccodesHash).not.toBeNull();
+    expect(row?.legacyMccodesSalt).not.toBeNull();
   });
 });
 

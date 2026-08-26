@@ -44,7 +44,7 @@ describe("GET /api/auth/me — attributes", () => {
     }
   });
 
-  it("reports the seeded max when a pool is declared, without writing", async () => {
+  it("seeds declared pools full at registration; the read stays display-only", async () => {
     const server = await bootTestServer({ plugins: [gymPlugin] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.9.2.2" });
@@ -54,14 +54,20 @@ describe("GET /api/auth/me — attributes", () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
+      // Full at signup (spec §7 item 7): a fresh player on a game running the
+      // pool family can act immediately, exactly like MCCodes' register.php.
+      expect(body.attributes.energy).toBe(10);
       expect(body.attributes.energyMax).toBe(10);
       expect(body.attributes.strength).toBe("0");
+      expect(body.attributes.iq).toBe("0");
 
-      // Display-only: the stored row is still untouched — core took no
-      // lock, opened no transaction, and wrote nothing. The authoritative
-      // write only happens on the next plugin action via tx.attributes.
+      // The row was written by REGISTRATION (current = max = defaultMax,
+      // stamp NULL), not by this read: the display-only settle still takes no
+      // lock, opens no transaction and writes nothing — the stamp is NULL
+      // because the clock has never started, not because a write was undone.
       const [stored] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
-      expect(stored?.energyMax).toBe(0);
+      expect(stored?.energy).toBe(10);
+      expect(stored?.energyMax).toBe(10);
       expect(stored?.energyRegenAt).toBeNull();
     } finally {
       await server.close();
