@@ -218,4 +218,86 @@ describe("crimes admin", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  // B0 Task 2: the success_formula dialect's authoring-time validation —
+  // invalid formulas 400 here, never silently at resolve time (audit §7
+  // item 5). crimeExpReward rides the same optional-field pattern.
+  describe("success formula + crime exp reward (B0)", () => {
+    const base = {
+      name: "Formula job", description: "", cooldownSeconds: 30,
+      minPayout: "50", maxPayout: "100", minBullets: 0, maxBullets: 0,
+      expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+    };
+
+    it("400s a create whose formula is outside the dialect", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/crimes", headers: auth(),
+        payload: { ...base, successFormula: "rand(1,100)" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_formula");
+      expect(String(res.json().message)).toContain("rand");
+    });
+
+    it("creates with a valid formula + crime exp reward, defaults absent ones", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/crimes", headers: auth(),
+        payload: { ...base, successFormula: "min(95, 10 + CRIMEXP / 100)", crimeExpReward: "7" },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(crimes).where(eq(crimes.id, res.json().id));
+      expect(row?.successFormula).toBe("min(95, 10 + CRIMEXP / 100)");
+      expect(row?.crimeExpReward).toBe(7n);
+    });
+
+    it("update sets and clears the formula; absent fields leave columns alone", async () => {
+      const crimeId = uuidv7();
+      await db.insert(crimes).values({
+        id: crimeId, name: "Pickpocket", description: "", cooldownSeconds: 30,
+        minPayout: 50n, maxPayout: 250n, minBullets: 0, maxBullets: 0,
+        expReward: 5n, minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+        crimeExpReward: 9n, successFormula: "min(50, LEVEL * 10)",
+      });
+      const update = {
+        id: crimeId, cooldownSeconds: 30, minPayout: "50", maxPayout: "250",
+        expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+      };
+
+      // Omitting both fields leaves them untouched.
+      const keep = await app.inject({
+        method: "POST", url: "/api/admin/crimes/update", headers: auth(), payload: update });
+      expect(keep.statusCode).toBe(204);
+      let [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+      expect(row?.successFormula).toBe("min(50, LEVEL * 10)");
+      expect(row?.crimeExpReward).toBe(9n);
+
+      // Empty string clears the formula back to the skill-chance path.
+      const clear = await app.inject({
+        method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+        payload: { ...update, successFormula: "" } });
+      expect(clear.statusCode).toBe(204);
+      [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+      expect(row?.successFormula).toBeNull();
+      expect(row?.crimeExpReward).toBe(9n); // still untouched
+    });
+
+    it("400s an update whose formula does not parse", async () => {
+      const crimeId = uuidv7();
+      await db.insert(crimes).values({
+        id: crimeId, name: "Pickpocket", description: "", cooldownSeconds: 30,
+        minPayout: 50n, maxPayout: 250n, minBullets: 0, maxBullets: 0,
+        expReward: 5n, minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+      });
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+        payload: {
+          id: crimeId, cooldownSeconds: 30, minPayout: "50", maxPayout: "250",
+          expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+          successFormula: "LEVEL ~ 2",
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_formula");
+    });
+  });
 });

@@ -22,6 +22,8 @@ export const crimes = pgTable("crimes", {
   jailSeconds: integer("jail_seconds").notNull(),
   sort: integer("sort").notNull(),
   braveCost: integer("brave_cost").notNull().default(0),
+  crimeExpReward: bigint("crime_exp_reward", { mode: "bigint" }).notNull(),
+  successFormula: text("success_formula"),
 });
 
 export const playerCrimeSkill = pgTable("player_crime_skill", {
@@ -54,4 +56,11 @@ export const players = pgTable("players", {
 export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   jailedUntil: timestamp("jailed_until", { withTimezone: true }),
+  // Read by the commit job's formula branch (B0, spec 2026-08-26-mccodes-
+  // migrator-design §2.2): the five tokens substitute from this row.
+  level: integer("level").notNull(),
+  crimeExp: bigint("crime_exp", { mode: "bigint" }).notNull(),
+  exp: bigint("exp", { mode: "bigint" }).notNull(),
+  will: integer("will").notNull(),
+  iq: bigint("iq", { mode: "bigint" }).notNull(),
 });

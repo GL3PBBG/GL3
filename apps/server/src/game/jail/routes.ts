@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
@@ -198,6 +198,7 @@ export function registerJailRoutes(
         username: players.username,
         energy: playerStats.energy, energyMax: playerStats.energyMax,
         energyRegenAt: playerStats.energyRegenAt,
+        level: playerStats.level,
       })
         .from(playerStats)
         .innerJoin(players, eq(players.id, playerStats.playerId))
@@ -249,6 +250,15 @@ export function registerJailRoutes(
       await tx.update(playerStats)
         .set({ jailedUntil: null })
         .where(eq(playerStats.playerId, targetId));
+
+      // Audit §7 item 4: a successful bust grants the BUSTER level×5
+      // crime_exp — the counter's only MCCodes producer besides per-crime
+      // rewards, keeping its economy intact for the crime odds that read
+      // it. Unconditional by that decision: with no formula crime in the
+      // catalog the column is inert, accumulating harmlessly.
+      await tx.update(playerStats)
+        .set({ crimeExp: sql`${playerStats.crimeExp} + ${BigInt((caller?.level ?? 1) * 5)}` })
+        .where(eq(playerStats.playerId, playerId));
 
       const notificationId = uuidv7();
       await insertNotification(tx, {

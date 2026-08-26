@@ -355,6 +355,7 @@ export default defineWorkspace([
         "test/core-profile-extras.test.ts",
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
+        "test/crimes-formula.test.ts",
         "test/crimes-widget.test.ts",
         "test/detectives-extras.test.ts",
         "test/detectives-worker.test.ts",

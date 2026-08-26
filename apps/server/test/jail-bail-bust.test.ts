@@ -293,6 +293,10 @@ describe("POST /api/jail/bust", () => {
       expect(target?.jailedUntil).toBeNull();
       const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
       expect(caller?.jailedUntil).toBeNull();
+      // Audit §7 item 4: a successful bust grants the BUSTER level×5
+      // crime_exp (level 1 here) — the counter's jail-side producer, riding
+      // the same transaction as the release.
+      expect(caller?.crimeExp).toBe(5n);
 
       // Busting is free on both branches — a successful bust moves no money.
       const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
