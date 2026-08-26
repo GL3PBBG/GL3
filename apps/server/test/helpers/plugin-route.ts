@@ -3,6 +3,8 @@ import type { Redis } from "ioredis";
 import type { Db } from "../../src/db/client.js";
 import type { StorageDriver } from "../../src/assets/driver.js";
 import { collectAssetSlots } from "../../src/plugins/asset-slots.js";
+import { collectAttributePools } from "../../src/plugins/attribute-pools.js";
+import { collectExpRouters } from "../../src/plugins/exp-routers.js";
 import { createPluginCtx } from "../../src/plugins/ctx.js";
 import { loadSnapshot } from "../../src/plugins/routes.js";
 import { testAssetDriver } from "./assets.js";
@@ -76,6 +78,11 @@ export async function callPluginRoute(
     job: null,
     filters: manifest.filters.map((subscription) => ({ ownerId: manifest.id, subscription })),
     propertyTypes: new Map(),
+    // Mirrors routes.ts's real construction, narrowed to the one manifest —
+    // a route consulting either registry (crimes' brave, combat's initiation
+    // energy) must see the same shape here as in production.
+    attributePools: collectAttributePools([manifest]),
+    expRouter: collectExpRouters([manifest]),
     installedPluginIds: new Set([manifest.id]),
     assetSlots: collectAssetSlots([manifest]),
   });

@@ -8,9 +8,9 @@ import { itemActions, itemPriceAt } from "@gl3/plugin-inventory";
 import { activeReportTargetIds } from "@gl3/plugin-detectives";
 import { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 import { cooldownSecondsFor } from "./cooldown.js";
-import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, WeaponEffectsSchema } from "./effects.js";
+import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, MeleeEffectsSchema, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
-import { resolveShot, rollFor, type WeaponProfile } from "./resolve.js";
+import { resolveMeleeStrike, resolveShot, rollFor, rollMelee, type WeaponProfile } from "./resolve.js";
 import { combatLog, items, locations, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
@@ -18,7 +18,7 @@ import { type CombatSettings, readCombatSettings } from "./settings.js";
 // subpath: no other plugin has one, and the resolver is the only part of
 // combat worth importing from outside (its tests run in the no-DB
 // `@gl3/server:unit` project because it touches neither Postgres nor Redis).
-export { resolveShot, rollFor } from "./resolve.js";
+export { resolveMeleeStrike, resolveShot, rollFor, rollMelee } from "./resolve.js";
 export type { Rolls, ShotOutcome, WeaponProfile } from "./resolve.js";
 export { backfireChanceFor, effectiveCondition, PRISTINE, repairCostFor } from "./condition.js";
 export { cooldownSecondsFor } from "./cooldown.js";
@@ -148,6 +148,22 @@ async function loadWeapon(
     .where(eq(items.id, weaponItemId));
   if (!row || row.itemType !== ITEM_TYPE_WEAPON) return unarmed;
 
+  // Melee first (C6): `power` in the effects IS the melee marker — those
+  // items have no damage range for the firearm schema to require. A melee
+  // weapon consumes no ammunition and never wears or backfires (MCCodes
+  // parity: melee never ran dry or rusted); the zeroed firearm fields keep
+  // every shared downstream read inert.
+  const melee = MeleeEffectsSchema.safeParse(row.effects);
+  if (melee.success) {
+    return {
+      accuracy: 100, damageMin: 0, damageMax: 0, bulletsPerShot: 0,
+      critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+      backfireChance: 0,
+      model: "melee" as const,
+      power: melee.data.power,
+    };
+  }
+
   const parsed = WeaponEffectsSchema.safeParse(row.effects);
   // A malformed weapon falls back to unarmed rather than 500ing: the jsonb is
   // an external boundary.
@@ -223,6 +239,10 @@ async function cooldownForAttacker(
       .leftJoin(items, eq(items.id, playerStats.weaponItemId))
       .where(eq(playerStats.playerId, playerId));
     if (!row || row.itemType !== ITEM_TYPE_WEAPON) return unarmed;
+    // A melee weapon has no dps or damage range to pace by — it falls to
+    // the flat cooldown, exactly like a migrated V2 weapon (loadWeapon's
+    // fallback shape).
+    if (MeleeEffectsSchema.safeParse(row.effects).success) return unarmed;
     const parsed = WeaponEffectsSchema.safeParse(row.effects);
     if (!parsed.success) return unarmed;
     return parsed.data;
@@ -352,6 +372,20 @@ const attackRoute = route({
         ? PRISTINE
         : await readCondition(tx, player.id, attacker.weaponItemId, config, shotAt);
 
+      // Initiation energy (C6, audit §7 item 13): MCCodes' charge — 50% of
+      // max energy, ONCE per engagement (the opening shot), never per shot.
+      // Registry-consulted self-pricing, exactly like crimes' brave: the
+      // amount is a fraction of this player's own max, which no generic
+      // actionCost subscriber could compute. Filter subscribers below stay
+      // per-shot. Refused here, the cooldown stays burned — same anti-probe
+      // rule every other 4xx in this route follows.
+      if (opensEngagement && ctx.attributePools.get("energy") !== null) {
+        const attrs = await tx.attributes.read(player.id);
+        const initiation = Math.floor(attrs.energyMax / 2);
+        if (attrs.energy < initiation) throw new PluginError("insufficient_energy", 409);
+        await tx.attributes.spend(player.id, "energy", initiation);
+      }
+
       const weapon = await loadWeapon(tx, attacker.weaponItemId, config, currentCondition);
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
         throw new PluginError("insufficient_bullets", 409);
@@ -384,7 +418,17 @@ const attackRoute = route({
         .where(eq(playerStats.playerId, player.id));
 
       const targetArmor = await loadArmor(tx, target.armorItemId);
-      const outcome = resolveShot(weapon, targetArmor, rollFor(weapon));
+      // The weapon carries its model (C6): firearms resolve by accuracy,
+      // melee by the stats — power × strength ÷ (guard/1.5), agility-ratio
+      // hit clamp, d40 crits. Same ShotOutcome shape downstream either way.
+      const outcome = weapon.model === "melee"
+        ? resolveMeleeStrike({
+          power: weapon.power ?? 0,
+          attStrength: Number(attacker.strength), attAgility: Number(attacker.agility),
+          defGuard: Number(target.guard), defAgility: Number(target.agility),
+          targetArmor,
+        }, rollMelee())
+        : resolveShot(weapon, targetArmor, rollFor(weapon));
 
       // Every shot wears the weapon, hit or miss or backfire: as with bullets,
       // the cost is firing, not connecting.
@@ -393,7 +437,7 @@ const attackRoute = route({
       // decay models rust from disuse and use decay models firing; a player
       // who shoots constantly accrues only the latter, one who never shoots
       // only the former. Both reach zero and neither double-counts.
-      if (attacker.weaponItemId !== null) {
+      if (attacker.weaponItemId !== null && weapon.model !== "melee") {
         const nextCondition = Math.max(0, currentCondition - config.condition.wearPerShot);
         await tx.db
           .insert(weaponCondition)

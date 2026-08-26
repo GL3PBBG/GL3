@@ -317,6 +317,7 @@ export default defineWorkspace([
         "test/temple.test.ts",
         "test/bank-open-fee.test.ts",
         "test/mccodes-member-regen.test.ts",
+        "test/combat-melee.test.ts",
         "test/auth-reset.test.ts",
         "test/auth-verify.test.ts",
         "test/auth.test.ts",

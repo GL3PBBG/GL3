@@ -1,6 +1,13 @@
 import { randomInt } from "node:crypto";
 
 export interface WeaponProfile {
+  /**
+   * Which resolution model this weapon carries (C6). Absent = "firearm" —
+   * every pre-existing profile literal stays valid untouched.
+   */
+  model?: "firearm" | "melee";
+  /** Melee only: flat weapon power from the item's effects. */
+  power?: number;
   accuracy: number;
   damageMin: number;
   damageMax: number;
@@ -108,4 +115,81 @@ export function resolveShot(
   const armorAbsorbed = raw - damage;
 
   return { hit: true, crit, damage, armorAbsorbed, bulletsSpent, backfire: false, selfDamage: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// MELEE (C6, audit §7 item 9) — MCCodes' stat-driven resolution, the second
+// model a weapon can carry. Firearms keep resolveShot above, byte-identical;
+// the two never share arithmetic, only the ShotOutcome shape the shot path
+// downstream consumes.
+// ---------------------------------------------------------------------------
+
+export interface MeleeInput {
+  /** Flat weapon power, from the item's effects jsonb. */
+  power: number;
+  attStrength: number;
+  attAgility: number;
+  defGuard: number;
+  defAgility: number;
+  targetArmor: number;
+}
+
+/** The four draws a strike needs, taken by the caller so this stays pure. */
+export interface MeleeRolls {
+  hitRoll: number;
+  /** rand(8000, 12000), divided by 10000 — the ±20% swing. */
+  damageRoll: number;
+  /** d40: 17 crits (index 16), 8 and 25 (7, 24) weaken. */
+  critRoll: number;
+  /** rand(20, 40), tenths — the crit/weak multiplier magnitude. */
+  critAmountRoll: number;
+}
+
+export function rollMelee(): MeleeRolls {
+  return {
+    hitRoll: randomInt(0, 100),
+    damageRoll: randomInt(8000, 12001),
+    critRoll: randomInt(0, 40),
+    critAmountRoll: randomInt(20, 41),
+  };
+}
+
+/**
+ * Verbatim MCCodes math (attack.php:198-236): hit chance is the agility
+ * ratio clamped to 10–95, damage is `power × strength ÷ (guard/1.5)` with
+ * the ±20% swing, minus flat armor with a minimum-1 floor — an armored
+ * target cannot fully negate a connected strike. The crit table is the d40:
+ * a 17 multiplies by ×2–4, an 8 or 25 divides by ÷2–4.
+ *
+ * Zero stats are normalized to 1 in the two divisors — GL3-native rows
+ * carry zeros MCCodes never could, and a division by zero is not balance.
+ */
+export function resolveMeleeStrike(input: MeleeInput, rolls: MeleeRolls): ShotOutcome {
+  const miss: ShotOutcome = {
+    hit: false, crit: false, damage: 0, armorAbsorbed: 0,
+    bulletsSpent: 0, backfire: false, selfDamage: 0,
+  };
+
+  const ratio = Math.max(10, Math.min((60 * input.attAgility) / Math.max(1, input.defAgility), 95));
+  if (rolls.hitRoll >= ratio) return miss;
+
+  let raw = Math.floor(
+    (input.power * input.attStrength) / (Math.max(1, input.defGuard) / 1.5)
+      * (rolls.damageRoll / 10000),
+  );
+  let crit = false;
+  if (rolls.critRoll === 16) {
+    raw = Math.floor((raw * rolls.critAmountRoll) / 10);
+    crit = true;
+  } else if (rolls.critRoll === 7 || rolls.critRoll === 24) {
+    raw = Math.max(1, Math.floor(raw / (rolls.critAmountRoll / 10)));
+  }
+
+  const damage = Math.max(1, raw - input.targetArmor);
+  return {
+    hit: true, crit,
+    damage,
+    armorAbsorbed: Math.max(0, raw - damage),
+    bulletsSpent: 0, backfire: false, selfDamage: 0,
+  };
 }

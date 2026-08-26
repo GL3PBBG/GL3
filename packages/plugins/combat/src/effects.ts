@@ -63,6 +63,15 @@ export const ArmorEffectsSchema = z.object({
   armor: z.number().int().nonnegative(),
 });
 
+/**
+ * A melee weapon (C6, audit §7 item 9): MCCodes items carry a flat `weapon`
+ * power with no damage range, no accuracy, no ammunition. Presence of
+ * `power` IS the melee marker — the item's `model`, in combat's terms.
+ */
+export const MeleeEffectsSchema = z.object({
+  power: z.number().int().positive(),
+});
+
 export const ConsumableEffectsSchema = z.object({
   heal: z.number().int().positive(),
 });

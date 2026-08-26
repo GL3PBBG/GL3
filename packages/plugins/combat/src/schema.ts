@@ -30,6 +30,14 @@ export const playerStats = pgTable("player_stats", {
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   bullets: bigint("bullets", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
+  // The melee leg's resolution inputs (C6): MCCodes damage is
+  // power × strength ÷ (guard / 1.5), hit chance the agility ratio.
+  strength: bigint("strength", { mode: "bigint" }).notNull(),
+  agility: bigint("agility", { mode: "bigint" }).notNull(),
+  guard: bigint("guard", { mode: "bigint" }).notNull(),
+  energy: integer("energy").notNull(),
+  energyMax: integer("energy_max").notNull(),
+  energyRegenAt: timestamp("energy_regen_at", { withTimezone: true }),
   rankId: uuid("rank_id"),
   gangId: uuid("gang_id"),
   locationId: uuid("location_id"),
