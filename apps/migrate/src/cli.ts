@@ -2,9 +2,8 @@
 import { ZodError } from "zod";
 import { parseCliArgs, type CliArgs } from "./cli-args.js";
 import { createMysqlPool } from "./mysql/client.js";
-import { fingerprintV2Schema } from "./mysql/fingerprint.js";
+import { DIALECTS, runMigration } from "./orchestrator.js";
 import { createDb } from "../../server/src/db/client.js";
-import { runMigration } from "./orchestrator.js";
 import { createReport, finishReport, formatHumanSummary, writeReportFile } from "./report.js";
 
 function dumpModeMessage(sqlDumpPath: string, pgUrl: string): string {
@@ -20,7 +19,7 @@ function dumpModeMessage(sqlDumpPath: string, pgUrl: string): string {
 
 const USAGE =
   "usage: gl3-migrate --mysql mysql://user:pass@host/v2db --pg postgres://user:pass@host/gl3db " +
-  "[--dry-run] [--report report.json] [--town-combat-mode open|underground]";
+  "[--dry-run] [--report report.json] [--town-combat-mode open|underground] [--mccodes]";
 
 const KEY_TO_FLAG: Record<string, string> = {
   mysqlUrl: "--mysql",
@@ -29,6 +28,7 @@ const KEY_TO_FLAG: Record<string, string> = {
   sqlDumpPath: "--sql-dump",
   dryRun: "--dry-run",
   townCombatMode: "--town-combat-mode",
+  dialect: "--mccodes",
 };
 
 /** A raw `ZodError.message` is a JSON dump of every issue — unreadable as the
@@ -65,13 +65,18 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const pool = await createMysqlPool(args.mysqlUrl);
-  const fingerprint = await fingerprintV2Schema(pool);
+  // The dialect owns its fingerprint (B1, spec §1): the dispatch happens
+  // BEFORE the preflight, so --mccodes pointed at a V2 database (or the
+  // reverse) fails the MCCodes fingerprint with V2's column names named —
+  // a wrong-dialect mistake never migrates the wrong game.
+  const dialect = DIALECTS[args.dialect];
+  const fingerprint = await dialect.fingerprint(pool);
   const report = createReport(args.dryRun);
   report.unknownTables = fingerprint.unknownTables;
 
   if (!fingerprint.ok) {
     console.error(
-      `V2 schema fingerprint failed: missing tables [${fingerprint.missingTables.join(", ")}], ` +
+      `${dialect.label} schema fingerprint failed: missing tables [${fingerprint.missingTables.join(", ")}], ` +
       `missing columns ${JSON.stringify(fingerprint.missingColumns)}`,
     );
     await pool.end();
@@ -88,7 +93,10 @@ export async function main(argv: string[]): Promise<number> {
 
   const { db, sql } = createDb(args.pgUrl);
   try {
-    await runMigration({ mysql: pool, db, report, dryRun: args.dryRun, townCombatMode: args.townCombatMode });
+    await runMigration({
+      mysql: pool, db, report, dryRun: args.dryRun,
+      townCombatMode: args.townCombatMode, dialect: args.dialect,
+    });
   } finally {
     await pool.end();
     await sql.end();

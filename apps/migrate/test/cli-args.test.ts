@@ -11,7 +11,16 @@ describe("parseCliArgs", () => {
       reportPath: undefined,
       sqlDumpPath: undefined,
       townCombatMode: "open",
+      dialect: "v2",
     });
+  });
+
+  it("defaults the dialect to v2; --mccodes selects the MCCodes dialect", () => {
+    expect(parseCliArgs(["--pg", "postgres://x"]).dialect).toBe("v2");
+    const args = parseCliArgs([
+      "--mccodes", "--mysql", "mysql://u:p@host/db", "--pg", "postgres://u:p@host/db",
+    ]);
+    expect(args.dialect).toBe("mccodes");
   });
 
   it("parses --dry-run as a boolean flag with no value", () => {

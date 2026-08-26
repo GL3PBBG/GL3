@@ -1,8 +1,22 @@
 import type mysql from "mysql2/promise";
 
-const REQUIRED_TABLES = ["users", "userStats", "userTimers"] as const;
+export interface FingerprintSpec {
+  /** Tables the migrator cannot run without; absence fails the preflight. */
+  readonly requiredTables: readonly string[];
+  /** Columns the required tables must carry (the dialect's id column etc.). */
+  readonly requiredColumns: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Game-only columns absent from a framework-shaped source — informational:
+   * they make the games phases skip and report, never fail the preflight.
+   */
+  readonly gameColumns?: Readonly<Record<string, readonly string[]>>;
+  /** Every table this migrator actually migrates; anything else reports unknown. */
+  readonly knownTables: readonly string[];
+}
 
-const REQUIRED_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], string[]> = {
+const V2_REQUIRED_TABLES = ["users", "userStats", "userTimers"] as const;
+
+const V2_REQUIRED_COLUMNS: Record<(typeof V2_REQUIRED_TABLES)[number], string[]> = {
   users: ["U_id", "U_name", "U_password"],
   userStats: ["US_id", "US_money"],
   userTimers: ["UT_user", "UT_desc", "UT_time"],
@@ -16,22 +30,22 @@ const REQUIRED_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], string[]> = {
  * instead, which is why they surface in `missingGameColumns` (informational)
  * rather than `missingColumns` (fatal).
  */
-const GAME_COLUMNS: Record<"userStats", string[]> = {
+const V2_GAME_COLUMNS: Record<"userStats", string[]> = {
   userStats: ["US_gang", "US_crimes"],
 };
 
-/** Every table this migrator actually migrates (Tasks 11–28). Anything else
- * present in the source database — core-but-unsupported V2 module or
- * genuinely third-party — is reported the same way (§4.2 item 1). */
-const KNOWN_TABLES = new Set([
-  ...REQUIRED_TABLES,
+/** Every table the V2 migrator actually migrates (Tasks 11–28). Anything else
+ *  present in the source database — core-but-unsupported V2 module or
+ *  genuinely third-party — is reported the same way (§4.2 item 1). */
+const V2_KNOWN_TABLES = [
+  ...V2_REQUIRED_TABLES,
   "ranks", "moneyRanks", "userRoles", "roleAccess", "rounds",
   "crimes", "locations", "cars", "theft", "weapons", "items", "itemEffects", "itemMeta", "settings",
   "gangs", "gangPermissions", "gangInvites", "gangLogs",
   "userInventory", "garage", "properties",
   "bounties", "detectives", "mail", "notifications", "gameNews",
   "forums", "topics", "posts", "premiumMembership",
-]);
+];
 
 export interface FingerprintResult {
   ok: boolean;
@@ -42,7 +56,13 @@ export interface FingerprintResult {
   unknownTables: string[];
 }
 
-export async function fingerprintV2Schema(pool: mysql.Pool): Promise<FingerprintResult> {
+/**
+ * The shared preflight core (B1 Task 6): one information-schema read, then
+ * REQUIRED/KNOWN evaluation against a dialect's spec. `fingerprintV2Schema`
+ * and the MCCodes fingerprint are both thin wrappers over this — identical
+ * semantics, different tables.
+ */
+export async function fingerprintSchema(pool: mysql.Pool, spec: FingerprintSpec): Promise<FingerprintResult> {
   const [rows] = await pool.query<mysql.RowDataPacket[]>(
     "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE()",
   );
@@ -56,25 +76,26 @@ export async function fingerprintV2Schema(pool: mysql.Pool): Promise<Fingerprint
     columnsByTable.set(table, set);
   }
 
-  const missingTables = REQUIRED_TABLES.filter((t) => !columnsByTable.has(t));
+  const missingTables = spec.requiredTables.filter((t) => !columnsByTable.has(t));
 
   const missingColumns: Record<string, string[]> = {};
-  for (const table of REQUIRED_TABLES) {
+  for (const table of spec.requiredTables) {
     const cols = columnsByTable.get(table);
     if (!cols) continue;
-    const missing = REQUIRED_COLUMNS[table].filter((c) => !cols.has(c));
+    const missing = (spec.requiredColumns[table] ?? []).filter((c) => !cols.has(c));
     if (missing.length > 0) missingColumns[table] = missing;
   }
 
   const missingGameColumns: Record<string, string[]> = {};
-  for (const [table, columns] of Object.entries(GAME_COLUMNS) as Array<[keyof typeof GAME_COLUMNS, string[]]>) {
+  for (const [table, columns] of Object.entries(spec.gameColumns ?? {})) {
     const cols = columnsByTable.get(table);
     if (!cols) continue; // missing table already reported above
     const missing = columns.filter((c) => !cols.has(c));
     if (missing.length > 0) missingGameColumns[table] = missing;
   }
 
-  const unknownTables = [...columnsByTable.keys()].filter((t) => !KNOWN_TABLES.has(t));
+  const known = new Set(spec.knownTables);
+  const unknownTables = [...columnsByTable.keys()].filter((t) => !known.has(t));
 
   return {
     ok: missingTables.length === 0 && Object.keys(missingColumns).length === 0,
@@ -83,4 +104,13 @@ export async function fingerprintV2Schema(pool: mysql.Pool): Promise<Fingerprint
     missingGameColumns,
     unknownTables,
   };
+}
+
+export function fingerprintV2Schema(pool: mysql.Pool): Promise<FingerprintResult> {
+  return fingerprintSchema(pool, {
+    requiredTables: V2_REQUIRED_TABLES,
+    requiredColumns: V2_REQUIRED_COLUMNS,
+    gameColumns: V2_GAME_COLUMNS,
+    knownTables: V2_KNOWN_TABLES,
+  });
 }

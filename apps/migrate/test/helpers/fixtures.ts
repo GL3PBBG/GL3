@@ -31,9 +31,13 @@ function requireEnv(name: string): string {
  *
  * Only the MySQL/V2 half — the Postgres/GL3 target half (Task 5) will
  * export `createIsolatedPgTarget` from the same file.
+ *
+ * `files` replaces the default V2 schema/seed pair: the MCCodes dialect
+ * (cluster B) passes its own 63-table fixture, and an empty array yields a
+ * bare database for tests that CREATE their tables inline.
  */
 export async function createIsolatedMysqlFixture(
-  options?: { flavor?: "gl2" | "openpbbg" },
+  options?: { flavor?: "gl2" | "openpbbg"; files?: URL[] },
 ): Promise<{ url: string; teardown: () => Promise<void> }> {
   const adminUrl = requireEnv("MYSQL_ADMIN_URL");
   const dbName = `gl3_test_mysql_${randomBytes(8).toString("hex")}`;
@@ -62,10 +66,10 @@ export async function createIsolatedMysqlFixture(
   const conn = await mysql.createConnection({ uri: target.toString(), multipleStatements: true });
   try {
     await conn.query("SET SESSION sql_mode = ''");
-    const schema = await readFile(SCHEMA_SQL, "utf8");
-    const seed = await readFile(SEED_SQL, "utf8");
-    await conn.query(schema);
-    await conn.query(seed);
+    const sources = options?.files ?? [await readFile(SCHEMA_SQL, "utf8"), await readFile(SEED_SQL, "utf8")];
+    for (const source of sources) {
+      await conn.query(typeof source === "string" ? source : await readFile(source, "utf8"));
+    }
     // The openPBBG flavor is the GL2 framework without the gangster game:
     // same load, then the game tables and userStats' two game columns are
     // dropped — the shape a real openPBBG database has.
