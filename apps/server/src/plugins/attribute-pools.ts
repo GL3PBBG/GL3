@@ -26,3 +26,17 @@ export function collectAttributePools(
   }
   return registry;
 }
+
+/**
+ * Membership-scaled regen (C spec §1.3), as one shared decision so the
+ * authoritative settle (ctx.ts's settleAll, under the player lock) and the
+ * display settle (/api/auth/me) can never disagree: a member must not SEE
+ * less regen than they get. Pure — callers read the membership timer
+ * themselves and pass the liveness boolean.
+ */
+export function memberRegenMultiplier(
+  decl: { memberMultiplier?: number | undefined } | null,
+  memberLive: boolean,
+): number {
+  return memberLive && decl?.memberMultiplier !== undefined ? decl.memberMultiplier : 1;
+}

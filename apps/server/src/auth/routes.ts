@@ -1,4 +1,4 @@
-import { asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
@@ -8,12 +8,12 @@ import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
-import { players, playerStats, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
+import { players, playerStats, playerTimers, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
-import { collectAttributePools } from "../plugins/attribute-pools.js";
+import { collectAttributePools, memberRegenMultiplier } from "../plugins/attribute-pools.js";
 import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
 import { clearBanned, isBanned, markBanned } from "./ban.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
@@ -403,11 +403,26 @@ export function registerAuthRoutes(
     // when no pool is declared, which keeps a V2 install's payload
     // byte-identical to what it served before this feature existed.
     const pools = collectAttributePools(manifests());
-    const attributes = pools.size === 0 ? undefined : (() => {
+    const attributes = pools.size === 0 ? undefined : await (async () => {
       const now = new Date();
-      const energy = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, pools.get("energy") ?? null);
-      const will = settlePool(row.will, row.willMax, row.willRegenAt, now, pools.get("will") ?? null);
-      const brave = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, pools.get("brave") ?? null);
+      // The same memberMultiplier settleAll applies (ctx.ts, via the shared
+      // memberRegenMultiplier decision): a member must not SEE less regen
+      // than they get. Display-only — one extra timer read, no lock, no
+      // write, same as the settles below.
+      const anyMemberPriced = [...pools.values()].some((d) => d.memberMultiplier !== undefined);
+      let memberLive = false;
+      if (anyMemberPriced) {
+        const [timer] = await db.select({ expiresAt: playerTimers.expiresAt })
+          .from(playerTimers)
+          .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, "membership")));
+        memberLive = timer !== undefined && timer.expiresAt.getTime() > now.getTime();
+      }
+      const energyDecl = pools.get("energy") ?? null;
+      const willDecl = pools.get("will") ?? null;
+      const braveDecl = pools.get("brave") ?? null;
+      const energy = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, energyDecl, memberRegenMultiplier(energyDecl, memberLive));
+      const will = settlePool(row.will, row.willMax, row.willRegenAt, now, willDecl, memberRegenMultiplier(willDecl, memberLive));
+      const brave = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, braveDecl, memberRegenMultiplier(braveDecl, memberLive));
       return {
         energy: energy.value, energyMax: energy.max,
         will: will.value, willMax: will.max,

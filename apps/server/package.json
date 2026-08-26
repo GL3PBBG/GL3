@@ -32,6 +32,7 @@
     "@gl3/plugin-progression": "*",
     "@gl3/plugin-education": "*",
     "@gl3/plugin-jobs": "*",
+    "@gl3/plugin-temple": "*",
     "@gl3/plugin-news": "*",
     "@gl3/plugin-notifications": "*",
     "@gl3/plugin-oc": "*",

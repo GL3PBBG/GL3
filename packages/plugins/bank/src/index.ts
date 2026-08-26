@@ -52,6 +52,20 @@ const bankRoute = (direction: Direction) =>
       if (amount <= 0n) throw new PluginError("amount_must_be_positive", 400);
 
       return ctx.transaction(async (tx) => {
+        // The optional account-open fee (C spec §5.4, audit §7 item 6): when
+        // `bank.open_fee` is non-zero, a deposit requires the one-time
+        // `bank.opened` timer — MCCodes' 50k gate, admin-tunable, and the one
+        // idea worth borrowing from its banks. Zero (the default) skips the
+        // timer read entirely: every existing bank byte stays identical, the
+        // proof being bank.test.ts unchanged. Cluster B pre-opens migrated
+        // players who held either MCCodes account.
+        if (direction === "deposit") {
+          const openFee = Number(ctx.settings.get("open_fee") ?? "0");
+          if (openFee > 0 && (await tx.timers.get(player.id, "bank.opened")) === null) {
+            throw new PluginError("account_not_opened", 409);
+          }
+        }
+
         let cash: bigint;
         let bank: bigint;
         try {
@@ -101,9 +115,38 @@ const bankRoute = (direction: Direction) =>
     },
   });
 
+const openRoute = route({
+  method: "POST",
+  path: "/api/bank/open",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      const openFee = Number(ctx.settings.get("open_fee") ?? "0");
+      // Already open, or a zero-fee game where opening was never required:
+      // free and idempotent.
+      if (openFee === 0 || (await tx.timers.get(player.id, "bank.opened")) !== null) {
+        return { status: 200, body: { opened: true, fee: "0" } };
+      }
+      try {
+        await tx.economy.applyBalanceChange({
+          playerId: player.id, amount: -BigInt(openFee), kind: "cash", reason: "bank.open",
+        });
+      } catch (error) {
+        if (error instanceof InsufficientFundsError) throw new PluginError("insufficient_funds", 409);
+        throw error;
+      }
+      // A state, not a countdown: far-future expiry, never cleared.
+      await tx.timers.set(player.id, "bank.opened", new Date(Date.now() + 100 * 365 * 86_400_000));
+      return { status: 200, body: { opened: true, fee: String(openFee) } };
+    });
+  },
+});
+
 export default definePlugin({
   id: "bank",
   version: "1.0.0",
   basePaths: ["/api/bank"],
-  routes: [bankRoute("deposit"), bankRoute("withdraw")],
+  routes: [bankRoute("deposit"), bankRoute("withdraw"), openRoute],
 });

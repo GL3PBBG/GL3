@@ -25,6 +25,7 @@ import plugin_gl3_plugin_mccodes_attributes from "@gl3/plugin-mccodes-attributes
 import plugin_gl3_plugin_oc from "@gl3/plugin-oc";
 import plugin_gl3_plugin_progression from "@gl3/plugin-progression";
 import plugin_gl3_plugin_properties from "@gl3/plugin-properties";
+import plugin_gl3_plugin_temple from "@gl3/plugin-temple";
 import plugin_gl3_plugin_theft from "@gl3/plugin-theft";
 import plugin_gl3_plugin_travel from "@gl3/plugin-travel";
 
@@ -46,6 +47,7 @@ export const INSTALLED_PLUGINS: readonly (readonly [string, PluginManifest])[] =
   ["@gl3/plugin-oc", plugin_gl3_plugin_oc],
   ["@gl3/plugin-progression", plugin_gl3_plugin_progression],
   ["@gl3/plugin-properties", plugin_gl3_plugin_properties],
+  ["@gl3/plugin-temple", plugin_gl3_plugin_temple],
   ["@gl3/plugin-theft", plugin_gl3_plugin_theft],
   ["@gl3/plugin-travel", plugin_gl3_plugin_travel],
 ];

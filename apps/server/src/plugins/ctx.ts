@@ -38,6 +38,7 @@ import { recordScore } from "../game/leaderboard/service.js";
 import { insertNotification } from "../game/notifications/service.js";
 import { newSeed } from "../game/rng.js";
 import { slotKey } from "./asset-slots.js";
+import { memberRegenMultiplier } from "./attribute-pools.js";
 
 export interface PluginCtxDeps {
   db: Db;
@@ -286,7 +287,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                 : [];
               const memberLive = memberRow !== undefined && memberRow.expiresAt.getTime() > now.getTime();
               const multFor = (decl: { memberMultiplier?: number | undefined } | null): number =>
-                memberLive && decl?.memberMultiplier !== undefined ? decl.memberMultiplier : 1;
+                memberRegenMultiplier(decl, memberLive);
               const energyDecl = options.attributePools.get("energy") ?? null;
               const willDecl = options.attributePools.get("will") ?? null;
               const braveDecl = options.attributePools.get("brave") ?? null;
