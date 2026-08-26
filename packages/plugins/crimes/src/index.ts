@@ -281,8 +281,41 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     // when nothing is priced — that single guard is what keeps an install
     // with no attribute plugin from taking a lock or touching a regen clock
     // this job never used to touch.
+    //
+    // The handoff gap (STATUS.md, closed by C1): the route's pre-check is
+    // advisory, and a concurrent action can drain the pool between the 202
+    // and this spend. A shortfall resolves as a FAILED attempt — event
+    // published, nothing spent, no roll, no jail, no skill — inside this
+    // same transaction, so the idempotency claim COMMITS, BullMQ acks once,
+    // and a client polling for an outcome always gets one instead of
+    // watching retries exhaust into silence. The funds check runs under the
+    // lock already held, against the settled read, and precedes every spend
+    // so the batch is all-or-nothing: no pool pays for an attempt another
+    // pool cannot cover.
     if (priced.length > 0) {
       await tx.locks.player([playerId]);
+      const attrs = await tx.attributes.read(playerId);
+      const shortfall = priced.find(([pool, amount]) => attrs[pool] < amount);
+      if (shortfall !== undefined) {
+        await tx.db.insert(crimeLog).values({
+          id: uuidv7(), playerId, crimeId, success: false, payout: 0n, jobId: ctx.job!.id,
+        });
+        await tx.events.publishCore({
+          type: "crime.resolved",
+          actorId: playerId,
+          actorName,
+          audience: { kind: "player", playerId },
+          crimeId,
+          crimeName: crime.name,
+          success: false,
+          cause: "insufficient_pool",
+          payout: "0",
+          bullets: "0",
+          exp: "0",
+          jailedUntil: null,
+        });
+        return;
+      }
       for (const [pool, amount] of priced) {
         await tx.attributes.spend(playerId, pool, amount);
       }

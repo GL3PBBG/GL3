@@ -7,16 +7,19 @@ import { loadConfig } from "../src/config.js";
 import { crimes, crimeLog, playerStats } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
-import { createRedis } from "../src/redis.js";
+import { createRedis, createSubscriber } from "../src/redis.js";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 const jobDeps = () => ({ db, redis, queues: new Map(), settings: {}, leaderboardPrefix: "crimes-cost-test" });
 
-afterAll(async () => { await conn.end(); redis.disconnect(); });
+afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconnect(); });
 
 /**
  * Subscribes `crimes.commit` to a flat 4-energy cost, and nothing else — a
@@ -103,6 +106,43 @@ describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost 
     // Not the cooldown: a second attempt still reaches the funds check.
     const again = await app.inject({ method: "POST", url: `/api/crimes/${braveCrimeId}/commit`, headers: auth });
     expect(again.statusCode).toBe(409);
+  });
+
+  it("resolves a job-time brave shortfall as a failed crime with an event (the handoff gap)", async () => {
+    const { playerId } = await registerVerifiedPlayer({ app, redis }, { remoteAddress: "10.9.3.4" });
+    // Registration seeded brave 5/5. Drain to 3 AFTER registration — the
+    // concurrent spend that lands between the route's advisory pre-check
+    // and the job's authoritative one is exactly the gap this closes.
+    await db.update(playerStats).set({ brave: 3 }).where(eq(playerStats.playerId, playerId));
+
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const waiting = awaitOwnEvent(subscriber, playerId);
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", {
+      id: "shortfall-job", data: { playerId, crimeId: braveCrimeId, seed: "shortfall-seed", costs: { brave: 7 } },
+    });
+    const event = await waiting;
+    expect(event.type).toBe("crime.resolved");
+    if (event.type === "crime.resolved") {
+      expect(event.success).toBe(false);
+      expect(event.cause).toBe("insufficient_pool");
+      expect(event.payout).toBe("0");
+    }
+
+    // Nothing moved: no brave spent, no payout, exactly one failed log row.
+    const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(stats?.brave).toBe(3);
+    expect(stats?.cash).toBe(0n);
+    const logs = await db.select().from(crimeLog).where(eq(crimeLog.jobId, "shortfall-job"));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.success).toBe(false);
+
+    // The claim committed, so a replay is the idempotent no-op — still one
+    // row, no second event, nothing re-spent.
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", {
+      id: "shortfall-job", data: { playerId, crimeId: braveCrimeId, seed: "shortfall-seed", costs: { brave: 7 } },
+    });
+    const again = await db.select().from(crimeLog).where(eq(crimeLog.jobId, "shortfall-job"));
+    expect(again).toHaveLength(1);
   });
 
   it("ignores brave_cost entirely when no plugin declares the brave pool", async () => {

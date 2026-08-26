@@ -20,6 +20,11 @@ export const GameEventSchema = z.discriminatedUnion("type", [
     crimeId: IdSchema,
     crimeName: z.string(),
     success: z.boolean(),
+    // Present only on a failure the attempt never caused: "insufficient_pool"
+    // is the job-time shortfall resolution (C1's handoff-gap fix) — the route
+    // pre-checked funds, a concurrent action drained the pool after the 202,
+    // and the attempt resolves as failed rather than stranding the client.
+    cause: z.enum(["insufficient_pool"]).optional(),
     payout: MoneySchema,
     bullets: MoneySchema,
     exp: MoneySchema,
