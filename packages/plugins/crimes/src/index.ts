@@ -163,6 +163,15 @@ const commitRoute = route({
     // nothing), and a player who can pay is charged exactly once,
     // authoritatively, in the job below rather than here.
     const resolvedCost = await ctx.filters.apply(coreActionCost, { action: "crimes.commit", costs: {} });
+    // Per-crime brave pricing (audit §7 item 13; C spec §1.1): the amount is
+    // content, so it comes from the crime's own brave_cost column rather
+    // than a filter subscriber — the actionCost value carries no per-crime
+    // context. Priced iff the brave pool is declared by an installed plugin;
+    // undeclared or 0 means this crime never costs brave, on every
+    // GL3-native game forever.
+    if (ctx.attributePools.get("brave") !== null && crime.braveCost > 0) {
+      resolvedCost.costs.brave = crime.braveCost;
+    }
     const priced = pricedEntries(resolvedCost.costs);
 
     if (priced.length > 0) {

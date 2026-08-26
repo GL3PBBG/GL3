@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import crimesPlugin from "@gl3/plugin-crimes";
 import { definePlugin, on, coreActionCost, type PluginManifest } from "@gl3/plugin-sdk";
 import { loadConfig } from "../src/config.js";
-import { crimes, playerStats } from "../src/db/schema/index.js";
+import { crimes, crimeLog, playerStats } from "../src/db/schema/index.js";
 import { seedCrimes } from "../src/db/seed.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
 import { createRedis } from "../src/redis.js";
@@ -33,6 +33,100 @@ const pricesCrimesEnergy: PluginManifest = definePlugin({
   filters: [on(coreActionCost, (_ctx, value) => (
     value.action === "crimes.commit" ? { ...value, costs: { ...value.costs, energy: 4 } } : value
   ))],
+});
+
+/**
+ * Declares the brave pool (the anchor's real role, minimal) so the per-crime
+ * brave_cost pricing has a declaration to consult. Registration on this boot
+ * seeds brave 5/5 — which is exactly what the pricing tests want to spend.
+ */
+const declaresBrave: PluginManifest = definePlugin({
+  id: "bravetest",
+  version: "1.0.0",
+  basePaths: ["/api/bravetest"],
+  providesAttributes: [
+    { pool: "brave", defaultMax: 5, regenAmount: 1, regenIntervalSeconds: 60 },
+  ],
+});
+
+describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost set)", () => {
+  let app: FastifyInstance;
+  let closeServer: () => Promise<void>;
+  let braveCrimeId: string;
+
+  beforeEach(async () => {
+    await resetDb(db);
+    if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [declaresBrave] }));
+    await seedCrimes(db);
+    braveCrimeId = crypto.randomUUID();
+    await db.insert(crimes).values({
+      id: braveCrimeId, name: "Brave Heist", cooldownSeconds: 60,
+      minPayout: 10, maxPayout: 20, braveCost: 3,
+    });
+  });
+  afterAll(async () => { await closeServer(); });
+
+  it("spends the crime's brave_cost on a committed attempt, success or failure", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { remoteAddress: "10.9.3.1" });
+    const auth = { authorization: `Bearer ${token}` };
+
+    // Registration seeded brave 5/5; the attempt costs 3 whatever the roll.
+    const res = await app.inject({ method: "POST", url: `/api/crimes/${braveCrimeId}/commit`, headers: auth });
+    expect(res.statusCode).toBe(202);
+
+    // The 202 only acknowledges the enqueue — the authoritative spend lands
+    // when the job resolves, so wait for its crime_log row before asserting.
+    const jobId = res.json().jobId as string;
+    for (let i = 0; i < 50; i++) {
+      const [log] = await db.select().from(crimeLog).where(eq(crimeLog.jobId, jobId));
+      if (log) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(stats?.brave).toBe(2);
+  });
+
+  it("409s before the cooldown burns when brave cannot cover the cost", async () => {
+    braveCrimeId = crypto.randomUUID();
+    await db.insert(crimes).values({
+      id: braveCrimeId, name: "Reckless Heist", cooldownSeconds: 600,
+      minPayout: 10, maxPayout: 20, braveCost: 99,
+    });
+    const { token } = await registerVerifiedPlayer({ app, redis }, { remoteAddress: "10.9.3.2" });
+    const auth = { authorization: `Bearer ${token}` };
+
+    const res = await app.inject({ method: "POST", url: `/api/crimes/${braveCrimeId}/commit`, headers: auth });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("insufficient_brave");
+
+    // Not the cooldown: a second attempt still reaches the funds check.
+    const again = await app.inject({ method: "POST", url: `/api/crimes/${braveCrimeId}/commit`, headers: auth });
+    expect(again.statusCode).toBe(409);
+  });
+
+  it("ignores brave_cost entirely when no plugin declares the brave pool", async () => {
+    const plainServer = await bootTestServer();
+    try {
+      await seedCrimes(db);
+      const crimeId = crypto.randomUUID();
+      await db.insert(crimes).values({
+        id: crimeId, name: "Unpriced Heist", cooldownSeconds: 60,
+        minPayout: 10, maxPayout: 20, braveCost: 99,
+      });
+      const { token, playerId } = await registerVerifiedPlayer(plainServer, { remoteAddress: "10.9.3.3" });
+      const res = await plainServer.app.inject({
+        method: "POST", url: `/api/crimes/${crimeId}/commit`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(202);
+
+      const [stats] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+      expect(stats?.brave).toBe(0);
+    } finally {
+      await plainServer.close();
+    }
+  });
 });
 
 describe("crimes.commit — opt-out baseline (no attribute plugin installed)", () => {

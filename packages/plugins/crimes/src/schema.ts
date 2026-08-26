@@ -21,6 +21,7 @@ export const crimes = pgTable("crimes", {
   jailChancePercent: integer("jail_chance_percent").notNull(),
   jailSeconds: integer("jail_seconds").notNull(),
   sort: integer("sort").notNull(),
+  braveCost: integer("brave_cost").notNull().default(0),
 });
 
 export const playerCrimeSkill = pgTable("player_crime_skill", {
