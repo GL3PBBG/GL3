@@ -1,4 +1,4 @@
-import { bigint, boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Drizzle handles for the two plugin-owned tables the migrator writes.
@@ -108,6 +108,95 @@ export const membershipPackages = pgTable("p_membership_packages", {
   name: text("name").notNull(),
   costPoints: bigint("cost_points", { mode: "bigint" }).notNull(),
   durationSeconds: integer("duration_seconds").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// Cluster B: the MCCodes plugin family's tables, same mirror pattern. The
+// plugin packages export their manifests; the DDL in each plugin's
+// migrations.ts is the definition these stay in step with.
+// ---------------------------------------------------------------------------
+
+/** Mirrors `packages/plugins/houses/src/migrations.ts` `0001_houses`. */
+export const housesPlugin = pgTable("p_houses", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  price: bigint("price", { mode: "bigint" }).notNull(),
+  will: integer("will").notNull(),
+});
+
+/** Mirrors `packages/plugins/education/src/migrations.ts` (three tables). */
+export const coursesPlugin = pgTable("p_courses", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  cost: bigint("cost", { mode: "bigint" }).notNull(),
+  days: integer("days").notNull(),
+  strengthGain: integer("strength_gain").notNull(),
+  agilityGain: integer("agility_gain").notNull(),
+  guardGain: integer("guard_gain").notNull(),
+  labourGain: integer("labour_gain").notNull(),
+  iqGain: integer("iq_gain").notNull(),
+});
+
+export const educationProgress = pgTable("p_education_progress", {
+  playerId: uuid("player_id").primaryKey(),
+  courseId: uuid("course_id").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+});
+
+export const coursesDone = pgTable("p_courses_done", {
+  playerId: uuid("player_id").notNull(),
+  courseId: uuid("course_id").notNull(),
+}, (t) => ({ pk: primaryKey({ columns: [t.playerId, t.courseId] }) }));
+
+/** Mirrors `packages/plugins/jobs/src/migrations.ts` (three tables). */
+export const jobsPlugin = pgTable("p_jobs", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  firstRankId: uuid("first_rank_id").notNull(),
+});
+
+export const jobRanks = pgTable("p_job_ranks", {
+  id: uuid("id").primaryKey(),
+  jobId: uuid("job_id").notNull(),
+  name: text("name").notNull(),
+  pay: bigint("pay", { mode: "bigint" }).notNull(),
+  strengthGain: integer("strength_gain").notNull(),
+  labourGain: integer("labour_gain").notNull(),
+  iqGain: integer("iq_gain").notNull(),
+  strengthReq: integer("strength_req").notNull(),
+  labourReq: integer("labour_req").notNull(),
+  iqReq: integer("iq_req").notNull(),
+});
+
+export const playerJobs = pgTable("p_player_jobs", {
+  playerId: uuid("player_id").primaryKey(),
+  rankId: uuid("rank_id").notNull(),
+  lastWageAt: timestamp("last_wage_at", { withTimezone: true }).notNull(),
+});
+
+/** Mirrors `packages/plugins/inventory/src/migrations.ts` `p_inventory_shop_stock`
+ *  — location-scoped shop listings, FK-free by that plugin's lock-graph rule. */
+export const shopStock = pgTable("p_inventory_shop_stock", {
+  locationId: uuid("location_id").notNull(),
+  itemId: uuid("item_id").notNull(),
+  price: bigint("price", { mode: "bigint" }).notNull(),
+  stock: integer("stock").notNull(),
+}, (t) => ({ pk: primaryKey({ columns: [t.locationId, t.itemId] }) }));
+
+/** Mirrors the combat plugin's `p_combat_log` (relinquished from core 0005,
+ *  recreated by combat's migrations.ts). */
+export const combatLog = pgTable("p_combat_log", {
+  id: uuid("id").primaryKey(),
+  attackerId: uuid("attacker_id").notNull(),
+  targetId: uuid("target_id").notNull(),
+  hit: boolean("hit").notNull(),
+  damage: integer("damage").notNull(),
+  fatal: boolean("fatal").notNull(),
+  weaponItemId: uuid("weapon_item_id"),
+  payout: bigint("payout", { mode: "bigint" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 });
 
 /**

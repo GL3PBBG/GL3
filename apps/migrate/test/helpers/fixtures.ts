@@ -5,8 +5,13 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import mysql from "mysql2/promise";
 import postgres from "postgres";
 import bountiesPlugin from "@gl3/plugin-bounties";
+import combatPlugin from "@gl3/plugin-combat";
 import detectivesPlugin from "@gl3/plugin-detectives";
+import educationPlugin from "@gl3/plugin-education";
 import forumPlugin from "@gl3/plugin-forum";
+import housesPlugin from "@gl3/plugin-houses";
+import inventoryPlugin from "@gl3/plugin-inventory";
+import jobsPlugin from "@gl3/plugin-jobs";
 import membershipPlugin from "@gl3/plugin-membership";
 import propertiesPlugin from "@gl3/plugin-properties";
 import theftPlugin from "@gl3/plugin-theft";
@@ -15,6 +20,8 @@ import { runPluginMigrations } from "../../../server/src/plugins/migrate.js";
 
 const SCHEMA_SQL = new URL("../fixtures/v2-schema.sql", import.meta.url);
 const SEED_SQL = new URL("../fixtures/v2-seed.sql", import.meta.url);
+const MCCODES_SCHEMA_SQL = new URL("../fixtures/mccodes-schema.sql", import.meta.url);
+const MCCODES_SEED_SQL = new URL("../fixtures/mccodes-seed.sql", import.meta.url);
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -117,15 +124,28 @@ export async function createIsolatedMysqlFixture(
 const PG_MIGRATIONS_FOLDER = new URL("../../../server/drizzle", import.meta.url).pathname;
 
 /**
+ * The MCCodes 63-table fixture (cluster B Task 7): all 63 tables with the
+ * real installer's column shapes, seeded with every edge the migrators must
+ * handle. Same isolation contract as the V2 fixture.
+ */
+export function createIsolatedMccodesFixture(): Promise<{ url: string; teardown: () => Promise<void> }> {
+  return createIsolatedMysqlFixture({ files: [MCCODES_SCHEMA_SQL, MCCODES_SEED_SQL] });
+}
+
+/**
  * Creates a uniquely-named Postgres database, runs every core migration from
  * apps/server/drizzle, then runs the bounties + detectives + properties +
  * theft + forum + membership plugin migrations (the ten plugin-owned target
  * tables — "Known unknowns" item 8, plus the three `p_forum_*` tables Task 16
  * adds and `p_membership_packages` this task adds). Returns a connection URL
  * plus a teardown function.
+ *
+ * `{ plugins: "mccodes" }` adds the C-family plugin migrations (houses,
+ * education, jobs, inventory, combat) on top of the base set — the target a
+ * `--mccodes` run writes into, per the README's boot-once contract.
  */
 export async function createIsolatedPgTarget(
-  options?: { plugins?: "all" | "framework" | "none" },
+  options?: { plugins?: "all" | "framework" | "none" | "mccodes" },
 ): Promise<{ url: string; teardown: () => Promise<void> }> {
   const adminUrl = requireEnv("DATABASE_URL");
   const dbName = `gl3_test_migrate_pg_${randomBytes(8).toString("hex")}`;
@@ -152,11 +172,16 @@ export async function createIsolatedPgTarget(
   // loader creates them at boot. `{ plugins: "framework" }` runs only the
   // membership plugin's — the exact table set a GL3_PROFILE=framework boot
   // creates (membership is a framework plugin; the other five are gameplay).
-  // `{ plugins: "none" }` runs none.
+  // `{ plugins: "none" }` runs none. `{ plugins: "mccodes" }` adds the
+  // C-family's tables (houses/education/jobs/inventory/combat) — the target
+  // a --mccodes run expects.
+  const basePlugins = [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin, forumPlugin, membershipPlugin];
   const pluginSelection =
     options?.plugins === "framework" ? [membershipPlugin]
     : options?.plugins === "none" ? []
-    : [bountiesPlugin, detectivesPlugin, propertiesPlugin, theftPlugin, forumPlugin, membershipPlugin];
+    : options?.plugins === "mccodes"
+      ? [...basePlugins, housesPlugin, educationPlugin, jobsPlugin, inventoryPlugin, combatPlugin]
+      : basePlugins;
   if (pluginSelection.length > 0) {
     const pluginDb = createDb(target.toString());
     try {
