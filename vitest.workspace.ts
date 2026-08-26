@@ -312,6 +312,8 @@ export default defineWorkspace([
         "test/houses.test.ts",
         "test/framework-profile.test.ts",
         "test/progression.test.ts",
+        "test/education.test.ts",
+        "test/jobs.test.ts",
         "test/auth-reset.test.ts",
         "test/auth-verify.test.ts",
         "test/auth.test.ts",
