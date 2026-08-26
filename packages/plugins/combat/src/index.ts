@@ -53,7 +53,7 @@ const ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
  * surface (and the version bump that would come with it) for. Keep the two
  * in sync by hand if the pool set ever changes.
  */
-const POOLS = ["energy", "will", "brave", "nerve"] as const satisfies readonly Pool[];
+const POOLS = ["energy", "will", "brave"] as const satisfies readonly Pool[];
 
 /**
  * Positive-amount entries only, in fixed pool order. `costs` comes back from

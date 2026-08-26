@@ -120,6 +120,13 @@
       "when": 1787348400000,
       "tag": "0016_player_attributes",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787434800000,
+      "tag": "0017_mccodes_core_readiness",
+      "breakpoints": true
     }
   ]
 }

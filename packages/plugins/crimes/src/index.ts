@@ -29,7 +29,7 @@ function memberCooldown(base: number, member: boolean): number {
   return member ? Math.ceil(base * 0.75) : base;
 }
 
-const POOLS = ["energy", "will", "brave", "nerve"] as const satisfies readonly Pool[];
+const POOLS = ["energy", "will", "brave"] as const satisfies readonly Pool[];
 
 /**
  * Positive-amount entries only, in fixed pool order — what's actually worth

@@ -342,10 +342,10 @@ export function registerAuthRoutes(
       energy: playerStats.energy, energyMax: playerStats.energyMax, energyRegenAt: playerStats.energyRegenAt,
       will: playerStats.will, willMax: playerStats.willMax, willRegenAt: playerStats.willRegenAt,
       brave: playerStats.brave, braveMax: playerStats.braveMax, braveRegenAt: playerStats.braveRegenAt,
-      nerve: playerStats.nerve, nerveMax: playerStats.nerveMax, nerveRegenAt: playerStats.nerveRegenAt,
       level: playerStats.level,
       strength: playerStats.strength, agility: playerStats.agility,
       guard: playerStats.guard, labour: playerStats.labour,
+      iq: playerStats.iq,
     }).from(players)
       .innerJoin(playerStats, eq(playerStats.playerId, players.id))
       .where(eq(players.id, playerId));
@@ -365,19 +365,17 @@ export function registerAuthRoutes(
       const energy = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, pools.get("energy") ?? null);
       const will = settlePool(row.will, row.willMax, row.willRegenAt, now, pools.get("will") ?? null);
       const brave = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, pools.get("brave") ?? null);
-      const nerve = settlePool(row.nerve, row.nerveMax, row.nerveRegenAt, now, pools.get("nerve") ?? null);
       return {
         energy: energy.value, energyMax: energy.max,
         will: will.value, willMax: will.max,
         brave: brave.value, braveMax: brave.max,
-        nerve: nerve.value, nerveMax: nerve.max,
         level: row.level,
         strength: row.strength.toString(), agility: row.agility.toString(),
         guard: row.guard.toString(), labour: row.labour.toString(),
+        iq: row.iq.toString(),
         energyRegenAt: energy.stamp?.toISOString() ?? null,
         willRegenAt: will.stamp?.toISOString() ?? null,
         braveRegenAt: brave.stamp?.toISOString() ?? null,
-        nerveRegenAt: nerve.stamp?.toISOString() ?? null,
       };
     })();
 

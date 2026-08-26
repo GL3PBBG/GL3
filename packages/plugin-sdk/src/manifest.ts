@@ -249,7 +249,9 @@ const InputSchema = z
         z.object({
           pool: PoolSchema,
           defaultMax: z.number().int().positive(),
-          regenAmount: z.number().int().nonnegative(),
+          // Fractional allowed: MCCodes' brave regenerates 10% of max + 0.5.
+          regenAmount: z.number().nonnegative(),
+          regenPercent: z.number().int().min(0).max(100).optional(),
           regenIntervalSeconds: z.number().int().positive(),
         }),
       )

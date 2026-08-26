@@ -42,6 +42,15 @@ export const players = pgTable("players", {
   legacyPasswordSha256: text("legacy_password_sha256"),
   /** Required by the §4.3 formula — it hashes the V2 *integer* id, not the uuid. */
   legacyV2Id: integer("legacy_v2_id"),
+  /** MCCodes `users.userpass` copied verbatim: md5(pass_salt . md5(password)).
+   * An empty/NULL salt means the older unsalted md5(password) form. Upgraded to
+   * argon2id on first login, same flow as the V2 column (spec
+   * 2026-08-26-mccodes-mechanics-audit §7 item 10). */
+  legacyMccodesHash: text("legacy_mccodes_hash"),
+  /** MCCodes `users.pass_salt` (8 hex chars). Part of the hash input, NOT an id
+   * — so unlike legacy_v2_id it carries no unique index: salts collide across
+   * dumps. */
+  legacyMccodesSalt: text("legacy_mccodes_salt"),
   roleId: uuid("role_id").references(() => roles.id, { onDelete: "set null" }),
   roundId: uuid("round_id").references(() => rounds.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -69,25 +78,34 @@ export const playerStats = pgTable("player_stats", {
   exp: bigint("exp", { mode: "bigint" }).notNull().default(sql`0`),
   health: integer("health").notNull().default(100),
   backfire: integer("backfire").notNull().default(0),
-  // MCCodes-parity attributes (spec 2026-08-25-player-attributes). Every one
-  // is inert until a plugin declares the pool through `providesAttributes` —
-  // an all-zero row spends nothing and runs no clock. They live here rather
-  // than in a table of their own precisely because this row is already locked
-  // by `tx.locks.player`, so they add no lock-graph edge (NOTES.md rule 6).
+  // MCCodes-parity attributes (specs 2026-08-25-player-attributes and
+  // 2026-08-26-mccodes-mechanics-audit). The pools are inert until a plugin
+  // declares them through `providesAttributes` — an all-zero row spends
+  // nothing and runs no clock — and iq/crime_exp/health_max stay untouched
+  // until their cluster-C plugins read them. They live here rather than in a
+  // table of their own precisely because this row is already locked by
+  // `tx.locks.player`, so they add no lock-graph edge (NOTES.md rule 6).
   energy: integer("energy").notNull().default(0),
   energyMax: integer("energy_max").notNull().default(0),
   will: integer("will").notNull().default(0),
   willMax: integer("will_max").notNull().default(0),
   brave: integer("brave").notNull().default(0),
   braveMax: integer("brave_max").notNull().default(0),
-  nerve: integer("nerve").notNull().default(0),
-  nerveMax: integer("nerve_max").notNull().default(0),
-  // bigint, not integer: MCCodes players grind these past 2^31.
+  // bigint, not integer: MCCodes players grind these past 2^31. IQ is bought
+  // and studied (courses, jobs, crystal temple), never gym-trained.
   strength: bigint("strength", { mode: "bigint" }).notNull().default(sql`0`),
   agility: bigint("agility", { mode: "bigint" }).notNull().default(sql`0`),
   guard: bigint("guard", { mode: "bigint" }).notNull().default(sql`0`),
   labour: bigint("labour", { mode: "bigint" }).notNull().default(sql`0`),
+  iq: bigint("iq", { mode: "bigint" }).notNull().default(sql`0`),
+  // MCCodes' global crime-progression counter; feeds imported success
+  // formulas (spec 2026-08-26-mccodes-mechanics-audit §7 item 4).
+  crimeExp: bigint("crime_exp", { mode: "bigint" }).notNull().default(sql`0`),
   level: integer("level").notNull().default(1),
+  // NULL = max health stays rank-derived (GL3-native). Set = the progression
+  // plugin owns the cap (+50 per MCCodes level-up). "NULL means not my model",
+  // the same convention as the regen stamps (§7 item 8).
+  healthMax: integer("health_max"),
   // NULLABLE, never defaultNow(): null means the clock has never started, so
   // the first settle stamps it and accrues nothing. A player migrated from a
   // decade-old dump must not regenerate ten years of energy on first read —
@@ -95,7 +113,6 @@ export const playerStats = pgTable("player_stats", {
   energyRegenAt: timestamp("energy_regen_at", { withTimezone: true }),
   willRegenAt: timestamp("will_regen_at", { withTimezone: true }),
   braveRegenAt: timestamp("brave_regen_at", { withTimezone: true }),
-  nerveRegenAt: timestamp("nerve_regen_at", { withTimezone: true }),
   rankId: uuid("rank_id").references(() => ranks.id, { onDelete: "set null" }),
   gangId: uuid("gang_id").references((): AnyPgColumn => gangs.id, { onDelete: "set null" }),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),

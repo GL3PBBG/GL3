@@ -244,7 +244,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
           // nothing here takes a lock of its own. Written as explicit
           // per-pool/per-attr blocks rather than a loop over computed column
           // names — a dynamic `row[pool]` / `row[`${pool}Max`]` lookup fights
-          // strict mode for no real gain here, and four short blocks are
+          // strict mode for no real gain here, and three short blocks are
           // easier to typecheck AND read than one clever one.
           attributes: (() => {
             const settleAll = async (playerId: string): Promise<PlayerAttributes> => {
@@ -255,13 +255,11 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               const energyOut = settlePool(row.energy, row.energyMax, row.energyRegenAt, now, options.attributePools.get("energy") ?? null);
               const willOut = settlePool(row.will, row.willMax, row.willRegenAt, now, options.attributePools.get("will") ?? null);
               const braveOut = settlePool(row.brave, row.braveMax, row.braveRegenAt, now, options.attributePools.get("brave") ?? null);
-              const nerveOut = settlePool(row.nerve, row.nerveMax, row.nerveRegenAt, now, options.attributePools.get("nerve") ?? null);
 
               const patch: Partial<{
                 energy: number; energyMax: number; energyRegenAt: Date | null;
                 will: number; willMax: number; willRegenAt: Date | null;
                 brave: number; braveMax: number; braveRegenAt: Date | null;
-                nerve: number; nerveMax: number; nerveRegenAt: Date | null;
               }> = {};
               if (energyOut.value !== row.energy) patch.energy = energyOut.value;
               if (energyOut.max !== row.energyMax) patch.energyMax = energyOut.max;
@@ -272,9 +270,6 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               if (braveOut.value !== row.brave) patch.brave = braveOut.value;
               if (braveOut.max !== row.braveMax) patch.braveMax = braveOut.max;
               if (braveOut.stamp?.getTime() !== row.braveRegenAt?.getTime()) patch.braveRegenAt = braveOut.stamp;
-              if (nerveOut.value !== row.nerve) patch.nerve = nerveOut.value;
-              if (nerveOut.max !== row.nerveMax) patch.nerveMax = nerveOut.max;
-              if (nerveOut.stamp?.getTime() !== row.nerveRegenAt?.getTime()) patch.nerveRegenAt = nerveOut.stamp;
 
               if (Object.keys(patch).length > 0) {
                 await tx.update(playerStats).set(patch).where(eq(playerStats.playerId, playerId));
@@ -284,10 +279,10 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                 energy: energyOut.value, energyMax: energyOut.max,
                 will: willOut.value, willMax: willOut.max,
                 brave: braveOut.value, braveMax: braveOut.max,
-                nerve: nerveOut.value, nerveMax: nerveOut.max,
                 level: row.level,
                 strength: row.strength, agility: row.agility,
                 guard: row.guard, labour: row.labour,
+                iq: row.iq,
               };
             };
 
@@ -311,11 +306,6 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                   case "brave": {
                     if (current.brave < amount) throw new PluginError("insufficient_brave", 409);
                     await tx.update(playerStats).set({ brave: current.brave - amount }).where(eq(playerStats.playerId, playerId));
-                    return;
-                  }
-                  case "nerve": {
-                    if (current.nerve < amount) throw new PluginError("insufficient_nerve", 409);
-                    await tx.update(playerStats).set({ nerve: current.nerve - amount }).where(eq(playerStats.playerId, playerId));
                     return;
                   }
                   default:
@@ -342,11 +332,6 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                     await tx.update(playerStats).set({ brave: next }).where(eq(playerStats.playerId, playerId));
                     return;
                   }
-                  case "nerve": {
-                    const next = Math.min(current.nerveMax, current.nerve + amount);
-                    await tx.update(playerStats).set({ nerve: next }).where(eq(playerStats.playerId, playerId));
-                    return;
-                  }
                   default:
                     assertUnreachableAttribute("invalid_pool", pool);
                 }
@@ -362,9 +347,6 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                     return;
                   case "brave":
                     await tx.update(playerStats).set({ braveMax: value }).where(eq(playerStats.playerId, playerId));
-                    return;
-                  case "nerve":
-                    await tx.update(playerStats).set({ nerveMax: value }).where(eq(playerStats.playerId, playerId));
                     return;
                   default:
                     assertUnreachableAttribute("invalid_pool", pool);
@@ -401,6 +383,14 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                       .set({ labour: sql`${playerStats.labour} + ${delta}` })
                       .where(eq(playerStats.playerId, playerId))
                       .returning({ value: playerStats.labour });
+                    if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
+                    return updated.value;
+                  }
+                  case "iq": {
+                    const [updated] = await tx.update(playerStats)
+                      .set({ iq: sql`${playerStats.iq} + ${delta}` })
+                      .where(eq(playerStats.playerId, playerId))
+                      .returning({ value: playerStats.iq });
                     if (!updated) throw new Error(`player_stats row missing for ${playerId}`);
                     return updated.value;
                   }

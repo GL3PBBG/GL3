@@ -66,4 +66,31 @@ describe("settlePool", () => {
     const out = settlePool(20, 100, at(600), T0, DECL);
     expect(out).toEqual({ value: 20, max: 100, stamp: at(600) });
   });
+
+  it("regenerates a percent of max when only regenPercent is set", () => {
+    // MCCodes energy: 8% of max per interval, flat amount zero (§7 item 2).
+    const decl: AttributePoolDecl = {
+      pool: "energy", defaultMax: 25, regenAmount: 0, regenPercent: 8, regenIntervalSeconds: 60,
+    };
+    // 8% of 25 = 2 per interval; three intervals → 6.
+    const out = settlePool(0, 25, T0, at(180), decl);
+    expect(out.value).toBe(6);
+  });
+
+  it("combines flat and percent (MCCodes brave: 10% + 0.5) and rounds once per batch, not per interval", () => {
+    const decl: AttributePoolDecl = {
+      pool: "brave", defaultMax: 50, regenAmount: 0.5, regenPercent: 10, regenIntervalSeconds: 300,
+    };
+    // Per interval: 0.5 + 5 = 5.5. One interval rounds 5.5 → 6; three
+    // intervals batch to 16.5 → 17, where per-interval rounding would give 18.
+    expect(settlePool(0, 50, T0, at(300), decl).value).toBe(6);
+    expect(settlePool(0, 50, T0, at(900), decl).value).toBe(17);
+  });
+
+  it("scales the whole per-interval gain by an optional multiplier", () => {
+    // Membership/donator regen bonuses arrive as a caller-computed multiplier;
+    // MCCodes donators regenerate energy at double the base rate.
+    const out = settlePool(0, 100, T0, at(120), DECL, 2);
+    expect(out.value).toBe(20);
+  });
 });

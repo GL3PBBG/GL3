@@ -16,22 +16,23 @@ describe("player_attributes migration", () => {
     await db.execute(sql`INSERT INTO player_stats (player_id) VALUES (${playerId})`);
 
     const rows = (await db.execute(sql`
-      SELECT energy, energy_max, will, will_max, brave, brave_max, nerve, nerve_max,
-             strength, agility, guard, labour, level,
-             energy_regen_at, will_regen_at, brave_regen_at, nerve_regen_at
+      SELECT energy, energy_max, will, will_max, brave, brave_max,
+             strength, agility, guard, labour, iq, crime_exp, level, health_max,
+             energy_regen_at, will_regen_at, brave_regen_at
       FROM player_stats WHERE player_id = ${playerId}
     `)) as unknown as Record<string, unknown>[];
 
     const row = rows[0];
     expect(row).toBeDefined();
-    for (const col of ["energy", "energy_max", "will", "will_max", "brave", "brave_max", "nerve", "nerve_max"]) {
+    for (const col of ["energy", "energy_max", "will", "will_max", "brave", "brave_max"]) {
       expect(Number(row![col])).toBe(0);
     }
-    for (const col of ["strength", "agility", "guard", "labour"]) {
+    for (const col of ["strength", "agility", "guard", "labour", "iq", "crime_exp"]) {
       expect(String(row![col])).toBe("0");
     }
     expect(Number(row!["level"])).toBe(1);
-    for (const col of ["energy_regen_at", "will_regen_at", "brave_regen_at", "nerve_regen_at"]) {
+    expect(row!["health_max"]).toBeNull();
+    for (const col of ["energy_regen_at", "will_regen_at", "brave_regen_at"]) {
       expect(row![col]).toBeNull();
     }
   });

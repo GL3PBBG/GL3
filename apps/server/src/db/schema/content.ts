@@ -22,6 +22,15 @@ export const crimes = pgTable("crimes", {
    */
   jailChancePercent: integer("jail_chance_percent").notNull().default(0),
   jailSeconds: integer("jail_seconds").notNull().default(0),
+  /**
+   * MCCodes `crimes.crimePERCFORM`, translated into the sandboxed five-token
+   * dialect (LEVEL/CRIMEXP/EXP/WILL/IQ; arithmetic plus
+   * min/max/floor/ceil/round/abs). NULL = GL3-native per-player skill chance —
+   * the two models are mutually exclusive per crime, and the migrator imports
+   * NULL with a report entry whenever a source formula doesn't fit the
+   * dialect (spec 2026-08-26-mccodes-mechanics-audit §7 item 5).
+   */
+  successFormula: text("success_formula"),
 }, (t) => ({ sortIdx: index("crimes_sort_idx").on(t.sort) }));
 
 export const locations = pgTable("locations", {
@@ -32,6 +41,8 @@ export const locations = pgTable("locations", {
   bulletStock: integer("bullet_stock").notNull().default(0),
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull().default(sql`0`),
   combatMode: text("combat_mode").notNull().default("open"),
+  /** Travel gate from MCCodes `cities.cityminlevel`; 0 = no gate. */
+  minLevel: integer("min_level").notNull().default(0),
 });
 
 export const weapons = pgTable("weapons", {

@@ -13,6 +13,12 @@ export const gangs = pgTable("gangs", {
   cash: bigint("cash", { mode: "bigint" }).notNull().default(sql`0`),
   bullets: bigint("bullets", { mode: "bigint" }).notNull().default(sql`0`),
   level: integer("level").notNull().default(1),
+  /** MCCodes war score: combat writes the swings, the gangs plugin owns
+   * destruction at ≤ 0. Default 100 = MCCodes' new-gang value (spec
+   * 2026-08-26-mccodes-mechanics-audit §7 item 9). */
+  respect: bigint("respect", { mode: "bigint" }).notNull().default(sql`100`),
+  /** Gang-held premium currency: MCCodes gangCRYSTALS → points (§7 item 11). */
+  points: bigint("points", { mode: "bigint" }).notNull().default(sql`0`),
   locationId: uuid("location_id").references(() => locations.id, { onDelete: "set null" }),
   bossPlayerId: uuid("boss_player_id").references((): AnyPgColumn => players.id, { onDelete: "set null" }),
   underbossPlayerId: uuid("underboss_player_id").references((): AnyPgColumn => players.id, { onDelete: "set null" }),
