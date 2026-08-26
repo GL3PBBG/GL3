@@ -49,6 +49,10 @@ export function invalidationKeys(
       return [keys.me(), keys.locations(), keys.bulletShop()];
     case "player.rankedUp":
       return [keys.me(), keys.ranks()];
+    case "player.levelUp":
+      // Exp, pools and max hp all moved — ranks stay deliberately absent:
+      // a levelUp boot never touches the rank ladder.
+      return [keys.me()];
     case "player.attacked":
       // Bullets moved and the target's health did, so the list a player is
       // looking at is stale; the log gains a row for both parties. Hospital is

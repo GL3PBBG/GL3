@@ -66,6 +66,8 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
       return `${event.actorName} joined the game`;
     case "player.rankedUp":
       return `Ranked up to ${event.rankName} (+${formatMoney(event.cashReward)})`;
+    case "player.levelUp":
+      return `Reached level ${event.level}`;
     case "bank.transacted":
       return `Bank ${event.direction}: ${formatMoney(event.amount)}`;
     case "bullets.purchased":
