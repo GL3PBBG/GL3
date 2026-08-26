@@ -105,6 +105,7 @@ const CORPUS: readonly CorpusEntry[] = [
   { type: "chat.message", audience: { kind: "global" }, body: "Leave the gun." },
   { type: "player.joined", audience: { kind: "global" } },
   { type: "player.rankedUp", audience: { kind: "global" }, rankId: UUID_A, rankName: "Thug", cashReward: "250", bulletReward: "5", maxHealth: 120 },
+  { type: "player.levelUp", audience: { kind: "player", playerId: UUID_A }, level: 2 },
   { type: "bank.transacted", audience: { kind: "player", playerId: UUID_A }, direction: "deposit", amount: "100", cash: "900", bank: "100" },
   { type: "bullets.purchased", audience: { kind: "player", playerId: UUID_A }, locationId: UUID_A, quantity: 5, cost: "500", cash: "500", bullets: "5" },
   { type: "oc.updated", audience: { kind: "gang", gangId: UUID_A }, heistId: UUID_A, status: "open" },

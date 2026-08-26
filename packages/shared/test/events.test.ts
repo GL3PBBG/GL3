@@ -107,14 +107,15 @@ describe("GameEventSchema", () => {
   // core variant, player.backfired (attacker-only weapon jam). The rounds spec
   // adds two more, round.started and round.finished — rounds are core (no
   // relinquish migration), so they join this list rather than travelling as
-  // plugin.event.
+  // plugin.event. The progression plugin (C3) adds player.levelUp — the
+  // MCCodes ladder's counterpart to rankedUp, fired only on a routed boot.
   it("covers the core event names plus M5's plugin envelope, plus player.backfired and rounds", () => {
     expect(new Set(GameEventSchema.options.map((o) => o.shape.type.value))).toEqual(new Set([
       "crime.resolved", "player.jailed", "player.released", "player.travelled",
       "player.attacked", "player.killed", "player.backfired", "player.discharged", "bounty.placed", "bounty.claimed",
       "gang.created", "gang.memberJoined", "gang.memberLeft", "mail.received",
       "notification.created", "news.posted", "chat.message", "player.joined",
-      "player.rankedUp", "bank.transacted", "bullets.purchased",
+      "player.rankedUp", "player.levelUp", "bank.transacted", "bullets.purchased",
       "oc.updated", "oc.resolved",
       "round.started", "round.finished",
       "plugin.event",
