@@ -153,9 +153,10 @@ describe("mccodes dialect — B2 (roles, locations, players)", () => {
       ]);
       expect(run.report.orphans.filter((o) => o.table === "userstats"))
         .toEqual([{ table: "userstats", v2Id: 99, reason: expect.any(String) }]);
-      // Equipped items are not migrated until B3 — the classifier reports
-      // them rather than silently dropping.
-      expect(run.report.orphans.some((o) => o.table === "users" && o.reason.includes("was not migrated"))).toBe(true);
+      // B3's content phase runs before players, so equipped items resolve —
+      // no "was not migrated" orphans from the classifier any more (the
+      // B2-era assertion of the opposite is retired with the phase order).
+      expect(run.report.orphans.some((o) => o.table === "users" && o.reason.includes("was not migrated"))).toBe(false);
       expect(run.report.droppedColumns.find((d) => d.table === "users")!.columns)
         .toContain("staffnotes");
     } finally {
