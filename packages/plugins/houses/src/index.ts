@@ -1,8 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { HOUSES_MIGRATIONS } from "./migrations.js";
 import { definePlugin, isInsufficientFundsError, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { adminPage, housesPage } from "./pages.js";
+// Re-exported so `apps/server/test/houses-page.test.ts` can assert against the
+// same page object rather than a hand-copied duplicate of its view tree,
+// which would silently drift if `pages.ts` changed — the theft precedent.
+export { adminPage, housesPage } from "./pages.js";
 
 /** This plugin's own catalog table (migrations.ts creates it). */
 const houses = pgTable("p_houses", {
@@ -45,6 +51,44 @@ const listRoute = route({
         })),
       },
     };
+  },
+});
+
+/**
+ * The catalog plus the caller's current house, composed from the same reads
+ * `/api/houses` and `currentHouse` already do, shaped as a `TableRowsResponse`
+ * so one GET serves both the catalog `table` and the `keyValueSource` (the
+ * sourced contract Task 1 established). `houseName`/`houseWill` are present
+ * only above the Default House — `willMax <= 100` means no upgrade owned, the
+ * same threshold `sellRoute` already uses.
+ */
+const boardRoute = route({
+  method: "GET",
+  path: "/api/houses/board",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      await tx.locks.player([player.id]);
+      const attrs = await tx.attributes.read(player.id);
+      const rows = await tx.db.select().from(houses).orderBy(asc(houses.will));
+      const owned = attrs.willMax > 100 ? await currentHouse(tx, attrs.willMax) : null;
+
+      const values: Record<string, string> = { willMax: String(attrs.willMax) };
+      if (owned !== null) {
+        values.houseName = owned.name;
+        values.houseWill = String(owned.will);
+      }
+
+      return {
+        status: 200,
+        body: {
+          rows: rows.map((h) => ({ id: h.id, name: h.name, price: h.price.toString(), will: String(h.will) })),
+          values,
+        },
+      };
+    });
   },
 });
 
@@ -115,6 +159,112 @@ const sellRoute = route({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Admin routes — the catalog editor. Theft's four-route shape
+// (`packages/plugins/theft/src/index.ts`'s admin section): list/create/
+// update/delete, `auth: "admin"`, an update that blanks a rename. No FK
+// references `p_houses`, so unlike theft's cars there is no "in use" row to
+// refuse against — a delete is unconditional, the membership packages shape.
+// ---------------------------------------------------------------------------
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+
+/**
+ * The page renderer posts every field in a form, sending "" for the ones the
+ * admin left blank (`PageRenderer.tsx`'s form `onSubmit`). Blank is
+ * normalised to `undefined` here so an update that only reprices a house
+ * leaves its name untouched — the theft/membership admin convention, reused
+ * rather than reinvented (there is no shared export for it).
+ */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
+const HouseCreateSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    price: AdminMoney,
+    will: z.coerce.number().int().positive(),
+  })
+  .strict();
+
+const HouseUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    price: AdminMoney,
+    will: z.coerce.number().int().positive(),
+  })
+  .strict();
+
+/** The catalog as a `TableRowsResponse`. `id` is the update form's select `valueKey` and is never rendered as a column. */
+const adminListRoute = route({
+  method: "GET",
+  path: "/api/admin/houses/list",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(houses).orderBy(asc(houses.will)));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((h) => ({ id: h.id, name: h.name, price: h.price.toString(), will: String(h.will) })),
+      },
+    };
+  },
+});
+
+const adminCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/houses",
+  auth: "admin",
+  body: HouseCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(houses).values({ id, name: body.name, price: BigInt(body.price), will: body.will });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/houses/update",
+  auth: "admin",
+  body: HouseUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(houses)
+        .set({
+          price: BigInt(body.price),
+          will: body.will,
+          ...(body.name !== undefined && { name: body.name }),
+        })
+        .where(eq(houses.id, body.id))
+        .returning({ id: houses.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("house_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/houses/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      const result = await tx.db.delete(houses).where(eq(houses.id, params.id)).returning({ id: houses.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("house_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 /**
  * Houses (C spec §4.2): maxwill IS the house. Buying upgrades the ceiling
  * and resets current will; selling refunds in full and returns to the
@@ -123,8 +273,13 @@ const sellRoute = route({
 export default definePlugin({
   id: "houses",
   version: "1.0.0",
-  basePaths: ["/api/houses"],
+  basePaths: ["/api/houses", "/api/admin/houses"],
   requires: ["mccodes-attributes"],
   migrations: HOUSES_MIGRATIONS,
-  routes: [listRoute, buyRoute, sellRoute],
+  routes: [
+    listRoute, boardRoute, buyRoute, sellRoute,
+    adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
+  ],
+  pages: [housesPage],
+  adminPages: [adminPage],
 });

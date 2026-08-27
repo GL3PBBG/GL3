@@ -148,6 +148,14 @@ export const theftGarage = pgTable("p_theft_garage", {
   locationId: uuid("location_id"),
 });
 
+/** Mirrors `packages/plugins/houses/src/migrations.ts` `0001_houses`. */
+export const houses = pgTable("p_houses", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  price: bigint("price", { mode: "bigint" }).notNull(),
+  will: integer("will").notNull(),
+});
+
 /** Mirrors `packages/plugins/membership/src/migrations.ts` `0001_packages`. */
 export const membershipPackages = pgTable("p_membership_packages", {
   id: uuid("id").primaryKey(),
