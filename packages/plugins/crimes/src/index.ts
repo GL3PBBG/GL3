@@ -523,7 +523,11 @@ const adminCrimesListRoute = route({
           maxPayout: c.maxPayout.toString(),
           expReward: c.expReward.toString(),
           crimeExpReward: c.crimeExpReward.toString(),
-          successFormula: c.successFormula,
+          // "" not null: the table renderer parses rows with
+          // z.record(z.string()), and one null cell kills the whole table.
+          // The update route already reads "" back as NULL (blank = skill
+          // chance), so the round-trip is lossless.
+          successFormula: c.successFormula ?? "",
           jailChancePercent: String(c.jailChancePercent),
           jailSeconds: String(c.jailSeconds),
         })),

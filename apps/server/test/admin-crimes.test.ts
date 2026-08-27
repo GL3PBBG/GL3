@@ -43,6 +43,15 @@ describe("crimes admin", () => {
       cooldownSeconds: "30", minPayout: "50", maxPayout: "250",
       expReward: "5", jailChancePercent: "0", jailSeconds: "0",
     });
+    // The seeded crime above has a NULL success_formula — every V2-migrated
+    // catalog does. The table renderer parses this response with
+    // TableRowsResponseSchema (`z.record(z.string())`), so a raw null in any
+    // cell kills the WHOLE admin table client-side. Parse exactly as the
+    // client does; this is what broke the live crimes admin page on a
+    // migrated database (2026-08-27).
+    expect(row.successFormula).toBe("");
+    const { TableRowsResponseSchema } = await import("@gl3/shared");
+    expect(() => TableRowsResponseSchema.parse(list.json())).not.toThrow();
   });
 
   it("updates a crime and persists the change", async () => {
