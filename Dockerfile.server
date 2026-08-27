@@ -84,6 +84,13 @@ COPY packages/plugins/bounties/package.json packages/plugins/bounties/
 COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY packages/plugins/forum/package.json packages/plugins/forum/
+COPY packages/plugins/mccodes-attributes/package.json packages/plugins/mccodes-attributes/
+COPY packages/plugins/gym/package.json packages/plugins/gym/
+COPY packages/plugins/houses/package.json packages/plugins/houses/
+COPY packages/plugins/education/package.json packages/plugins/education/
+COPY packages/plugins/jobs/package.json packages/plugins/jobs/
+COPY packages/plugins/temple/package.json packages/plugins/temple/
+COPY packages/plugins/progression/package.json packages/plugins/progression/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 # Scoped registry for marketplace plugins. Inert until a `@gl3-plugins/*`
@@ -140,6 +147,20 @@ COPY packages/plugins/detectives/tsconfig.json packages/plugins/detectives/tscon
 COPY packages/plugins/detectives/src packages/plugins/detectives/src
 COPY packages/plugins/forum/tsconfig.json packages/plugins/forum/tsconfig.json
 COPY packages/plugins/forum/src packages/plugins/forum/src
+COPY packages/plugins/mccodes-attributes/tsconfig.json packages/plugins/mccodes-attributes/tsconfig.json
+COPY packages/plugins/mccodes-attributes/src packages/plugins/mccodes-attributes/src
+COPY packages/plugins/gym/tsconfig.json packages/plugins/gym/tsconfig.json
+COPY packages/plugins/gym/src packages/plugins/gym/src
+COPY packages/plugins/houses/tsconfig.json packages/plugins/houses/tsconfig.json
+COPY packages/plugins/houses/src packages/plugins/houses/src
+COPY packages/plugins/education/tsconfig.json packages/plugins/education/tsconfig.json
+COPY packages/plugins/education/src packages/plugins/education/src
+COPY packages/plugins/jobs/tsconfig.json packages/plugins/jobs/tsconfig.json
+COPY packages/plugins/jobs/src packages/plugins/jobs/src
+COPY packages/plugins/temple/tsconfig.json packages/plugins/temple/tsconfig.json
+COPY packages/plugins/temple/src packages/plugins/temple/src
+COPY packages/plugins/progression/tsconfig.json packages/plugins/progression/tsconfig.json
+COPY packages/plugins/progression/src packages/plugins/progression/src
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
 COPY examples/hello-plugin/tsconfig.json examples/hello-plugin/tsconfig.json
@@ -196,6 +217,13 @@ COPY packages/plugins/bounties/package.json packages/plugins/bounties/
 COPY packages/plugins/oc/package.json packages/plugins/oc/
 COPY packages/plugins/detectives/package.json packages/plugins/detectives/
 COPY packages/plugins/forum/package.json packages/plugins/forum/
+COPY packages/plugins/mccodes-attributes/package.json packages/plugins/mccodes-attributes/
+COPY packages/plugins/gym/package.json packages/plugins/gym/
+COPY packages/plugins/houses/package.json packages/plugins/houses/
+COPY packages/plugins/education/package.json packages/plugins/education/
+COPY packages/plugins/jobs/package.json packages/plugins/jobs/
+COPY packages/plugins/temple/package.json packages/plugins/temple/
+COPY packages/plugins/progression/package.json packages/plugins/progression/
 COPY apps/server/package.json apps/server/
 COPY examples/hello-plugin/package.json examples/hello-plugin/
 COPY .npmrc ./
@@ -227,6 +255,13 @@ COPY --from=builder /app/packages/plugins/bounties/dist packages/plugins/bountie
 COPY --from=builder /app/packages/plugins/oc/dist packages/plugins/oc/dist
 COPY --from=builder /app/packages/plugins/detectives/dist packages/plugins/detectives/dist
 COPY --from=builder /app/packages/plugins/forum/dist packages/plugins/forum/dist
+COPY --from=builder /app/packages/plugins/mccodes-attributes/dist packages/plugins/mccodes-attributes/dist
+COPY --from=builder /app/packages/plugins/gym/dist packages/plugins/gym/dist
+COPY --from=builder /app/packages/plugins/houses/dist packages/plugins/houses/dist
+COPY --from=builder /app/packages/plugins/education/dist packages/plugins/education/dist
+COPY --from=builder /app/packages/plugins/jobs/dist packages/plugins/jobs/dist
+COPY --from=builder /app/packages/plugins/temple/dist packages/plugins/temple/dist
+COPY --from=builder /app/packages/plugins/progression/dist packages/plugins/progression/dist
 COPY --from=builder /app/apps/server/dist apps/server/dist
 COPY --from=builder /app/apps/server/drizzle apps/server/drizzle
 COPY --from=builder /app/examples/hello-plugin/dist examples/hello-plugin/dist

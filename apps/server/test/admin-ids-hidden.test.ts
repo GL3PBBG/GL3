@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { playersPage } from "../src/admin/players-page.js";
 import { rolesPage } from "../src/admin/roles-page.js";
 import { roundsPage } from "../src/admin/rounds-page.js";
-import { CORE_PLUGINS } from "../src/plugins/core-plugins.js";
+import { CORE_PLUGINS, MCCODES_PLUGINS } from "../src/plugins/core-plugins.js";
 
 /**
  * Admin tables must not render raw UUIDs. The ids stay in the *payload* —
@@ -36,7 +36,13 @@ function tableColumnKeys(node: unknown): string[] {
 
 describe("admin tables never display an id column", () => {
   const sections: { label: string; view: unknown }[] = [
-    ...CORE_PLUGINS.flatMap((manifest) =>
+    // CORE_PLUGINS is FRAMEWORK_PLUGINS + GAMEPLAY_PLUGINS only (v2's
+    // historical set) and never included the MCCodes family — walking it
+    // alone let houses'/education's/jobs' admin sections go uncensused here
+    // even after they shipped. MCCODES_PLUGINS is the gl3 union's other
+    // half (`apps/server/src/plugins/core-plugins.ts`); walking both is what
+    // it takes to reach every admin section a `gl3`-profile boot can serve.
+    ...[...CORE_PLUGINS, ...MCCODES_PLUGINS].flatMap((manifest) =>
       manifest.adminPages.map((page) => ({ label: `${manifest.id}:${page.id}`, view: page.view })),
     ),
     { label: `core:${rolesPage.id}`, view: rolesPage.view },
@@ -46,23 +52,23 @@ describe("admin tables never display an id column", () => {
 
   it("covers every core admin page that has one", () => {
     // Guards the walker itself: a refactor that stopped finding adminPages
-    // would make every assertion below vacuously pass. The floor equals
-    // reality on this branch: nine plugins declare adminPages plus forum's
-    // `forum-admin` section, membership's `membership-admin` section and
-    // houses' `houses-admin` section, twelve total, plus roles and rounds
-    // hand-written here, is 15 — the count does NOT include education's
-    // `education-admin` or jobs' `jobs-admin` sections despite the two
-    // preceding bumps' comments implying otherwise: `CORE_PLUGINS` below is
-    // `FRAMEWORK_PLUGINS + GAMEPLAY_PLUGINS` only
-    // (`apps/server/src/plugins/core-plugins.ts`) and never included the
-    // MCCODES family (gym/houses/education/jobs/temple/progression) —
-    // `toBeGreaterThanOrEqual` let both of those floor bumps land without
-    // the actual count ever moving. Each MCCODES-family plugin instead
-    // proves its own admin page id-hidden, in its own page test
-    // (`education-page.test.ts`, `houses-page.test.ts`,
-    // `jobs-page.test.ts`), which is where jobs' `jobs-admin` section is
-    // actually checked.
-    expect(sections.length).toBeGreaterThanOrEqual(15);
+    // would make every assertion below vacuously pass. `toBeGreaterThanOrEqual`
+    // is what let two prior floor bumps land while the walker still only
+    // covered `CORE_PLUGINS` (`FRAMEWORK_PLUGINS + GAMEPLAY_PLUGINS`, v2's
+    // historical set) — houses'/education's/jobs' admin sections went
+    // uncensused here the whole time despite the comments implying
+    // otherwise, because a floor that only ever needs to be met, not
+    // matched, tolerates a walker that quietly stopped finding some of its
+    // targets. `toBe` closes that: this is now an EXACT count, restated by
+    // actually running the walker (not by arithmetic) each time a plugin
+    // gains or loses an admin section. Current count, walking
+    // `CORE_PLUGINS` + `MCCODES_PLUGINS`: 15 pre-existing (nine plugins'
+    // adminPages, forum's `forum-admin`, membership's `membership-admin`,
+    // plus roles/rounds/players hand-written here) + 3 from the MCCodes
+    // family (houses' `houses-admin`, education's `education-admin`, jobs'
+    // `jobs-admin` — gym, temple, mccodes-attributes and progression
+    // declare none) = 18.
+    expect(sections.length).toBe(18);
   });
 
   for (const section of sections) {

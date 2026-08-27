@@ -45,13 +45,23 @@ describe("core.profileView and core.moneyFormat applied at their real seams", ()
       expect(profileRes.statusCode).toBe(200);
       const body = profileRes.json();
       const parsed = ProfileDtoSchema.parse(body);
-      // `bounties` and `detectives` are core plugins (always loaded by
-      // bootTestServer) and each subscribes to core.profileView, contributing
-      // an always-on link ahead of the test plugins here, in plugin load
-      // order (core-plugins.ts).
+      // `bounties`, `detectives` and `progression` are all part of
+      // `bootTestServer`'s default gl3 union and each subscribes to
+      // core.profileView, contributing an always-on entry ahead of the test
+      // plugins here, in plugin load order (core-plugins.ts:
+      // `[...FRAMEWORK_PLUGINS, ...GAMEPLAY_PLUGINS, ...MCCODES_PLUGINS]` —
+      // bounties/detectives from GAMEPLAY_PLUGINS, progression last in
+      // MCCODES_PLUGINS, ahead of the optional test-local plugins). The
+      // family frontend wave's Task 7 added progression's "Level" stat
+      // subscriber; this test wasn't touched in that wave (task-scoped runs
+      // don't reach a cross-cutting drift guard like this one), so it went
+      // red on the first bare `npm run verify` after — the rounds cluster's
+      // "twelve green scoped runs, then the full suite catches it" shape,
+      // caught and fixed at Task 8.
       expect(parsed.extras).toEqual([
         { kind: "link", pluginId: "bounties", label: "Place bounty", to: `/plugins/bounties.index?target=${playerId}` },
         { kind: "link", pluginId: "detectives", label: "Hire detective", to: `/plugins/detectives.index?target=${playerId}` },
+        { kind: "stat", pluginId: "progression", label: "Level", value: "1" },
         { kind: "stat", pluginId: "profile-contributor", label: "Contributed", value: "1" },
         { kind: "link", pluginId: "profile-contributor", label: "See more", to: "/profile-contributor" },
       ]);
