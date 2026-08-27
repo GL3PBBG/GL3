@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_VIEW_DEPTH, MAX_VIEW_NODES } from "@gl3/shared";
-import { definePlugin, PageSchemaSchema } from "../src/index.js";
+import { MAX_VIEW_DEPTH, MAX_VIEW_NODES, ViewNodeDtoSchema } from "@gl3/shared";
+import { definePlugin, PageSchemaSchema, ViewNodeSchema } from "../src/index.js";
 
 const page = {
   id: "hello.index",
@@ -418,5 +418,18 @@ describe("table node", () => {
     expect(PageSchemaSchema.safeParse(page({
       kind: "table", source: "GET /api/x", columns: [], rows: [] ,
     })).success).toBe(false);
+  });
+});
+
+describe("meter, meterSource and keyValueSource nodes", () => {
+  it("meter, meterSource and keyValueSource parse in both schemas", () => {
+    const meter = { kind: "meter", label: "Energy", value: 7, max: 12 };
+    const meterSrc = { kind: "meterSource", label: "Energy", source: "GET /api/gym", valueKey: "energy", maxKey: "energyMax" };
+    const kvSrc = { kind: "keyValueSource", source: "GET /api/jobs/board", entries: [{ label: "Rank", key: "rankName" }], emptyText: "Unemployed" };
+    for (const node of [meter, meterSrc, kvSrc]) {
+      expect(() => ViewNodeSchema.parse(node)).not.toThrow();
+      expect(() => ViewNodeDtoSchema.parse(node)).not.toThrow();
+    }
+    expect(() => ViewNodeSchema.parse({ kind: "meterSource", label: "x", source: "POST /api/x", valueKey: "a", maxKey: "b" })).toThrow(); // GET only
   });
 });

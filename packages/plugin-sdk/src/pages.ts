@@ -64,6 +64,33 @@ const leafOptions = [
     })
     .strict(),
   z
+    .object({ kind: z.literal("meter"), label: z.string().min(1), value: z.number(), max: z.number().positive() })
+    .strict(),
+  // GET-only, same rule and reason as `table.source`: the value renders on
+  // mount and must never mutate. The response's `values: Record<string,string>`
+  // (`FormValuesResponseSchema`) is read as `Number(values[valueKey])` /
+  // `Number(values[maxKey])`.
+  z
+    .object({
+      kind: z.literal("meterSource"),
+      label: z.string().min(1),
+      source: z.string().regex(GET_SOURCE_RE, "meterSource source must be `GET /absolute/path`"),
+      valueKey: z.string().min(1),
+      maxKey: z.string().min(1),
+    })
+    .strict(),
+  // GET-only, same rule as `meterSource`. Renders one row per entry whose
+  // `key` is present in the response's `values`; zero present keys (or a 404)
+  // renders `emptyText` instead.
+  z
+    .object({
+      kind: z.literal("keyValueSource"),
+      source: z.string().regex(GET_SOURCE_RE, "keyValueSource source must be `GET /absolute/path`"),
+      entries: z.array(z.object({ label: z.string().min(1), key: z.string().min(1) }).strict()).min(1),
+      emptyText: z.string().optional(),
+    })
+    .strict(),
+  z
     .object({
       kind: z.literal("form"),
       action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),

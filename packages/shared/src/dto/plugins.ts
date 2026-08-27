@@ -52,21 +52,23 @@ const GET_SOURCE_RE = /^GET \/(?![/\\])[^\s\\]*$/;
 export const MAX_VIEW_DEPTH = 16;
 export const MAX_VIEW_NODES = 512;
 
-// Every array-of-objects field the twelve-kind vocabulary has: `panel.children`
-// and `list.items` nest actual view nodes; `keyValue.rows` and `form.fields`
-// nest plain leaf objects, not `ViewNode`s, but each one is still a parsed
-// object the bound exists to cap — a form is not exempt from MAX_VIEW_NODES
-// just because its fields aren't independently renderable. `text`, `money`,
-// `error`, `link`, `button` and `cooldownButton` carry no array field and are
-// correctly left out. `cards` is left out deliberately rather than by omission:
-// its array holds card CODES, not parsed objects, so counting them would spend
-// the node budget on strings the recursion never descends into.
+// Every array-of-objects field the vocabulary has: `panel.children` and
+// `list.items` nest actual view nodes; `keyValue.rows`, `form.fields` and
+// `keyValueSource.entries` nest plain leaf objects, not `ViewNode`s, but each
+// one is still a parsed object the bound exists to cap — a form is not exempt
+// from MAX_VIEW_NODES just because its fields aren't independently
+// renderable. `text`, `money`, `error`, `link`, `button`, `cooldownButton`,
+// `meter` and `meterSource` carry no array field and are correctly left out.
+// `cards` is left out deliberately rather than by omission: its array holds
+// card CODES, not parsed objects, so counting them would spend the node
+// budget on strings the recursion never descends into.
 function childrenOf(node: unknown): readonly unknown[] {
   if (typeof node !== "object" || node === null) return [];
   if ("children" in node && Array.isArray(node.children)) return node.children;
   if ("items" in node && Array.isArray(node.items)) return node.items;
   if ("rows" in node && Array.isArray(node.rows)) return node.rows;
   if ("fields" in node && Array.isArray(node.fields)) return node.fields;
+  if ("entries" in node && Array.isArray(node.entries)) return node.entries;
   if ("columns" in node && Array.isArray(node.columns)) return node.columns;
   return [];
 }
@@ -133,6 +135,28 @@ const leafOptions = [
   z.object({
     kind: z.literal("keyValue"),
     rows: z.array(z.object({ label: z.string(), value: z.string() }).strict()),
+  }).strict(),
+  z.object({ kind: z.literal("meter"), label: z.string().min(1), value: z.number(), max: z.number().positive() })
+    .strict(),
+  // GET-only, same rule and reason as `table.source`: the value renders on
+  // mount and must never mutate. The response's `values: Record<string,string>`
+  // (`FormValuesResponseSchema`) is read as `Number(values[valueKey])` /
+  // `Number(values[maxKey])`.
+  z.object({
+    kind: z.literal("meterSource"),
+    label: z.string().min(1),
+    source: z.string().regex(GET_SOURCE_RE, "meterSource source must be `GET /absolute/path`"),
+    valueKey: z.string().min(1),
+    maxKey: z.string().min(1),
+  }).strict(),
+  // GET-only, same rule as `meterSource`. Renders one row per entry whose
+  // `key` is present in the response's `values`; zero present keys (or a 404)
+  // renders `emptyText` instead.
+  z.object({
+    kind: z.literal("keyValueSource"),
+    source: z.string().regex(GET_SOURCE_RE, "keyValueSource source must be `GET /absolute/path`"),
+    entries: z.array(z.object({ label: z.string().min(1), key: z.string().min(1) }).strict()).min(1),
+    emptyText: z.string().optional(),
   }).strict(),
   z.object({
     kind: z.literal("form"),
