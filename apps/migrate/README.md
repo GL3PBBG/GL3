@@ -54,6 +54,59 @@ Flags:
   `--mysql` prints the two commands to load the dump into a scratch MySQL/MariaDB
   instance and re-run against that instead.
 
+## The MCCodes dialect (`--mccodes`)
+
+`gl3-migrate` is bilingual. `--mccodes` switches the source dialect from GL2/V2
+to MCCodes v2 — the fingerprint then requires MCCodes' own table shapes
+(`users.userid`/`userpass`, `userstats`, `staff_roles`, ...), so pointing the
+wrong flag at the wrong database fails before anything is written.
+
+Rules specific to this dialect:
+
+- **One source per target.** The MCCodes id_map keys share the table namespace
+  with V2's; never run both dialects into the same GL3 database.
+- **Boot-once contract.** Run the target GL3 server once (with the MCCodes
+  plugin family installed — `houses`, `education`, `jobs`, `inventory`,
+  `combat`, `mccodes-attributes` and friends) *before* migrating, so the
+  plugin migrations have created the `p_*` tables the content phases write.
+  Sections whose target tables are absent skip and are listed under
+  `absentTargetTables`.
+- **Eight phases, V2's dependency law:** roles → world/content (items, crimes
+  with the `crimePERCFORM` formula translation, houses/courses/jobs catalogs)
+  → players → progress → gangs → inventory → social/forum → logs → settings.
+  Content runs before players so the equipment classifier resolves against
+  migrated items.
+
+Documented divergences from a byte-identical port:
+
+- **Shop stock**: MCCodes shops are infinite; GL3's stock column is finite, so
+  listings import with a 2,000,000,000 sentinel (admin-restockable).
+- **Both-armed players**: every MCCodes weapon is melee-model, and GL3 keeps
+  one melee slot — a player with two equipped weapons keeps the primary, and
+  the merge is reported per player (`equipMerges`).
+- **Bank fold**: `bankmoney` + `cybermoney` fold into the one GL3 bank, split
+  recorded per player (`bankFoldSplits`); `-1` means never-opened.
+- **Formulas**: `crimePERCFORM` imports verbatim where GL3's five-token
+  dialect accepts it; a rejected formula imports NULL (the crime stays
+  playable through the skill path) and the original is in the report
+  (`percformRejects`) for manual rewrite.
+- **No war model**: `gangwars`/`surrenders`/`orgcrimes`/`oclogs` drop with
+  counted report entries; gang `respect`/`points` import as data.
+- **Mail is flat**: MCCodes has no threads; each message is its own thread.
+- **Forum `ff_auth` gate**: only `public` forums import — GL3's forum has no
+  per-forum permission column, so `staff`/`gang` forums (and everything filed
+  under them) skip wholesale rather than leak.
+- **Logs**: `attacklogs` import into `p_combat_log` (the `stole` −1/−2
+  sentinels are recorded per row for the deferred KO-outcome wave); every
+  transfer/commerce/staff log, the markets, IPN and cron bookkeeping drop
+  with counted entries — the GL3 ledger is append-only and opening balances
+  are seeded, so imported history would be fabricated, not migrated.
+- **Settings**: only keys with a live GL3 surface migrate, stored namespaced
+  (`ct_refillprice` → `temple.refill_points`, ...); the rest drop by name.
+- **Legacy login**: migrated players sign in with their MCCodes password
+  through the `md5(salt + md5(pass))` (or older unsalted) branch and are
+  upgraded to argon2id on first login, exactly like V2's.
+
 ## Re-running
 
 The whole run is idempotent. Every V2 auto-increment id is resolved to a stable GL3

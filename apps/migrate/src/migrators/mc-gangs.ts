@@ -105,11 +105,18 @@ export async function migrateMcGangs(pool: mysql.Pool, exec: Executor, report: M
     "SELECT COUNT(*) AS n FROM surrenders");
   const [ocCount] = await pool.query<(mysql.RowDataPacket & { n: number })[]>(
     "SELECT COUNT(*) AS n FROM orgcrimes");
+  const [ocLogCount] = await pool.query<(mysql.RowDataPacket & { n: number })[]>(
+    "SELECT COUNT(*) AS n FROM oclogs");
+  // Applications don't fit gang_invites: an MCCodes application is
+  // self-initiated (no inviter row to satisfy invited_by), the inverse flow.
+  const [appCount] = await pool.query<(mysql.RowDataPacket & { n: number })[]>(
+    "SELECT COUNT(*) AS n FROM applications");
   recordDroppedColumns(report, "gangs", [
     "gangPREF", "gangSUFF", "gangCAPACITY", "gangCRIME", "gangCHOURS", "gangAMENT",
   ], gangRows.length);
   recordDroppedColumns(report, "gangwars", ["*"], Number(warCount[0]?.n ?? 0));
   recordDroppedColumns(report, "surrenders", ["*"], Number(surrenderCount[0]?.n ?? 0));
   recordDroppedColumns(report, "orgcrimes", ["*"], Number(ocCount[0]?.n ?? 0));
-  recordDroppedColumns(report, "oclogs", ["*"], Number(ocCount[0]?.n ?? 0));
+  recordDroppedColumns(report, "oclogs", ["*"], Number(ocLogCount[0]?.n ?? 0));
+  recordDroppedColumns(report, "applications", ["*"], Number(appCount[0]?.n ?? 0));
 }

@@ -169,11 +169,13 @@ describe("mccodes dialect — B3 (content, progression, gangs)", () => {
       expect(logs).toHaveLength(1);
       expect(logs[0]!.message).toBe("The vault received a donation.");
 
-      // Wars/surrenders/orgcrimes drop with counted report entries.
+      // Wars/surrenders/orgcrimes drop with counted report entries. (B4's
+      // sweep adds many more "*" drops, so containment, not equality.)
       const dropped = run.report.droppedColumns.filter((d) => d.columns.includes("*"));
-      expect(dropped.map((d) => d.table).sort())
-        .toEqual(["gangwars", "oclogs", "orgcrimes", "surrenders"]);
+      expect(dropped.map((d) => d.table)).toEqual(
+        expect.arrayContaining(["gangwars", "oclogs", "orgcrimes", "surrenders", "applications"]));
       expect(dropped.find((d) => d.table === "gangwars")!.rows).toBe(1);
+      expect(dropped.find((d) => d.table === "oclogs")!.rows).toBe(1);
     } finally {
       await run.teardown();
     }

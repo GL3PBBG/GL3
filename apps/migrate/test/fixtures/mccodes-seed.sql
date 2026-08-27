@@ -88,7 +88,9 @@ INSERT INTO items (itmid, itmtype, itmname, itmdesc, itmbuyprice, itmsellprice,
   0, '', 0, '', 0, 0);
 INSERT INTO shops VALUES (1, 1, 'Corner Store', 'Everything a criminal needs.');
 INSERT INTO shopitems VALUES (1, 1, 1), (2, 1, 3);
-INSERT INTO inventory VALUES (1, 1, 1, 1), (2, 3, 1, 1), (3, 4, 1, 3), (4, 2, 2, 1);
+-- Row 5 references item 99, which does not exist — the B4 orphan case.
+INSERT INTO inventory VALUES (1, 1, 1, 1), (2, 3, 1, 1), (3, 4, 1, 3), (4, 2, 2, 1),
+                             (5, 99, 1, 2);
 
 INSERT INTO gangs VALUES (1, 'The Syndicate', 'Old money, older grudges.', 'Wise', 'Guy',
   750000, 30, 240, 2, 1, 10, 0, 0, '');
@@ -112,13 +114,16 @@ INSERT INTO announcements VALUES ('Welcome to the game.', 1754000000),
 
 INSERT INTO forum_forums (ff_id, ff_name, ff_desc, ff_posts, ff_topics, ff_lp_time,
   ff_lp_poster_id, ff_lp_poster_name, ff_lp_t_id, ff_lp_t_name, ff_auth, ff_owner) VALUES
-(1, 'General', 'Public chat', 1, 1, 1755200000, 1, 'Muggy', 1, 'First topic', 'public', -1);
+(1, 'General', 'Public chat', 1, 1, 1755200000, 1, 'Muggy', 1, 'First topic', 'public', -1),
+(2, 'Staff Room', 'Staff only', 1, 1, 1755300000, 2, 'BigSal', 2, 'Staff topic', 'staff', -1);
 INSERT INTO forum_topics (ft_id, ft_forum_id, ft_name, ft_desc, ft_posts, ft_owner_id,
   ft_owner_name, ft_start_time, ft_last_id, ft_last_name, ft_last_time, ft_pinned, ft_locked) VALUES
-(1, 1, 'First topic', '', 1, 1, 'Muggy', 1755200000, 1, 'Muggy', 1755200000, 0, 0);
+(1, 1, 'First topic', '', 1, 1, 'Muggy', 1755200000, 1, 'Muggy', 1755200000, 0, 0),
+(2, 2, 'Staff topic', '', 1, 2, 'BigSal', 1755300000, 2, 'BigSal', 1755300000, 0, 0);
 INSERT INTO forum_posts (fp_id, fp_topic_id, fp_forum_id, fp_poster_id, fp_poster_name,
   fp_time, fp_subject, fp_text) VALUES
-(1, 1, 1, 1, 'Muggy', 1755200000, 'Hello', 'First post!');
+(1, 1, 1, 1, 'Muggy', 1755200000, 'Hello', 'First post!'),
+(2, 2, 2, 2, 'BigSal', 1755300000, 'Secrets', 'Staff-only business.');
 
 -- The three `stole` shapes: a mug amount, the hospitalized sentinel (-1), the
 -- left sentinel (-2).

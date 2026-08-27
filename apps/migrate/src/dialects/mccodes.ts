@@ -12,6 +12,10 @@ import { migrateMcCrimes } from "../migrators/mc-crimes.js";
 import { migrateMcHousesEducationJobs, migrateMcProgress } from "../migrators/mc-houses-education-jobs.js";
 import { migrateMcPlayers } from "../migrators/mc-players.js";
 import { migrateMcGangs } from "../migrators/mc-gangs.js";
+import { migrateMcInventory } from "../migrators/mc-inventory.js";
+import { migrateMcForum, migrateMcSocial } from "../migrators/mc-social.js";
+import { migrateMcLogs } from "../migrators/mc-logs.js";
+import { migrateMcSettings } from "../migrators/mc-settings.js";
 import type { RunMigrationOptions, SourceDialect } from "./types.js";
 
 /**
@@ -48,7 +52,8 @@ function makeGuard(pool: mysql.Pool, report: MigrationReport, sourceTables: Set<
 }
 
 async function runMccodes({ mysql: pool, db, report, dryRun }: RunMigrationOptions): Promise<void> {
-  const guard = makeGuard(pool, report, await readSourceTables(pool));
+  const sourceTables = await readSourceTables(pool);
+  const guard = makeGuard(pool, report, sourceTables);
 
   // The target-table inventory the plugin-table migrators consult (a
   // family-less boot skips those sections with a report entry, not a 42P01).
@@ -83,6 +88,26 @@ async function runMccodes({ mysql: pool, db, report, dryRun }: RunMigrationOptio
 
   // Phase 4: gangs (fills player_stats.gang_id + gang_members).
   await runPhase(db, dryRun, guard(["gangs", "gangevents"])((tx) => migrateMcGangs(pool, tx, report)));
+
+  // Phase 5: inventory (items and players both settled above).
+  await runPhase(db, dryRun, guard(["inventory"])((tx) => migrateMcInventory(pool, tx, report)));
+
+  // Phase 6: social, then the forum trilogy (its own guard — a source
+  // stripped of forums still migrates its mail).
+  await runPhase(db, dryRun, guard(["mail", "events", "announcements", "friendslist", "blacklist", "contactlist"])(
+    (tx) => migrateMcSocial(pool, tx, report),
+  ));
+  await runPhase(db, dryRun, guard(["forum_forums", "forum_topics", "forum_posts"])(
+    (tx) => migrateMcForum(pool, tx, report, target),
+  ));
+
+  // Phase 7: logs — attacklogs import plus the wholesale drop sweep.
+  await runPhase(db, dryRun, guard(["attacklogs"])(
+    (tx) => migrateMcLogs(pool, tx, report, sourceTables, target),
+  ));
+
+  // Phase 8: settings (the temple namespace mapping).
+  await runPhase(db, dryRun, guard(["settings"])((tx) => migrateMcSettings(pool, tx, report)));
 }
 
 export const mccodesDialect: SourceDialect = {
