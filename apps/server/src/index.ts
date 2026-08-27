@@ -143,7 +143,7 @@ await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config
 // player-cash tax is not something an openPBBG-shaped game inherits silently.
 // Asset GC is not gameplay — avatars and plugin art exist in every profile —
 // so it alone rides the switch under framework.
-if (config.profile === "full" && config.sweepIntervalMs > 0) {
+if (config.profile !== "framework" && config.sweepIntervalMs > 0) {
   startSentenceSweeper({
     db, redis, intervalMs: config.sweepIntervalMs,
     onError: (error) => { app.log.error({ err: error }, "sentence sweep failed"); },

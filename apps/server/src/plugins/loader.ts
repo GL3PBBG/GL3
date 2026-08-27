@@ -37,7 +37,7 @@ export async function loadPlugins(
   deps: LoadPluginsDeps,
   manifests: readonly PluginManifest[],
   queuePrefix = "",
-  profile: Gl3Profile = "full",
+  profile: Gl3Profile = "v2",
 ): Promise<LoadedPlugins> {
   validatePlugins(manifests);
   await runPluginMigrations(deps.db, manifests);

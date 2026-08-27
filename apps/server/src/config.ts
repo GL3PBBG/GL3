@@ -19,15 +19,18 @@ const EnvSchema = z.object({
     { message: "CORS_ORIGINS must not contain a wildcard \"*\" — spec §7 requires a strict allowlist" },
   ),
   /**
-   * Which bundled plugins load at boot. `full` (default) loads every
-   * first-party plugin — the gangster game, unchanged. `framework` loads
-   * only the game-agnostic set (ranks, notifications, news, bank, mail,
-   * forum, inventory, membership), skips jail/hospital, the sentence
-   * sweeper, the wealth tax and the gameplay seeds — an openPBBG-shaped
-   * engine that gameplay plugins can be added back onto via PLUGIN_IDS
-   * (e.g. `GL3_PROFILE=framework PLUGIN_IDS=crimes`).
+   * Which of the four game modes this boot serves. `gl3` is the flagship
+   * hybrid — every bundled plugin, curated (see the gl3-hybrid-profile
+   * spec). `v2` is the Gangster Legends V2 port (the profile formerly
+   * named `full` — that name no longer parses). `mccodes` is the
+   * MCCodes-parity game (the attribute family plus crimes/combat/travel).
+   * `framework` loads only the game-agnostic set (ranks, notifications,
+   * news, bank, mail, forum, inventory, membership), skips jail/hospital,
+   * the sentence sweeper, the wealth tax and the gameplay seeds — an
+   * openPBBG-shaped engine that gameplay plugins can be added back onto
+   * via PLUGIN_IDS (e.g. `GL3_PROFILE=framework PLUGIN_IDS=crimes`).
    */
-  GL3_PROFILE: z.enum(["full", "framework"]).default("full"),
+  GL3_PROFILE: z.enum(["gl3", "v2", "mccodes", "framework"]).default("v2"),
   /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
   PLUGIN_IDS: z.string().default(""),
   /**
@@ -115,8 +118,9 @@ export interface Config {
   sessionTtlSeconds: number;
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
-  /** `full` = every bundled plugin; `framework` = the game-agnostic subset. */
-  profile: "full" | "framework";
+  /** The game mode: `gl3` (hybrid union), `v2` (the GL2 port), `mccodes`
+   *  (the MCCodes-parity set), `framework` (game-agnostic subset). */
+  profile: "gl3" | "v2" | "mccodes" | "framework";
   pluginIds: string[];
   /** Package specifiers imported at boot from outside this build. */
   pluginPackages: string[];

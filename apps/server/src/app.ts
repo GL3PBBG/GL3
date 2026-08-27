@@ -90,7 +90,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // not framework. A framework boot registers neither; nothing can sentence a
   // player there (no crimes, no combat), so the routes would be dead weight
   // answering with never-set state.
-  if (config.profile === "full") {
+  if (config.profile !== "framework") {
     // The thunk, not `loaded.manifests` itself — same reason as the auth
     // routes above: `loaded` is assigned after this registration runs.
     registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, () => loaded!.manifests);

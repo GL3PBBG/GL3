@@ -25,7 +25,7 @@ export interface PluginsPayload {
 }
 
 /** Which bundled set a boot loaded — see `plugins/core-plugins.ts`. */
-export type Gl3Profile = "full" | "framework";
+export type Gl3Profile = "gl3" | "v2" | "mccodes" | "framework";
 
 /**
  * Core-owned gameplay screens that ride the plugin payload so the client
@@ -49,7 +49,7 @@ const FULL_PROFILE_CORE_PAGES = [
  */
 export function buildPluginsPayload(
   manifests: readonly PluginManifest[],
-  profile: Gl3Profile = "full",
+  profile: Gl3Profile = "v2",
 ): PluginsPayload {
   const menu: MenuItem[] = [];
   const pages: PagePayload[] = [];
@@ -90,7 +90,7 @@ export function buildPluginsPayload(
     }
   }
 
-  if (profile === "full") {
+  if (profile !== "framework") {
     for (const page of FULL_PROFILE_CORE_PAGES) {
       pages.push({
         pluginId: "core", id: page.id, path: `/plugins/${page.id}`,

@@ -15,7 +15,7 @@ import { attachGateway } from "../../src/ws/gateway.js";
 import { testAssetDriver } from "./assets.js";
 
 export async function bootTestServer(
-  options?: { plugins?: readonly PluginManifest[]; profile?: "full" | "framework" },
+  options?: { plugins?: readonly PluginManifest[]; profile?: "gl3" | "v2" | "mccodes" | "framework" },
 ): Promise<{
   app: FastifyInstance;
   close: () => Promise<void>;
@@ -28,7 +28,7 @@ export async function bootTestServer(
 }> {
   // GL3_PROFILE is pinned per call, not inherited: an ambient variable in a
   // developer's shell must not flip a test file's plugin set.
-  const config = loadConfig({ ...process.env, NODE_ENV: "test", GL3_PROFILE: options?.profile ?? "full" });
+  const config = loadConfig({ ...process.env, NODE_ENV: "test", GL3_PROFILE: options?.profile ?? "v2" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
 
@@ -80,12 +80,12 @@ export async function bootTestServer(
 
   const loadedPlugins = await loadPlugins(
     { db, redis, settings: loadedTestSettings, leaderboardPrefix, assetDriver },
-    // Full-profile boots keep the historical merge (every bundled plugin plus
-    // the caller's extras); a framework boot loads the game-agnostic subset —
-    // the same selection production makes through bundledPlugins.
-    options?.profile === "framework"
-      ? bundledPlugins("framework", options.plugins ?? [])
-      : withCorePlugins(options?.plugins ?? []),
+    // v2 boots keep the historical merge (every v2 bundled plugin plus the
+    // caller's extras, via withCorePlugins); any other profile loads exactly
+    // the selection production makes through bundledPlugins.
+    options?.profile === undefined || options.profile === "v2"
+      ? withCorePlugins(options?.plugins ?? [])
+      : bundledPlugins(options.profile, options.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
     config.profile,
   );
