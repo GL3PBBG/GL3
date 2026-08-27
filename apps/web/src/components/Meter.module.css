@@ -1,4 +1,7 @@
 .meter { display: flex; flex-direction: column; gap: 0.15rem; min-width: 5rem; }
+/* The Shell's icon HUD: bar only, sized to sit beside a 15px glyph. */
+.compact { min-width: 2.6rem; }
+.compact .meterTrack { height: 0.3rem; }
 .meterLabel {
   font-size: 0.7rem;
   letter-spacing: 0.06em;

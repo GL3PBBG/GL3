@@ -11,13 +11,19 @@ import styles from "./Meter.module.css";
  * `aria-valuenow`/`aria-valuemax` carry the raw, unclamped numbers: they are
  * the fact being reported, not the drawn approximation of it.
  */
-export function Meter({ label, value, max }: { label: string; value: number; max: number }): JSX.Element {
+export function Meter({ label, value, max, compact = false }: {
+  label: string; value: number; max: number;
+  /** The Shell's icon HUD: no text caption (the caller pairs the bar with
+   * an icon and a tooltip), a narrower track. aria-label still carries the
+   * full label, so the compact bar reads identically to a screen reader. */
+  compact?: boolean;
+}): JSX.Element {
   const safeMax = max > 0 ? max : 1;
   const clamped = Math.min(Math.max(value, 0), safeMax);
   const pct = (clamped / safeMax) * 100;
   return (
-    <div className={styles.meter}>
-      <span className={styles.meterLabel}>{label}</span>
+    <div className={compact ? `${styles.meter} ${styles.compact}` : styles.meter} title={`${label} ${value}/${max}`}>
+      {compact ? null : <span className={styles.meterLabel}>{label}</span>}
       <div
         className={styles.meterTrack}
         role="progressbar"

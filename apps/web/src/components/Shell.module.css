@@ -48,21 +48,34 @@
   background: var(--fg);
 }
 
-/* The HUD in related pairs — money, combat, progression — rather than ten
-   same-weight stats in one line: the dividers, not spacing, carry the
-   grouping. */
-.hud { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; margin-left: auto; }
+/* The HUD in related pairs — money, combat, pools, progression — icons
+   carrying the identity, dividers carrying the grouping. Centered, not
+   baseline: glyphs and slim pool bars have no baseline to share. */
+.hud { display: flex; gap: 0.85rem; flex-wrap: wrap; align-items: center; margin-left: auto; }
 .hudGroup {
   display: flex;
-  gap: 0.9rem;
+  gap: 0.7rem;
   flex-wrap: wrap;
-  align-items: baseline;
-  padding-right: 1rem;
+  align-items: center;
+  padding-right: 0.85rem;
   border-right: 1px solid var(--line);
 }
 .hud .hudGroup:last-child { border-right: 0; padding-right: 0; }
-.stat { display: inline-flex; gap: 0.35rem; align-items: baseline; }
+.stat { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.9rem; }
+.stat svg { color: var(--muted); flex: none; }
 .statLabel { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Screen-reader-only label text for icon stats — the standard clip recipe. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* The account chip replaces the old "Player" stat and header log-out button:
    identity plus its menu, where a log-out belongs. */

@@ -14,6 +14,7 @@ import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
 import { Meter } from "./Meter.js";
+import { HudIcon } from "./HudIcon.js";
 import { NavMenu } from "./NavMenu.js";
 import { Amount, Money } from "./ui.js";
 import { SlotImage } from "./GameImage.js";
@@ -27,22 +28,35 @@ import type { PlayerAttributesDto } from "@gl3/shared";
  * byte-identical to before this feature existed.
  */
 function PoolBars({ attributes }: { attributes: PlayerAttributesDto }): JSX.Element {
-  const pools: readonly [string, number, number][] = [
-    ["Energy", attributes.energy, attributes.energyMax],
-    ["Will", attributes.will, attributes.willMax],
-    ["Brave", attributes.brave, attributes.braveMax],
+  const pools: readonly [string, string, number, number][] = [
+    ["energy", "Energy", attributes.energy, attributes.energyMax],
+    ["will", "Will", attributes.will, attributes.willMax],
+    ["brave", "Brave", attributes.brave, attributes.braveMax],
   ];
   return (
     <div className={styles.hudGroup}>
-      {pools.map(([label, value, max]) => <Meter key={label} label={label} value={value} max={max} />)}
+      {pools.map(([icon, label, value, max]) => (
+        <span key={icon} className={styles.stat}>
+          <HudIcon id={icon} />
+          <Meter label={label} value={value} max={max} compact />
+        </span>
+      ))}
     </div>
   );
 }
 
-function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+/**
+ * One HUD stat: a glyph, the value, and the label demoted to a tooltip plus
+ * visually-hidden text — a screen reader hears "Cash $209,980" exactly as
+ * the old text HUD read, while the strip fits one line. An `icon` the glyph
+ * table doesn't know renders nothing and the label text stands alone, so a
+ * plugin-supplied entry never loses its meaning to a missing picture.
+ */
+function Stat({ icon, label, children }: { icon?: string; label: string; children: ReactNode }): JSX.Element {
   return (
-    <span className={styles.stat}>
-      <span className={styles.statLabel}>{label}</span>
+    <span className={styles.stat} title={label}>
+      {icon !== undefined ? <HudIcon id={icon} /> : null}
+      <span className={icon !== undefined ? styles.srOnly : styles.statLabel}>{label}</span>
       {children}
     </span>
   );
@@ -280,26 +294,26 @@ export function Shell(): JSX.Element {
           <h1 className={styles.brand}>GL3</h1>
           <div className={styles.hud}>
             <div className={styles.hudGroup}>
-              <Stat label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
-              <Stat label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
+              <Stat icon="cash" label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>
+              <Stat icon="bank" label="Bank">{me.data ? <Money value={me.data.bank} /> : "—"}</Stat>
             </div>
             {/* Feature detection via the plugins payload: a stat whose
                 owning plugin is absent (framework boot: no combat, no
                 travel) would be a permanent zero/Nowhere readout. Undefined
                 while the payload loads — show, then hide if absent. */}
             <div className={styles.hudGroup}>
-              {showBullets ? <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat> : null}
-              <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
+              {showBullets ? <Stat icon="bullet" label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat> : null}
+              <Stat icon="points" label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
             </div>
             {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
             <div className={styles.hudGroup}>
-              <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
-              {showLocation ? <Stat label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
+              <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
+              {showLocation ? <Stat icon="location" label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
             </div>
             {(hudExtras.data?.entries ?? []).length > 0 ? (
               <div className={styles.hudGroup}>
                 {(hudExtras.data?.entries ?? []).map((entry) => (
-                  <Stat key={`${entry.pluginId}:${entry.label}`} label={entry.label}>
+                  <Stat key={`${entry.pluginId}:${entry.label}`} icon="clock" label={entry.label}>
                     {entry.countdownTo !== undefined
                       ? <CountdownValue to={entry.countdownTo} />
                       : entry.value}
