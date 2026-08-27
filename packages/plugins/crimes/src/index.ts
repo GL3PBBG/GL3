@@ -158,6 +158,10 @@ const commitRoute = route({
   method: "POST",
   path: "/api/crimes/:crimeId/commit",
   accessInJail: false,
+  // Hospital blocks crimes exactly as jail does (V2 behavior). This route
+  // predates the accessInHospital field (default true) and was the one
+  // gameplay action a hospitalised player could still take.
+  accessInHospital: false,
   params: CommitCrimeParamsSchema,
   handler: async (ctx, { params }) => {
     const player = ctx.player;

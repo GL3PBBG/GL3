@@ -133,6 +133,22 @@ describe("POST /api/crimes/:crimeId/commit while jailed", () => {
   });
 });
 
+describe("POST /api/crimes/:crimeId/commit while hospitalised", () => {
+  it("423s hospitalised and does not enqueue a job", async () => {
+    // Same gate class as jail above: the loader's accessInHospital pass.
+    // Crimes shipped before that field existed and was never retrofitted —
+    // a hospitalised player could commit crimes (found live 2026-08-27).
+    const future = new Date(Date.now() + 60_000);
+    await db.update(playerStats).set({ hospitalUntil: future }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({ method: "POST", url: `/api/crimes/${crimeId}/commit`, headers: auth });
+    expect(res.statusCode).toBe(423);
+    expect(res.json()).toMatchObject({ error: "hospitalised" });
+
+    await db.update(playerStats).set({ hospitalUntil: null }).where(eq(playerStats.playerId, playerId));
+  });
+});
+
 describe("plugin commit job — jail and rank-up wiring", () => {
   it("jails the player on a crime whose failure rolls jail, and reports it on crime.resolved", async () => {
     const [armouredVan] = await db.select().from(crimes).where(eq(crimes.name, "Armoured Van"));
