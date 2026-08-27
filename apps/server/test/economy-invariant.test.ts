@@ -52,7 +52,7 @@ let shopItemId: string;
 
 beforeAll(async () => {
   await resetDb(db);
-  await seedCrimes(db);
+  await seedCrimes(db, "v2");
   await seedRanks(db);
   await seedLocations(db);
   // p_inventory_shop_stock and p_combat_log are plugin-owned tables (via

@@ -24,7 +24,7 @@ beforeAll(async () => {
   wsBase = `ws://127.0.0.1:${port}/ws`;
 });
 afterAll(async () => { await closeServer(); await conn.end(); });
-beforeEach(async () => { await resetDb(db); await seedCrimes(db); });
+beforeEach(async () => { await resetDb(db); await seedCrimes(db, "v2"); });
 
 async function register(username: string): Promise<{ token: string; playerId: string }> {
   return registerVerifiedPlayer({ app, redis }, { username });

@@ -26,7 +26,7 @@ let crimeId: string;
 
 beforeEach(async () => {
   await resetDb(db);
-  await seedCrimes(db);
+  await seedCrimes(db, "v2");
 
   playerId = uuidv7();
   await db.insert(players).values({ id: playerId, username: `idem-${playerId}` });

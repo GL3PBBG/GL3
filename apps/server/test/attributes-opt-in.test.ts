@@ -60,7 +60,7 @@ describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost 
   beforeEach(async () => {
     await resetDb(db);
     if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [declaresBrave] }));
-    await seedCrimes(db);
+    await seedCrimes(db, "v2");
     braveCrimeId = crypto.randomUUID();
     await db.insert(crimes).values({
       id: braveCrimeId, name: "Brave Heist", cooldownSeconds: 60,
@@ -148,7 +148,7 @@ describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost 
   it("ignores brave_cost entirely when no plugin declares the brave pool", async () => {
     const plainServer = await bootTestServer();
     try {
-      await seedCrimes(db);
+      await seedCrimes(db, "v2");
       const crimeId = crypto.randomUUID();
       await db.insert(crimes).values({
         id: crimeId, name: "Unpriced Heist", cooldownSeconds: 60,
@@ -177,7 +177,7 @@ describe("crimes.commit — opt-out baseline (no attribute plugin installed)", (
   beforeEach(async () => {
     await resetDb(db);
     if (!app) ({ app, close: closeServer } = await bootTestServer());
-    await seedCrimes(db);
+    await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;
   });
@@ -206,7 +206,7 @@ describe("crimes.commit — priced (an attribute-cost plugin is installed)", () 
   beforeEach(async () => {
     await resetDb(db);
     if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [pricesCrimesEnergy] }));
-    await seedCrimes(db);
+    await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;
   });
@@ -285,7 +285,7 @@ describe("crimes.commit job — the priced.length > 0 guard", () => {
   beforeEach(async () => {
     await resetDb(db);
     if (!app) ({ app, close: closeServer } = await bootTestServer());
-    await seedCrimes(db);
+    await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;
   });

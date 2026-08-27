@@ -29,7 +29,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await resetDb(db);
-  await seedCrimes(db);
+  await seedCrimes(db, "v2");
   ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Vito" }));
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
   crimeId = first!.id;

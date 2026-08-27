@@ -33,7 +33,7 @@ let auth: { authorization: string };
 beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, close: closeServer } = await bootTestServer());
-  await seedCrimes(db);
+  await seedCrimes(db, "v2");
 
   // A distinct remoteAddress keeps this suite's register-rate-limit bucket
   // from colliding with every other agent's tests hitting the shared

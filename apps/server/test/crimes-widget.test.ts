@@ -18,7 +18,7 @@ let crimeId: string;
 beforeEach(async () => {
   await resetDb(db);
   if (!app) ({ app, redis, close: closeServer } = await bootTestServer());
-  await seedCrimes(db);
+  await seedCrimes(db, "v2");
 
   const [first] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
   crimeId = first!.id;

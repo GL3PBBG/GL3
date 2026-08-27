@@ -83,7 +83,7 @@ describe("the ledger reconciles across a rollover", () => {
     }
 
     // --- move money through two real routes: crime commit, then bank deposit ---
-    await seedCrimes(db);
+    await seedCrimes(db, "v2");
     const [pickpocket] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     if (!pickpocket) throw new Error("Pickpocket crime not seeded");
 

@@ -2,7 +2,7 @@ import type { PluginManifest } from "@gl3/plugin-sdk";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { bootSeedsFor, seedCrimes, seedItems, seedLocations, seedRanks } from "./db/seed.js";
+import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, seedRanks, seedTempleExchanges } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
@@ -95,11 +95,15 @@ const dynamicManifests = assertNoIdCollisions(
 const manifests: PluginManifest[] = bundledPlugins(config.profile, [...optionalManifests, ...dynamicManifests]);
 
 // Sample content, gated on the plugins that read it — see bootSeedsFor.
-const seeds = bootSeedsFor(manifests.map((m) => m.id));
-if (seeds.crimes) await seedCrimes(db);
+// Family-table seeds run in a SECOND pass after loadPlugins below: the
+// plugin migrations that create the p_* tables have not run yet here.
+const seeds = bootSeedsFor(manifests.map((m) => m.id), config.profile);
+if (seeds.crimes) await seedCrimes(db, config.profile);
 await seedRanks(db);
 if (seeds.locations) await seedLocations(db);
 if (seeds.items) await seedItems(db);
+// Before loadSettings: the boot's own settings snapshot must see it.
+if (seeds.templeExchanges) await seedTempleExchanges(db);
 await rebuildLeaderboards(db, redis);
 
 const loadedSettings = await loadSettings(db);
@@ -123,6 +127,10 @@ const loadedPlugins = await loadPlugins(
   "",
   config.profile,
 );
+
+// The second seed pass: family plugin tables exist only now, after
+// loadPlugins ran the plugin migrations (see bootSeedsFor's first pass).
+if (seeds.family) await seedFamilyContent(db, manifests.map((m) => m.id));
 
 // Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
 // fallback (see the comment at that seam in app.ts): production keeps its
