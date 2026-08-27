@@ -56,9 +56,14 @@ export function trainSession(
   return { gain, willDrained };
 }
 
+// `reps` is a digit STRING, not z.number(): the page's form renderer
+// submits every field as a string (PageRenderer builds
+// Record<string,string>), so a numeric schema rejects the route's own
+// declared form. Temple's PointsSchema is the same convention. Bounds
+// checked after parse; coercion is explicit, not zod-magic.
 const TrainBodySchema = z.object({
   stat: z.enum(TRAINABLE),
-  reps: z.number().int().positive().max(1000),
+  reps: z.string().regex(/^\d+$/, "must be a nonnegative integer string"),
 }).strict();
 
 /** The gym page's data feed — the meter and the four trained stats,
@@ -111,6 +116,8 @@ const trainRoute = route({
   handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    const reps = Number(body.reps);
+    if (reps < 1 || reps > 1000) throw new PluginError("invalid_reps", 400);
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
@@ -128,13 +135,13 @@ const trainRoute = route({
       const jailed = (status?.jailedUntil?.getTime() ?? 0) > now;
 
       const attrs = await tx.attributes.read(player.id);
-      if (attrs.energy < body.reps) throw new PluginError("insufficient_energy", 409);
+      if (attrs.energy < reps) throw new PluginError("insufficient_energy", 409);
 
-      const session = trainSession({ int: (min, max) => randomInt(min, max) }, attrs.will, body.reps);
+      const session = trainSession({ int: (min, max) => randomInt(min, max) }, attrs.will, reps);
       const gain = jailed ? session.gain / 2 : session.gain;
       const applied = BigInt(Math.round(gain));
 
-      await tx.attributes.spend(player.id, "energy", body.reps);
+      await tx.attributes.spend(player.id, "energy", reps);
       if (session.willDrained > 0) await tx.attributes.spend(player.id, "will", session.willDrained);
       const next = await tx.attributes.train(player.id, body.stat satisfies TrainedAttr, applied);
 
@@ -144,7 +151,7 @@ const trainRoute = route({
           stat: body.stat,
           gain: applied.toString(),
           next: next.toString(),
-          energySpent: body.reps,
+          energySpent: reps,
           willDrained: session.willDrained,
         },
       };

@@ -41,9 +41,13 @@ describe("gym plugin", () => {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.11.1.1" });
       const auth = { authorization: `Bearer ${token}` };
 
+      // reps as a STRING: the page's form renderer submits every field as a
+      // string (PageRenderer builds Record<string,string>), so the route
+      // must accept exactly what its own declared form sends. A z.number()
+      // body here 400'd every real form submit (found live 2026-08-27).
       const res = await server.app.inject({
         method: "POST", url: "/api/gym/train", headers: auth,
-        payload: { stat: "strength", reps: 10 },
+        payload: { stat: "strength", reps: "10" },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().energySpent).toBe(10);
@@ -66,7 +70,7 @@ describe("gym plugin", () => {
       const res = await server.app.inject({
         method: "POST", url: "/api/gym/train",
         headers: { authorization: `Bearer ${token}` },
-        payload: { stat: "agility", reps: 20 },
+        payload: { stat: "agility", reps: "20" },
       });
       expect(res.statusCode).toBe(409);
       expect(res.json().error).toBe("insufficient_energy");
@@ -90,7 +94,7 @@ describe("gym plugin", () => {
       const res = await server.app.inject({
         method: "POST", url: "/api/gym/train",
         headers: { authorization: `Bearer ${jailed.token}` },
-        payload: { stat: "guard", reps: 5 },
+        payload: { stat: "guard", reps: "5" },
       });
       expect(res.statusCode).toBe(200);
 
@@ -101,7 +105,7 @@ describe("gym plugin", () => {
       const blocked = await server.app.inject({
         method: "POST", url: "/api/gym/train",
         headers: { authorization: `Bearer ${hospital.token}` },
-        payload: { stat: "guard", reps: 5 },
+        payload: { stat: "guard", reps: "5" },
       });
       expect(blocked.statusCode).toBe(423);
       expect(blocked.json().error).toBe("in_hospital");
