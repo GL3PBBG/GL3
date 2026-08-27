@@ -149,3 +149,7 @@
    other towns. Dimmed rather than hidden: knowing where the action is is the
    point, and the only control offered is the Travel link beside the list. */
 .remote { opacity: 0.55; }
+
+/* A keyValue label carrying a pool glyph (PageRenderer's PoolLabel). */
+.iconLabel { display: inline-flex; align-items: center; gap: 0.3rem; }
+.iconLabel svg { color: var(--muted); flex: none; }

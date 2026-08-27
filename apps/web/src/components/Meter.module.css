@@ -3,6 +3,9 @@
 .compact { min-width: 2.6rem; }
 .compact .meterTrack { height: 0.3rem; }
 .meterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;

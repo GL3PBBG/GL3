@@ -1,4 +1,5 @@
 import styles from "./Meter.module.css";
+import { HudIcon, poolIconFor } from "./HudIcon.js";
 
 /**
  * A labeled progress bar. Shared by the `meter`/`meterSource` view nodes
@@ -23,7 +24,14 @@ export function Meter({ label, value, max, compact = false }: {
   const pct = (clamped / safeMax) * 100;
   return (
     <div className={compact ? `${styles.meter} ${styles.compact}` : styles.meter} title={`${label} ${value}/${max}`}>
-      {compact ? null : <span className={styles.meterLabel}>{label}</span>}
+      {compact ? null : (
+        <span className={styles.meterLabel}>
+          {/* The same glyph the Shell's HUD uses for this pool, so the gym
+              page's "Energy" bar and the header bar read as one thing. */}
+          {poolIconFor(label) !== null ? <HudIcon id={poolIconFor(label)!} /> : null}
+          {label}
+        </span>
+      )}
       <div
         className={styles.meterTrack}
         role="progressbar"

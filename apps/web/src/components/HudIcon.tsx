@@ -28,6 +28,20 @@ const PATHS: Record<string, readonly string[]> = {
   clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18", "M12 7v5l3 2"],
 };
 
+/**
+ * The pool glyph a label earns, or null. Prefix-matched ("Will ceiling" on
+ * the houses page gets the will eye) so every meter and keyValue row that
+ * names a pool teaches the same glyph the Shell's HUD uses — familiarity by
+ * repetition, no schema field needed.
+ */
+export function poolIconFor(label: string): string | null {
+  const l = label.trim().toLowerCase();
+  for (const pool of ["energy", "will", "brave"]) {
+    if (l.startsWith(pool)) return pool;
+  }
+  return null;
+}
+
 export function HudIcon({ id }: { id: string }): JSX.Element | null {
   const paths = PATHS[id];
   if (paths === undefined) return null;

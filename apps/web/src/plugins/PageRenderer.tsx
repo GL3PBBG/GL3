@@ -4,6 +4,7 @@ import { ApiError, api } from "../api/client.js";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
+import { HudIcon, poolIconFor } from "../components/HudIcon.js";
 import { Meter } from "../components/Meter.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
@@ -446,12 +447,20 @@ export function KeyValueSourceBlock({ source, entries, emptyText, refetchSignal 
     <dl>
       {present.map((entry) => (
         <div key={entry.key}>
-          <dt className={styles.meta}>{entry.label}</dt>
+          <dt className={styles.meta}><PoolLabel label={entry.label} /></dt>
           <dd>{values[entry.key]}</dd>
         </div>
       ))}
     </dl>
   );
+}
+
+/** A keyValue label, with the Shell HUD's pool glyph prepended when the
+ * label names a pool — the same familiarity-by-repetition the meters get. */
+function PoolLabel({ label }: { label: string }): JSX.Element {
+  const icon = poolIconFor(label);
+  if (icon === null) return <>{label}</>;
+  return <span className={styles.iconLabel}><HudIcon id={icon} /> {label}</span>;
 }
 
 /**
@@ -827,7 +836,7 @@ export function PageRenderer({ instructions, onActionSuccess }: {
           <dl key={index}>
             {inst.rows.map((row, rowIndex) => (
               <div key={rowIndex}>
-                <dt className={styles.meta}>{row.label}</dt>
+                <dt className={styles.meta}><PoolLabel label={row.label} /></dt>
                 <dd>{row.value}</dd>
               </div>
             ))}
