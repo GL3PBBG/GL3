@@ -1,12 +1,14 @@
 # GL3
 
 A modern platform for persistent browser games, and the gangster game built
-on it. One codebase, two faces: `GL3_PROFILE=full` (the default) is the
+on it. One codebase, four faces: `GL3_PROFILE=gl3` (the default) is the
+flagship hybrid — everything below combined, curated; `GL3_PROFILE=v2` is the
 successor to [Gangster Legends V2](https://github.com/ChristopherDay/Gangster-Legends-V2);
-`GL3_PROFILE=framework` is the game-agnostic engine, the same module shape
-as [openPBBG](https://github.com/ChristopherDay/openPBBG) (the GL2 framework
-without the gangster game). Existing databases of either kind migrate in one
-command, players and passwords included. Documentation lives at
+`GL3_PROFILE=mccodes` is the MCCodes-parity game; and `GL3_PROFILE=framework`
+is the game-agnostic engine, the same module shape as
+[openPBBG](https://github.com/ChristopherDay/openPBBG) (the GL2 framework
+without the gangster game). Existing V2, openPBBG and MCCodes databases
+migrate in one command, players and passwords included. Documentation lives at
 **[docs.gl3.dev](https://docs.gl3.dev)**: tutorials, how-to guides, full API/DTO
 reference, and the design-decision record. A live demo runs at
 **[game.gl3.dev](https://game.gl3.dev)**.

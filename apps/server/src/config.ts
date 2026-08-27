@@ -30,7 +30,7 @@ const EnvSchema = z.object({
    * openPBBG-shaped engine that gameplay plugins can be added back onto
    * via PLUGIN_IDS (e.g. `GL3_PROFILE=framework PLUGIN_IDS=crimes`).
    */
-  GL3_PROFILE: z.enum(["gl3", "v2", "mccodes", "framework"]).default("v2"),
+  GL3_PROFILE: z.enum(["gl3", "v2", "mccodes", "framework"]).default("gl3"),
   /** Comma-separated list of plugin ids to load at boot (spec: Boot sequence step 1). */
   PLUGIN_IDS: z.string().default(""),
   /**
