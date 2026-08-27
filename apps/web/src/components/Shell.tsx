@@ -305,6 +305,18 @@ export function Shell(): JSX.Element {
               {showBullets ? <Stat icon="bullet" label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat> : null}
               <Stat icon="points" label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
             </div>
+            {/* Health rides its own group ahead of the pools: every profile
+                has it (combat whittles it), and it must not disappear with
+                the attribute family. Optional-chained for an older server
+                whose payload predates the field. */}
+            {me.data?.health !== undefined && me.data.healthMax !== undefined ? (
+              <div className={styles.hudGroup}>
+                <span className={styles.stat}>
+                  <HudIcon id="health" />
+                  <Meter label="Health" value={me.data.health} max={me.data.healthMax} compact />
+                </span>
+              </div>
+            ) : null}
             {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
             <div className={styles.hudGroup}>
               <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>

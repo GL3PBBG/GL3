@@ -17,6 +17,8 @@ const PATHS: Record<string, readonly string[]> = {
   bullet: ["M4 9h9l6 3-6 3H4Z", "M8 9v6"],
   // A cut diamond.
   points: ["M6 4h12l4 5-10 11L2 9Z", "M2 9h20", "m9 4 3 5 3-5", "m12 9-0 11"],
+  // Health — a heart, drawn plainly so it reads at 15px.
+  health: ["M12 20S4 14.5 4 9.5A4.5 4.5 0 0 1 12 6.6 4.5 4.5 0 0 1 20 9.5C20 14.5 12 20 12 20Z"],
   // Pools.
   energy: ["M13 2 5 13h5l-2 9 8-11h-5Z"],
   will: ["M12 5C7 5 3 9 2 12c1 3 5 7 10 7s9-4 10-7c-1-3-5-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6"],
@@ -36,7 +38,7 @@ const PATHS: Record<string, readonly string[]> = {
  */
 export function poolIconFor(label: string): string | null {
   const l = label.trim().toLowerCase();
-  for (const pool of ["energy", "will", "brave"]) {
+  for (const pool of ["energy", "will", "brave", "health"]) {
     if (l.startsWith(pool)) return pool;
   }
   return null;

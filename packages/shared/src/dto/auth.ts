@@ -61,6 +61,11 @@ export const MeResponseSchema = z.object({
   points: z.string(),
   bullets: z.string(),
   exp: z.string(),
+  // Optional for one reason only: a client at this version must keep
+  // parsing an older server's payload. Every current server sends both;
+  // the cap resolves health_max override ?? rank max_health ?? 100.
+  health: z.number().int().optional(),
+  healthMax: z.number().int().optional(),
   grants: z.array(z.string()),
   // Absent entirely (not null) when no plugin declares an attribute pool —
   // see PlayerAttributesDtoSchema.

@@ -8,7 +8,7 @@ import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
-import { players, playerStats, playerTimers, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
+import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
 import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
@@ -389,8 +389,11 @@ export function registerAuthRoutes(
       strength: playerStats.strength, agility: playerStats.agility,
       guard: playerStats.guard, labour: playerStats.labour,
       iq: playerStats.iq,
+      health: playerStats.health, healthMaxOverride: playerStats.healthMax,
+      rankMaxHealth: ranks.maxHealth,
     }).from(players)
       .innerJoin(playerStats, eq(playerStats.playerId, players.id))
+      .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
       .where(eq(players.id, playerId));
 
     if (!row) return reply.code(404).send({ error: "player_not_found" });
@@ -442,6 +445,10 @@ export function registerAuthRoutes(
       cash: row.cash.toString(), bank: row.bank.toString(),
       points: row.points.toString(),
       bullets: row.bullets.toString(), exp: row.exp.toString(),
+      // The cap resolves exactly as combat/hospital do: the 0017 per-player
+      // override (an MCCodes import's maxhp), else the rank's, else 100.
+      health: row.health,
+      healthMax: row.healthMaxOverride ?? row.rankMaxHealth ?? 100,
       grants,
       ...(attributes ? { attributes } : {}),
     });

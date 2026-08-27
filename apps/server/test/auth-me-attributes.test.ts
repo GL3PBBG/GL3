@@ -48,6 +48,26 @@ describe("GET /api/auth/me — attributes", () => {
     }
   });
 
+  it("carries health and the resolved cap in every profile", async () => {
+    // Health was only visible on combat/hospital pages — the HUD had no way
+    // to show the one stat combat whittles (found live 2026-08-27). The cap
+    // resolves health_max override ?? rank max_health ?? 100; a fresh player
+    // has no override and the seeded Associate rank's 100.
+    const server = await bootTestServer({ profile: "v2" });
+    try {
+      const { token } = await registerVerifiedPlayer(server, { remoteAddress: "10.9.2.5" });
+      const res = await server.app.inject({
+        method: "GET", url: "/api/auth/me",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().health).toBe(100);
+      expect(res.json().healthMax).toBe(100);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("seeds declared pools full at registration; the read stays display-only", async () => {
     const server = await bootTestServer({ profile: "v2", plugins: [gymPlugin] });
     try {
