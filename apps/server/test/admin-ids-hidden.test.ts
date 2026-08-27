@@ -48,10 +48,10 @@ describe("admin tables never display an id column", () => {
     // Guards the walker itself: a refactor that stopped finding adminPages
     // would make every assertion below vacuously pass. The floor equals
     // reality on this branch: nine plugins declare adminPages plus forum's
-    // `forum-admin` section, membership's `membership-admin` section and
-    // houses' `houses-admin` section, twelve total, plus roles and rounds
-    // hand-written here, is 14.
-    expect(sections.length).toBeGreaterThanOrEqual(14);
+    // `forum-admin` section, membership's `membership-admin` section,
+    // houses' `houses-admin` section and education's `education-admin`
+    // section, thirteen total, plus roles and rounds hand-written here, is 15.
+    expect(sections.length).toBeGreaterThanOrEqual(15);
   });
 
   for (const section of sections) {

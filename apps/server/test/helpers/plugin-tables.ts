@@ -156,6 +156,20 @@ export const houses = pgTable("p_houses", {
   will: integer("will").notNull(),
 });
 
+/** Mirrors `packages/plugins/education/src/migrations.ts` `0001_courses`. */
+export const courses = pgTable("p_courses", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  cost: bigint("cost", { mode: "bigint" }).notNull(),
+  days: integer("days").notNull(),
+  strengthGain: integer("strength_gain").notNull(),
+  agilityGain: integer("agility_gain").notNull(),
+  guardGain: integer("guard_gain").notNull(),
+  labourGain: integer("labour_gain").notNull(),
+  iqGain: integer("iq_gain").notNull(),
+});
+
 /** Mirrors `packages/plugins/membership/src/migrations.ts` `0001_packages`. */
 export const membershipPackages = pgTable("p_membership_packages", {
   id: uuid("id").primaryKey(),

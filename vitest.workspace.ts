@@ -337,6 +337,7 @@ export default defineWorkspace([
         "test/gl3-seeds.test.ts",
         "test/progression.test.ts",
         "test/education.test.ts",
+        "test/education-page.test.ts",
         "test/jobs.test.ts",
         "test/temple.test.ts",
         "test/bank-open-fee.test.ts",
