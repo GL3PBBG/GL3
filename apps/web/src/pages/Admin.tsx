@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { keys } from "../api/keys.js";
 import { useAdminSections } from "../api/queries.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import { PAGE_OVERRIDES } from "../plugins/overrides.js";
@@ -18,6 +20,7 @@ import styles from "./pages.module.css";
  */
 export function Admin(): JSX.Element {
   const sections = useAdminSections();
+  const queryClient = useQueryClient();
   // The section's pluginId, not an index: a grant change between refetches
   // reorders the list without silently switching the admin to another tab.
   const [active, setActive] = useState<string | null>(null);
@@ -58,6 +61,11 @@ export function Admin(): JSX.Element {
             <PageRenderer
               key={`${current.pluginId}:${page.id}`}
               instructions={instructions}
+              // Same seam as PluginPage: an admin edit (a price, a stock
+              // figure) can change what the chrome shows, and no event fires.
+              onActionSuccess={() => {
+                void queryClient.invalidateQueries({ queryKey: keys.me() });
+              }}
             />
           );
         })}

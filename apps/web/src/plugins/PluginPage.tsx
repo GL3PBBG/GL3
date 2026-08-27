@@ -1,4 +1,6 @@
 import { useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { keys } from "../api/keys.js";
 import { usePlugins } from "../api/queries.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import { PageRenderer } from "./PageRenderer.js";
@@ -17,6 +19,7 @@ import { renderNode } from "./render.js";
 export function PluginPage(): JSX.Element | null {
   const { pageId } = useParams();
   const plugins = usePlugins();
+  const queryClient = useQueryClient();
 
   if (plugins.isLoading) return <Loading />;
   if (plugins.isError) return <ErrorText error={plugins.error} />;
@@ -40,5 +43,21 @@ export function PluginPage(): JSX.Element | null {
   // Keyed by page id: without it, React reuses the PageRenderer instance
   // across a /plugins/a -> /plugins/b navigation, so formValues and the
   // error banner from page A survive onto page B.
-  return <PageRenderer key={page.id} instructions={instructions} />;
+  //
+  // onActionSuccess: most plugin routes publish no event, so nothing else
+  // invalidates the chrome — the Shell's pool bars and stat row (`me`) and
+  // the HUD/badge queries would sit stale after a train/buy/claim until an
+  // unrelated event happened to fire (gym's energy bar, found live
+  // 2026-08-27).
+  return (
+    <PageRenderer
+      key={page.id}
+      instructions={instructions}
+      onActionSuccess={() => {
+        void queryClient.invalidateQueries({ queryKey: keys.me() });
+        void queryClient.invalidateQueries({ queryKey: keys.hudExtras() });
+        void queryClient.invalidateQueries({ queryKey: keys.menuBadges() });
+      }}
+    />
+  );
 }

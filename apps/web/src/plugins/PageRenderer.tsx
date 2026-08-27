@@ -691,7 +691,18 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
  * Renders a flat list of RenderInstructions. Button/form actions are sent via
  * `api()` (the actions are `"METHOD /path"` strings declared in the schema).
  */
-export function PageRenderer({ instructions }: { instructions: readonly RenderInstruction[] }): JSX.Element {
+export function PageRenderer({ instructions, onActionSuccess }: {
+  instructions: readonly RenderInstruction[];
+  /**
+   * Fired after every 2xx action. The host (PluginPage/Admin) invalidates
+   * app-level queries here — the Shell's pool bars and stat row read `me`,
+   * and most plugin routes publish no event to invalidate it (gym's train
+   * left the energy bar stale, found live 2026-08-27). A prop, not
+   * useQueryClient in here, so the renderer stays mountable without a
+   * QueryClientProvider (every renderer test does exactly that).
+   */
+  onActionSuccess?: (() => void) | undefined;
+}): JSX.Element {
   const navigate = useNavigate();
   const [error, setError] = useState<unknown>(null);
   // Keyed `"<instructionIndex>:<fieldName>"`, not by bare field name: two forms
@@ -732,6 +743,7 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
       // Any successful action may have mutated table-backed data — bump
       // the signal so every TableBlock on this page re-fetches.
       setRefetchSignal((n) => n + 1);
+      onActionSuccess?.();
     } catch (caught) {
       // Kept as the thrown value, not flattened to `.message`: describeError
       // turns an ApiError into player copy ("Not ready yet — 30s to go.")

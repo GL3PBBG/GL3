@@ -75,3 +75,30 @@ describe("FormBlock prefill", () => {
     await waitFor(() => { expect(screen.getByLabelText("Cost")).toHaveProperty("value", "750"); });
   });
 });
+
+describe("action success notifies the host", () => {
+  // The Shell's chrome (pool bars, cash) reads app-level queries this
+  // signal lets the host invalidate.
+  it("calls onActionSuccess after a 2xx action", async () => {
+    stubFetch(() => ({ ok: true }));
+    const onActionSuccess = vi.fn();
+    render(createElement(MemoryRouter, null, createElement(PageRenderer, {
+      instructions: [{ kind: "button", label: "Train", action: "POST /api/gym/train" }],
+      onActionSuccess,
+    })));
+    fireEvent.click(screen.getByRole("button", { name: "Train" }));
+    await waitFor(() => { expect(onActionSuccess).toHaveBeenCalledTimes(1); });
+  });
+
+  it("does not call onActionSuccess when the action fails", async () => {
+    stubFetch(() => new Error("boom"));
+    const onActionSuccess = vi.fn();
+    render(createElement(MemoryRouter, null, createElement(PageRenderer, {
+      instructions: [{ kind: "button", label: "Train", action: "POST /api/gym/train" }],
+      onActionSuccess,
+    })));
+    fireEvent.click(screen.getByRole("button", { name: "Train" }));
+    await waitFor(() => { expect(screen.getByRole("alert")).toBeTruthy(); });
+    expect(onActionSuccess).not.toHaveBeenCalled();
+  });
+});
