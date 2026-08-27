@@ -42,6 +42,10 @@ describe("buildNav", () => {
     expect(crimes.items.map((i) => i.label)).toEqual(["Car theft"]);
     const account = nav.find((c) => c.id === "account")!;
     expect(account.items.map((i) => i.label)).toContain("Membership");
+    // Inventory is a core route (the item-economy cluster's hand-written
+    // page) that was reachable only by URL until the family-frontend wave
+    // made the gap visible — a personal-belongings entry, so Account.
+    expect(account.items.map((i) => i.label)).toContain("Inventory");
     // No unmapped plugin pages, so no trailing catch-all category.
     expect(nav.some((c) => c.id === "more")).toBe(false);
   });

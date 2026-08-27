@@ -89,6 +89,10 @@ const ACCOUNT: NavCategory = {
   items: [
     { to: "/profile", label: "Profile" },
     { to: "/stats", label: "Stats" },
+    // A core route since the item-economy cluster, but reachable only by
+    // URL until the family-frontend wave made the missing entry visible.
+    // Personal belongings, so Account — Town is places and services.
+    { to: "/inventory", label: "Inventory" },
     { to: "/ranks", label: "Ranks" },
     { to: "/leaderboards", label: "Leaderboards" },
     { to: "/rounds", label: "Rounds" },
