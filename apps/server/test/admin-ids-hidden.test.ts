@@ -48,9 +48,20 @@ describe("admin tables never display an id column", () => {
     // Guards the walker itself: a refactor that stopped finding adminPages
     // would make every assertion below vacuously pass. The floor equals
     // reality on this branch: nine plugins declare adminPages plus forum's
-    // `forum-admin` section, membership's `membership-admin` section,
-    // houses' `houses-admin` section and education's `education-admin`
-    // section, thirteen total, plus roles and rounds hand-written here, is 15.
+    // `forum-admin` section, membership's `membership-admin` section and
+    // houses' `houses-admin` section, twelve total, plus roles and rounds
+    // hand-written here, is 15 — the count does NOT include education's
+    // `education-admin` or jobs' `jobs-admin` sections despite the two
+    // preceding bumps' comments implying otherwise: `CORE_PLUGINS` below is
+    // `FRAMEWORK_PLUGINS + GAMEPLAY_PLUGINS` only
+    // (`apps/server/src/plugins/core-plugins.ts`) and never included the
+    // MCCODES family (gym/houses/education/jobs/temple/progression) —
+    // `toBeGreaterThanOrEqual` let both of those floor bumps land without
+    // the actual count ever moving. Each MCCODES-family plugin instead
+    // proves its own admin page id-hidden, in its own page test
+    // (`education-page.test.ts`, `houses-page.test.ts`,
+    // `jobs-page.test.ts`), which is where jobs' `jobs-admin` section is
+    // actually checked.
     expect(sections.length).toBeGreaterThanOrEqual(15);
   });
 

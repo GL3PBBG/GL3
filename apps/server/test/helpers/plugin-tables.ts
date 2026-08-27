@@ -170,6 +170,35 @@ export const courses = pgTable("p_courses", {
   iqGain: integer("iq_gain").notNull(),
 });
 
+/** Mirrors `packages/plugins/jobs/src/migrations.ts` `0001_jobs`. */
+export const jobCatalog = pgTable("p_jobs", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  firstRankId: uuid("first_rank_id").notNull(),
+});
+
+/** Mirrors `packages/plugins/jobs/src/migrations.ts` `0002_ranks`. */
+export const jobRanks = pgTable("p_job_ranks", {
+  id: uuid("id").primaryKey(),
+  jobId: uuid("job_id").notNull(),
+  name: text("name").notNull(),
+  pay: bigint("pay", { mode: "bigint" }).notNull(),
+  strengthGain: integer("strength_gain").notNull(),
+  labourGain: integer("labour_gain").notNull(),
+  iqGain: integer("iq_gain").notNull(),
+  strengthReq: integer("strength_req").notNull(),
+  labourReq: integer("labour_req").notNull(),
+  iqReq: integer("iq_req").notNull(),
+});
+
+/** Mirrors `packages/plugins/jobs/src/migrations.ts` `0003_employment`. */
+export const playerJobs = pgTable("p_player_jobs", {
+  playerId: uuid("player_id").primaryKey(),
+  rankId: uuid("rank_id").notNull(),
+  lastWageAt: timestamp("last_wage_at", { withTimezone: true }).notNull(),
+});
+
 /** Mirrors `packages/plugins/membership/src/migrations.ts` `0001_packages`. */
 export const membershipPackages = pgTable("p_membership_packages", {
   id: uuid("id").primaryKey(),

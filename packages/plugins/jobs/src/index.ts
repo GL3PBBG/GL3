@@ -1,8 +1,14 @@
 import { and, asc, desc, eq, gt, lte } from "drizzle-orm";
 import { bigint, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { JOBS_MIGRATIONS } from "./migrations.js";
-import { definePlugin, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { adminPage, jobsPage } from "./pages.js";
+import { coreHud, definePlugin, on, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+// Re-exported so `apps/server/test/jobs-page.test.ts` can assert against the
+// same page object rather than a hand-copied duplicate of its view tree —
+// the education/houses precedent.
+export { adminPage, jobsPage } from "./pages.js";
 
 const jobs = pgTable("p_jobs", {
   id: uuid("id").primaryKey(),
@@ -133,6 +139,70 @@ const listRoute = route({
   },
 });
 
+/**
+ * The catalog of ranks (job-grouped) plus the caller's current employment,
+ * composed from the same `settleWages`/`employmentWithRank` `mineRoute`
+ * uses — the education/houses board shape, reused rather than duplicated so
+ * a board read settles wages exactly like `/api/jobs/mine` does.
+ */
+const boardRoute = route({
+  method: "GET",
+  path: "/api/jobs/board",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      await tx.locks.player([player.id]);
+      await settleWages(tx, player.id);
+      const employed = await employmentWithRank(tx, player.id);
+
+      const rankRows = await tx.db.select({
+        id: ranks.id, jobId: ranks.jobId, jobName: jobs.name, rankName: ranks.name, pay: ranks.pay,
+        strengthReq: ranks.strengthReq, labourReq: ranks.labourReq, iqReq: ranks.iqReq,
+      })
+        .from(ranks)
+        .innerJoin(jobs, eq(jobs.id, ranks.jobId))
+        .orderBy(asc(jobs.name), asc(ranks.pay));
+
+      const values: Record<string, string> = {};
+      if (employed !== null) {
+        const [job] = await tx.db.select().from(jobs).where(eq(jobs.id, employed.jobId));
+        values.jobName = job?.name ?? "";
+        values.rankName = employed.rankName;
+        values.pay = employed.pay.toString();
+      }
+
+      return {
+        status: 200,
+        body: {
+          rows: rankRows.map((r) => ({
+            id: r.id, jobId: r.jobId, jobName: r.jobName, rankName: r.rankName, pay: r.pay.toString(),
+            strengthReq: String(r.strengthReq), labourReq: String(r.labourReq), iqReq: String(r.iqReq),
+          })),
+          values,
+        },
+      };
+    });
+  },
+});
+
+/**
+ * Jobs, one row per job (not per rank) — the interview form's `jobId`
+ * select needs options keyed by job, unlike `boardRoute`'s rank-keyed rows.
+ */
+const jobsListRoute = route({
+  method: "GET",
+  path: "/api/jobs/list",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select({ id: jobs.id, name: jobs.name }).from(jobs).orderBy(asc(jobs.name)));
+    return { status: 200, body: { rows } };
+  },
+});
+
 const InterviewSchema = z.object({ jobId: z.string().uuid() }).strict();
 
 const interviewRoute = route({
@@ -225,6 +295,255 @@ const quitRoute = route({
   },
 });
 
+// ---------------------------------------------------------------------------
+// core.hud (education's `hudCourse` shape). Unlike `settleWages`, this is a
+// PLAIN read — no lock, no write, no stat/cash grant — since the brief is
+// explicit the HUD path must not settle. An unclaimed day still settles
+// correctly the next time the player visits `/api/jobs/mine` or
+// `/api/jobs/board`; the HUD is display only.
+// ---------------------------------------------------------------------------
+
+const hudWage = on(coreHud, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+
+  const claimableDays = await ctx.transaction(async (tx) => {
+    const [row] = await tx.db.select({ lastWageAt: employment.lastWageAt })
+      .from(employment)
+      .where(eq(employment.playerId, player.id));
+    if (!row) return 0;
+    return Math.floor((Date.now() - row.lastWageAt.getTime()) / DAY_MS);
+  });
+  if (claimableDays < 1) return value;
+
+  return [...value, {
+    pluginId: ctx.pluginId, label: "Wages", value: `${claimableDays} day(s) unclaimed`,
+  }];
+});
+
+// ---------------------------------------------------------------------------
+// Admin routes — the two-catalog editor (theft's cars+tiers shape). No FK
+// references either `p_jobs` or `p_job_ranks` (rule 6 discipline — these
+// tables carry no foreign keys at all, per `migrations.ts`), so both deletes
+// are unconditional, the houses/education shape. `job_id`/`first_rank_id`
+// cross-reference each other with no FK to enforce it, which is what makes
+// the bootstrap order possible: a fresh job is created first with a
+// placeholder `firstRankId` (any uuid — nothing validates it exists yet),
+// its ranks are added afterward through the "Add rank" form (whose `jobId`
+// select already lists the new job), and the job's `firstRankId` is then
+// repointed at the real entry rank via the update form — the same order
+// `apps/server/src/db/seed.ts`'s jobs seed uses with hand-chosen uuids,
+// minus the ability to choose the uuid up front.
+// ---------------------------------------------------------------------------
+
+const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
+
+/** The blank-normalises-to-undefined convention (houses/education/theft/membership). */
+function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((v) => (v === "" ? undefined : v), inner.optional()) as never;
+}
+
+const JobCreateSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    description: z.string().min(1),
+    firstRankId: z.string().uuid(),
+  })
+  .strict();
+
+const JobUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    description: blankable(z.string().min(1)),
+    firstRankId: z.string().uuid(),
+  })
+  .strict();
+
+const RankCreateSchema = z
+  .object({
+    jobId: z.string().uuid(),
+    name: z.string().min(1).max(80),
+    pay: AdminMoney,
+    strengthGain: z.coerce.number().int().nonnegative(),
+    labourGain: z.coerce.number().int().nonnegative(),
+    iqGain: z.coerce.number().int().nonnegative(),
+    strengthReq: z.coerce.number().int().nonnegative(),
+    labourReq: z.coerce.number().int().nonnegative(),
+    iqReq: z.coerce.number().int().nonnegative(),
+  })
+  .strict();
+
+const RankUpdateSchema = z
+  .object({
+    id: z.string().uuid(),
+    jobId: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    pay: AdminMoney,
+    strengthGain: z.coerce.number().int().nonnegative(),
+    labourGain: z.coerce.number().int().nonnegative(),
+    iqGain: z.coerce.number().int().nonnegative(),
+    strengthReq: z.coerce.number().int().nonnegative(),
+    labourReq: z.coerce.number().int().nonnegative(),
+    iqReq: z.coerce.number().int().nonnegative(),
+  })
+  .strict();
+
+function jobRow(j: typeof jobs.$inferSelect) {
+  return { id: j.id, name: j.name, description: j.description, firstRankId: j.firstRankId };
+}
+
+/** The catalog as a `TableRowsResponse`. `id` is the update/select `valueKey` and is never rendered as a column. */
+const adminJobsListRoute = route({
+  method: "GET",
+  path: "/api/admin/jobs/list",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(jobs).orderBy(asc(jobs.name)));
+    return { status: 200, body: { rows: rows.map(jobRow) } };
+  },
+});
+
+const adminJobCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/jobs",
+  auth: "admin",
+  body: JobCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(jobs).values({
+        id, name: body.name, description: body.description, firstRankId: body.firstRankId,
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminJobUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/jobs/update",
+  auth: "admin",
+  body: JobUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(jobs)
+        .set({
+          firstRankId: body.firstRankId,
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+        })
+        .where(eq(jobs.id, body.id))
+        .returning({ id: jobs.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("job_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminJobDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/jobs/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      const result = await tx.db.delete(jobs).where(eq(jobs.id, params.id)).returning({ id: jobs.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("job_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+/** Job-joined so the rank select (job's `firstRankId`, and the rank's own update select) can label itself `"Job · Rank"`. */
+const adminRanksListRoute = route({
+  method: "GET",
+  path: "/api/admin/jobs/ranks/list",
+  auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) =>
+      tx.db.select({
+        id: ranks.id, jobId: ranks.jobId, jobName: jobs.name, name: ranks.name, pay: ranks.pay,
+        strengthGain: ranks.strengthGain, labourGain: ranks.labourGain, iqGain: ranks.iqGain,
+        strengthReq: ranks.strengthReq, labourReq: ranks.labourReq, iqReq: ranks.iqReq,
+      })
+        .from(ranks)
+        .leftJoin(jobs, eq(jobs.id, ranks.jobId))
+        .orderBy(asc(ranks.name)));
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((r) => ({
+          id: r.id, jobId: r.jobId, jobName: r.jobName ?? "", rankLabel: `${r.jobName ?? "?"} · ${r.name}`,
+          name: r.name, pay: r.pay.toString(),
+          strengthGain: String(r.strengthGain), labourGain: String(r.labourGain), iqGain: String(r.iqGain),
+          strengthReq: String(r.strengthReq), labourReq: String(r.labourReq), iqReq: String(r.iqReq),
+        })),
+      },
+    };
+  },
+});
+
+const adminRankCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/jobs/ranks",
+  auth: "admin",
+  body: RankCreateSchema,
+  handler: async (ctx, { body }) => {
+    const id = uuidv7();
+    await ctx.transaction(async (tx) => {
+      await tx.db.insert(ranks).values({
+        id, jobId: body.jobId, name: body.name, pay: BigInt(body.pay),
+        strengthGain: body.strengthGain, labourGain: body.labourGain, iqGain: body.iqGain,
+        strengthReq: body.strengthReq, labourReq: body.labourReq, iqReq: body.iqReq,
+      });
+    });
+    return { status: 201, body: { id } };
+  },
+});
+
+const adminRankUpdateRoute = route({
+  method: "POST",
+  path: "/api/admin/jobs/ranks/update",
+  auth: "admin",
+  body: RankUpdateSchema,
+  handler: async (ctx, { body }) => {
+    const updated = await ctx.transaction(async (tx) => {
+      const result = await tx.db
+        .update(ranks)
+        .set({
+          jobId: body.jobId, pay: BigInt(body.pay),
+          strengthGain: body.strengthGain, labourGain: body.labourGain, iqGain: body.iqGain,
+          strengthReq: body.strengthReq, labourReq: body.labourReq, iqReq: body.iqReq,
+          ...(body.name !== undefined && { name: body.name }),
+        })
+        .where(eq(ranks.id, body.id))
+        .returning({ id: ranks.id });
+      return result.length > 0;
+    });
+    if (!updated) throw new PluginError("rank_not_found", 404);
+    return { status: 204 };
+  },
+});
+
+const adminRankDeleteRoute = route({
+  method: "DELETE",
+  path: "/api/admin/jobs/ranks/:id",
+  auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const deleted = await ctx.transaction(async (tx) => {
+      const result = await tx.db.delete(ranks).where(eq(ranks.id, params.id)).returning({ id: ranks.id });
+      return result.length > 0;
+    });
+    if (!deleted) throw new PluginError("rank_not_found", 404);
+    return { status: 204 };
+  },
+});
+
 /**
  * Jobs (C spec §4.5): passive daily income with NO cron — wages settle
  * lazily, whole days at a time, wherever employment is read or changed.
@@ -233,10 +552,17 @@ const quitRoute = route({
 export default definePlugin({
   id: "jobs",
   version: "1.0.0",
-  basePaths: ["/api/jobs"],
+  basePaths: ["/api/jobs", "/api/admin/jobs"],
   requires: ["mccodes-attributes"],
   migrations: JOBS_MIGRATIONS,
-  routes: [mineRoute, listRoute, interviewRoute, promoteRoute, quitRoute],
+  routes: [
+    mineRoute, listRoute, boardRoute, jobsListRoute, interviewRoute, promoteRoute, quitRoute,
+    adminJobsListRoute, adminJobCreateRoute, adminJobUpdateRoute, adminJobDeleteRoute,
+    adminRanksListRoute, adminRankCreateRoute, adminRankUpdateRoute, adminRankDeleteRoute,
+  ],
+  filters: [hudWage],
+  pages: [jobsPage],
+  adminPages: [adminPage],
 });
 
 export { JOBS_MIGRATIONS };
