@@ -29,12 +29,29 @@ async function debitPoints(
   }
 }
 
+/**
+ * The curation seam (gl3-hybrid spec §2): `exchanges` is a comma-list of
+ * `refill|iq|money` naming what this game offers. UNSET means all three —
+ * the faithful MCCodes default. The gl3 profile seeds "refill": points ->
+ * IQ or cash turns a season prize into scoring power (see NOTES.md,
+ * "Points are not a game balance"). Admin-editable like any setting.
+ */
+function assertExchangeEnabled(
+  ctx: { settings: { get(key: string): string | null } }, exchange: string,
+): void {
+  const raw = ctx.settings.get("exchanges");
+  if (raw === null) return;
+  const enabled = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!enabled.includes(exchange)) throw new PluginError("exchange_disabled", 403);
+}
+
 const refillRoute = route({
   method: "POST",
   path: "/api/temple/refill",
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    assertExchangeEnabled(ctx, "refill");
 
     // Offered only when the energy pool is declared — the opt-in property:
     // a game with no attribute family has nothing to refill.
@@ -61,6 +78,7 @@ const iqRoute = route({
   handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    assertExchangeEnabled(ctx, "iq");
     const points = BigInt(body.points);
     if (points <= 0n) throw new PluginError("amount_must_be_positive", 400);
     const perPoint = Number(ctx.settings.get("iq_per_point") ?? "5");
@@ -81,6 +99,7 @@ const moneyRoute = route({
   handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    assertExchangeEnabled(ctx, "money");
     const points = BigInt(body.points);
     if (points <= 0n) throw new PluginError("amount_must_be_positive", 400);
     const perPoint = BigInt(ctx.settings.get("money_per_point") ?? "200");

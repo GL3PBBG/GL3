@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
 import templePlugin from "@gl3/plugin-temple";
-import { playerStats } from "../src/db/schema/index.js";
+import { playerStats, settings } from "../src/db/schema/index.js";
 import { testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -82,6 +82,40 @@ describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)"
     } finally {
       await server.close();
     }
+  });
+
+  it("temple.exchanges gates each exchange: absent entries 403, listed ones stay live", async () => {
+    // The gl3 curation seam (gl3-hybrid spec §2): the profile seeds
+    // "refill", turning off points -> IQ and points -> cash.
+    await db.insert(settings).values({ key: "temple.exchanges", value: "refill" })
+      .onConflictDoUpdate({ target: settings.key, set: { value: "refill" } });
+    const server = await bootTestServer({ plugins: [mccodesAttributes, templePlugin] });
+    try {
+      const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.16.1.4" });
+      const auth = { authorization: `Bearer ${token}` };
+      await grantPoints(playerId, 100n);
+      await db.update(playerStats).set({ energy: 4 }).where(eq(playerStats.playerId, playerId));
+
+      const money = await server.app.inject({
+        method: "POST", url: "/api/temple/money", headers: auth, payload: { points: "1" },
+      });
+      expect(money.statusCode).toBe(403);
+      expect(money.json().error).toBe("exchange_disabled");
+
+      const iq = await server.app.inject({
+        method: "POST", url: "/api/temple/iq", headers: auth, payload: { points: "1" },
+      });
+      expect(iq.statusCode).toBe(403);
+      expect(iq.json().error).toBe("exchange_disabled");
+
+      const refill = await server.app.inject({ method: "POST", url: "/api/temple/refill", headers: auth });
+      expect(refill.statusCode).toBe(200);
+    } finally {
+      await db.delete(settings).where(eq(settings.key, "temple.exchanges"));
+      await server.close();
+    }
+    // The unset default serves all three — every case above this one runs
+    // without the setting and already proves it.
   });
 
   it("refuses to boot without the anchor — the opt-in property at the loader", async () => {

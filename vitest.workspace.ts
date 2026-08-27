@@ -81,6 +81,27 @@ const srcAliases = {
       "@gl3/plugin-casino": fileURLToPath(
         new URL("./packages/plugins/casino/src/index.ts", import.meta.url),
       ),
+      "@gl3/plugin-mccodes-attributes": fileURLToPath(
+        new URL("./packages/plugins/mccodes-attributes/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-gym": fileURLToPath(
+        new URL("./packages/plugins/gym/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-houses": fileURLToPath(
+        new URL("./packages/plugins/houses/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-education": fileURLToPath(
+        new URL("./packages/plugins/education/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-jobs": fileURLToPath(
+        new URL("./packages/plugins/jobs/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-temple": fileURLToPath(
+        new URL("./packages/plugins/temple/src/index.ts", import.meta.url),
+      ),
+      "@gl3/plugin-progression": fileURLToPath(
+        new URL("./packages/plugins/progression/src/index.ts", import.meta.url),
+      ),
       "@gl3/plugin-blackjack": fileURLToPath(
         new URL("./packages/plugins/blackjack/src/index.ts", import.meta.url),
       ),
