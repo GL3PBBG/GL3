@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
@@ -17,7 +21,7 @@ async function grantPoints(playerId: string, points: bigint): Promise<void> {
 
 describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)", () => {
   it("refills energy to max for the configured points, once", async () => {
-    const server = await bootTestServer({ plugins: [mccodesAttributes, templePlugin] });
+    const server = await bootTestServer({ profile: "v2", plugins: [mccodesAttributes, templePlugin] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.16.1.1" });
       const auth = { authorization: `Bearer ${token}` };
@@ -41,7 +45,7 @@ describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)"
   });
 
   it("sells IQ and money at the configured per-point rates, ledgered", async () => {
-    const server = await bootTestServer({ plugins: [mccodesAttributes, templePlugin] });
+    const server = await bootTestServer({ profile: "v2", plugins: [mccodesAttributes, templePlugin] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.16.1.2" });
       const auth = { authorization: `Bearer ${token}` };
@@ -69,7 +73,7 @@ describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)"
   });
 
   it("refuses a purchase the points balance cannot cover", async () => {
-    const server = await bootTestServer({ plugins: [mccodesAttributes, templePlugin] });
+    const server = await bootTestServer({ profile: "v2", plugins: [mccodesAttributes, templePlugin] });
     try {
       const { token } = await registerVerifiedPlayer(server, { remoteAddress: "10.16.1.3" });
       const res = await server.app.inject({
@@ -89,7 +93,7 @@ describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)"
     // "refill", turning off points -> IQ and points -> cash.
     await db.insert(settings).values({ key: "temple.exchanges", value: "refill" })
       .onConflictDoUpdate({ target: settings.key, set: { value: "refill" } });
-    const server = await bootTestServer({ plugins: [mccodesAttributes, templePlugin] });
+    const server = await bootTestServer({ profile: "v2", plugins: [mccodesAttributes, templePlugin] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.16.1.4" });
       const auth = { authorization: `Bearer ${token}` };
@@ -123,7 +127,7 @@ describe("temple plugin (default rates: 12 refill / 5 iq / 200 money per point)"
     // temple-without-anchor boot cannot be constructed to reach it: the
     // loader's requires enforcement fails first, which is the stronger
     // guarantee and the one worth pinning.
-    await expect(bootTestServer({ plugins: [templePlugin] })).rejects.toThrow(
+    await expect(bootTestServer({ profile: "v2", plugins: [templePlugin] })).rejects.toThrow(
       /requires plugin "mccodes-attributes"/,
     );
   });

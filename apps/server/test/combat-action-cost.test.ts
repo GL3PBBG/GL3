@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
@@ -91,7 +95,7 @@ describe("combat.attack — priced (an attribute-cost plugin is installed)", () 
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, redis, close: closeServer } = await bootTestServer({ plugins: [pricesAttackEnergy] }));
+    if (!app) ({ app, redis, close: closeServer } = await bootTestServer({ profile: "v2", plugins: [pricesAttackEnergy] }));
   });
   afterAll(async () => { await closeServer(); });
 
@@ -157,7 +161,7 @@ describe("combat.attack — opt-out baseline (no attribute plugin installed)", (
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, redis, close: closeServer } = await bootTestServer());
+    if (!app) ({ app, redis, close: closeServer } = await bootTestServer({ profile: "v2" }));
   });
   afterAll(async () => { await closeServer(); });
 

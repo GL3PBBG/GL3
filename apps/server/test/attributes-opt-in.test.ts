@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -59,7 +63,7 @@ describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost 
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [declaresBrave] }));
+    if (!app) ({ app, close: closeServer } = await bootTestServer({ profile: "v2", plugins: [declaresBrave] }));
     await seedCrimes(db, "v2");
     braveCrimeId = crypto.randomUUID();
     await db.insert(crimes).values({
@@ -146,7 +150,7 @@ describe("crimes.commit — per-crime brave pricing (brave declared, brave_cost 
   });
 
   it("ignores brave_cost entirely when no plugin declares the brave pool", async () => {
-    const plainServer = await bootTestServer();
+    const plainServer = await bootTestServer({ profile: "v2" });
     try {
       await seedCrimes(db, "v2");
       const crimeId = crypto.randomUUID();
@@ -176,7 +180,7 @@ describe("crimes.commit — opt-out baseline (no attribute plugin installed)", (
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, close: closeServer } = await bootTestServer());
+    if (!app) ({ app, close: closeServer } = await bootTestServer({ profile: "v2" }));
     await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;
@@ -205,7 +209,7 @@ describe("crimes.commit — priced (an attribute-cost plugin is installed)", () 
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, close: closeServer } = await bootTestServer({ plugins: [pricesCrimesEnergy] }));
+    if (!app) ({ app, close: closeServer } = await bootTestServer({ profile: "v2", plugins: [pricesCrimesEnergy] }));
     await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;
@@ -284,7 +288,7 @@ describe("crimes.commit job — the priced.length > 0 guard", () => {
 
   beforeEach(async () => {
     await resetDb(db);
-    if (!app) ({ app, close: closeServer } = await bootTestServer());
+    if (!app) ({ app, close: closeServer } = await bootTestServer({ profile: "v2" }));
     await seedCrimes(db, "v2");
     const [crime] = await db.select().from(crimes).where(eq(crimes.name, "Pickpocket"));
     crimeId = crime!.id;

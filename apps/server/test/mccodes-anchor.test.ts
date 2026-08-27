@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
@@ -19,7 +23,7 @@ afterAll(async () => { await conn.end(); });
  */
 describe("mccodes-attributes anchor", () => {
   it("seeds the declared pools full at registration (12/5/100)", async () => {
-    const server = await bootTestServer({ plugins: [mccodesAttributes] });
+    const server = await bootTestServer({ profile: "v2", plugins: [mccodesAttributes] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.10.1.1" });
       const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
@@ -44,7 +48,7 @@ describe("mccodes-attributes anchor", () => {
   });
 
   it("changes nothing on a default boot — the opt-in property", async () => {
-    const server = await bootTestServer();
+    const server = await bootTestServer({ profile: "v2" });
     try {
       const { playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.10.1.2" });
       const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

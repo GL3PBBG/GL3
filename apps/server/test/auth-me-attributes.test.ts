@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { definePlugin, type PluginManifest } from "@gl3/plugin-sdk";
@@ -30,7 +34,7 @@ const gymPlugin: PluginManifest = definePlugin({
 
 describe("GET /api/auth/me — attributes", () => {
   it("omits the attributes field entirely when no pool is declared", async () => {
-    const server = await bootTestServer();
+    const server = await bootTestServer({ profile: "v2" });
     try {
       const { token } = await registerVerifiedPlayer(server, { remoteAddress: "10.9.2.1" });
       const res = await server.app.inject({
@@ -45,7 +49,7 @@ describe("GET /api/auth/me — attributes", () => {
   });
 
   it("seeds declared pools full at registration; the read stays display-only", async () => {
-    const server = await bootTestServer({ plugins: [gymPlugin] });
+    const server = await bootTestServer({ profile: "v2", plugins: [gymPlugin] });
     try {
       const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.9.2.2" });
       const res = await server.app.inject({

@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { GameEventSchema, type GameEvent } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -45,7 +49,7 @@ async function place(p: Player, locationId: string | null, patch: Record<string,
 
 beforeEach(async () => {
   await resetDb(db);
-  if (!app) ({ app, close: closeServer } = await bootTestServer());
+  if (!app) ({ app, close: closeServer } = await bootTestServer({ profile: "v2" }));
   townA = uuidv7();
   townB = uuidv7();
   await db.insert(locations).values([
@@ -269,7 +273,7 @@ describe("POST /api/jail/bail — wealth scaling", () => {
 async function bootWith(rows: Record<string, string>): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
   await db.insert(settingsTable)
     .values(Object.entries(rows).map(([key, value]) => ({ key, value })));
-  return bootTestServer();
+  return bootTestServer({ profile: "v2" });
 }
 
 describe("POST /api/jail/bust", () => {
@@ -374,7 +378,7 @@ describe("POST /api/jail/bust — the 10-energy attempt charge (audit §7 item 1
   });
 
   it("charges 10 energy on both outcomes", async () => {
-    const own = await bootTestServer({ plugins: [declaresEnergy] });
+    const own = await bootTestServer({ profile: "v2", plugins: [declaresEnergy] });
     try {
       const buster = await registerOn(own.app, "ChargedBuster");
       const inmate = await registerOn(own.app, "ChargedInmate");
@@ -396,7 +400,7 @@ describe("POST /api/jail/bust — the 10-energy attempt charge (audit §7 item 1
   });
 
   it("409s without moving anything when energy cannot cover the charge", async () => {
-    const own = await bootTestServer({ plugins: [declaresEnergy] });
+    const own = await bootTestServer({ profile: "v2", plugins: [declaresEnergy] });
     try {
       const buster = await registerOn(own.app, "BrokeBuster");
       const inmate = await registerOn(own.app, "StillInmate");
@@ -422,7 +426,7 @@ describe("POST /api/jail/bust — the 10-energy attempt charge (audit §7 item 1
   });
 
   it("stays free on a default boot — no pool declared, byte-identical", async () => {
-    const own = await bootTestServer();
+    const own = await bootTestServer({ profile: "v2" });
     try {
       const buster = await registerOn(own.app, "FreeBuster");
       const inmate = await registerOn(own.app, "FreeInmate");

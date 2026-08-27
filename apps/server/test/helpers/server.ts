@@ -28,7 +28,10 @@ export async function bootTestServer(
 }> {
   // GL3_PROFILE is pinned per call, not inherited: an ambient variable in a
   // developer's shell must not flip a test file's plugin set.
-  const config = loadConfig({ ...process.env, NODE_ENV: "test", GL3_PROFILE: options?.profile ?? "v2" });
+  // The default follows production's flagship: the gl3 union (spec §4,
+  // milestone 4). A test that genuinely tests the v2 game's pricing pins
+  // { profile: "v2" } explicitly, with a comment saying why.
+  const config = loadConfig({ ...process.env, NODE_ENV: "test", GL3_PROFILE: options?.profile ?? "gl3" });
   const { db, sql } = createDb(config.databaseUrl);
   const redis = createRedis(config.redisUrl);
 
@@ -81,11 +84,12 @@ export async function bootTestServer(
   const loadedPlugins = await loadPlugins(
     { db, redis, settings: loadedTestSettings, leaderboardPrefix, assetDriver },
     // v2 boots keep the historical merge (every v2 bundled plugin plus the
-    // caller's extras, via withCorePlugins); any other profile loads exactly
-    // the selection production makes through bundledPlugins.
-    options?.profile === undefined || options.profile === "v2"
+    // caller's extras, via withCorePlugins); every other profile — including
+    // the gl3 default — loads exactly the selection production makes
+    // through bundledPlugins.
+    options?.profile === "v2"
       ? withCorePlugins(options?.plugins ?? [])
-      : bundledPlugins(options.profile, options.plugins ?? []),
+      : bundledPlugins(options?.profile ?? "gl3", options?.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
     config.profile,
   );

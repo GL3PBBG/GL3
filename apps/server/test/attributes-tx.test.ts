@@ -1,3 +1,7 @@
+// Every boot here pins { profile: "v2" }: this file tests the attribute
+// family's OPT-IN property (baselines without a pool, or a custom test
+// pool plugin that would collide with the gl3 union's mccodes-attributes).
+// The suite's default boot is the gl3 union — see helpers/server.ts.
 import { eq } from "drizzle-orm";
 import { describe, expect, it, beforeAll } from "vitest";
 import { z } from "zod";
@@ -87,7 +91,7 @@ const driverPlugin: PluginManifest = definePlugin({
 
 describe("tx.attributes", () => {
   let app: Awaited<ReturnType<typeof bootTestServer>>;
-  beforeAll(async () => { app = await bootTestServer({ plugins: [driverPlugin] }); });
+  beforeAll(async () => { app = await bootTestServer({ profile: "v2", plugins: [driverPlugin] }); });
 
   it("seeds the max from the declaration on first read", async () => {
     const { token } = await registerVerifiedPlayer(app);
