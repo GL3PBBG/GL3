@@ -330,6 +330,7 @@ export default defineWorkspace([
         "test/auth-me-attributes.test.ts",
         "test/mccodes-anchor.test.ts",
         "test/gym.test.ts",
+        "test/gym-page.test.ts",
         "test/houses.test.ts",
         "test/framework-profile.test.ts",
         "test/gl3-seeds.test.ts",

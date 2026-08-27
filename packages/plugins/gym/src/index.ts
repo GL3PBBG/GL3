@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { definePlugin, PluginError, route, type TrainedAttr } from "@gl3/plugin-sdk";
+import { gymPage } from "./pages.js";
 
 /**
  * Read mirror of the two sentence columns gym gates on (crimes' schema.ts
@@ -59,6 +60,49 @@ const TrainBodySchema = z.object({
   stat: z.enum(TRAINABLE),
   reps: z.number().int().positive().max(1000),
 }).strict();
+
+/** The gym page's data feed — the meter and the four trained stats,
+ * all values stringified (`FormValuesResponseSchema`'s shape). */
+const feedRoute = route({
+  method: "GET",
+  path: "/api/gym",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    return ctx.transaction(async (tx) => {
+      await tx.locks.player([player.id]);
+      const attrs = await tx.attributes.read(player.id);
+      return {
+        status: 200,
+        body: {
+          values: {
+            energy: attrs.energy.toString(),
+            energyMax: attrs.energyMax.toString(),
+            strength: attrs.strength.toString(),
+            agility: attrs.agility.toString(),
+            guard: attrs.guard.toString(),
+            labour: attrs.labour.toString(),
+          },
+        },
+      };
+    });
+  },
+});
+
+/** Static options feed for the train form's stat select — the four
+ * trainable stats never change at runtime, so this is a fixed row set,
+ * same shape as travel's `/api/admin/travel/combat-modes`. */
+const statsRoute = route({
+  method: "GET",
+  path: "/api/gym/stats",
+  handler: async () => ({
+    status: 200,
+    body: {
+      rows: TRAINABLE.map((stat) => ({ id: stat, name: stat[0]!.toUpperCase() + stat.slice(1) })),
+    },
+  }),
+});
 
 const trainRoute = route({
   method: "POST",
@@ -119,7 +163,8 @@ export default definePlugin({
   version: "1.0.0",
   basePaths: ["/api/gym"],
   requires: ["mccodes-attributes"],
-  routes: [trainRoute],
+  routes: [feedRoute, statsRoute, trainRoute],
+  pages: [gymPage],
 });
 
-export { TRAINABLE, trainRoute };
+export { TRAINABLE, trainRoute, feedRoute, statsRoute };
