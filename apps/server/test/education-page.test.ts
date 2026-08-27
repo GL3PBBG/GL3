@@ -1,5 +1,5 @@
 import { HudExtrasResponseSchema } from "@gl3/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
@@ -177,6 +177,44 @@ describe("education admin", () => {
       id, name: "Doomed 101", description: "Not long for this world.", cost: 1n, days: 1,
       strengthGain: 0, agilityGain: 0, guardGain: 0, labourGain: 0, iqGain: 0,
     });
+    const del = await app.inject({ method: "DELETE", url: `/api/admin/education/${id}`, headers: auth() });
+    expect(del.statusCode).toBe(204);
+    expect(await db.select().from(courses).where(eq(courses.id, id))).toEqual([]);
+  });
+
+  it("refuses deleting a course with an in-flight enrollment, then succeeds once the player finishes", async () => {
+    const id = uuidv7();
+    await db.insert(courses).values({
+      id, name: "Wedge Prevention 101", description: "Don't get stuck.", cost: 10n, days: 1,
+      strengthGain: 1, agilityGain: 0, guardGain: 0, labourGain: 0, iqGain: 0,
+    });
+
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "Wedged" });
+    const headers = { authorization: `Bearer ${token}` };
+    await db.update(playerStats).set({ cash: 1000n }).where(eq(playerStats.playerId, playerId));
+
+    const start = await app.inject({
+      method: "POST", url: "/api/education/start", headers, payload: { courseId: id },
+    });
+    expect(start.statusCode).toBe(200);
+
+    // `p_education_progress` carries no FK to `p_courses` — an unconditional
+    // delete here would wedge the enrolled player: no completion (the claim
+    // subquery matches nothing) and no restart (`already_studying` blocks a
+    // fresh enrollment, and there is no cancel route). The theft
+    // car-in-use precedent (test/admin-theft.test.ts).
+    const blocked = await app.inject({ method: "DELETE", url: `/api/admin/education/${id}`, headers: auth() });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error).toBe("course_in_use");
+    expect((await db.select().from(courses).where(eq(courses.id, id))).length).toBe(1);
+
+    // Force the enrollment into the past so the next real read claims it —
+    // the same lazy-completion tick `settleAndRead` runs on every visit.
+    await db.execute(sql`UPDATE p_education_progress SET started_at = now() - interval '2 days' WHERE course_id = ${id}`);
+    const settle = await app.inject({ method: "GET", url: "/api/education", headers });
+    expect(settle.statusCode).toBe(200);
+    expect((settle.json() as { completedNow: string | null }).completedNow).toBe("Wedge Prevention 101");
+
     const del = await app.inject({ method: "DELETE", url: `/api/admin/education/${id}`, headers: auth() });
     expect(del.statusCode).toBe(204);
     expect(await db.select().from(courses).where(eq(courses.id, id))).toEqual([]);

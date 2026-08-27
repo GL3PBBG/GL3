@@ -265,8 +265,10 @@ const hudCourse = on(coreHud, async (ctx, value) => {
 // Admin routes — the catalog editor. Houses' four-route shape
 // (`packages/plugins/houses/src/index.ts`'s admin section): list/create/
 // update/delete, `auth: "admin"`, an update that blanks a rename. No FK
-// references `p_courses`, so a delete is unconditional, the houses/
-// membership shape.
+// references `p_courses`, so a delete checks `p_education_progress` for an
+// in-flight enrollment first and refuses rather than orphaning it — the
+// theft car-in-use shape (`packages/plugins/theft/src/index.ts`'s
+// `adminCarDeleteRoute`), not the houses/membership unconditional one.
 // ---------------------------------------------------------------------------
 
 const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
@@ -373,11 +375,22 @@ const adminDeleteRoute = route({
   auth: "admin",
   params: z.object({ id: z.string().uuid() }),
   handler: async (ctx, { params }) => {
-    const deleted = await ctx.transaction(async (tx) => {
-      const result = await tx.db.delete(courses).where(eq(courses.id, params.id)).returning({ id: courses.id });
-      return result.length > 0;
+    const outcome = await ctx.transaction(async (tx) => {
+      const [existing] = await tx.db.select({ id: courses.id }).from(courses).where(eq(courses.id, params.id));
+      if (existing === undefined) return "not_found" as const;
+      // `p_education_progress` carries no FK to `p_courses` by design — a
+      // deleted-out-from-under enrollment can never complete (the completion
+      // subquery matches nothing) and can never restart (`already_studying`
+      // blocks a fresh enrollment with no cancel route to escape it). Refuse
+      // instead, the theft car-in-use shape.
+      const [enrolled] = await tx.db.select({ playerId: progress.playerId }).from(progress)
+        .where(eq(progress.courseId, params.id)).limit(1);
+      if (enrolled !== undefined) return "in_use" as const;
+      await tx.db.delete(courses).where(eq(courses.id, params.id));
+      return "ok" as const;
     });
-    if (!deleted) throw new PluginError("course_not_found", 404);
+    if (outcome === "not_found") throw new PluginError("course_not_found", 404);
+    if (outcome === "in_use") throw new PluginError("course_in_use", 409);
     return { status: 204 };
   },
 });

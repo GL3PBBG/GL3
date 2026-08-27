@@ -39,7 +39,7 @@ const SERVER_PORT = 3000; // apps/web/vite.config.ts's proxy target is hardcoded
 const WEB_PORT = 5173;
 
 const PAGES = [
-  { url: `http://localhost:${WEB_PORT}/plugins/gym`, name: "gym", text: "Strength" },
+  { url: `http://localhost:${WEB_PORT}/plugins/gym.index`, name: "gym", text: "Strength" },
   { url: `http://localhost:${WEB_PORT}/plugins/houses.index`, name: "houses", text: "Small Flat" },
   { url: `http://localhost:${WEB_PORT}/plugins/education.index`, name: "education", text: "Street Smarts" },
   { url: `http://localhost:${WEB_PORT}/plugins/jobs.index`, name: "jobs", text: "Warehouse Crew" },
