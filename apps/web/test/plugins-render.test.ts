@@ -257,6 +257,43 @@ describe("renderNode", () => {
     expect(out[0]).toEqual({ kind: "panelHeader", title: "The other seats", layout: "row" });
   });
 
+  it("renders a meter node with label, value and max", () => {
+    expect(renderNode({ kind: "meter", label: "Energy", value: 6, max: 12 }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "meter", label: "Energy", value: 6, max: 12 }]);
+  });
+
+  it("renders a meterSource node carrying its keys", () => {
+    expect(renderNode({
+      kind: "meterSource", label: "Energy", source: "GET /api/gym/pools",
+      valueKey: "energy", maxKey: "energyMax",
+    }, {})).toEqual<RenderInstruction[]>([{
+      kind: "meterSource", label: "Energy", source: "GET /api/gym/pools",
+      valueKey: "energy", maxKey: "energyMax",
+    }]);
+  });
+
+  it("renders a keyValueSource node, defaulting an absent emptyText to null", () => {
+    const out = renderNode({
+      kind: "keyValueSource", source: "GET /api/jobs/board",
+      entries: [{ label: "Rank", key: "rankName" }],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "keyValueSource", source: "GET /api/jobs/board",
+      entries: [{ label: "Rank", key: "rankName" }], emptyText: null,
+    }]);
+  });
+
+  it("carries a keyValueSource node's emptyText through", () => {
+    const out = renderNode({
+      kind: "keyValueSource", source: "GET /api/jobs/board",
+      entries: [{ label: "Rank", key: "rankName" }], emptyText: "Unemployed",
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "keyValueSource", source: "GET /api/jobs/board",
+      entries: [{ label: "Rank", key: "rankName" }], emptyText: "Unemployed",
+    }]);
+  });
+
   it("nests arbitrarily deep panels", () => {
     const node = {
       kind: "panel" as const, title: "outer",

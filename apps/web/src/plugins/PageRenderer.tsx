@@ -1,9 +1,10 @@
 import { Fragment, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client.js";
+import { ApiError, api } from "../api/client.js";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
+import { Meter } from "../components/Meter.js";
 import { togglePending } from "./pending.js";
 import type { FormField, RenderInstruction } from "./render.js";
 import { formatRemaining } from "../lib/countdown.js";
@@ -330,6 +331,126 @@ function SelectField({ field, value, onChange, refetchSignal }: {
         <option key={opt.value} value={opt.value}>{opt.label}</option>
       ))}
     </select>
+  );
+}
+
+/**
+ * A `meterSource` instruction: fetches `{ values }` once (and again on
+ * `refetchSignal`, same as `TableBlock`) and reads `value`/`max` off two named
+ * keys — the response is a form-values payload, not a table, because a
+ * pool's numbers are one flat map, not rows. No `emptyText`: unlike
+ * `KeyValueSourceBlock`, this node has nowhere to fall back to, so a 404
+ * renders `ErrorText` like any other failure.
+ */
+export function MeterSourceBlock({ label, source, valueKey, maxKey, refetchSignal }: {
+  label: string;
+  source: string;
+  valueKey: string;
+  maxKey: string;
+  refetchSignal: number;
+}): JSX.Element {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  const path = source.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api<unknown>(path)
+      .then((body) => {
+        if (cancelled) return;
+        const parsed = FormValuesResponseSchema.parse(body);
+        setValues(parsed.values);
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(caught);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [path, refetchSignal]);
+
+  if (loading) return <Loading what="meter" />;
+  if (error !== null) return <ErrorText error={error} />;
+
+  const value = Number(values[valueKey]);
+  const max = Number(values[maxKey]);
+  return (
+    <Meter
+      label={label}
+      value={Number.isFinite(value) ? value : 0}
+      max={Number.isFinite(max) && max > 0 ? max : 1}
+    />
+  );
+}
+
+/**
+ * A `keyValueSource` instruction: fetches `{ values }` (same shape and
+ * refetch behaviour as `MeterSourceBlock`) and draws one row per `entries`
+ * item whose `key` is present. Zero present keys OR a 404 renders
+ * `emptyText` — jobs/education/houses pages use this for "you have none of
+ * this yet" rather than an error, since a 404 there means "no record", not
+ * "the server failed."
+ */
+export function KeyValueSourceBlock({ source, entries, emptyText, refetchSignal }: {
+  source: string;
+  entries: readonly { readonly label: string; readonly key: string }[];
+  emptyText: string | null;
+  refetchSignal: number;
+}): JSX.Element {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  const path = source.replace(/^GET\s+/, "");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api<unknown>(path)
+      .then((body) => {
+        if (cancelled) return;
+        const parsed = FormValuesResponseSchema.parse(body);
+        setValues(parsed.values);
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setError(caught);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [path, refetchSignal]);
+
+  if (loading) return <Loading what="details" />;
+  if (error !== null) {
+    if (error instanceof ApiError && error.status === 404) {
+      return <p className={styles.muted}>{emptyText ?? "No data."}</p>;
+    }
+    return <ErrorText error={error} />;
+  }
+
+  const present = entries.filter((entry) => values[entry.key] !== undefined);
+  if (present.length === 0) {
+    return <p className={styles.muted}>{emptyText ?? "No data."}</p>;
+  }
+
+  return (
+    <dl>
+      {present.map((entry) => (
+        <div key={entry.key}>
+          <dt className={styles.meta}>{entry.label}</dt>
+          <dd>{values[entry.key]}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -699,6 +820,29 @@ export function PageRenderer({ instructions }: { instructions: readonly RenderIn
               </div>
             ))}
           </dl>
+        );
+      case "meter":
+        return <Meter key={index} label={inst.label} value={inst.value} max={inst.max} />;
+      case "meterSource":
+        return (
+          <MeterSourceBlock
+            key={index}
+            label={inst.label}
+            source={inst.source}
+            valueKey={inst.valueKey}
+            maxKey={inst.maxKey}
+            refetchSignal={refetchSignal}
+          />
+        );
+      case "keyValueSource":
+        return (
+          <KeyValueSourceBlock
+            key={index}
+            source={inst.source}
+            entries={inst.entries}
+            emptyText={inst.emptyText}
+            refetchSignal={refetchSignal}
+          />
         );
       case "form":
         return (

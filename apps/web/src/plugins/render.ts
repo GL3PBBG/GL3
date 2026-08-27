@@ -23,6 +23,14 @@ export type RenderInstruction =
   | { kind: "button"; label: string; action: string }
   | { kind: "cooldownButton"; label: string; action: string; cooldownAction: string }
   | { kind: "keyValue"; rows: { label: string; value: string }[] }
+  | { kind: "meter"; label: string; value: number; max: number }
+  | { kind: "meterSource"; label: string; source: string; valueKey: string; maxKey: string }
+  | {
+      kind: "keyValueSource";
+      source: string;
+      entries: { label: string; key: string }[];
+      emptyText: string | null;
+    }
   | { kind: "form"; action: string; submitLabel: string; valuesSource: string | null; fields: FormField[] }
   | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
@@ -69,6 +77,14 @@ function isFieldType(v: unknown): v is "text" | "number" | "decimal" | "money" |
   return v === "text" || v === "number" || v === "decimal" || v === "money" || v === "password";
 }
 
+/** `meter.value`/`max` arrive as validated numbers, but the renderer still
+ * narrows defensively like every other kind here rather than trusting the
+ * wire — an unparseable value falls back to 0. */
+function asNumber(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function renderNode(node: unknown, _handlers: Record<string, (action: string) => void>): RenderInstruction[] {
   if (isNode(node, "text")) return [{ kind: "text", value: String(node.value) }];
   if (isNode(node, "money")) return [{ kind: "money", value: String(node.value) }];
@@ -89,6 +105,39 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       value: isRecord(r) ? String(r.value) : "",
     }));
     return [{ kind: "keyValue", rows }];
+  }
+  if (isNode(node, "meter")) {
+    return [{
+      kind: "meter",
+      label: String(node.label),
+      value: asNumber(node.value),
+      // Zero would divide-by-zero downstream; the schema already requires
+      // `max` positive, so this fallback is unreachable for a validated
+      // payload and only guards a malformed one, the same posture as
+      // `isFieldType`'s "text" fallback above.
+      max: asNumber(node.max) > 0 ? asNumber(node.max) : 1,
+    }];
+  }
+  if (isNode(node, "meterSource")) {
+    return [{
+      kind: "meterSource",
+      label: String(node.label),
+      source: String(node.source),
+      valueKey: String(node.valueKey),
+      maxKey: String(node.maxKey),
+    }];
+  }
+  if (isNode(node, "keyValueSource")) {
+    const entries = childArray(node.entries).map((e) => ({
+      label: isRecord(e) ? String(e.label) : "",
+      key: isRecord(e) ? String(e.key) : "",
+    }));
+    return [{
+      kind: "keyValueSource",
+      source: String(node.source),
+      entries,
+      emptyText: typeof node.emptyText === "string" ? node.emptyText : null,
+    }];
   }
   if (isNode(node, "form")) {
     const fields = childArray(node.fields).map((f): FormField => {

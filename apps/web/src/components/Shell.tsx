@@ -13,10 +13,31 @@ import { unreadCount } from "../lib/mail.js";
 import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.js";
 import { progressToNextRank } from "../lib/ranks.js";
 import { EventFeed } from "./EventFeed.js";
+import { Meter } from "./Meter.js";
 import { NavMenu } from "./NavMenu.js";
 import { Amount, Money } from "./ui.js";
 import { SlotImage } from "./GameImage.js";
 import styles from "./Shell.module.css";
+import type { PlayerAttributesDto } from "@gl3/shared";
+
+/**
+ * Pool bars for whichever of the three attribute pools `/api/auth/me`
+ * carries — absent entirely on an install with no attribute plugin loaded
+ * (see `PlayerAttributesDtoSchema`), which is what keeps a v2 boot's HUD
+ * byte-identical to before this feature existed.
+ */
+function PoolBars({ attributes }: { attributes: PlayerAttributesDto }): JSX.Element {
+  const pools: readonly [string, number, number][] = [
+    ["Energy", attributes.energy, attributes.energyMax],
+    ["Will", attributes.will, attributes.willMax],
+    ["Brave", attributes.brave, attributes.braveMax],
+  ];
+  return (
+    <div className={styles.hudGroup}>
+      {pools.map(([label, value, max]) => <Meter key={label} label={label} value={value} max={max} />)}
+    </div>
+  );
+}
 
 function Stat({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -270,6 +291,7 @@ export function Shell(): JSX.Element {
               {showBullets ? <Stat label="Bullets">{me.data ? <Amount value={me.data.bullets} /> : "—"}</Stat> : null}
               <Stat label="Points">{me.data ? <Amount value={me.data.points} /> : "—"}</Stat>
             </div>
+            {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
             <div className={styles.hudGroup}>
               <Stat label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
               {showLocation ? <Stat label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
