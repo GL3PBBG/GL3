@@ -105,3 +105,44 @@ describe("progression (exp routing claimed)", () => {
     }
   });
 });
+
+describe("progression's core.profileView / core.dashboard subscribers", () => {
+  it("carries the CALLING player's Level + exp on GET /api/dashboard/widgets", async () => {
+    const server = await bootTestServer({ plugins: [mccodesAttributes, progressionPlugin] });
+    try {
+      const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.13.2.1" });
+      await db.update(playerStats).set({ level: 4, exp: 30n }).where(eq(playerStats.playerId, playerId));
+
+      const res = await server.app.inject({
+        method: "GET", url: "/api/dashboard/widgets",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const widgets = (res.json() as { widgets: { pluginId: string; title: string; view: unknown }[] }).widgets;
+      const widget = widgets.find((w) => w.pluginId === "progression");
+      expect(widget?.title).toBe("Progression");
+      expect(JSON.stringify(widget?.view)).toContain("Level 4");
+      expect(JSON.stringify(widget?.view)).toContain("30 exp");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("carries the TARGET player's Level as a profile extra, not the viewer's", async () => {
+    const server = await bootTestServer({ plugins: [mccodesAttributes, progressionPlugin] });
+    try {
+      const target = await registerVerifiedPlayer(server, { remoteAddress: "10.13.2.2" });
+      await db.update(playerStats).set({ level: 7 }).where(eq(playerStats.playerId, target.playerId));
+
+      // Public route — no auth header, exactly like ProfileDto's own tests.
+      const res = await server.app.inject({
+        method: "GET", url: `/api/players/${target.playerId}/profile`,
+      });
+      expect(res.statusCode).toBe(200);
+      const extras = (res.json() as { extras: { kind: string; pluginId: string; label: string; value: string }[] }).extras;
+      expect(extras).toContainEqual({ kind: "stat", pluginId: "progression", label: "Level", value: "7" });
+    } finally {
+      await server.close();
+    }
+  });
+});

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { bigint, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import { definePlugin, type PluginTx } from "@gl3/plugin-sdk";
+import { coreDashboard, coreProfileView, definePlugin, on, type PluginTx } from "@gl3/plugin-sdk";
 
 /** Read mirrors of core-owned tables (crimes' schema.ts pattern). */
 const playerStats = pgTable("player_stats", {
@@ -98,6 +98,46 @@ export async function applyExpLevels(tx: PluginTx, playerId: string, expGain: bi
   }
 }
 
+// ---------------------------------------------------------------------------
+// core.profileView / core.dashboard (bounties'/membership's subscriber
+// shape). Both plain SELECTs against the read-mirror `playerStats` above, no
+// lock — a public profile read and an authenticated dashboard read.
+// ---------------------------------------------------------------------------
+
+/** The target's Level, on any profile — not the viewer's own. */
+const profileLevel = on(coreProfileView, async (ctx, value) => {
+  const [row] = await ctx.transaction(async (tx) => tx.db
+    .select({ level: playerStats.level })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, value.targetId)));
+  if (!row) return value;
+  return {
+    ...value,
+    extras: [...value.extras, { kind: "stat" as const, pluginId: ctx.pluginId, label: "Level", value: String(row.level) }],
+  };
+});
+
+/** Level + exp, for the CALLING player — no widget for an unauthenticated caller. */
+const dashboardWidget = on(coreDashboard, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+  const [row] = await ctx.transaction(async (tx) => tx.db
+    .select({ level: playerStats.level, exp: playerStats.exp })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, player.id)));
+  if (!row) return value;
+  return [...value, {
+    pluginId: ctx.pluginId,
+    title: "Progression",
+    view: {
+      kind: "panel" as const, title: "Progression",
+      children: [
+        { kind: "text" as const, value: `Level ${row.level} · ${row.exp.toString()} exp` },
+      ],
+    },
+  }];
+});
+
 /**
  * Progression (C spec §4.3): the exp destination for an MCCodes-profile
  * boot. Installing this plugin IS the routing claim — one claimant per
@@ -109,4 +149,5 @@ export default definePlugin({
   basePaths: ["/api/progression"],
   requires: ["mccodes-attributes"],
   applyExp: applyExpLevels,
+  filters: [profileLevel, dashboardWidget],
 });

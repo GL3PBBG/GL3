@@ -341,6 +341,7 @@ export default defineWorkspace([
         "test/jobs.test.ts",
         "test/jobs-page.test.ts",
         "test/temple.test.ts",
+        "test/temple-page.test.ts",
         "test/bank-open-fee.test.ts",
         "test/mccodes-member-regen.test.ts",
         "test/combat-melee.test.ts",

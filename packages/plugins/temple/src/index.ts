@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { definePlugin, InsufficientFundsError, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { templePage } from "./pages.js";
+
+export { templePage } from "./pages.js";
 
 /**
  * The crystal temple, as a points shop (C spec §4.6, audit §4.10): exactly
@@ -35,15 +38,35 @@ async function debitPoints(
  * the faithful MCCodes default. The gl3 profile seeds "refill": points ->
  * IQ or cash turns a season prize into scoring power (see NOTES.md,
  * "Points are not a game balance"). Admin-editable like any setting.
+ *
+ * Shared by the gate below and the `GET /api/temple` route, so the page's
+ * "Offered here" list and the 403 a disabled exchange answers can never
+ * disagree about what's on.
  */
+function enabledExchanges(ctx: { settings: { get(key: string): string | null } }): string[] {
+  const raw = ctx.settings.get("exchanges");
+  if (raw === null) return ["refill", "iq", "money"];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 function assertExchangeEnabled(
   ctx: { settings: { get(key: string): string | null } }, exchange: string,
 ): void {
-  const raw = ctx.settings.get("exchanges");
-  if (raw === null) return;
-  const enabled = raw.split(",").map((s) => s.trim()).filter(Boolean);
-  if (!enabled.includes(exchange)) throw new PluginError("exchange_disabled", 403);
+  if (!enabledExchanges(ctx).includes(exchange)) throw new PluginError("exchange_disabled", 403);
 }
+
+/**
+ * The `keyValueSource` the temple page reads for "Offered here" — a comma-
+ * joined list of the enabled exchanges, not player-specific.
+ */
+const templeRoute = route({
+  method: "GET",
+  path: "/api/temple",
+  handler: async (ctx) => ({
+    status: 200,
+    body: { values: { exchanges: enabledExchanges(ctx).join(",") } },
+  }),
+});
 
 const refillRoute = route({
   method: "POST",
@@ -120,5 +143,6 @@ export default definePlugin({
   version: "1.0.0",
   basePaths: ["/api/temple"],
   requires: ["mccodes-attributes"],
-  routes: [refillRoute, iqRoute, moneyRoute],
+  routes: [templeRoute, refillRoute, iqRoute, moneyRoute],
+  pages: [templePage],
 });
