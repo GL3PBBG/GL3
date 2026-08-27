@@ -3,8 +3,10 @@ import { CORE_PLUGINS } from "../src/plugins/core-plugins.js";
 
 /**
  * An item's `itemType` is the discriminator of the create and update bodies:
- * the route rejects anything but `weapon`, `armor` or `consumable` with a 400,
- * and each of the six forms targets exactly one of them. Asking the admin to
+ * the route rejects anything but `weapon`, `melee`, `armor` or `consumable`
+ * with a 400, and each of the eight forms targets exactly one of them
+ * (`melee` is form-level only — it stores as item_type `weapon`). Asking the
+ * admin to
  * type it means a form that is wrong on submit for one typo, with the correct
  * value knowable from the form itself.
  *
@@ -46,18 +48,21 @@ describe("inventory admin forms carry itemType as a hidden constant", () => {
   const discriminators = fields.filter((field) => field.name === "itemType");
 
   it("finds one on every item form", () => {
-    // Three create forms and three update forms. Guards the walker as much as
-    // the count: a walker that found nothing would make the next test pass
-    // vacuously.
-    expect(discriminators.length).toBe(6);
+    // Four create forms and four update forms — "melee" joined both sets as a
+    // FORM-level discriminant (stored as item_type "weapon"; the body schema
+    // maps it back). Guards the walker as much as the count: a walker that
+    // found nothing would make the next test pass vacuously.
+    expect(discriminators.length).toBe(8);
   });
 
   it("declares every one hidden, carrying the type its form creates", () => {
     expect(discriminators.map((field) => [field.type, field.value])).toEqual([
       ["hidden", "weapon"],
+      ["hidden", "melee"],
       ["hidden", "armor"],
       ["hidden", "consumable"],
       ["hidden", "weapon"],
+      ["hidden", "melee"],
       ["hidden", "armor"],
       ["hidden", "consumable"],
     ]);

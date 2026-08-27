@@ -177,6 +177,31 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({ heal: 25 });
     });
 
+    // Melee weapons: `power` in the effects IS the model marker (combat C6),
+    // so the form authors them under its own discriminant "melee" while the
+    // row stores item_type "weapon" — the melee slot's equip gate and
+    // combat's loadWeapon both read the effects, never a distinct type.
+    it("creates a melee weapon stored as item_type weapon with power effects", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Combat Knife", itemType: "melee", power: 12 },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.itemType).toBe("weapon");
+      expect(row?.effects).toEqual({ power: 12 });
+    });
+
+    // "" coerces to 0, which is not a positive power — unlike the firearm
+    // optionals there is no meaningful blank here, so it refuses.
+    it("rejects a melee weapon with no power figure", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Pool Noodle", itemType: "melee", power: "" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
     it("rejects a weapon with damageMax < damageMin", async () => {
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items", headers: auth(),
@@ -218,6 +243,8 @@ describe("inventory admin", () => {
         armorPierce: "3",
         minRankExp: "100",
         dps: "1.5",
+        // Blank, not "—": a firearm has no power stat at all.
+        power: "",
         armor: "",
         heal: "",
         // The effect kind cell, blank for anything that is not a consumable.
@@ -263,6 +290,24 @@ describe("inventory admin", () => {
       const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
       const rows = list.json().rows as Array<Record<string, string>>;
       expect(rows[0]).toMatchObject({ damage: "4–6", accuracy: "—" });
+    });
+
+    // The regression this pins: statCells ran every weapon row through the
+    // firearm schema, which a melee row — power, no damage range — fails, so
+    // one imported melee item took down the whole admin items table with a
+    // 500. Inserted directly, as the MCCodes migrator would.
+    it("lists a melee weapon's power without failing the firearm columns", async () => {
+      await db.insert(items).values({
+        id: uuidv7(), name: "Imported Katana", itemType: "weapon",
+        effects: { power: 40 },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
+      expect(list.statusCode).toBe(200);
+      const rows = list.json().rows as Array<Record<string, string>>;
+      expect(rows[0]).toMatchObject({
+        name: "Imported Katana", itemType: "weapon", power: "40",
+        damage: "", accuracy: "", dps: "", armor: "", heal: "",
+      });
     });
 
     // `items.effects` is jsonb an earlier tool or a hand-edit can leave in a
@@ -399,6 +444,39 @@ describe("inventory admin", () => {
       expect(res.json().error).toBe("item_type_mismatch");
       const [row] = await db.select().from(items).where(eq(items.id, id));
       expect(row?.effects).toMatchObject({ damageMin: 8, damageMax: 18 });
+    });
+
+    it("updates a melee weapon's power", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Combat Knife", itemType: "melee", power: 12 },
+      });
+      expect(create.statusCode).toBe(201);
+      const id: string = create.json().id;
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, itemType: "melee", power: 55 },
+      });
+      expect(res.statusCode).toBe(204);
+      const [row] = await db.select().from(items).where(eq(items.id, id));
+      expect(row?.itemType).toBe("weapon");
+      expect(row?.effects).toEqual({ power: 55 });
+    });
+
+    // Melee stores as item_type "weapon", so the mismatch guard must compare
+    // against the STORED type the form value maps to — an armor item is
+    // still refused, same as pointing the armor form at a weapon.
+    it("400s the melee form pointed at an armor item", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Kevlar Vest", itemType: "armor", armor: 30 },
+      });
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id: create.json().id, itemType: "melee", power: 10 },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("item_type_mismatch");
     });
 
     it("404s an unknown item id", async () => {

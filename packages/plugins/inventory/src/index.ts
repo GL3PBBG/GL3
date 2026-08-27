@@ -438,6 +438,24 @@ const WeaponStatsShape = {
 const ArmorStatsShape = { armor: z.coerce.number().int().nonnegative() } as const;
 
 /**
+ * The melee form's discriminant. NOT a stored item type: a melee weapon is
+ * `item_type = "weapon"` whose effects carry `power` — the marker combat's
+ * `loadWeapon` and the melee-slot equip gate both read (C6). The form needs
+ * its own discriminant because the firearm shape requires a damage range a
+ * melee item never has; `storedItemType` maps it back before any row is
+ * written or compared.
+ */
+const FORM_TYPE_MELEE = "melee";
+
+/** Not blankable: "" coerces to 0, and a powerless melee weapon is not a
+ *  weapon — unlike the firearm optionals there is no meaningful blank. */
+const MeleeStatsShape = { power: z.coerce.number().int().positive() } as const;
+
+function storedItemType(formType: string): string {
+  return formType === FORM_TYPE_MELEE ? ITEM_TYPE_WEAPON : formType;
+}
+
+/**
  * `kind` names a def in the `inventory.itemEffects` registry; blank is the
  * built-in `heal`, which is what every existing item is. `heal` is blankable
  * for the same reason it became optional in `ConsumableEffectsSchema` — a
@@ -457,6 +475,11 @@ const ItemBodySchema = z.discriminatedUnion("itemType", [
     itemType: z.literal(ITEM_TYPE_WEAPON),
     name: z.string().min(1).max(80),
     ...WeaponStatsShape,
+  }).strict(),
+  z.object({
+    itemType: z.literal(FORM_TYPE_MELEE),
+    name: z.string().min(1).max(80),
+    ...MeleeStatsShape,
   }).strict(),
   z.object({
     itemType: z.literal(ITEM_TYPE_ARMOR),
@@ -483,6 +506,12 @@ const ItemUpdateSchema = z.discriminatedUnion("itemType", [
     ...WeaponStatsShape,
   }).strict(),
   z.object({
+    itemType: z.literal(FORM_TYPE_MELEE),
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+    ...MeleeStatsShape,
+  }).strict(),
+  z.object({
     itemType: z.literal(ITEM_TYPE_ARMOR),
     id: z.string().uuid(),
     name: blankable(z.string().min(1).max(80)),
@@ -498,6 +527,7 @@ const ItemUpdateSchema = z.discriminatedUnion("itemType", [
 
 type ItemStatsBody =
   | ({ itemType: typeof ITEM_TYPE_WEAPON } & z.infer<z.ZodObject<typeof WeaponStatsShape>>)
+  | ({ itemType: typeof FORM_TYPE_MELEE } & z.infer<z.ZodObject<typeof MeleeStatsShape>>)
   | ({ itemType: typeof ITEM_TYPE_ARMOR } & z.infer<z.ZodObject<typeof ArmorStatsShape>>)
   | ({ itemType: typeof ITEM_TYPE_CONSUMABLE } & z.infer<z.ZodObject<typeof ConsumableStatsShape>>);
 
@@ -523,6 +553,8 @@ function effectsFor(body: ItemStatsBody): unknown {
           ...(body.minRankExp !== undefined && { minRankExp: body.minRankExp }),
           ...(body.dps !== undefined && { dps: body.dps }),
         });
+      case FORM_TYPE_MELEE:
+        return MeleeEffectsSchema.parse({ power: body.power });
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
       case ITEM_TYPE_CONSUMABLE: {
@@ -572,8 +604,8 @@ const ShopStockBodySchema = z.object({
 function statCells(itemType: string, effects: unknown): Record<string, string> {
   const blank = {
     damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
-    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", armor: "",
-    heal: "", effect: "",
+    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", power: "",
+    armor: "", heal: "", effect: "",
   };
   const parsed = readEffects(itemType, effects);
   const known = itemType === ITEM_TYPE_WEAPON
@@ -590,6 +622,12 @@ function statCells(itemType: string, effects: unknown): Record<string, string> {
   }
   switch (itemType) {
     case ITEM_TYPE_WEAPON: {
+      // Melee first, the same order readEffects itself checks: a melee row is
+      // `{ power }`, which the firearm schema below REJECTS (no damage
+      // range) — parsing it there used to throw and 500 the whole listing
+      // the moment one imported melee item existed.
+      const melee = MeleeEffectsSchema.safeParse(parsed);
+      if (melee.success) return { ...blank, power: String(melee.data.power) };
       const w = WeaponEffectsSchema.parse(parsed);
       return {
         ...blank,
@@ -652,7 +690,8 @@ const adminItemCreateRoute = route({
       await tx.db.insert(items).values({
         id,
         name: body.name,
-        itemType: body.itemType,
+        // "melee" is the FORM's discriminant only — the row stores "weapon".
+        itemType: storedItemType(body.itemType),
         effects,
       });
     });
@@ -677,7 +716,12 @@ const adminItemUpdateRoute = route({
         .from(items)
         .where(eq(items.id, body.id));
       if (!existing) return "not_found" as const;
-      if (existing.itemType !== body.itemType) return "mismatch" as const;
+      // Compared against the STORED type the form value maps to: melee and
+      // firearm are both item_type "weapon", so pointing either weapon form
+      // at the other converts the model — deliberate (both leave type and
+      // effects agreeing, and combat degrades a non-melee row in the melee
+      // slot to fists) — while an armor or consumable target still refuses.
+      if (existing.itemType !== storedItemType(body.itemType)) return "mismatch" as const;
       await tx.db
         .update(items)
         .set({ effects, ...(body.name !== undefined && { name: body.name }) })
@@ -870,6 +914,7 @@ const adminPage: PageSchema = {
             { key: "armorPierce", label: "Pierce" },
             { key: "minRankExp", label: "Min rank exp" },
             { key: "dps", label: "DPS" },
+            { key: "power", label: "Power" },
             { key: "armor", label: "Armor" },
             { key: "heal", label: "Heal" },
             { key: "effect", label: "Effect" },
@@ -880,6 +925,11 @@ const adminPage: PageSchema = {
             { name: "name", label: "Name", type: "text" },
             { name: "itemType", type: "hidden", value: ITEM_TYPE_WEAPON },
             ...WEAPON_STAT_FORM_FIELDS,
+          ] },
+          { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add melee weapon", fields: [
+            { name: "name", label: "Name", type: "text" },
+            { name: "itemType", type: "hidden", value: FORM_TYPE_MELEE },
+            { name: "power", label: "Power", type: "number" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add armor", fields: [
             { name: "name", label: "Name", type: "text" },
@@ -902,6 +952,12 @@ const adminPage: PageSchema = {
             { name: "itemType", type: "hidden", value: ITEM_TYPE_WEAPON },
             { name: "name", label: "Rename to (optional)", type: "text" },
             ...WEAPON_STAT_FORM_FIELDS,
+          ] },
+          { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Update melee weapon", fields: [
+            { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
+            { name: "itemType", type: "hidden", value: FORM_TYPE_MELEE },
+            { name: "name", label: "Rename to (optional)", type: "text" },
+            { name: "power", label: "Power", type: "number" },
           ] },
           { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Update armor", fields: [
             { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
