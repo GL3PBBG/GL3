@@ -205,6 +205,36 @@ const moverPlugin: PluginManifest = definePlugin({
   filters: [on(games, (_ctx, list) => [...list, MOVER as GameDef])],
 });
 
+/**
+ * `THROWS`'s twin for the `moves` handler specifically: `act` itself
+ * behaves — it is `moves` that blows up. Proves `stepMoves`'s own
+ * `guardGame` wrapping (`index.ts`), the same clean-400 contract every other
+ * `GameDef` handler on this path already gets, rather than a raw throw
+ * escaping as an unhandled 500.
+ */
+const MOVES_THROWS: GameDef<{ wager: bigint }> = {
+  id: "movesthrows",
+  name: "MovesThrows",
+  maxPayoutMultiplier: 2,
+  action: z.unknown(),
+  start: ({ wager }): GameStep<{ wager: bigint }> => (
+    { state: { wager }, view: { kind: "text", value: "movesthrows: ready" }, done: false }
+  ),
+  act: (state): GameStep<{ wager: bigint }> => (
+    { state, done: false, view: { kind: "text", value: "movesthrows: acted" } }
+  ),
+  settle: (_state, wager) => wager,
+  view: () => ({ kind: "text", value: "movesthrows" }),
+  moves: (): never => { throw new Error("moves blew up"); },
+};
+
+const movesThrowsPlugin: PluginManifest = definePlugin({
+  id: "movesthrows",
+  version: "1.0.0",
+  basePaths: ["/api/movesthrows"],
+  filters: [on(games, (_ctx, list) => [...list, MOVES_THROWS as GameDef])],
+});
+
 beforeAll(async () => {
   await resetDb(db);
 
@@ -213,7 +243,7 @@ beforeAll(async () => {
   // is pinned off here; its own coverage lives in properties-pay-owner.test.ts.
   await db.insert(settings).values({ key: "properties.skim_percent", value: "0" });
   ({ app, close: closeServer, redis } = await bootTestServer({
-    plugins: [faroPlugin, throwsPlugin, moverPlugin],
+    plugins: [faroPlugin, throwsPlugin, moverPlugin, movesThrowsPlugin],
   }));
 });
 
@@ -694,5 +724,21 @@ describe("POST /api/casino/act — the moves field", () => {
     // The hand is settled — no more legal moves, but the game DID implement
     // the method, so this is [] rather than null.
     expect(winBody.moves).toEqual([]);
+  });
+
+  it("a moves() that throws is a clean 400, not a 500 — the same guardGame contract act/settle already get", async () => {
+    const { token, playerId } = await register();
+    const locationId = await seedLocation();
+    await placePlayer(playerId, locationId, 1_000_000n);
+
+    // `act` itself behaves; only `moves` blows up, so this proves `stepMoves`
+    // has its own `guardGame` wrapping rather than piggy-backing on `act`'s.
+    await seedSession({
+      playerId, locationId, propertyId: null, wager: 10_000n, gameId: "movesthrows",
+    });
+
+    const res = await act(token, "anything");
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toBe("game_error");
   });
 });

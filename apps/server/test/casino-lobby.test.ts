@@ -288,6 +288,57 @@ describe("GET /api/casino", () => {
     expect(body.session?.view).toBeNull();
   });
 
+  it("degrades `moves` to null when the game's `moves` throws, rather than failing the whole lobby", async () => {
+    // `safeMoves`'s own coverage — `safeView`'s twin. This game DOES declare
+    // `view` (and it succeeds), so a null `session.moves` here proves the
+    // degrade is `moves`-specific rather than piggy-backing on the
+    // viewless case above: the rest of the response, `view` included, is
+    // untouched by one handler misbehaving.
+    const WOBBLY_MOVES: GameDef = {
+      id: "casino",
+      name: "Wobbly",
+      maxPayoutMultiplier: 2,
+      action: z.unknown(),
+      start() { throw new Error("WOBBLY_MOVES.start must not be reached"); },
+      act() { throw new Error("WOBBLY_MOVES.act must not be reached"); },
+      settle() { return 0n; },
+      view: () => ({ kind: "text", value: "wobbly" }),
+      moves: (): never => { throw new Error("moves blew up"); },
+    };
+    const withWobblyGame = {
+      ...casinoPlugin,
+      filters: [on(games, (_ctx, list: GameDef[]) => [...list, WOBBLY_MOVES])],
+    };
+
+    const punter = await register();
+    const locationId = await seedLocation();
+    await placePlayer(punter.playerId, locationId, 1_000_000n);
+    await db.insert(casinoSessions).values({
+      id: uuidv7(),
+      playerId: punter.playerId,
+      gameId: "casino",
+      locationId,
+      propertyId: null,
+      wager: 40_000n,
+      state: {},
+      status: "open",
+      seed: "wobbly",
+    });
+
+    const result = await callPluginRoute(withWobblyGame, "GET", "/api/casino", {
+      db, redis, leaderboardPrefix: "casino-lobby-test", playerId: punter.playerId,
+    });
+    // The whole request still 200s — one game's misbehaving `moves` does not
+    // take down the lobby, `view`'s own established contract.
+    expect(result.status).toBe(200);
+    const body = result.body as LobbyBody;
+
+    expect(body.session).not.toBeNull();
+    // `view` still renders — proof the throw is isolated to `moves`.
+    expect(body.session?.view).toEqual({ kind: "text", value: "wobbly" });
+    expect(body.session?.moves).toBeNull();
+  });
+
   it("does not forfeit a live hand when the expiry setting is absurd", async () => {
     // THE PATH THAT COSTS A PLAYER MONEY. `settings.value` is unbounded `text`;
     // before `MAX_SESSION_EXPIRY_MINUTES` a ~309+ digit row read as `Infinity`,

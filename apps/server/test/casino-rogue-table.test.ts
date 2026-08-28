@@ -306,6 +306,35 @@ describe("a table game that throws", () => {
 
     await expect(act(manifest, playerId)).rejects.toMatchObject({ code: "game_error" });
   });
+
+  it("becomes a clean error from moves, on a plain read", async () => {
+    // `view` and `act` both behave — only `moves` blows up — so this proves
+    // `renderTablePayload`'s own `guardGame("moves", ...)` wrapping, not
+    // borrowed coverage from the `view` guard beside it.
+    //
+    // A call counter, not an unconditional throw: `bet` itself renders its
+    // own response through `renderTablePayload` (`renderAfter`) the instant
+    // it completes the deal, so an unconditional throw would fail `bet`
+    // itself rather than isolate the plain-GET read path this test is about.
+    // The FIRST call — inside that same `bet` — is left to succeed; only the
+    // SECOND, a plain `GET` with no write involved, is made to blow up.
+    let calls = 0;
+    const manifest = casinoWith(rogueTableGame({
+      deal: () => ({ state: {}, done: false, turn: 0 }),
+      moves: () => {
+        calls += 1;
+        if (calls === 1) return [];
+        throw new Error("moves blew up");
+      },
+    }));
+    const { playerId } = await seatOne(manifest);
+    expect((await bet(manifest, playerId, WAGER)).status).toBe(200);
+
+    // The dealt hand is still live, so `renderTablePayload` has a state to
+    // call `moves` against — a plain GET is enough to trigger it, no `act`
+    // needed.
+    await expect(readTable(manifest, playerId)).rejects.toMatchObject({ code: "game_error" });
+  });
 });
 
 describe("a table game whose step points the turn at a seat that is not in the hand", () => {
@@ -346,6 +375,21 @@ describe("a table game that declares moves", () => {
     const res = await readTable(manifest, playerId);
     const body = res.body as { table: { moves: unknown } };
     expect(body.table.moves).toBeNull();
+  });
+
+  it("answers [] rather than null before the first deal, for a game that DOES implement moves", async () => {
+    // Distinct from the "omits the method" case above: this game HAS
+    // `moves`, but `sit` alone leaves `table.state === null` (no hand yet),
+    // so there is nothing to call it against — `renderTablePayload`'s own
+    // `[]` branch, never reaching the game at all.
+    const manifest = casinoWith(rogueTableGame({
+      moves: () => [{ action: "go", label: "Go" }],
+    }));
+    const { playerId } = await seatOne(manifest);
+
+    const res = await readTable(manifest, playerId);
+    const body = res.body as { table: { moves: unknown } };
+    expect(body.table.moves).toEqual([]);
   });
 });
 
