@@ -147,6 +147,7 @@ const openRoute = route({
 export default definePlugin({
   id: "bank",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/bank"],
   routes: [bankRoute("deposit"), bankRoute("withdraw"), openRoute],
 });

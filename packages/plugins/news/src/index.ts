@@ -59,6 +59,7 @@ const adminPage: PageSchema = {
 export default definePlugin({
   id: "news",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/news", "/api/admin/news"],
   routes: [
     route({

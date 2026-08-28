@@ -9,6 +9,21 @@ import type { PluginRoute } from "./route.js";
 export const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const SEMVER_PATTERN = /^\d+\.\d+\.\d+$/;
 
+/**
+ * The plugin API contract version this SDK implements — the number a plugin
+ * declares in its manifest's `apiVersion` field.
+ *
+ * Bumping this is the definition of a breaking SDK change: anything a plugin
+ * compiled against the old surface could have relied on — manifest fields,
+ * `ctx`/`tx` members, filter semantics. Additive changes do NOT bump it; they
+ * ship as ordinary SDK version bumps and every older plugin keeps loading,
+ * which is the whole distinction between the SDK's semver and this contract.
+ * If a v2 ever lands, the loader grows a supported-versions window (v1
+ * deprecated, not dropped) and the boot error below becomes a migration
+ * prompt rather than a refusal.
+ */
+export const PLUGIN_API_VERSION = 1;
+
 export interface PluginMigration {
   name: string;
   sql: string;
@@ -138,6 +153,21 @@ export const SINGLETON_ENTITY_ID = "00000000-0000-0000-0000-000000000000";
 export interface PluginManifestInput {
   id: string;
   version: string;
+  /**
+   * Which plugin API contract this plugin was written against. Absent means
+   * `PLUGIN_API_VERSION`: everything authored before the field existed is v1
+   * by definition, so no existing plugin — including out-of-repo ones —
+   * breaks when the check ships.
+   *
+   * Declaring a version the loading SDK does not implement is a hard boot
+   * failure with its own message, checked BEFORE the strict manifest parse:
+   * a v2 plugin on a v1 server typically carries manifest fields this schema
+   * has never heard of, and without the pre-check `.strict()` would report
+   * the first of those as an "Unrecognized key" — technically true,
+   * operationally useless (2026-08-24's stale-image `Unrecognized key
+   * 'category'` crash-loop is the failure this field exists to replace).
+   */
+  apiVersion?: number;
   basePaths: string[];
   /** Ids of other plugins that must be loaded in the same boot. */
   requires?: string[];
@@ -182,6 +212,8 @@ export type ExpApplier = (
 export interface PluginManifest {
   id: string;
   version: string;
+  /** Declared contract version, defaulted to `PLUGIN_API_VERSION` at parse. */
+  apiVersion: number;
   basePaths: string[];
   requires: string[];
   tables: Record<string, unknown>;
@@ -237,6 +269,11 @@ const InputSchema = z
   .object({
     id: z.string().regex(PLUGIN_ID_PATTERN, "plugin id must be lowercase kebab-case"),
     version: z.string().regex(SEMVER_PATTERN, "version must be semver x.y.z"),
+    // The number's RANGE is checked here; its VALUE against the SDK is
+    // checked before this schema runs (see `assertSupportedApiVersion`), so a
+    // mismatch reports the contract rather than whichever v2-only field
+    // `.strict()` happened to hit first.
+    apiVersion: z.number().int().min(1).optional(),
     basePaths: z
       .array(
         z
@@ -357,6 +394,37 @@ function describeId(input: unknown): string {
 }
 
 /**
+ * The contract check runs before `InputSchema.safeParse`, not inside it,
+ * because the ordering IS the feature. A plugin written against a newer API
+ * version typically also carries manifest fields this schema has never heard
+ * of, and `.strict()` would report the first of those as an "Unrecognized
+ * key" — technically true, operationally useless. Reading the one number off
+ * the raw object first turns that into a version mismatch that names both
+ * sides and the remedy.
+ *
+ * Only a well-formed integer ≥ 1 claims a version. Anything else — a string,
+ * a fraction, zero — is a malformed field and belongs to the schema's own
+ * error, which names it like any other.
+ */
+function assertSupportedApiVersion(input: unknown): void {
+  if (typeof input !== "object" || input === null) return;
+  const declared = (input as { apiVersion?: unknown }).apiVersion;
+  if (
+    typeof declared !== "number" ||
+    !Number.isInteger(declared) ||
+    declared < 1 ||
+    declared === PLUGIN_API_VERSION
+  ) {
+    return;
+  }
+  throw new Error(
+    `invalid plugin manifest for "${describeId(input)}" — apiVersion: plugin declares ${declared} ` +
+      `but this build of @gl3/plugin-sdk implements ${PLUGIN_API_VERSION}; install a plugin ` +
+      `release built for apiVersion ${PLUGIN_API_VERSION}, or update the server`,
+  );
+}
+
+/**
  * Validates an UNTYPED value as a manifest — the entry point for a plugin
  * whose shape the compiler never saw.
  *
@@ -374,6 +442,7 @@ function describeId(input: unknown): string {
  * single source of truth for both paths.
  */
 export function parsePluginManifest(input: unknown): PluginManifest {
+  assertSupportedApiVersion(input);
   const result = InputSchema.safeParse(input);
   if (!result.success) {
     const detail = result.error.issues
@@ -388,6 +457,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
   return {
     id: parsed.id,
     version: parsed.version,
+    apiVersion: parsed.apiVersion ?? PLUGIN_API_VERSION,
     basePaths: parsed.basePaths,
     requires: parsed.requires ?? [],
     tables: parsed.tables ?? {},

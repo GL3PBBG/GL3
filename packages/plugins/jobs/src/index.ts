@@ -552,6 +552,7 @@ const adminRankDeleteRoute = route({
 export default definePlugin({
   id: "jobs",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/jobs", "/api/admin/jobs"],
   requires: ["mccodes-attributes"],
   migrations: JOBS_MIGRATIONS,

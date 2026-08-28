@@ -1032,6 +1032,7 @@ export {
 export default definePlugin({
   id: "inventory",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/inventory", "/api/shop", "/api/admin/inventory"],
   tables: { shopStock: "p_inventory_shop_stock" },
   migrations: SHOP_MIGRATIONS,

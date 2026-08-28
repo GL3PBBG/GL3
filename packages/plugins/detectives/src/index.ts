@@ -451,6 +451,7 @@ const menuBadge = on(coreMenuBadges, async (ctx, value) => {
 export default definePlugin({
   id: "detectives",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/detectives", "/api/admin/detectives"],
   pages: [{
     id: "detectives.index",

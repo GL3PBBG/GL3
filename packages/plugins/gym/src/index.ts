@@ -168,6 +168,7 @@ const trainRoute = route({
 export default definePlugin({
   id: "gym",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/gym"],
   requires: ["mccodes-attributes"],
   routes: [feedRoute, statsRoute, trainRoute],

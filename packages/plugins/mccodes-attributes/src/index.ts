@@ -20,6 +20,7 @@ import { definePlugin } from "@gl3/plugin-sdk";
 export default definePlugin({
   id: "mccodes-attributes",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/mccodes-attributes"],
   requires: [],
   providesAttributes: [

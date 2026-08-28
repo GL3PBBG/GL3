@@ -146,6 +146,7 @@ const dashboardWidget = on(coreDashboard, async (ctx, value) => {
 export default definePlugin({
   id: "progression",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/progression"],
   requires: ["mccodes-attributes"],
   applyExp: applyExpLevels,

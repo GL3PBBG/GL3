@@ -59,6 +59,9 @@ describe("loadDynamicPlugins", () => {
     expect(packageName).toBe("fixture-plugin");
     expect(manifest.id).toBe("fixture");
     expect(manifest.version).toBe("2.0.0");
+    // The manifest above declares no apiVersion: an out-of-repo plugin
+    // authored before the field existed defaults to the current contract.
+    expect(manifest.apiVersion).toBe(1);
     // Normalised by parsePluginManifest — the caller never writes `?? []`.
     expect(manifest.routes).toEqual([]);
     expect(manifest.migrations).toEqual([]);
@@ -112,6 +115,25 @@ describe("loadDynamicPlugins", () => {
 
     await expect(loadDynamicPlugins(["broken-plugin"], dir)).rejects.toThrow(
       /cannot load plugin package "broken-plugin".*lowercase kebab-case/s,
+    );
+  });
+
+  it("rejects a plugin declaring an unsupported apiVersion, naming the contract", async () => {
+    const dir = makeDir();
+    writePackage(
+      dir,
+      "future-plugin",
+      { main: "./dist/index.js" },
+      "dist/index.js",
+      // apiVersion 2 AND a v2-only field: the contract error must beat
+      // `.strict()`'s "Unrecognized key", which is the entire point of the
+      // check running before the schema — this is the 2026-08-24 stale-image
+      // crash-loop shape, made to say something actionable instead.
+      `export default { id: "future", version: "1.0.0", apiVersion: 2, category: "weapons", basePaths: ["/api/future"] };`,
+    );
+
+    await expect(loadDynamicPlugins(["future-plugin"], dir)).rejects.toThrow(
+      /cannot load plugin package "future-plugin" — invalid plugin manifest for "future" — apiVersion: plugin declares 2 but this build of @gl3\/plugin-sdk implements 1/,
     );
   });
 

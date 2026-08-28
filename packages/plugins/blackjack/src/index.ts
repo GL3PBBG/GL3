@@ -34,6 +34,7 @@ export const BLACKJACK_TABLE: TableGameDef<BjTableState> = {
 export default definePlugin({
   id: "blackjack",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/blackjack"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.

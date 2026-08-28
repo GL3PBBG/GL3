@@ -273,6 +273,7 @@ const adminDeleteRoute = route({
 export default definePlugin({
   id: "houses",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/houses", "/api/admin/houses"],
   requires: ["mccodes-attributes"],
   migrations: HOUSES_MIGRATIONS,

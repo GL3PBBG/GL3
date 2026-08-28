@@ -291,6 +291,17 @@ is handled inside GL3 (error identification uses brand checks, not
 surfaces as manifest validation errors at boot, not as subtle runtime
 breakage — which is the failure mode you want.
 
+A plugin can make that mismatch explicit by declaring `apiVersion` in its
+manifest (absent means `1`, the current and only contract version). The
+declaration is checked **before** the manifest's schema, so a plugin written
+against a newer SDK fails with a contract error naming both versions and the
+remedy — `apiVersion: plugin declares 2 but this build of @gl3/plugin-sdk
+implements 1; install a plugin release built for apiVersion 1, or update the
+server` — instead of a cryptic `Unrecognized key '…'` on whichever new field
+happened to come first. A stale server image meeting a newer plugin used to
+produce exactly that cryptic crash-loop; the field exists so it never does
+again.
+
 ## Failure modes
 
 All of these fail **loud, at boot**, before the server accepts traffic:
@@ -301,6 +312,11 @@ All of these fail **loud, at boot**, before the server accepts traffic:
 - **Package present but broken** (no default export, or the export fails
   manifest validation): the error names the package and the offending
   manifest field.
+- **Plugin written against a newer plugin API contract** (manifest declares
+  `apiVersion: 2` on a server that implements `1`): the error names the
+  package, both versions, and the remedy — update the server or install a
+  plugin release built for the server's contract. Checked before schema
+  validation, so it reports the contract, not the first unknown field.
 - **Init container itself fails** (bad credentials, registry unreachable,
   nonexistent version): in Kubernetes the pod never leaves `Init:Error`, so
   the old pods keep serving during a rollout — a bad plugin install cannot

@@ -33,6 +33,7 @@ import { greetings } from "./schema.js";
 export default definePlugin({
   id: "hello",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/hello"],
   tables: { greetings: "p_hello_greetings" },
   migrations: [{
@@ -95,7 +96,8 @@ export default definePlugin({
 });
 ```
 
-Every collection except `id`, `version`, `basePaths` is optional.
+Every collection except `id`, `version`, `basePaths` is optional. `apiVersion`
+is optional too, but declaring it is the convention: see below.
 
 ## The manifest
 
@@ -108,6 +110,7 @@ plugin id in the message.
 |---|---|---|
 | `id` | `string` | Lowercase kebab-case `[a-z][a-z0-9-]*`. Used as the table prefix base and in every boot-failure message. |
 | `version` | `string` | Semver `x.y.z`. |
+| `apiVersion` | `number` | Which plugin API contract this plugin targets — `PLUGIN_API_VERSION` from the SDK you built against (`1` today). Absent means the current one. Checked **before** the rest of the manifest, so a plugin written against a newer SDK fails with a contract error naming both versions, not with `Unrecognized key` on the first field this SDK has never heard of. |
 | `basePaths` | `string[]` | At least one, each `/api/<name>...`. Every route path must sit under one of these. `/api/auth`, `/api/ws`, `/api/plugins`, `/health` are reserved to core. Overlapping basePaths across plugins is a hard boot failure. |
 | `tables` | `Record<string, string>` | Maps your key to a SQL table name that **must** start with `p_<id-with-underscores>_` (e.g. id `hello` → prefix `p_hello_`). Enforced by the loader at boot. |
 | `migrations` | `{ name, sql }[]` | Plain SQL, no drizzle-kit. Applied once, tracked in `plugin_migrations`. Migration names must be unique within a plugin (checked at definition time). **One-way — there is no `down`**; see Uninstalling. |

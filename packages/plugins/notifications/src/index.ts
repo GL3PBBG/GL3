@@ -25,6 +25,7 @@ const NotificationParamsSchema = z.object({ notificationId: z.string().uuid() })
 export default definePlugin({
   id: "notifications",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/notifications"],
   routes: [
     route({

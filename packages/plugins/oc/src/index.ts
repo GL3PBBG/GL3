@@ -753,6 +753,7 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
 export default definePlugin({
   id: "oc",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/oc"],
   pages: [{
     id: "oc.index",
