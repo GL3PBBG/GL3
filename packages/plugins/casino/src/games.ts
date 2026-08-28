@@ -81,7 +81,14 @@ export interface TableGameDef<S = unknown> {
   maxPayoutMultiplier: number;
   /** Validates the act body's `action`. Rule: zod every external boundary. */
   action: z.ZodType<unknown>;
-  deal(input: { seats: TableSeatInput[]; seed: string }): TableStep<S>;
+  /**
+   * `handNo` is the number this hand will be stored under (`casino_tables.
+   * hand_no` after the deal) — persisted, so a disputed hand replays from the
+   * stored (seed, handNo) pair. Optional so a game that ignores it (blackjack)
+   * and a hub that predates it stay compatible; a rotation-sensitive game
+   * (poker's button) uses it when present and derives from the seed when not.
+   */
+  deal(input: { seats: TableSeatInput[]; seed: string; handNo?: number }): TableStep<S>;
   act(state: S, seat: number, action: unknown): TableStep<S>;
   /** What happens to a seat whose turn timer lapsed. Pure, like the rest. */
   autoAct(state: S, seat: number): TableStep<S>;

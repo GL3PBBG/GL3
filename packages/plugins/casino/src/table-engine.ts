@@ -451,6 +451,9 @@ export async function dealIfReady(
   const step = guardGame(table.gameId, "start", () => game.deal({
     seats: bettors.map((s) => ({ seat: s.seatNo, wager: s.wager })),
     seed: table.seed,
+    // The number this hand is stored under (written below) — lets a game
+    // rotate a dealer button across hands without holding state of its own.
+    handNo: table.handNo + 1,
   }));
   const seed = randomBytes(16).toString("hex");
   const handNo = table.handNo + 1;
