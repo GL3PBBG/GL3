@@ -412,6 +412,12 @@ export default definePlugin({
     adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
   ],
   filters: [hudCourse],
+  // The page renders at /plugins/<pageId>, out of reach of the Shell's
+  // route→slot banner map, so the banner is this plugin's own singleton drawn
+  // by a `slotImage` node in the page view (the theft precedent).
+  providesAssets: [
+    { slot: "page-education", label: "Education page banner", singleton: true },
+  ],
   pages: [educationPage],
   adminPages: [adminPage],
 });

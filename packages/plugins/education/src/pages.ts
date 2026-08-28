@@ -8,6 +8,7 @@ export const educationPage: PageSchema = {
     kind: "panel",
     title: "Education",
     children: [
+      { kind: "slotImage", slot: "page-education", alt: "Education", size: "lg" },
       { kind: "keyValueSource", source: "GET /api/education/board", entries: [
         { label: "Course", key: "activeName" },
         { label: "Days remaining", key: "daysRemaining" },

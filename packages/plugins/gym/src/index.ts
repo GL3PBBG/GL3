@@ -171,6 +171,12 @@ export default definePlugin({
   basePaths: ["/api/gym"],
   requires: ["mccodes-attributes"],
   routes: [feedRoute, statsRoute, trainRoute],
+  // The page renders at /plugins/<pageId>, out of reach of the Shell's
+  // route→slot banner map, so the banner is this plugin's own singleton drawn
+  // by a `slotImage` node in the page view (the theft precedent).
+  providesAssets: [
+    { slot: "page-gym", label: "Gym page banner", singleton: true },
+  ],
   pages: [gymPage],
 });
 

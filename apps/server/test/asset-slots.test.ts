@@ -207,3 +207,40 @@ describe("boot validation", () => {
     expect(() => validatePlugins([plugin])).toThrow(/outside/);
   });
 });
+
+// The MCCodes family's player pages render at /plugins/<pageId>, out of reach
+// of the Shell's route→slot banner map — so their banner is each plugin's own
+// `providesAssets` singleton drawn by a `slotImage` node in the page view (the
+// theft/membership precedent). Without both halves the admin art section has
+// no entry for the page and nothing could render one anyway.
+describe("family plugin page banners", () => {
+  it("every family page declares a singleton banner slot and draws it", async () => {
+    const family = await Promise.all([
+      import("@gl3/plugin-gym"),
+      import("@gl3/plugin-houses"),
+      import("@gl3/plugin-education"),
+      import("@gl3/plugin-jobs"),
+      import("@gl3/plugin-temple"),
+    ]);
+
+    for (const mod of family) {
+      const manifest = mod.default;
+      for (const page of manifest.pages) {
+        const slots = collectSlotImages(page.view);
+        expect(slots.length, `${manifest.id} page ${page.id} draws no slotImage banner`).toBeGreaterThan(0);
+        for (const slot of slots) {
+          const decl = manifest.providesAssets.find((d) => d.slot === slot);
+          expect(decl, `${manifest.id} slotImage "${slot}" has no providesAssets declaration`).toBeDefined();
+          expect(decl?.singleton, `${manifest.id} slot "${slot}" must be a singleton`).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+function collectSlotImages(view: import("@gl3/plugin-sdk").ViewNode): string[] {
+  if (view.kind === "slotImage") return [view.slot];
+  if (view.kind === "panel") return view.children.flatMap(collectSlotImages);
+  if (view.kind === "list") return view.items.flatMap(collectSlotImages);
+  return [];
+}

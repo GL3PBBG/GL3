@@ -8,6 +8,7 @@ export const jobsPage: PageSchema = {
     kind: "panel",
     title: "Jobs",
     children: [
+      { kind: "slotImage", slot: "page-jobs", alt: "Jobs", size: "lg" },
       { kind: "keyValueSource", source: "GET /api/jobs/board", entries: [
         { label: "Job", key: "jobName" },
         { label: "Rank", key: "rankName" },

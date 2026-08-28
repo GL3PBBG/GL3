@@ -8,6 +8,7 @@ export const gymPage: PageSchema = {
     kind: "panel",
     title: "Gym",
     children: [
+      { kind: "slotImage", slot: "page-gym", alt: "Gym", size: "lg" },
       { kind: "meterSource", label: "Energy", source: "GET /api/gym", valueKey: "energy", maxKey: "energyMax" },
       { kind: "form", action: "POST /api/gym/train", submitLabel: "Train", fields: [
         { name: "stat", label: "Stat", type: "select",

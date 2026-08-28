@@ -13,6 +13,7 @@ export const templePage: PageSchema = {
     kind: "panel",
     title: "Temple",
     children: [
+      { kind: "slotImage", slot: "page-temple", alt: "Temple", size: "lg" },
       { kind: "keyValueSource", source: "GET /api/temple", entries: [
         { label: "Offered here", key: "exchanges" },
       ], emptyText: "Nothing offered" },

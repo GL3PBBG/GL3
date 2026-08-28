@@ -8,6 +8,7 @@ export const housesPage: PageSchema = {
     kind: "panel",
     title: "Houses",
     children: [
+      { kind: "slotImage", slot: "page-houses", alt: "Houses", size: "lg" },
       { kind: "keyValueSource", source: "GET /api/houses/board", entries: [
         { label: "House", key: "houseName" },
         { label: "Will ceiling", key: "houseWill" },

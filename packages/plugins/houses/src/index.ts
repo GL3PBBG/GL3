@@ -280,6 +280,12 @@ export default definePlugin({
     listRoute, boardRoute, buyRoute, sellRoute,
     adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
   ],
+  // The page renders at /plugins/<pageId>, out of reach of the Shell's
+  // route→slot banner map, so the banner is this plugin's own singleton drawn
+  // by a `slotImage` node in the page view (the theft precedent).
+  providesAssets: [
+    { slot: "page-houses", label: "Houses page banner", singleton: true },
+  ],
   pages: [housesPage],
   adminPages: [adminPage],
 });

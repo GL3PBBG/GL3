@@ -561,6 +561,12 @@ export default definePlugin({
     adminRanksListRoute, adminRankCreateRoute, adminRankUpdateRoute, adminRankDeleteRoute,
   ],
   filters: [hudWage],
+  // The page renders at /plugins/<pageId>, out of reach of the Shell's
+  // route→slot banner map, so the banner is this plugin's own singleton drawn
+  // by a `slotImage` node in the page view (the theft precedent).
+  providesAssets: [
+    { slot: "page-jobs", label: "Jobs page banner", singleton: true },
+  ],
   pages: [jobsPage],
   adminPages: [adminPage],
 });
