@@ -315,8 +315,8 @@ export function Shell(): JSX.Element {
                   <HudIcon id="health" />
                   <Meter label="Health" value={me.data.health} max={me.data.healthMax} compact />
                 </span>
-              </div>
             ) : null}
+                {me.data?.attributes && me.data?.health !== undefined ? null:</div>} 
             {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
             <div className={styles.hudGroup}>
               <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
