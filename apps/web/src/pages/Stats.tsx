@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import type { GameStatsResponse } from "@gl3/shared";
-import { useStats } from "../api/queries.js";
-import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
+import type { GameStatsResponse, PropertyRow } from "@gl3/shared";
+import { useMe, usePlugins, useProperties, useRanks, useStats } from "../api/queries.js";
+import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
+import { progressToNextRank } from "../lib/ranks.js";
 import {
   barPath, countFractions, indexOfMax, layoutBars, moneyFractions,
 } from "../lib/chart.js";
@@ -79,12 +80,84 @@ function TrendChart({ title, fractions, days, tooltips, note, label }: TrendChar
   );
 }
 
-function Tile({ label, value }: { label: string; value: number }): JSX.Element {
+function Tile({ label, value }: { label: string; value: ReactNode }): JSX.Element {
   return (
     <div className={styles.tile}>
       <span className={styles.tileLabel}>{label}</span>
-      <span className={styles.tileValue}>{value.toLocaleString()}</span>
+      <span className={styles.tileValue}>{value}</span>
     </div>
+  );
+}
+
+/**
+ * The rows `username` owns. `"—"` is the server's no-owner marker, not a
+ * name, so it never matches even a player somehow called `"—"`.
+ */
+export function ownedProperties(rows: readonly PropertyRow[], username: string): PropertyRow[] {
+  return rows.filter((row) => row.ownerName !== "—" && row.ownerName === username);
+}
+
+/**
+ * The player's own standing: the HUD's numbers, laid out as tiles, plus the
+ * properties they own. Renders nothing until /api/auth/me answers — the city
+ * panels below don't depend on it, so the page never blocks on this panel.
+ */
+function You(): JSX.Element | null {
+  const me = useMe();
+  const ranks = useRanks();
+  const properties = useProperties();
+  const plugins = usePlugins();
+
+  if (me.data === undefined) return null;
+
+  // Same feature detection as the HUD (Shell): a stat whose owning plugin is
+  // absent would be a permanent zero readout, so it hides with the plugin.
+  const installed = plugins.data?.installed;
+  const showBullets = installed === undefined || installed.includes("combat") || installed.includes("bullets");
+
+  const rank = progressToNextRank(me.data.exp, ranks.data?.ranks ?? []);
+  const owned = ownedProperties(properties.data?.rows ?? [], me.data.username);
+
+  return (
+    <Panel title="You">
+      <div className={styles.tiles}>
+        <Tile label="Cash" value={<Money value={me.data.cash} />} />
+        <Tile label="Bank" value={<Money value={me.data.bank} />} />
+        <Tile label="Points" value={<Amount value={me.data.points} />} />
+        {showBullets ? <Tile label="Bullets" value={<Amount value={me.data.bullets} />} /> : null}
+        <Tile label="Experience" value={<Amount value={me.data.exp} />} />
+        {me.data.health !== undefined && me.data.healthMax !== undefined
+          ? <Tile label="Health" value={`${me.data.health} / ${me.data.healthMax}`} />
+          : null}
+        <Tile label="Rank" value={rank.current?.name ?? "Unranked"} />
+      </div>
+
+      <h3 className={styles.subhead}>Properties owned ({owned.length})</h3>
+      {owned.length === 0
+        ? <p className={styles.heroNote}>You own no properties.</p>
+        : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Location</th>
+                <th className={styles.numeric}>Profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {owned.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.typeName}</td>
+                  <td>{row.locationName}</td>
+                  <td className={styles.numeric}>
+                    {row.profit === "" ? "—" : <Money value={row.profit} />}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+    </Panel>
   );
 }
 
@@ -140,6 +213,8 @@ export function Stats(): JSX.Element {
     <>
       <ErrorText error={stats.error} />
 
+      <You />
+
       <Panel title="The city">
         {/* The one hero figure on the page — every other number is a tile. */}
         <div className={styles.hero}>
@@ -149,11 +224,11 @@ export function Stats(): JSX.Element {
         </div>
 
         <div className={styles.tiles}>
-          <Tile label="Players" value={totals.playersTotal} />
-          <Tile label="Online now" value={totals.onlineNow} />
-          <Tile label="In jail" value={totals.jailedNow} />
-          <Tile label="In hospital" value={totals.hospitalisedNow} />
-          <Tile label="Gangs" value={totals.gangsTotal} />
+          <Tile label="Players" value={totals.playersTotal.toLocaleString()} />
+          <Tile label="Online now" value={totals.onlineNow.toLocaleString()} />
+          <Tile label="In jail" value={totals.jailedNow.toLocaleString()} />
+          <Tile label="In hospital" value={totals.hospitalisedNow.toLocaleString()} />
+          <Tile label="Gangs" value={totals.gangsTotal.toLocaleString()} />
         </div>
       </Panel>
 

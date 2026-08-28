@@ -72,6 +72,8 @@
   font-size: 0.75rem;
 }
 
+.subhead { margin: 1.25rem 0 0; font-size: 0.95rem; font-weight: 600; }
+
 .details { margin-top: 1rem; }
 .details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
 .table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
