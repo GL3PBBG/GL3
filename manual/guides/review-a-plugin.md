@@ -4,8 +4,9 @@
 > registry (`npm.gl3.dev`). Nothing in the repo statically enforces economy
 > discipline on plugin code — this review is the gate.
 
-A plugin runs inside the server process with full database access. The twenty
-first-party plugins hold four invariants that the whole economy rests on; a
+A plugin runs inside the server process with full database access. The
+twenty-seven first-party plugins hold five invariants that the whole economy
+rests on; a
 submitted plugin must hold them too. Every check below is something a real
 defect class made necessary.
 
@@ -20,7 +21,7 @@ a concurrent double-spend impossible and keeps `sum(ledger) == balance` true.
 Reject on any direct write to a balance column:
 
 ```sh
-grep -rn "cash\|bank\|points" packages/<plugin>/src \
+grep -rn "cash\|bank\|points" packages/plugins/<id>/src \
   | grep -v "applyBalanceChange\|applyGangBalanceChange"   # then eyeball every hit
 ```
 
@@ -43,19 +44,19 @@ one row and want the other. Postgres kills one with `40P01` — availability
 loss, and it means the author hasn't read the lock-order rules.
 
 The cross-table variants have their own helpers with the order built in:
-`tx.locks.gangAndPlayer` (gang↔player), `lockLocationsForUpdate` (any
-location row — **always before** the player row), and the OC heist rule
-(heist row first). A plugin inventing its own order for these pairs is a
+`tx.locks.gangAndPlayer` (gang↔player), `tx.locks.location` /
+`tx.locks.locations` (any location row — **always before** the player row),
+and the OC heist rule (heist row first). A plugin inventing its own order for these pairs is a
 reject even if you cannot immediately construct the deadlock.
 
 ## Check 3: cooldown-gated actions claim atomically
 
 A gated action must claim its gate with the Redis `SET … NX` helper
-(`acquireCooldown`) — one atomic claim, winner-takes-all — and call
-`releaseCooldown` on any failure path taken *after* a successful claim, or
-the failed attempt locks the player out for the full TTL. Check-then-set
-(`peekCooldown` then `set`) is a time-of-check race: two parallel requests
-both see the gate open.
+(`ctx.cooldown.acquire`) — one atomic claim, winner-takes-all — and call
+`ctx.cooldown.release` on any failure path taken *after* a successful claim,
+or the failed attempt locks the player out for the full TTL. Check-then-set
+(`ctx.cooldown.peek` then a set) is a time-of-check race: two parallel
+requests both see the gate open.
 
 ## Check 4: shared non-player rows get their own lock
 

@@ -42,15 +42,16 @@ This split is deliberate, not an accident of packaging:
   produced. The audit itself follows the checklist in
   [Review a plugin](/guides/review-a-plugin).
 
-## The three environment variables
+## The four environment variables
 
 From `.env.example`:
 
 | Variable | What it does |
 | --- | --- |
-| `PLUGIN_IDS` | Selects among plugins **compiled into** this server build (the generated static import map). Irrelevant to externally installed plugins — do **not** add your dynamic plugin's id here. |
-| `PLUGIN_PACKAGES` | Comma-separated npm package **specifiers** (e.g. `@acme/plugin-x`) to load from outside the build. Naming a package here is the enabling act; packages listed load unconditionally. |
+| `PLUGIN_IDS` | Selects among plugins **compiled into** this server build (the generated static import map). Under `GL3_PROFILE=framework` it is the only way gameplay/family plugins load. Irrelevant to externally installed plugins — do **not** add your dynamic plugin's id here. |
+| `PLUGIN_PACKAGES` | Comma-separated npm package **specifiers** (e.g. `@acme/plugin-x`) to load from outside the build. Naming a package here is the enabling act; packages listed load unconditionally, in every profile. |
 | `PLUGIN_DIR` | The directory the packages are resolved from — in production, a mounted volume. When **unset**, packages resolve from the server's own `node_modules`, which is what a from-source deployment wants. |
+| `GL3_NPM_TOKEN` | Registry credential for `npm.gl3.dev`, consumed by the shipped compose `plugins` installer service (it writes an `.npmrc` before `npm i`). The compose `app` profile refuses to start without it. |
 
 Resolution looks for `<PLUGIN_DIR>/node_modules/<specifier>`, i.e. exactly the
 layout `npm i --prefix <PLUGIN_DIR> <specifier>` produces. The full Node
@@ -209,35 +210,42 @@ always required, matching how plugin settings already behave (read at boot).
 
 ## Docker Compose equivalent
 
-The repository's `docker-compose.yml` runs the full game under its `app`
-profile (`docker compose --profile app up`), so this is a service to add
-next to `server` in that file — same shape, whether you run the shipped file
-or your own:
+The repository's `docker-compose.yml` **already ships this** under its `app`
+profile (`docker compose --profile app up`): the one-shot service is named
+`plugins`, it installs whatever `PLUGIN_PACKAGES` names (default
+`@gl3-plugins/market`) into the `plugins-data` volume, and it authenticates
+to `npm.gl3.dev` by writing an `.npmrc` from `GL3_NPM_TOKEN` (required in
+`.env`). The server sets `PLUGIN_DIR=/data/plugins`, mounts the volume
+read-only, and `depends_on: plugins: service_completed_successfully`. **Do
+not add a second installer service** — to change what installs, set
+`PLUGIN_PACKAGES` in `.env` and re-up.
+
+For a compose file of your own, the shape is (shipped service abridged):
 
 ```yaml
 services:
-  install-plugins:
+  plugins:
     image: node:22-alpine
+    # writes .npmrc from GL3_NPM_TOKEN, then:
     command: ["npm", "i", "--prefix", "/data/plugins", "@acme/plugin-x@1.2.3"]
     volumes:
-      - plugins:/data/plugins
-      - ./npmrc:/root/.npmrc:ro   # registry creds for npm.gl3.dev
+      - plugins-data:/data/plugins
     restart: "no"                 # one-shot: runs, installs, exits
 
   server:
     image: ghcr.io/gl3pbbg/gl3-server:latest
     depends_on:
-      install-plugins:
+      plugins:
         condition: service_completed_successfully
     environment:
       PLUGIN_PACKAGES: "@acme/plugin-x"
       PLUGIN_DIR: /data/plugins
       # ...DATABASE_URL, REDIS_URL, etc.
     volumes:
-      - plugins:/data/plugins
+      - plugins-data:/data/plugins:ro
 
 volumes:
-  plugins:
+  plugins-data:
 ```
 
 `service_completed_successfully` is the compose analogue of an init
@@ -250,8 +258,9 @@ need any of the volume machinery. Two options:
 
 - **Static (compiled-in):** add the plugin to `apps/server/package.json`, run
   `npm install` and `npm run plugins:generate` (which rewrites the generated
-  static import map), rebuild, restart. The plugin is then selected by id via
-  `PLUGIN_IDS` like any other compiled-in plugin.
+  static import map — the package's `package.json` must declare
+  `"gl3": { "plugin": true }` to be picked up), rebuild, restart. The plugin
+  is then selected by id via `PLUGIN_IDS` like any other compiled-in plugin.
 - **Dynamic without a directory:** `npm i` the package into the server's own
   `node_modules`, name it in `PLUGIN_PACKAGES`, and leave `PLUGIN_DIR`
   **unset** — the loader then resolves the specifier from the server's own
@@ -339,9 +348,10 @@ Plugins that statically import another plugin declare it on their manifest
 (`requires`), and the loader enforces it at boot: a boot whose set does not
 satisfy every `requires` fails with an error naming the plugin and the
 missing requirement, before any route serves a request. The bundled gameplay
-clusters (`combat` → `detectives`; `casino` → `properties` → `combat`;
-`bullets` → `properties` + `travel`; the full list is in the
-[framework profile guide](./framework-profile.md)) are all covered by
+clusters (`combat` → `inventory` + `detectives`; `casino` → `properties` →
+`combat`; `bullets` → `properties` + `travel`; the family plugins →
+`mccodes-attributes`; the full list is in the
+[game modes guide](./framework-profile.md)) are all covered by
 declarations, so an incomplete `PLUGIN_IDS` is a boot error, not a runtime one.
 
 That covers code dependencies. Data-driven couplings are still yours to

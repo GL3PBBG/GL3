@@ -32,7 +32,7 @@ import type { Gl3Profile } from "./manifest-endpoint.js";
  * Ported core modules, split by what kind of game they assume. A static
  * `import` per manifest, not a lookup by id: that is what keeps the
  * dependency direction checkable by the compiler (spec). What changed with
- * the profile split is only *membership at runtime* — which of the two
+ * the profile split is only *membership at runtime* — which of the three
  * static arrays a boot concatenates — never how the manifests get here.
  */
 export const FRAMEWORK_PLUGINS: readonly PluginManifest[] = [
@@ -41,7 +41,7 @@ export const FRAMEWORK_PLUGINS: readonly PluginManifest[] = [
 ];
 
 /**
- * The gangster game on top of the framework. Loaded by the `full` profile;
+ * The gangster game on top of the framework. Loaded by the `v2` and `gl3` profiles;
  * individually addable onto a `framework` boot via `PLUGIN_IDS` (each of
  * these carries the `"gl3": { "plugin": true }` marker, so the generated
  * map makes them selectable). Cross-plugin requirements are declared on the

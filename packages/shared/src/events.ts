@@ -125,7 +125,7 @@ export const GameEventSchema = z.discriminatedUnion("type", [
     })),
   }),
   /**
-   * The envelope every plugin event travels in. The twenty-five core variants
+   * The envelope every plugin event travels in. The twenty-six core variants
    * above stay closed and unchanged; ported core modules keep emitting their
    * own typed variants (spec: Events). A plugin declares the payload schema,
    * the `describe` template and the invalidation keys in its manifest, and all
