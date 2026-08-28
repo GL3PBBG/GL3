@@ -309,16 +309,16 @@ export function Shell(): JSX.Element {
                 has it (combat whittles it), and it must not disappear with
                 the attribute family. Optional-chained for an older server
                 whose payload predates the field. */}
+           <div className={styles.hudGroup}>
             {me.data?.health !== undefined && me.data.healthMax !== undefined ? (
-              <div className={styles.hudGroup}>
+            
                 <span className={styles.stat}>
                   <HudIcon id="health" />
                   <Meter label="Health" value={me.data.health} max={me.data.healthMax} compact />
                 </span>
             ) : null}
-            {!me.data?.attributes && me.data?.health ? </div> : null}     
+             
             {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
-            <div className={styles.hudGroup}>
               <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
               {showLocation ? <Stat icon="location" label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
             </div>
