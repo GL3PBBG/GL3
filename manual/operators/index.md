@@ -9,11 +9,19 @@ own game. Contributor material lives in the rest of the manual.
 
 - **Install & run**: Node 22, Postgres 16, Redis 7 — or one command with
   Docker: `docker compose --profile app up` stands up the whole game from the
-  published images (databases, the migrate one-shot, the server, the web
-  bundle, and an nginx router keeping the browser same-origin — see
-  [First boot](./first-boot.md)). Without the profile, the same file is the
-  development database pair (`npm run db:up`). `.env.example` documents every
-  setting, starting with `DATABASE_URL` and `REDIS_URL`.
+  published images (databases, the migrate one-shot, the plugins-install
+  one-shot, the server, the web bundle, and an nginx router keeping the
+  browser same-origin — see [First boot](./first-boot.md)). The plugins
+  installer requires `GL3_NPM_TOKEN` in `.env`, so set that first. Without the
+  profile, the same file is the development database pair (`npm run db:up`) —
+  and if the dev pair and the app profile share one host, add the shipped
+  `deploy/compose.no-db-ports.yml` override to avoid the 5432/6379 host-port
+  collision. `.env.example` documents every setting, starting with
+  `DATABASE_URL` and `REDIS_URL`.
+- **Choosing a game mode**: `GL3_PROFILE` selects which bundled plugins boot —
+  `gl3` (default, the flagship hybrid), `v2` (the faithful V2 port), `mccodes`,
+  or `framework` (bare engine) — see
+  [Game modes](./framework-profile.md).
 - **First boot & upgrades**: how an empty database becomes a playable game
   (core migrations in an init container → seeds and plugin migrations at
   server boot → first registered player becomes Administrator), why the
@@ -28,8 +36,9 @@ own game. Contributor material lives in the rest of the manual.
 - **Choosing plugins**: note the cross-plugin constraints, e.g. setting any town to
   `underground` combat mode requires the `detectives` plugin to be loaded, or every
   attack and target-list read in that town fails.
-- **Importing a V2 game**: the migration CLI (`apps/migrate`) offers a one-command
-  path from Gangster Legends V2, with `--dry-run`, `--report`, and
+- **Importing a V2 or MCCodes game**: the migration CLI (`apps/migrate`) offers
+  a one-command path from Gangster Legends V2 — or from MCCodes v2 with the
+  `--mccodes` dialect flag — with `--dry-run`, `--report`, `--sql-dump`, and
   `--town-combat-mode open|underground` (use `underground` to keep V2's
   everybody-hidden combat rules everywhere; per-town changes happen in admin
   afterwards). Migrated players keep their passwords: legacy hashes are verified on

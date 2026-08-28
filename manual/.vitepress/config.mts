@@ -5,7 +5,7 @@ import { generatedReferenceSidebar } from './reference-sidebar.gen.mts'
 export default defineConfig({
   title: 'GL3',
   description: 'GL3 developer documentation',
-  // GitHub Pages serves project sites under /<repo>/.
+  // Served from the apex custom domain docs.gl3.dev, so the site root is /.
   base: '/',
   lastUpdated: true,
   themeConfig: {
@@ -57,7 +57,7 @@ export default defineConfig({
         items: [
           { text: 'Operator guide', link: '/operators/' },
           { text: 'First boot', link: '/operators/first-boot' },
-          { text: 'The framework profile', link: '/operators/framework-profile' },
+          { text: 'Game modes (profiles)', link: '/operators/framework-profile' },
           { text: 'Installing plugins', link: '/operators/installing-plugins' },
         ],
       },

@@ -4,8 +4,6 @@
 
 ## Rules that apply to every migration
 
-- **One statement per migration file.** A file does one `ALTER`/`CREATE`; two
-  changes are two files.
 - Migrations are append-only: never edit a migration that has shipped.
 - Prefer nullable new columns with a read-side fallback over backfill migrations
   when old rows have a sensible degraded meaning (see
@@ -33,14 +31,17 @@
 ## Plugin migrations
 
 Plugin migrations live inside the plugin package and only touch that plugin's
-`p_<id>_` tables. The same one-statement rule applies.
+`p_<id>_` tables (hyphens in the id become underscores). **One statement per
+migration file** — a file does one `ALTER`/`CREATE`; two changes are two files.
+(Core SQL migrations are not bound by the one-statement rule.)
 
 ## Lock-edge audit
 
 Any migration that adds a table with a foreign key into a table that participates in
 locking paths adds a potential lock edge, because **a foreign key is a lock**
-(`FOR KEY SHARE` on insert, conflicting with `FOR UPDATE`). Audit against rule 6 in
-`NOTES.md`: either add a lock-order regression test or record in the design doc why
+(`FOR KEY SHARE` on insert, conflicting with `FOR UPDATE` — see
+[Create a plugin](/guides/create-a-plugin#locks-and-foreign-keys)). Audit it:
+either add a lock-order regression test or record in the design doc why
 no new edge exists. A concurrency test whose participants all acquire locks via the
 same helper proves only the case that was already safe.
 

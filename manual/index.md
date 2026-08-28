@@ -21,7 +21,7 @@ features:
     details: Task-oriented recipes for people who already know the system - migrations, routes, plugin dependencies.
     link: /guides/create-a-plugin
   - title: Reference
-    details: The API surface - routes, DTOs, settings namespaces, and error codes.
+    details: The API surface - DTOs, events, WS frames, error codes, and the repo layout.
     link: /reference/errors
   - title: Design decisions
     details: Why things are the way they are. Dated, immutable ADRs and design docs.

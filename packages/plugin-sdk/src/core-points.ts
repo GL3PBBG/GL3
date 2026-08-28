@@ -2,11 +2,11 @@ import type { ActionCost, DashboardWidget, HudEntry, MenuBadge, MoneyFormat, Pro
 import { filterPoint } from "./filters.js";
 
 /**
- * Core-owned UI seams (spec §2) — the five extension points core itself
+ * Core-owned extension points (spec §2) — the six points core itself
  * declares and applies, on top of the ordinary plugin-owned points
  * (`combat.killResolved`, `casino.games`, `membership.benefits`,
- * `properties.leverSet`, `inventory.itemActions`). All five use the
- * `"collect"` policy: a throwing subscriber is logged and dropped, and the
+ * `properties.leverSet`, `inventory.itemActions`). The five UI seams use the
+ * `"collect"` policy (`coreActionCost` alone is `"propagate"` — see below): a throwing subscriber is logged and dropped, and the
  * chain carries on with whatever the previous subscriber produced — a UI
  * seam should degrade, not break the page, when one plugin misbehaves.
  *

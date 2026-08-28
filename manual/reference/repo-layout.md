@@ -7,9 +7,9 @@
 | `apps/migrate` | V2 → GL3 migration CLI |
 | `packages/shared` (`@gl3/shared`) | Zod event contracts and DTOs, shared by server and web; published on `npm.gl3.dev` |
 | `packages/plugin-sdk` (`@gl3/plugin-sdk`) | The SDK third-party plugins build against; also published |
-| `packages/plugins/*` | The twenty bundled gameplay plugins (combat, detectives, travel, gangs, casino, ...) |
+| `packages/plugins/*` | The twenty-seven bundled gameplay plugins (combat, detectives, travel, gangs, casino, the MCCodes family, ...) |
 | `examples/` | Example plugin packages |
-| `scripts/` | Repo maintenance scripts (`plugins:generate`, stale test-clone cleanup, ...) |
+| `scripts/` | Repo maintenance scripts (`plugins:generate`, the docs reference generator `generate-reference.mjs`, stale test-clone cleanup, ...) |
 | `manual/` | This documentation site (VitePress) |
 | `SPEC.md` | What to build |
 
@@ -22,5 +22,8 @@
 - Plugin-to-plugin coupling: read-only exported helpers only.
 - `@gl3/shared` / `@gl3/plugin-sdk` changes to the public surface need a version
   bump plus a republish to `npm.gl3.dev` (additive changes are a patch under `0.x`).
-- New test files: registered explicitly in `vitest.workspace.ts`.
+- New test files under the `@gl3/server` projects: registered explicitly in
+  `vitest.workspace.ts` (an unlisted file silently never runs). The
+  `@gl3/shared`, `@gl3/plugin-sdk` and `@gl3/web` projects use globs and need
+  no registration.
 - Conventional Commits.

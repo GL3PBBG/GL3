@@ -17,7 +17,12 @@ The server's own CMD deliberately does **not** do this.
 **2. Seeds and plugin migrations — inside the server process, at boot.**
 - Starter content (crimes, ranks, towns, items) is seeded by the server on
   startup, guarded by "if any row exists, do nothing" — it fires exactly once
-  per database and never touches a live game. Importing a V2 game with
+  per database and never touches a live game. What seeds is gated on the
+  loaded plugin set and `GL3_PROFILE`: crimes only when the `crimes` plugin
+  loads (and the catalog differs per profile — see
+  [Game modes](./framework-profile.md)), towns only with `travel`/`bullets`,
+  items only with `inventory`; ranks always. MCCodes family content seeds in
+  a second pass after plugin migrations. Importing a V2 game with
   `apps/migrate` fills those tables first, so the seeds stay out of the way.
 - Each loaded plugin's migrations (including its seed rows — shop stock,
   theft tiers, and so on) are applied by the plugin loader, tracked in
@@ -92,8 +97,9 @@ spec:
 Compose has no native init containers; the same effect is two one-shot
 services with `depends_on: { condition: service_completed_successfully }` on
 the server. The repository's `docker-compose.yml` ships exactly that as its
-`app` profile — `docker compose --profile app up` runs the migrate one-shot,
-then the server, against the file's own Postgres and Redis.
+`app` profile — `docker compose --profile app up` runs both one-shots (the
+`migrate` service and the `plugins` installer, which needs `GL3_NPM_TOKEN` in
+`.env`), then the server, against the file's own Postgres and Redis.
 
 ## Troubleshooting
 

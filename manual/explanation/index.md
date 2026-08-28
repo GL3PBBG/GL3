@@ -6,12 +6,13 @@ records (ADRs). Nothing here is a manual; for how to do things, see the
 
 ## Where the "why" currently lives
 
-- `docs/ENGINEERING-NOTES.md`: why parts of the codebase look the way they do.
-  Every item there cost real debugging time. `NOTES.md` is the short version.
-- `docs/STATUS.md`: project status, milestone history, and per-cluster decisions.
-- `SPEC.md`: what to build.
+- `SPEC.md` at the repo root: what to build.
+- The [guides](/guides/create-a-plugin) carry the hard-won working rules inline
+  (lock ordering, ledger discipline, test registration) — every one of them
+  cost real debugging time.
 - Feature design docs are written before a feature lands and cover it end to end
-  (architecture, data flow, errors, testing, out of scope).
+  (architecture, data flow, errors, testing, out of scope); the durable
+  decisions they produce are distilled into ADRs here.
 
 New single-decision records land here as ADRs.
 

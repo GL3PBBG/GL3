@@ -29,18 +29,21 @@ that installed base: bigint money, argon2id, real foreign keys
 docker compose --profile app up
 ```
 
-That single command stands up the whole game from the published images:
-Postgres and Redis (internal to the compose network), a one-shot migrate
-container that asserts the schema, the server (starter content seeded at
-boot), the web bundle, and an nginx router keeping the browser same-origin
-(`deploy/nginx.conf`). Open http://localhost:8080 and register; the first
-player becomes Administrator. With `EMAIL_DRIVER` at its default, the email
-verification link prints to `docker compose --profile app logs server`.
+That command (after setting `GL3_NPM_TOKEN` in `.env` — the plugins
+installer's registry credential) stands up the whole game from the published
+images: Postgres and Redis (internal to the compose network), a one-shot
+migrate container that asserts the schema, a one-shot plugins installer
+(filling the `plugins-data` volume from `PLUGIN_PACKAGES`), the server
+(starter content seeded at boot), the web bundle, and an nginx router keeping
+the browser same-origin (`deploy/nginx.conf`). Open http://localhost:8080 and
+register; the first player becomes Administrator. With `EMAIL_DRIVER` at its
+default, the email verification link prints to
+`docker compose --profile app logs server`.
 Hosting elsewhere: set `GL3_PUBLIC_ORIGIN` (the URL players reach the game
 at, which feeds the CORS allowlist the WebSocket gateway also checks) and
-`GL3_PORT`; nothing needs editing. Want the engine without the gangster
+`GL3_PORT`. Want the engine without the gangster
 game? `GL3_PROFILE=framework` boots the openPBBG-shaped platform instead
-(see [The framework profile](https://docs.gl3.dev/operators/framework-profile.html)).
+(see [Game modes](https://docs.gl3.dev/operators/framework-profile.html)).
 
 The same file without the profile is the development database pair:
 `docker compose up -d` (what `npm run db:up` runs) starts only Postgres and
@@ -71,7 +74,9 @@ installed Postgres and Redis too. All that matters is that `DATABASE_URL` and
 `REDIS_URL` point at a Postgres 16 and Redis 7 instance.
 
 Run `npm run verify` (typecheck + tests) before every commit; integration tests
-need Postgres and Redis up (`npm run test:nodb` is the subset that doesn't).
+need Postgres and Redis up, and `apps/migrate`'s tests additionally need
+`MYSQL_ADMIN_URL` pointing at a MariaDB/MySQL instance (`npm run test:nodb`
+is the subset that needs none of them).
 
 **Run migrations against your dev database, not just in tests.** `npm
 --workspace @gl3/server run db:migrate` must be run manually against whatever
@@ -88,27 +93,33 @@ silently fails because the tables it needs don't exist yet.
 - `apps/migrate`: `gl3-migrate`, the V2 → GL3 migration CLI
 - `packages/shared`: zod event contracts and DTOs, shared by both apps
 - `packages/plugin-sdk`: the SDK plugins are written against
-- `packages/plugins/*`: twenty first-party plugins, split framework/gameplay by `GL3_PROFILE` (see below)
+- `packages/plugins/*`: twenty-seven first-party plugins, split framework/gameplay/MCCodes by `GL3_PROFILE` (see below)
 - `examples/hello-plugin`: a minimal, annotated example plugin
 - `deploy/`: the nginx router config the compose `app` profile mounts
 - `manual/`: the VitePress source of docs.gl3.dev
 
 ## Plugins
 
-Every ported V2 module is a plugin in `packages/plugins/`, split into two
-sets by `GL3_PROFILE`:
+Every bundled module is a plugin in `packages/plugins/`, split into three
+sets that `GL3_PROFILE` (`gl3` | `v2` | `mccodes` | `framework`, default
+`gl3`) combines:
 
 - **framework** (every profile): the game-agnostic engine, openPBBG's
   module list: `ranks`, `notifications`, `news`, `bank`, `mail`, `forum`,
   `inventory`, `membership`.
-- **gameplay** (`full`, the default): the gangster game on top:
+- **gameplay** (`v2` and `gl3`): the gangster game on top:
   `crimes`, `bullets`, `travel`, `gangs`, `combat`, `bounties`, `detectives`,
-  `oc`, `theft`, `properties`, `casino`, `blackjack`. A `framework` boot also
-  skips jail/hospital, the sentence sweeper, the wealth tax and the gameplay
-  seeds, and gameplay plugins can be added back individually with
-  `PLUGIN_IDS` (`GL3_PROFILE=framework PLUGIN_IDS=crimes`). Cross-plugin
-  requirements (`combat` needs `detectives`, ...) are declared on the
-  manifests and enforced at boot.
+  `oc`, `theft`, `properties`, `casino`, `blackjack`.
+- **MCCodes family** (`mccodes` and `gl3`): `mccodes-attributes` (pools and
+  gym-trained stats) plus `gym`, `houses`, `education`, `jobs`, `temple`,
+  `progression`. The `mccodes` profile also pulls in `crimes`, `combat`,
+  `travel` and `detectives`, where its mechanics live.
+
+A `framework` boot skips jail/hospital, the sentence sweeper, the wealth tax
+and the gameplay seeds; gameplay and family plugins can be added back
+individually with `PLUGIN_IDS` (`GL3_PROFILE=framework PLUGIN_IDS=crimes`).
+Cross-plugin requirements (`combat` needs `inventory` and `detectives`, ...)
+are declared on the manifests and enforced at boot.
 
 Third-party plugins load through `PLUGIN_IDS` (compiled into the server) and
 `PLUGIN_PACKAGES` (imported at boot from outside the build); `.env.example`
@@ -137,7 +148,8 @@ gl3-migrate --mysql mysql://user:pass@host/v2db --pg postgres://user:pass@host/g
 `--dry-run` runs every migrator inside a transaction that always rolls back
 (use this first against a production V2 database); `--report report.json`
 writes the full per-table machine-readable report; `--town-combat-mode
-open|underground` picks V2's everybody-hidden combat rules up front. The
+open|underground` picks V2's everybody-hidden combat rules up front; and
+`--mccodes` switches the source dialect to MCCodes v2. The
 target needs a booted GL3 schema first (core migrations + one server boot for
 plugin tables); see `apps/migrate/README.md` and the
 [operator guide](https://docs.gl3.dev/operators/) for the walkthrough.
@@ -182,8 +194,9 @@ and nulls `legacy_password_sha256`. Players never notice, and nobody is forced t
 - **M0 Scaffold, M1 Auth + vertical slice, M2 Core loop parity, M3 Social**:
   complete. The economy invariant (`sum(ledger) == balance`) is enforced by
   `apps/server/test/economy-invariant.test.ts`.
-- **M4 Migration CLI**: complete. `apps/migrate` runs 18 migrators over an
-  8-phase pipeline, idempotent via `id_map`.
+- **M4 Migration CLI**: complete. `apps/migrate` runs 20 migrators over an
+  8-phase pipeline for a V2 source, idempotent via `id_map`, plus an MCCodes
+  dialect (`--mccodes`) with its own migrator set.
 - **M5 Plugin SDK**: foundation, web page renderer and all nine V2 module
   ports complete; the gameplay clusters listed under **Plugins** above have
   shipped on top of it, along with admin (role → module grants) and a themed,
@@ -193,15 +206,16 @@ and nulls `legacy_password_sha256`. Players never notice, and nobody is forced t
   cross-plugin `requires`), and `gl3-migrate` accepts openPBBG sources and
   framework targets.
 
-`docs/STATUS.md` is the living, itemised record; read it before assuming
-anything here is the whole story.
+This list is a summary, not the whole story — the gameplay clusters under
+**Plugins** above each shipped with their own tests as the behaviour record.
 
 ## Contributing / picking this up
 
-- `docs/STATUS.md`: where the project stands and how to start the next milestone.
-- `docs/ENGINEERING-NOTES.md`: why the code looks the way it does; the constraints and
-  traps that have already caused real bugs here.
-- `NOTES.md`: the short version of both, plus this machine's environment quirks.
+- [docs.gl3.dev](https://docs.gl3.dev): tutorials, guides (including the
+  working conventions and lock-order rules in
+  [Create a plugin](https://docs.gl3.dev/guides/create-a-plugin.html)),
+  reference, and design decisions.
+- `SPEC.md`: what to build.
 - `manual/`: the docs site source; documentation changes ship in the same PR
   as the code they describe.
 

@@ -281,7 +281,15 @@ for (const m of modules) {
       const v = unwrap(variant);
       const label = v._def.shape().type._def.value;
       md += `### \`${label}\`\n\n`;
-      md += objectTable(v, { page: m.page, seen: new Set(), pending: [], counter: 0, nameFor: () => `${label}.object` });
+      const ctx = { page: m.page, self: v, seen: new Set(), pending: [], counter: 0, nameFor: null };
+      ctx.nameFor = () => `${label}.${(ctx.counter += 1) > 1 ? `object${ctx.counter}` : "object"}`;
+      md += objectTable(v, ctx);
+      // Anonymous inline objects referenced from the variant's table.
+      while (ctx.pending.length > 0) {
+        const { name: subName, schema: sub } = ctx.pending.shift();
+        md += `#### ${subName}\n\n`;
+        md += objectTable(sub, ctx);
+      }
     }
     for (const e of rest) {
       const schema = m.exports[e.name + "Schema"];

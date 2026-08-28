@@ -51,10 +51,11 @@ single-backend tests, and the default `@gl3/server` project for `bootTestServer`
 
 - `test/economy-invariant.test.ts` enforces `sum(ledger) == balance`. Any design
   that moves money extends it; a design that doesn't should say so.
-- Lock-order regression tests exist per lock edge (`gang-lock-order`,
-  `travel-lock-order`, `combat-lock-order`, `theft-lock-order`,
-  `properties-lock-order`, `properties-consumer-lock-order`, `casino-lock-order`,
-  `casino-table-lock-order`). A new lock edge needs one; a provably absent edge
+- Lock-order regression tests exist per lock edge (thirteen at last count:
+  `gang-`, `travel-`, `combat-`, `theft-`, `properties-`,
+  `properties-consumer-`, `casino-`, `casino-table-`, `bounties-`,
+  `bullets-restock-`, `oc-`, `rounds-` and `sentence-sweeper-lock-order`; run
+  `ls apps/server/test/*lock-order*` for the live list). A new lock edge needs one; a provably absent edge
   gets an audit note in the design doc instead, because a test whose participants
   all lock via the same helper proves only the already-safe case.
 
