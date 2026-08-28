@@ -284,6 +284,9 @@ export default definePlugin({
   // route→slot banner map, so the banner is this plugin's own singleton drawn
   // by a `slotImage` node in the page view (the theft precedent).
   providesAssets: [
+    // Per-row art with its own picker, bound from core's central art section
+    // (the theft cars precedent).
+    { slot: "house", label: "Houses", entitySource: "GET /api/admin/houses/list", entityLabelKey: "name" },
     { slot: "page-houses", label: "Houses page banner", singleton: true },
   ],
   pages: [housesPage],

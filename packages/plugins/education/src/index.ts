@@ -416,6 +416,9 @@ export default definePlugin({
   // route→slot banner map, so the banner is this plugin's own singleton drawn
   // by a `slotImage` node in the page view (the theft precedent).
   providesAssets: [
+    // Per-row art with its own picker, bound from core's central art section
+    // (the theft cars precedent).
+    { slot: "course", label: "Courses", entitySource: "GET /api/admin/education/list", entityLabelKey: "name" },
     { slot: "page-education", label: "Education page banner", singleton: true },
   ],
   pages: [educationPage],

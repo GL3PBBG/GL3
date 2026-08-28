@@ -214,6 +214,27 @@ describe("boot validation", () => {
 // theft/membership precedent). Without both halves the admin art section has
 // no entry for the page and nothing could render one anyway.
 describe("family plugin page banners", () => {
+  // Houses, jobs and courses are content rows like theft's cars: each needs a
+  // per-row slot with its own picker (`entitySource`), or the admin art
+  // section's Content panel has no entry for it and its row art is
+  // permanently unbindable. Gym and temple own no entity rows — banners only.
+  it("houses, jobs and education declare per-row art with their own picker", async () => {
+    const expected = [
+      { pkg: "@gl3/plugin-houses", slot: "house", source: "GET /api/admin/houses/list" },
+      { pkg: "@gl3/plugin-jobs", slot: "job", source: "GET /api/admin/jobs/list" },
+      { pkg: "@gl3/plugin-education", slot: "course", source: "GET /api/admin/education/list" },
+    ] as const;
+
+    for (const { pkg, slot, source } of expected) {
+      const manifest = (await import(pkg)).default;
+      const decl = manifest.providesAssets.find((d) => d.slot === slot);
+      expect(decl, `${manifest.id} declares no per-row "${slot}" slot`).toBeDefined();
+      expect(decl?.entitySource).toBe(source);
+      expect(decl?.entityLabelKey).toBe("name");
+      expect(decl?.singleton).toBeUndefined();
+    }
+  });
+
   it("every family page declares a singleton banner slot and draws it", async () => {
     const family = await Promise.all([
       import("@gl3/plugin-gym"),
