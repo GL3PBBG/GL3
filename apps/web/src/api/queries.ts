@@ -1143,12 +1143,14 @@ export function usePlayCasino() {
 
 /**
  * Advances the caller's open hand. The action is whatever the game's own
- * `action` schema accepts (blackjack: "hit" | "stand" | "double") — the hub
- * validates only the envelope, so this stays a string here.
+ * `action` schema accepts — a bare string for blackjack ("hit" | "stand" |
+ * "double"), or an arbitrary object for a game that speaks the generic-moves
+ * protocol (`GameMoveDto.action`, possibly shallow-merged with a typed
+ * amount). The hub validates only the envelope, so this stays `unknown` here.
  */
 export function useCasinoAct() {
   const queryClient = useQueryClient();
-  return useMutation<CasinoStepResponse, Error, string>({
+  return useMutation<CasinoStepResponse, Error, unknown>({
     mutationFn: async (action) =>
       CasinoStepResponseSchema.parse(
         await api("/api/casino/act", { method: "POST", body: JSON.stringify({ action }) }),
@@ -1263,12 +1265,12 @@ export function useTableBet() {
 
 /**
  * Plays the caller's turn. The action is whatever the game's own `action`
- * schema accepts (blackjack: "hit" | "stand" | "double"); the hub validates
- * only the envelope, so it stays a string here — `useCasinoAct`'s reasoning.
+ * schema accepts; the hub validates only the envelope, so it stays `unknown`
+ * here — `useCasinoAct`'s reasoning.
  */
 export function useTableAct() {
   const queryClient = useQueryClient();
-  return useMutation<CasinoTableResponse, Error, string>({
+  return useMutation<CasinoTableResponse, Error, unknown>({
     mutationFn: async (action) =>
       CasinoTableResponseSchema.parse(
         await api("/api/casino/table/act", { method: "POST", body: JSON.stringify({ action }) }),

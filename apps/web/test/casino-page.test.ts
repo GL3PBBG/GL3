@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { advanceHand, checkWager, dealtHand, handActions } from "../src/pages/Casino.js";
+import {
+  advanceHand, checkWager, dealtHand, handActions, mergeMovePayload, usesLegacyMoves,
+} from "../src/pages/Casino.js";
 import type { LiveHand } from "../src/pages/Casino.js";
 import {
   CasinoLobbyResponseSchema, CasinoStepResponseSchema,
 } from "@gl3/shared";
+import type { GameMoveDto } from "@gl3/shared";
 
 // The route's own values: min_bet and max_bet are decimal strings, and a
 // player's cash is one too. Nothing here is ever a JSON number.
@@ -113,6 +116,41 @@ describe("the hand on screen", () => {
     const resumed: LiveHand = { ...opened, expiresAt: "2026-08-17T15:12:03.114Z" };
     expect(advanceHand(resumed, { sessionId: SESSION, view, done: false, wager: "25000" }).expiresAt)
       .toBe("2026-08-17T15:12:03.114Z");
+  });
+});
+
+describe("usesLegacyMoves", () => {
+  it("falls back to the hardcoded UI when `moves` is absent (an old server)", () => {
+    expect(usesLegacyMoves(undefined)).toBe(true);
+  });
+
+  it("falls back when `moves` is null (the game doesn't speak the protocol)", () => {
+    expect(usesLegacyMoves(null)).toBe(true);
+  });
+
+  it("uses the generic bar for a bounded array, even an empty one", () => {
+    // [] means the game DOES speak the protocol and says: no move for you
+    // right now — that is a real answer, not a fallback trigger.
+    expect(usesLegacyMoves([])).toBe(false);
+    expect(usesLegacyMoves([{ action: "check", label: "Check" }])).toBe(false);
+  });
+});
+
+describe("mergeMovePayload", () => {
+  const check: GameMoveDto = { action: { action: "check" }, label: "Check" };
+  const bet: GameMoveDto = { action: { action: "bet" }, label: "Bet…", needsAmount: true };
+
+  it("posts the move's action verbatim when it needs no amount", () => {
+    expect(mergeMovePayload(check, "500")).toEqual({ action: "check" });
+  });
+
+  it("shallow-merges the typed amount in when the move needs one", () => {
+    expect(mergeMovePayload(bet, "500")).toEqual({ action: "bet", amount: "500" });
+  });
+
+  it("does not mutate the move's own action object", () => {
+    mergeMovePayload(bet, "500");
+    expect(bet.action).toEqual({ action: "bet" });
   });
 });
 

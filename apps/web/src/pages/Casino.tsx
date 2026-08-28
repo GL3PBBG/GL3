@@ -15,7 +15,7 @@ import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 import type {
   CasinoGame, CasinoRemoteTables, CasinoSessionView, CasinoStepResponse,
-  CasinoTableGame, CasinoTableSeat, CasinoTableView,
+  CasinoTableGame, CasinoTableSeat, CasinoTableView, GameMoveDto,
 } from "@gl3/shared";
 import { SlotImage } from "../components/GameImage.js";
 import { PlayerLink } from "../components/PlayerLink.js";
@@ -68,6 +68,35 @@ export type HandAction = "hit" | "stand" | "double";
  */
 export function handActions(actsTaken: number): readonly HandAction[] {
   return actsTaken === 0 ? ["hit", "stand", "double"] : ["hit", "stand"];
+}
+
+/**
+ * Whether a payload's `moves` field means "this game doesn't speak the
+ * generic-moves protocol" — the client's cue to fall back to its own
+ * hardcoded UI (blackjack's Hit/Stand/Double, here; the solo hand's same
+ * three). `undefined` is an old server that predates the field entirely;
+ * `null` is a current one reporting a game with no `moves` method. Either
+ * way there is no move list to draw from, so both fall back the same way.
+ *
+ * A bounded ARRAY, even an empty one, is a real answer from a game that DOES
+ * implement `moves` — "no legal move for you right now" — and is drawn with
+ * the generic bar (which then simply has nothing to show).
+ */
+export function usesLegacyMoves(
+  moves: readonly GameMoveDto[] | null | undefined,
+): moves is null | undefined {
+  return moves == null;
+}
+
+/**
+ * The body to POST for one move: the game's own `action` verbatim, or —
+ * when the move needs an amount — a shallow copy of it with the player's
+ * typed digits merged in. Never mutates `move.action` itself, since the same
+ * `GameMoveDto` rides the query cache and a poll can hand it out again.
+ */
+export function mergeMovePayload(move: GameMoveDto, amount: string): unknown {
+  if (move.needsAmount !== true) return move.action;
+  return { ...(move.action as Record<string, unknown>), amount };
 }
 
 /**
@@ -164,6 +193,9 @@ export interface LiveHand {
   readonly houseSeized: boolean;
   readonly expiresAt: string | null;
   readonly actsTaken: number;
+  /** The generic-moves protocol's list for this hand, straight off the
+   *  session/step it was built from — see `usesLegacyMoves`. */
+  readonly moves: readonly GameMoveDto[] | null | undefined;
 }
 
 function resumedHand(session: CasinoSessionView): LiveHand {
@@ -177,6 +209,7 @@ function resumedHand(session: CasinoSessionView): LiveHand {
     houseSeized: false,
     expiresAt: session.expiresAt,
     actsTaken: 0,
+    moves: session.moves,
   };
 }
 
@@ -193,6 +226,7 @@ export function dealtHand(step: CasinoStepResponse, gameName: string): LiveHand 
     houseSeized: step.houseSeized ?? false,
     expiresAt: null,
     actsTaken: 0,
+    moves: step.moves,
   };
 }
 
@@ -213,7 +247,49 @@ export function advanceHand(current: LiveHand, step: CasinoStepResponse): LiveHa
     payout: step.payout ?? null,
     houseSeized: step.houseSeized ?? false,
     actsTaken: current.actsTaken + 1,
+    moves: step.moves,
   };
+}
+
+/**
+ * The generic action bar the generic-moves protocol draws in place of a
+ * game's hardcoded buttons: one button per move, and — when at least one
+ * move needs one — a single amount field shared by all of them (a game
+ * offering both Bet and Raise types the figure once, not twice). A
+ * needsAmount button stays disabled until that field holds at least one
+ * digit; every button honours `busy` the same way the legacy buttons do.
+ */
+export function MoveBar({ moves, busy, onMove }: {
+  moves: readonly GameMoveDto[];
+  busy: boolean;
+  onMove: (payload: unknown) => void;
+}): JSX.Element {
+  const [amount, setAmount] = useState("");
+  const showAmount = moves.some((move) => move.needsAmount === true);
+  return (
+    <div className={styles.actions}>
+      {showAmount ? (
+        <input
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={amount}
+          aria-label="Amount"
+          onChange={(event) => { setAmount(event.target.value.replace(/\D/g, "")); }}
+        />
+      ) : null}
+      {moves.map((move, index) => (
+        // Index key: the bounded, server-ordered list carries no id of its own.
+        <button
+          key={index}
+          type="button"
+          disabled={busy || (move.needsAmount === true && amount === "")}
+          onClick={() => { onMove(mergeMovePayload(move, amount)); }}
+        >
+          {move.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function GameRow({ game, wager, cash, minBet, disabled, onPlay }: {
@@ -363,8 +439,10 @@ function TableScreen({ view, cash, jailed }: {
   const check = checkWager(wager, view.minBet, view.maxBet, cash);
   const busy = jailed || bet.isPending || act.isPending || leave.isPending;
   // `handActions`' shape, decided per seat rather than per hand: the table
-  // records no act count, so `canDouble` is the only gate there is.
-  const moves: readonly HandAction[] = actions.canDouble
+  // records no act count, so `canDouble` is the only gate there is. Only
+  // reached when `usesLegacyMoves(view.moves)` — a game that speaks the
+  // generic-moves protocol draws `MoveBar` instead, below.
+  const legacyMoves: readonly HandAction[] = actions.canDouble
     ? ["hit", "stand", "double"]
     : ["hit", "stand"];
 
@@ -438,18 +516,22 @@ function TableScreen({ view, cash, jailed }: {
         ) : null}
   
         {actions.canAct ? (
-          <div className={styles.actions}>
-            {moves.map((action) => (
-              <button
-                key={action}
-                type="button"
-                disabled={busy}
-                onClick={() => { act.mutate(action); }}
-              >
-                {ACTION_LABELS[action]}
-              </button>
-            ))}
-          </div>
+          usesLegacyMoves(view.moves) ? (
+            <div className={styles.actions}>
+              {legacyMoves.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { act.mutate(action); }}
+                >
+                  {ACTION_LABELS[action]}
+                </button>
+              ))}
+            </div>
+          ) : view.moves.length > 0 ? (
+            <MoveBar moves={view.moves} busy={busy} onMove={(payload) => { act.mutate(payload); }} />
+          ) : null
         ) : null}
   
         {actions.reason !== null ? <p className={styles.meta}>{actions.reason}</p> : null}
@@ -657,9 +739,11 @@ export function Casino(): JSX.Element {
 
   // `current` comes from the render closure rather than a `setHand` updater:
   // a hand resumed from the lobby has never been in `hand`, so an updater
-  // would be handed `null` and drop the whole table.
-  function onAct(current: LiveHand, action: HandAction): void {
-    act.mutate(action, {
+  // would be handed `null` and drop the whole table. `payload` is a bare
+  // `HandAction` on the legacy path and a merged move payload on the
+  // generic-moves one — the hub validates only the envelope either way.
+  function onAct(current: LiveHand, payload: unknown): void {
+    act.mutate(payload, {
       onSuccess: (step) => { setHand(advanceHand(current, step)); },
     });
   }
@@ -704,7 +788,7 @@ export function Casino(): JSX.Element {
                 </button>
               </div>
             </>
-          ) : (
+          ) : usesLegacyMoves(active.moves) ? (
             <div className={styles.actions}>
               {handActions(active.actsTaken).map((action) => (
                 <button
@@ -717,7 +801,13 @@ export function Casino(): JSX.Element {
                 </button>
               ))}
             </div>
-          )}
+          ) : active.moves.length > 0 ? (
+            <MoveBar
+              moves={active.moves}
+              busy={jailed || act.isPending}
+              onMove={(payload) => { onAct(active, payload); }}
+            />
+          ) : null}
         </div>
 
         {jailed ? <p className={styles.bad}>No playing from a cell.</p> : null}
