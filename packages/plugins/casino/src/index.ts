@@ -115,17 +115,18 @@ function safeView(game: GameDef, state: unknown): ViewNode | null {
 /**
  * The lobby's resume moves — `safeView`'s twin, same degrade-not-refuse
  * reasoning: a hand that cannot compute its moves must not take down the
- * whole lobby response. `null` for a game that declares no `moves` at all
- * (the client's legacy-UI signal) AND for one whose `moves` throws — the
- * lobby cannot tell those two apart from here, and both mean "no generic
- * moves bar for this hand".
+ * whole lobby response. `null` when the game declares no `moves` at all —
+ * the client's legacy-UI signal, its own hardcoded buttons instead of the
+ * generic bar. `[]` when `moves` throws: the game DOES speak the protocol
+ * but this hand's computation is broken, so the client renders no buttons
+ * rather than mistaking it for a legacy game.
  */
 function safeMoves(game: GameDef, state: unknown): GameMove[] | null {
   if (game.moves === undefined) return null;
   try {
     return boundMoves(game.moves(state));
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -345,9 +346,9 @@ const lobbyRoute = route({
             // no `view`, or when its `view` throws — the hand is still
             // resumable through `act`, it just cannot be drawn.
             view: liveGame === undefined ? null : safeView(liveGame, fromStorableState(live.state)),
-            // `null` when the game is no longer installed, when it declares
-            // no `moves`, or when its `moves` throws — same degrade as
-            // `view`, above.
+            // `null` when the game is no longer installed or declares no
+            // `moves` at all (the legacy-UI signal); `[]` when its `moves`
+            // throws — see `safeMoves`.
             moves: liveGame === undefined ? null : safeMoves(liveGame, fromStorableState(live.state)),
             expiresAt: expiresAt(live.createdAt, expiryMinutes).toISOString(),
           },

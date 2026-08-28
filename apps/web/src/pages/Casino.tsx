@@ -96,6 +96,10 @@ export function usesLegacyMoves(
  */
 export function mergeMovePayload(move: GameMoveDto, amount: string): unknown {
   if (move.needsAmount !== true) return move.action;
+  // Assumes `move.action` is a plain JSON object when `needsAmount` is true —
+  // the spec's client-merge contract. A game that ships anything else here
+  // (an array, a primitive) only garbles its own payload, and the hub's act
+  // schema refuses the malformed result; it cannot corrupt another game's.
   return { ...(move.action as Record<string, unknown>), amount };
 }
 

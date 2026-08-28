@@ -288,12 +288,14 @@ describe("GET /api/casino", () => {
     expect(body.session?.view).toBeNull();
   });
 
-  it("degrades `moves` to null when the game's `moves` throws, rather than failing the whole lobby", async () => {
+  it("degrades `moves` to [] when the game's `moves` throws, rather than failing the whole lobby", async () => {
     // `safeMoves`'s own coverage — `safeView`'s twin. This game DOES declare
-    // `view` (and it succeeds), so a null `session.moves` here proves the
+    // `view` (and it succeeds), so an empty `session.moves` here proves the
     // degrade is `moves`-specific rather than piggy-backing on the
     // viewless case above: the rest of the response, `view` included, is
-    // untouched by one handler misbehaving.
+    // untouched by one handler misbehaving. `[]`, not `null`: `null` is
+    // reserved for a game that doesn't speak the moves protocol at all, and
+    // this one does — it just blew up computing this hand's moves.
     const WOBBLY_MOVES: GameDef = {
       id: "casino",
       name: "Wobbly",
@@ -336,7 +338,7 @@ describe("GET /api/casino", () => {
     expect(body.session).not.toBeNull();
     // `view` still renders — proof the throw is isolated to `moves`.
     expect(body.session?.view).toEqual({ kind: "text", value: "wobbly" });
-    expect(body.session?.moves).toBeNull();
+    expect(body.session?.moves).toEqual([]);
   });
 
   it("does not forfeit a live hand when the expiry setting is absurd", async () => {
