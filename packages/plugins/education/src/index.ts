@@ -404,6 +404,7 @@ const adminDeleteRoute = route({
 export default definePlugin({
   id: "education",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/education", "/api/admin/education"],
   requires: ["mccodes-attributes"],
   migrations: EDUCATION_MIGRATIONS,

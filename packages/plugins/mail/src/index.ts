@@ -217,6 +217,7 @@ const markReadRoute = route({
 export default definePlugin({
   id: "mail",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/mail"],
   routes: [sendRoute, inboxRoute, threadRoute, markReadRoute],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts:87

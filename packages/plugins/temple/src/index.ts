@@ -141,6 +141,7 @@ const moneyRoute = route({
 export default definePlugin({
   id: "temple",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/temple"],
   requires: ["mccodes-attributes"],
   routes: [templeRoute, refillRoute, iqRoute, moneyRoute],

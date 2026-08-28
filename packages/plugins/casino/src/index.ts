@@ -815,6 +815,7 @@ const adminSessionsRoute = route({
 export default definePlugin({
   id: "casino",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/casino", "/api/admin/casino"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.

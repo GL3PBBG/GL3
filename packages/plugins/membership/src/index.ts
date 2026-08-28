@@ -360,6 +360,7 @@ const giftedEvent = {
 export default definePlugin({
   id: "membership",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/membership", "/api/admin/membership"],
   tables: { packages: "p_membership_packages" },
   migrations: MEMBERSHIP_MIGRATIONS,

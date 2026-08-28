@@ -826,6 +826,7 @@ const adminSettingsWriteRoute = route({
 export default definePlugin({
   id: "properties",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/properties", "/api/admin/properties"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.

@@ -593,6 +593,7 @@ const adminPage: PageSchema = {
 export default definePlugin({
   id: "forum",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/forum", "/api/admin/forum"],
   migrations: FORUM_MIGRATIONS,
   routes: [

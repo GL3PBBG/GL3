@@ -843,6 +843,7 @@ const adminGangListRoute = route({
 export default definePlugin({
   id: "gangs",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/gangs", "/api/admin/gangs"],
   pages: [{
     id: "gangs.index",

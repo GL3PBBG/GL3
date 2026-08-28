@@ -672,6 +672,7 @@ const adminCrimesPage: PageSchema = {
 export default definePlugin({
   id: "crimes",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/crimes", "/api/admin/crimes"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.

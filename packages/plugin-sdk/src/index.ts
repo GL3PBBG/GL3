@@ -49,6 +49,7 @@ export {
   parsePluginManifest,
   PLUGIN_ID_PATTERN,
   SEMVER_PATTERN,
+  PLUGIN_API_VERSION,
   type PluginManifest,
   type PluginManifestInput,
   type PluginMigration,

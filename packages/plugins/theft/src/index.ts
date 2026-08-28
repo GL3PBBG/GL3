@@ -733,6 +733,7 @@ const soldEvent = {
 export default definePlugin({
   id: "theft",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/theft", "/api/garage", "/api/admin/theft"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.

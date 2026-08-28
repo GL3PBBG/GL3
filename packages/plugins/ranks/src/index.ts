@@ -236,6 +236,7 @@ const adminRanksPage: PageSchema = {
 export default definePlugin({
   id: "ranks",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/ranks", "/api/admin/ranks"],
   routes: [
     route({

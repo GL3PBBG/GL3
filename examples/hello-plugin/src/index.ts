@@ -6,6 +6,7 @@ import { greetings } from "./schema.js";
 export default definePlugin({
   id: "hello",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/hello"],
   tables: { greetings: "p_hello_greetings" },
   migrations: [{

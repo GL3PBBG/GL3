@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { definePlugin, route } from "../src/index.js";
+import { definePlugin, parsePluginManifest, PLUGIN_API_VERSION, route } from "../src/index.js";
 
 const valid = { id: "bounties", version: "1.0.0", basePaths: ["/api/bounties"] };
 
@@ -116,6 +116,47 @@ describe("definePlugin", () => {
 
   it("still reports an invalid manifest when id is present but not a string", () => {
     expect(() => definePlugin({ ...valid, id: 7 })).toThrow(/invalid plugin manifest/);
+  });
+});
+
+describe("apiVersion", () => {
+  it("defaults an absent apiVersion to the SDK's contract version", () => {
+    // Every plugin authored before the field existed lands here — including
+    // out-of-repo ones, which is why absence must default rather than fail.
+    expect(definePlugin(valid).apiVersion).toBe(PLUGIN_API_VERSION);
+  });
+
+  it("accepts an explicit match and carries it through", () => {
+    expect(definePlugin({ ...valid, apiVersion: PLUGIN_API_VERSION }).apiVersion).toBe(1);
+  });
+
+  // The ORDERING is the feature, and the v2-only field is what proves it: a
+  // plugin written against a newer contract typically carries fields this
+  // schema has never heard of, and without the pre-parse check `.strict()`
+  // would win the race with "Unrecognized key 'category'" — the stale-image
+  // crash-loop of 2026-08-24, operationally useless precisely because it
+  // names the field instead of the contract. Bound to a variable first so
+  // excess-property checking cannot reject the literal at compile time; the
+  // point is the runtime guard against manifests TypeScript never saw.
+  it("rejects a newer apiVersion with the contract error, not the first unknown field", () => {
+    const fromTheFuture = { ...valid, apiVersion: 2, category: "weapons" };
+    expect(() => definePlugin(fromTheFuture)).toThrow(
+      /^invalid plugin manifest for "bounties" — apiVersion: plugin declares 2 but this build of @gl3\/plugin-sdk implements 1; install a plugin release built for apiVersion 1, or update the server$/,
+    );
+  });
+
+  // Only a well-formed integer ≥ 1 claims a version; a malformed value is an
+  // ordinary schema failure and must keep the schema's own message. These run
+  // through `parsePluginManifest` because its `unknown` parameter is the
+  // seam that admits them without a cast. The lookahead matters: the contract
+  // error shares this prefix, so without it a pre-check that wrongly claimed
+  // a malformed value would still pass.
+  it("reports a malformed apiVersion through the schema, not the contract error", () => {
+    for (const malformed of ["1", 1.5, 0, -1]) {
+      expect(() => parsePluginManifest({ ...valid, apiVersion: malformed })).toThrow(
+        /invalid plugin manifest for "bounties" — apiVersion: (?!plugin declares)/,
+      );
+    }
   });
 });
 

@@ -531,6 +531,7 @@ const adminPage: PageSchema = {
 export default definePlugin({
   id: "travel",
   version: "1.0.0",
+  apiVersion: 1,
   // First port claiming two base paths; plugins/validate.ts checks each route
   // path is contained in one of them and that no other plugin claims either.
   basePaths: ["/api/locations", "/api/travel", "/api/admin/travel"],

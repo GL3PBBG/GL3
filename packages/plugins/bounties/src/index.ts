@@ -242,6 +242,7 @@ const profileExtras = on(coreProfileView, async (ctx, value) => {
 export default definePlugin({
   id: "bounties",
   version: "1.0.0",
+  apiVersion: 1,
   basePaths: ["/api/bounties"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.
