@@ -332,13 +332,18 @@ describe("GET /api/casino/table", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<{
       table: {
-        phase: string; view: unknown; mySeat: number | null;
+        phase: string; view: unknown; moves: unknown; mySeat: number | null;
         seats: { seat: number; username: string }[];
       } | null;
     }>();
     expect(body.table).not.toBeNull();
     expect(body.table?.phase).toBe("betting");
     expect(body.table?.view).toBeNull();
+    // `null`, not `[]`: blackjack does not implement `moves` at all, which is
+    // the client's signal to keep its hardcoded Hit/Stand/Double buttons
+    // (spec's backward-compatibility proof) — distinct from a game that
+    // implements the method and simply has no legal move right now.
+    expect(body.table?.moves).toBeNull();
     expect(body.table?.mySeat).toBe(seatA);
     expect(body.table?.seats).toHaveLength(2);
     const usernames = body.table?.seats.map((s) => s.username).sort();

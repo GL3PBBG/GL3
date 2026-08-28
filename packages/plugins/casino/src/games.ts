@@ -19,6 +19,39 @@ export interface TableSeatInput {
   wager: bigint;
 }
 
+/**
+ * One button the client can offer the player. PURE data, computed from state
+ * alone — a game returns `[]` when the viewer has no legal move right now
+ * (not their turn, hand done, spectator).
+ */
+export interface GameMove {
+  /**
+   * The exact payload to POST as the act body's `action`. When `needsAmount`
+   * is true the client shallow-merges `{ amount: "<digits>" }` from its own
+   * input field into a COPY of this object before posting — `action` itself
+   * never carries a placeholder amount.
+   */
+  action: unknown;
+  label: string;
+  needsAmount?: boolean;
+}
+
+/**
+ * Bounds a game's OWN move list — a third-party game controls this content
+ * and it rides a response, the same trust boundary `guardGame`'s truncated
+ * `detail` closes for a thrown message. At most `MAX_MOVES` entries, each
+ * label sliced to `MOVE_LABEL_MAX_CHARS`.
+ */
+export const MAX_MOVES = 12;
+export const MOVE_LABEL_MAX_CHARS = 40;
+
+export function boundMoves(moves: GameMove[]): GameMove[] {
+  return moves.slice(0, MAX_MOVES).map((move) => ({
+    ...move,
+    label: move.label.slice(0, MOVE_LABEL_MAX_CHARS),
+  }));
+}
+
 export interface TableStep<S> {
   state: S;
   done: boolean;
@@ -66,6 +99,16 @@ export interface GameDef<S = unknown> {
    * resumes viewless rather than failing to install.
    */
   view?(state: S): ViewNode;
+  /**
+   * The moves the player can make right now, from `state` alone — pure, like
+   * `view`. OPTIONAL: a game that omits this is telling the hub (and, through
+   * it, the client) that it does not speak the generic-moves protocol at all,
+   * which is the client's signal to fall back to its own hardcoded UI for
+   * this game. A game that DOES implement it returns `[]` rather than
+   * omitting the method when the hand simply has no legal move right now
+   * (settled, waiting).
+   */
+  moves?(state: S): GameMove[];
 }
 
 export interface TableGameDef<S = unknown> {
@@ -96,6 +139,17 @@ export interface TableGameDef<S = unknown> {
   view(state: S, viewer: number | null): ViewNode;
   /** TOTAL returned per seat. A seat absent from the array is paid 0. */
   settle(state: S): { seat: number; payout: bigint }[];
+  /**
+   * The moves `seat` can make right now, from `state` alone — pure, like
+   * `view`. `seat` is `null` for a spectator, the same convention `view`
+   * uses. OPTIONAL, and absence means the same thing it means on `GameDef`:
+   * this game does not speak the generic-moves protocol, so the client falls
+   * back to its own hardcoded UI (blackjack keeps its Hit/Stand/Double
+   * buttons this way — the backward-compatibility proof). A game that DOES
+   * implement it returns `[]` when the viewer has no legal move right now
+   * (not their turn, hand done, spectator) rather than omitting the method.
+   */
+  moves?(state: S, seat: number | null): GameMove[];
 }
 
 export const games = filterPoint<GameDef[]>("casino.games", "propagate");

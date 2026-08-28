@@ -174,6 +174,37 @@ const throwsPlugin: PluginManifest = definePlugin({
   filters: [on(games, (_ctx, list) => [...list, THROWS as GameDef])],
 });
 
+/**
+ * A solo game that DOES implement the generic-moves protocol — FARO's
+ * `moves`-declaring twin, so the response's `moves` field has a game to
+ * carry a real, bounded list from rather than only ever proving `null`.
+ * `action` stays a fixed `Win now` button regardless of state — the field's
+ * wiring is what's under test here, not a game's own decision logic (that is
+ * `holdem`'s job, Task 4).
+ */
+const MOVER: GameDef<{ wager: bigint }> = {
+  id: "mover",
+  name: "Mover",
+  maxPayoutMultiplier: 2,
+  action: z.enum(["peek", "win"]),
+  start: ({ wager }): GameStep<{ wager: bigint }> => (
+    { state: { wager }, view: { kind: "text", value: "mover: ready" }, done: false }
+  ),
+  act: (state, action): GameStep<{ wager: bigint }> => (action === "win"
+    ? { state, done: true, view: { kind: "text", value: "mover: won" } }
+    : { state, done: false, view: { kind: "text", value: "mover: peeked" } }),
+  settle: (_state, wager) => wager * 2n,
+  view: () => ({ kind: "text", value: "mover" }),
+  moves: () => [{ action: "win", label: "Win now" }],
+};
+
+const moverPlugin: PluginManifest = definePlugin({
+  id: "mover",
+  version: "1.0.0",
+  basePaths: ["/api/mover"],
+  filters: [on(games, (_ctx, list) => [...list, MOVER as GameDef])],
+});
+
 beforeAll(async () => {
   await resetDb(db);
 
@@ -181,7 +212,9 @@ beforeAll(async () => {
   // suites pin the CONSUMER contract (exact escrow/credit math), so the skim
   // is pinned off here; its own coverage lives in properties-pay-owner.test.ts.
   await db.insert(settings).values({ key: "properties.skim_percent", value: "0" });
-  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [faroPlugin, throwsPlugin] }));
+  ({ app, close: closeServer, redis } = await bootTestServer({
+    plugins: [faroPlugin, throwsPlugin, moverPlugin],
+  }));
 });
 
 afterAll(async () => {
@@ -248,11 +281,14 @@ describe("POST /api/casino/act", () => {
 
     const waitRes = await act(token, "wait");
     expect(waitRes.statusCode).toBe(200);
-    const waitBody = waitRes.json<{ done: boolean; wager: string }>();
+    const waitBody = waitRes.json<{ done: boolean; wager: string; moves: unknown }>();
     expect(waitBody.done).toBe(false);
     // The unfinished branch reports the wager too — an act that does not
     // raise it still has to say what it is.
     expect(waitBody.wager).toBe(wager.toString());
+    // FARO declares no `moves` method — `null`, not `[]`, is the client's
+    // fall-back-to-legacy-UI signal.
+    expect(waitBody.moves).toBeNull();
     // No money moves on a non-settling act.
     expect(await cashOf(playerId)).toBe(cashBefore);
     expect(await cashOf(ownerId)).toBe(ownerCashBefore);
@@ -630,5 +666,33 @@ describe("POST /api/casino/act", () => {
     expect(row?.ownerPlayerId).toBe(playerId);
     // The lever is untouched: nothing changed hands.
     expect(row?.cost).toBe(500n);
+  });
+});
+
+describe("POST /api/casino/act — the moves field", () => {
+  it("carries the game's bounded moves on a non-settling step, and [] once the hand is done", async () => {
+    const { token, playerId } = await register();
+    const { playerId: ownerId } = await register();
+    const locationId = await seedLocation();
+    const propertyId = await seedHouse(locationId, ownerId, 0n);
+    const wager = 10_000n;
+    await placePlayer(ownerId, locationId, 10_000_000n + wager);
+    await placePlayer(playerId, locationId, 1_000_000n - wager);
+
+    await seedSession({ playerId, locationId, propertyId, wager, gameId: "mover" });
+
+    const peekRes = await act(token, "peek");
+    expect(peekRes.statusCode).toBe(200);
+    const peekBody = peekRes.json<{ done: boolean; moves: { action: unknown; label: string }[] }>();
+    expect(peekBody.done).toBe(false);
+    expect(peekBody.moves).toEqual([{ action: "win", label: "Win now" }]);
+
+    const winRes = await act(token, "win");
+    expect(winRes.statusCode).toBe(200);
+    const winBody = winRes.json<{ done: boolean; moves: unknown }>();
+    expect(winBody.done).toBe(true);
+    // The hand is settled — no more legal moves, but the game DID implement
+    // the method, so this is [] rather than null.
+    expect(winBody.moves).toEqual([]);
   });
 });

@@ -105,7 +105,8 @@ function lobby(token: string) {
 
 interface LobbyGame { gameId: string; name: string; ownerName: string | null; maxBet: string }
 interface LobbySession {
-  sessionId: string; gameId: string; gameName: string; wager: string; view: unknown; expiresAt: string;
+  sessionId: string; gameId: string; gameName: string; wager: string; view: unknown;
+  moves: unknown; expiresAt: string;
 }
 interface LobbyBody {
   locationId: string; locationName: string; minBet: string;
@@ -220,6 +221,9 @@ describe("GET /api/casino", () => {
     expect(session?.view).toEqual(FARO.view?.({ wager: 100_000n, outcome: "open" }));
     // A view the player can actually be shown — a real `text` node.
     expect(session?.view).toMatchObject({ kind: "text" });
+    // FARO declares no `moves` method — `null`, not `[]`, is the client's
+    // fall-back-to-legacy-UI signal.
+    expect(session?.moves).toBeNull();
     expect(new Date(session?.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now());
   });
 

@@ -320,6 +320,55 @@ describe("a table game whose step points the turn at a seat that is not in the h
   });
 });
 
+describe("a table game that declares moves", () => {
+  it("carries the game's moves to the seated acting viewer", async () => {
+    const manifest = casinoWith(rogueTableGame({
+      deal: () => ({ state: {}, done: false, turn: 0 }),
+      moves: (_state: unknown, seat: number | null) =>
+        seat === 0 ? [{ action: { kind: "go" }, label: "Go", needsAmount: true }] : [],
+    }));
+    const { playerId } = await seatOne(manifest);
+    expect((await bet(manifest, playerId, WAGER)).status).toBe(200);
+
+    const res = await readTable(manifest, playerId);
+    const body = res.body as { table: { moves: unknown } };
+    expect(body.table.moves).toEqual([{ action: { kind: "go" }, label: "Go", needsAmount: true }]);
+  });
+
+  it("sends null, not [], for a game that omits the method entirely", async () => {
+    // `rogueTableGame`'s own default: no `moves` override at all.
+    const manifest = casinoWith(rogueTableGame({
+      deal: () => ({ state: {}, done: false, turn: 0 }),
+    }));
+    const { playerId } = await seatOne(manifest);
+    expect((await bet(manifest, playerId, WAGER)).status).toBe(200);
+
+    const res = await readTable(manifest, playerId);
+    const body = res.body as { table: { moves: unknown } };
+    expect(body.table.moves).toBeNull();
+  });
+});
+
+describe("a rogue table game's move list", () => {
+  it("bounds the count at 12 and each label at 40 characters", async () => {
+    const longLabel = "x".repeat(60);
+    const manifest = casinoWith(rogueTableGame({
+      deal: () => ({ state: {}, done: false, turn: 0 }),
+      moves: () => Array.from({ length: 13 }, (_, i) => ({ action: i, label: longLabel })),
+    }));
+    const { playerId } = await seatOne(manifest);
+    expect((await bet(manifest, playerId, WAGER)).status).toBe(200);
+
+    const res = await readTable(manifest, playerId);
+    const body = res.body as { table: { moves: { action: unknown; label: string }[] } };
+    expect(body.table.moves).toHaveLength(12);
+    for (const move of body.table.moves) {
+      expect(move.label).toBe(longLabel.slice(0, 40));
+      expect(move.label.length).toBe(40);
+    }
+  });
+});
+
 describe("a table game whose autoAct never advances the turn", () => {
   it("exhausts advanceTable's bound and the read 500s — loud by design — while the wager-0 escape hatch still works", async () => {
     // `autoAct` hands back the SAME turn every time: a valid seat, still in

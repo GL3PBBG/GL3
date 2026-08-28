@@ -8,7 +8,7 @@ import {
 import {
   escrow, guardGame, NonNegativeIntegerString, parseAction, resolveHouse,
 } from "./engine.js";
-import { buildTableRegistry, type TableGameDef } from "./games.js";
+import { boundMoves, buildTableRegistry, type TableGameDef } from "./games.js";
 import { casinoSeats, casinoTables, locations, players, playerStats } from "./schema.js";
 import { fromStorableState } from "./state.js";
 import {
@@ -287,6 +287,17 @@ export async function renderTablePayload(
       ? null
       : guardGame(table.gameId, "view", () =>
           game.view(fromStorableState(table.state), inHand ? viewerSeat : null)),
+    // `null` — not `[]` — when the game does not implement `moves` at all:
+    // that is the client's signal to fall back to its own hardcoded UI
+    // (blackjack). A game that DOES implement it gets a bounded array,
+    // possibly empty, whenever there is a hand to compute it against; there
+    // is nothing to call it against before the first deal.
+    moves: game.moves === undefined
+      ? null
+      : (table.state === null
+          ? []
+          : boundMoves(guardGame(table.gameId, "moves", () =>
+              game.moves!(fromStorableState(table.state), inHand ? viewerSeat : null)))),
   };
 }
 

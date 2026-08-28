@@ -12,11 +12,13 @@ import {
   type House,
 } from "./engine.js";
 import {
+  boundMoves,
   buildRegistry,
   buildTableRegistry,
   games,
   tableGames,
   type GameDef,
+  type GameMove,
   type TableGameDef,
 } from "./games.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
@@ -47,8 +49,12 @@ export {
   buildRegistry,
   tableGames,
   buildTableRegistry,
+  boundMoves,
+  MAX_MOVES,
+  MOVE_LABEL_MAX_CHARS,
   type GameDef,
   type GameStep,
+  type GameMove,
   type TableGameDef,
   type TableStep,
   type TableSeatInput,
@@ -104,6 +110,40 @@ function safeView(game: GameDef, state: unknown): ViewNode | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The lobby's resume moves — `safeView`'s twin, same degrade-not-refuse
+ * reasoning: a hand that cannot compute its moves must not take down the
+ * whole lobby response. `null` for a game that declares no `moves` at all
+ * (the client's legacy-UI signal) AND for one whose `moves` throws — the
+ * lobby cannot tell those two apart from here, and both mean "no generic
+ * moves bar for this hand".
+ */
+function safeMoves(game: GameDef, state: unknown): GameMove[] | null {
+  if (game.moves === undefined) return null;
+  try {
+    return boundMoves(game.moves(state));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `play`/`act`'s own `moves` field. Unlike the lobby's `safeMoves`, this
+ * REFUSES (`guardGame`'s clean `game_error` 400) rather than degrades — the
+ * caller is mid-action on this path and every other handler `play`/`act`
+ * call (`start`, `act`, `settle`) already refuses that way, so a `moves` that
+ * throws is one more misbehaving game turned into a 400, not a silently
+ * empty bar. `null` when the game does not implement `moves` at all (the
+ * client's legacy-UI signal); `[]` once the hand is done, since a settled
+ * hand has no further legal move and there is no longer a live state worth
+ * handing the game.
+ */
+function stepMoves(game: GameDef, gameId: string, state: unknown, done: boolean): GameMove[] | null {
+  if (game.moves === undefined) return null;
+  if (done) return [];
+  return boundMoves(guardGame(gameId, "moves", () => game.moves!(state)));
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +345,10 @@ const lobbyRoute = route({
             // no `view`, or when its `view` throws — the hand is still
             // resumable through `act`, it just cannot be drawn.
             view: liveGame === undefined ? null : safeView(liveGame, fromStorableState(live.state)),
+            // `null` when the game is no longer installed, when it declares
+            // no `moves`, or when its `moves` throws — same degrade as
+            // `view`, above.
+            moves: liveGame === undefined ? null : safeMoves(liveGame, fromStorableState(live.state)),
             expiresAt: expiresAt(live.createdAt, expiryMinutes).toISOString(),
           },
         },
@@ -470,6 +514,7 @@ const playRoute = route({
           body: {
             sessionId, view: step.view, done: true,
             wager: wager.toString(), payout: payout.toString(), houseSeized: seized,
+            moves: stepMoves(game, body.gameId, step.state, true),
           },
         };
       }
@@ -484,7 +529,10 @@ const playRoute = route({
       // is `"7"`.
       return {
         status: 200,
-        body: { sessionId, view: step.view, done: false, wager: wager.toString() },
+        body: {
+          sessionId, view: step.view, done: false, wager: wager.toString(),
+          moves: stepMoves(game, body.gameId, step.state, false),
+        },
       };
     });
   },
@@ -615,6 +663,7 @@ const actRoute = route({
           body: {
             sessionId: pre.id, view: step.view, done: true,
             wager: wager.toString(), payout: payout.toString(), houseSeized: seized,
+            moves: stepMoves(game, pre.gameId, step.state, true),
           },
         };
       }
@@ -626,7 +675,10 @@ const actRoute = route({
       // a raise that settles in the same call never reaches the lobby at all.
       return {
         status: 200,
-        body: { sessionId: pre.id, view: step.view, done: false, wager: wager.toString() },
+        body: {
+          sessionId: pre.id, view: step.view, done: false, wager: wager.toString(),
+          moves: stepMoves(game, pre.gameId, step.state, false),
+        },
       };
     });
   },

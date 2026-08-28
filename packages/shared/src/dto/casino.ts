@@ -3,6 +3,29 @@ import { IdSchema, MoneySchema, TimestampSchema } from "../primitives.js";
 import { BoundedViewNodeDtoSchema } from "./plugins.js";
 
 /**
+ * One button the client can offer the player for the game's own `action`
+ * vocabulary — the generic-moves protocol's wire shape. `action` rides as
+ * `z.unknown()` because the hub cannot know a game's action shape up front,
+ * the same reasoning the act routes' own body schemas already carry.
+ */
+export const GameMoveDtoSchema = z.object({
+  action: z.unknown(),
+  label: z.string(),
+  needsAmount: z.boolean().optional(),
+});
+export type GameMoveDto = z.infer<typeof GameMoveDtoSchema>;
+
+/**
+ * A payload's `moves` field: `null` when the game does not implement the
+ * generic-moves protocol at all — the client's signal to fall back to its
+ * own hardcoded UI — and a bounded array, possibly empty, when it does.
+ * Optional throughout so an OLD server that predates this field still
+ * parses: the field is simply absent rather than `null`, and the client
+ * contract treats the two the same way.
+ */
+const MovesFieldSchema = z.array(GameMoveDtoSchema).nullable().optional();
+
+/**
  * One installed game as the lobby reports it for the town the player is in.
  *
  * `ownerName` is `null`, not `""`, for a table nobody has bought — the page
@@ -36,6 +59,7 @@ export const CasinoSessionViewSchema = z.object({
   gameName: z.string(),
   wager: MoneySchema,
   view: BoundedViewNodeDtoSchema.nullable(),
+  moves: MovesFieldSchema,
   expiresAt: TimestampSchema,
 });
 export type CasinoSessionView = z.infer<typeof CasinoSessionViewSchema>;
@@ -118,6 +142,7 @@ export const CasinoStepResponseSchema = z.object({
    * ever carries it, and an in-play step has no answer to give yet.
    */
   houseSeized: z.boolean().optional(),
+  moves: MovesFieldSchema,
 });
 export type CasinoStepResponse = z.infer<typeof CasinoStepResponseSchema>;
 
@@ -159,6 +184,7 @@ export const CasinoTableViewSchema = z.object({
   maxBet: MoneySchema,
   seats: z.array(CasinoTableSeatSchema),
   view: BoundedViewNodeDtoSchema.nullable(),
+  moves: MovesFieldSchema,
 });
 export type CasinoTableView = z.infer<typeof CasinoTableViewSchema>;
 
