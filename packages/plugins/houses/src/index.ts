@@ -3,7 +3,7 @@ import { bigint, integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { HOUSES_MIGRATIONS } from "./migrations.js";
-import { definePlugin, isInsufficientFundsError, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
+import { coreDashboard, definePlugin, isInsufficientFundsError, on, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { adminPage, housesPage } from "./pages.js";
 // Re-exported so `apps/server/test/houses-page.test.ts` can assert against the
 // same page object rather than a hand-copied duplicate of its view tree,
@@ -69,26 +69,34 @@ const boardRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    return ctx.transaction(async (tx) => {
+    const { attrs, rows, owned } = await ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
       const attrs = await tx.attributes.read(player.id);
       const rows = await tx.db.select().from(houses).orderBy(asc(houses.will));
       const owned = attrs.willMax > 100 ? await currentHouse(tx, attrs.willMax) : null;
-
-      const values: Record<string, string> = { willMax: String(attrs.willMax) };
-      if (owned !== null) {
-        values.houseName = owned.name;
-        values.houseWill = String(owned.will);
-      }
-
-      return {
-        status: 200,
-        body: {
-          rows: rows.map((h) => ({ id: h.id, name: h.name, price: h.price.toString(), will: String(h.will) })),
-          values,
-        },
-      };
+      return { attrs, rows, owned };
     });
+    // Per-row art from this plugin's own `house` slot; "" for unbound rows —
+    // table cells must never be null, and the image renderer treats an empty
+    // string as "no art" (the theft cars precedent).
+    const art = await ctx.assets.mine(rows.map((h) => h.id), "house");
+
+    const values: Record<string, string> = { willMax: String(attrs.willMax) };
+    if (owned !== null) {
+      values.houseName = owned.name;
+      values.houseWill = String(owned.will);
+    }
+
+    return {
+      status: 200,
+      body: {
+        rows: rows.map((h) => ({
+          id: h.id, name: h.name, price: h.price.toString(), will: String(h.will),
+          image: art.get(h.id) ?? "",
+        })),
+        values,
+      },
+    };
   },
 });
 
@@ -266,6 +274,40 @@ const adminDeleteRoute = route({
 });
 
 /**
+ * The owned house on the player's dashboard (`core.dashboard`, the crimes
+ * shape): nothing while the player only has the Default House, else the
+ * house's bound art (when an admin bound any — the `house` slot), its name
+ * and will ceiling, and a link to the houses page. Same lock-then-read as
+ * `boardRoute` — `tx.attributes.read` requires the caller hold the row.
+ */
+const dashboardWidget = on(coreDashboard, async (ctx, value) => {
+  const player = ctx.player;
+  if (player === null) return value;
+  const owned = await ctx.transaction(async (tx) => {
+    await tx.locks.player([player.id]);
+    const attrs = await tx.attributes.read(player.id);
+    return attrs.willMax > 100 ? currentHouse(tx, attrs.willMax) : null;
+  });
+  if (owned === null) return value;
+  const url = (await ctx.assets.mine([owned.id], "house")).get(owned.id);
+  return [...value, {
+    pluginId: ctx.pluginId,
+    title: "Your House",
+    view: {
+      kind: "panel" as const,
+      title: "Your House",
+      children: [
+        ...(url !== undefined
+          ? [{ kind: "image" as const, url, alt: owned.name, size: "md" as const }]
+          : []),
+        { kind: "text" as const, value: `${owned.name} — will ceiling ${owned.will}` },
+        { kind: "link" as const, label: "Go to houses", to: "/plugins/houses.index" },
+      ],
+    },
+  }];
+});
+
+/**
  * Houses (C spec §4.2): maxwill IS the house. Buying upgrades the ceiling
  * and resets current will; selling refunds in full and returns to the
  * Default House's 100. Requires the anchor for the will pool.
@@ -292,4 +334,5 @@ export default definePlugin({
   ],
   pages: [housesPage],
   adminPages: [adminPage],
+  filters: [dashboardWidget],
 });

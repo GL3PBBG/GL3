@@ -14,6 +14,7 @@ export const housesPage: PageSchema = {
         { label: "Will ceiling", key: "houseWill" },
       ], emptyText: "Default House" },
       { kind: "table", source: "GET /api/houses/board", columns: [
+        { key: "image", label: "", render: "image", imageSize: "md" },
         { key: "name", label: "House" },
         { key: "price", label: "Price" },
         { key: "will", label: "Will ceiling" },

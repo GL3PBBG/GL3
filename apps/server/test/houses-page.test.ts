@@ -3,7 +3,9 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { adminPage as housesAdminPage } from "@gl3/plugin-houses";
+import { adminPage as housesAdminPage, housesPage } from "@gl3/plugin-houses";
+import { DashboardWidgetsResponseSchema } from "@gl3/shared";
+import { assets, entityAssets } from "../src/db/schema/index.js";
 import { houses } from "./helpers/plugin-tables.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -51,10 +53,91 @@ describe("houses board route", () => {
     expect(afterBody.values.houseWill).toBe("150");
   });
 
+  it("carries each house's bound art as an image URL, empty string when unbound", async () => {
+    const houseId = uuidv7();
+    await db.insert(houses).values({ id: houseId, name: "Shack", price: 500n, will: 150 });
+    // A second house with no binding at all — the Default House cannot serve
+    // here, because resetDb truncates the migration-seeded row after the
+    // memoised first boot.
+    await db.insert(houses).values({ id: uuidv7(), name: "Bare Cabin", price: 100n, will: 120 });
+    const sha = "a".repeat(64);
+    const assetId = uuidv7();
+    await db.insert(assets).values({ id: assetId, sha256: sha, mime: "image/png", bytes: 1, width: 1, height: 1 });
+    await db.insert(entityAssets).values({ scope: "houses", entityId: houseId, slot: "house", assetId });
+
+    const res = await app.inject({ method: "GET", url: "/api/houses/board", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const rows = (res.json() as { rows: { name: string; image: string }[] }).rows;
+    expect(rows.find((r) => r.name === "Shack")?.image).toBe(`/assets/${sha}`);
+    expect(rows.find((r) => r.name === "Bare Cabin")?.image).toBe("");
+  });
+
+  it("renders the art column on the player page's catalog table", () => {
+    const view = housesPage.view as { children: { kind: string; columns?: { key: string; render?: string }[] }[] };
+    const table = view.children.find((c) => c.kind === "table");
+    expect(table?.columns?.some((c) => c.key === "image" && c.render === "image")).toBe(true);
+  });
+
   it("declares its page in /api/plugins", async () => {
     const res = await app.inject({ method: "GET", url: "/api/plugins", headers: auth() });
     const pages = (res.json() as { pages: { pluginId: string; id: string }[] }).pages;
     expect(pages.some((p) => p.pluginId === "houses" && p.id === "houses.index")).toBe(true);
+  });
+});
+
+describe("houses on the dashboard (core.dashboard)", () => {
+  it("contributes no widget while the player only has the Default House", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/dashboard/widgets", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const { widgets } = DashboardWidgetsResponseSchema.parse(res.json());
+    expect(widgets.some((w) => w.pluginId === "houses")).toBe(false);
+  });
+
+  it("shows the owned house with its art once an upgrade is bought", async () => {
+    const houseId = uuidv7();
+    await db.insert(houses).values({ id: houseId, name: "Shack", price: 0n, will: 150 });
+    const sha = "b".repeat(64);
+    const assetId = uuidv7();
+    await db.insert(assets).values({ id: assetId, sha256: sha, mime: "image/png", bytes: 1, width: 1, height: 1 });
+    await db.insert(entityAssets).values({ scope: "houses", entityId: houseId, slot: "house", assetId });
+
+    const buy = await app.inject({
+      method: "POST", url: "/api/houses/buy", headers: auth(), payload: { houseId },
+    });
+    expect(buy.statusCode).toBe(200);
+
+    const res = await app.inject({ method: "GET", url: "/api/dashboard/widgets", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const { widgets } = DashboardWidgetsResponseSchema.parse(res.json());
+    const widget = widgets.find((w) => w.pluginId === "houses");
+    expect(widget).toBeDefined();
+    expect(widget!.title).toBe("Your House");
+    if (widget!.view.kind !== "panel") throw new Error("expected a panel view");
+    expect(widget!.view.children).toContainEqual(
+      { kind: "image", url: `/assets/${sha}`, alt: "Shack", size: "md" },
+    );
+    const text = widget!.view.children.find((c) => c.kind === "text");
+    if (text?.kind !== "text") throw new Error("expected a text child");
+    expect(text.value).toBe("Shack — will ceiling 150");
+    expect(widget!.view.children).toContainEqual(
+      { kind: "link", label: "Go to houses", to: "/plugins/houses.index" },
+    );
+  });
+
+  it("omits the image node when the owned house has no art bound", async () => {
+    const houseId = uuidv7();
+    await db.insert(houses).values({ id: houseId, name: "Bare Hut", price: 0n, will: 150 });
+    const buy = await app.inject({
+      method: "POST", url: "/api/houses/buy", headers: auth(), payload: { houseId },
+    });
+    expect(buy.statusCode).toBe(200);
+
+    const res = await app.inject({ method: "GET", url: "/api/dashboard/widgets", headers: auth() });
+    const { widgets } = DashboardWidgetsResponseSchema.parse(res.json());
+    const widget = widgets.find((w) => w.pluginId === "houses");
+    expect(widget).toBeDefined();
+    if (widget!.view.kind !== "panel") throw new Error("expected a panel view");
+    expect(widget!.view.children.some((c) => c.kind === "image")).toBe(false);
   });
 });
 
