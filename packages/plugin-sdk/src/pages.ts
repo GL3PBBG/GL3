@@ -123,6 +123,16 @@ const leafOptions = [
               valueKey: z.string(),
               labelKey: z.string(),
               allowEmpty: z.boolean().optional(),
+              /**
+               * Choosing an option seeds the form's OTHER fields from the
+               * chosen option's own row, by field name — the edit-a-row UX
+               * without a bespoke page. The rows are the select's own
+               * optionsSource payload, so no extra fetch happens, and only
+               * keys those rows actually carry are seeded: a field the row
+               * lacks keeps whatever value it already had. Only meaningful
+               * when the sibling fields share names with the row's keys.
+               */
+              prefillForm: z.boolean().optional(),
             })
             .strict(),
           z

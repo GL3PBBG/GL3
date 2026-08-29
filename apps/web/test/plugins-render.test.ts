@@ -103,6 +103,7 @@ describe("renderNode", () => {
         name: "thingId", label: "Thing", type: "select",
         optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
         allowEmpty: false,
+        prefillForm: false,
       }],
     }]);
   });
@@ -122,7 +123,45 @@ describe("renderNode", () => {
         name: "thingId", label: "Thing (empty clears)", type: "select",
         optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
         allowEmpty: true,
+        prefillForm: false,
       }],
+    }]);
+  });
+
+  it("renders a select field's prefillForm flag, normalising absent to false", () => {
+    // One input, both arms: declared true carries true; absent (the shape
+    // every existing page sends) normalises to false, the same
+    // optional-to-required treatment `allowEmpty` gets.
+    const out = renderNode({
+      kind: "form", action: "POST /api/x", submitLabel: "Go",
+      fields: [
+        {
+          name: "thingId", label: "Thing", type: "select" as const,
+          optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+          prefillForm: true,
+        },
+        {
+          name: "otherId", label: "Other", type: "select" as const,
+          optionsSource: "GET /api/x/others", valueKey: "id", labelKey: "name",
+        },
+      ],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
+      fields: [
+        {
+          name: "thingId", label: "Thing", type: "select",
+          optionsSource: "GET /api/x/things", valueKey: "id", labelKey: "name",
+          allowEmpty: false,
+          prefillForm: true,
+        },
+        {
+          name: "otherId", label: "Other", type: "select",
+          optionsSource: "GET /api/x/others", valueKey: "id", labelKey: "name",
+          allowEmpty: false,
+          prefillForm: false,
+        },
+      ],
     }]);
   });
 

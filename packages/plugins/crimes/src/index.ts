@@ -643,6 +643,9 @@ const adminCrimesPage: PageSchema = {
         { key: "minPayout", label: "Min payout" },
         { key: "maxPayout", label: "Max payout" },
         { key: "expReward", label: "Exp" },
+        // Blank reads as "skill chance" exactly like the edit field below —
+        // the list payload already sends "" for NULL.
+        { key: "successFormula", label: "Formula" },
         { key: "jailChancePercent", label: "Jail %" },
         { key: "jailSeconds", label: "Jail (s)" },
       ], rowActions: [
@@ -663,7 +666,10 @@ const adminCrimesPage: PageSchema = {
         { name: "jailSeconds", label: "Jail seconds", type: "number" },
       ] },
       { kind: "form", action: "POST /api/admin/crimes/update", submitLabel: "Update crime", fields: [
-        { name: "id", label: "Crime", type: "select", optionsSource: "GET /api/admin/crimes/list", valueKey: "id", labelKey: "name" },
+        // prefillForm: picking the crime seeds every field below from the
+        // selected row of the SAME list the dropdown loads its options from —
+        // the admin edits what is there instead of retyping the whole crime.
+        { name: "id", label: "Crime", type: "select", optionsSource: "GET /api/admin/crimes/list", valueKey: "id", labelKey: "name", prefillForm: true },
         { name: "cooldownSeconds", label: "Cooldown seconds", type: "number" },
         { name: "minPayout", label: "Min payout", type: "money" },
         { name: "maxPayout", label: "Max payout", type: "money" },

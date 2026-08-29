@@ -283,10 +283,11 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
 function SelectField({ field, value, onChange, refetchSignal }: {
   field: Extract<FormField, { type: "select" }>;
   value: string;
-  onChange: (value: string) => void;
+  /** Receives the chosen option's full row (null for the placeholder), so a `prefillForm` select can seed its siblings from it. */
+  onChange: (value: string, row: Record<string, string> | null) => void;
   refetchSignal: number;
 }): JSX.Element {
-  const [options, setOptions] = useState<ReadonlyArray<{ value: string; label: string }>>([]);
+  const [rows, setRows] = useState<ReadonlyArray<Record<string, string>>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -300,10 +301,10 @@ function SelectField({ field, value, onChange, refetchSignal }: {
       .then((body) => {
         if (cancelled) return;
         const parsed = TableRowsResponseSchema.parse(body);
-        setOptions(parsed.rows.map((row) => ({
-          value: row[field.valueKey] ?? "",
-          label: row[field.labelKey] ?? row[field.valueKey] ?? "",
-        })));
+        // The full rows, not just the value/label pairs: `prefillForm` seeds
+        // sibling fields from the chosen row, and re-deriving them later would
+        // mean a second fetch.
+        setRows(parsed.rows);
       })
       .catch((caught: unknown) => {
         if (cancelled) return;
@@ -313,16 +314,24 @@ function SelectField({ field, value, onChange, refetchSignal }: {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [path, field.valueKey, field.labelKey, refetchSignal]);
+  }, [path, refetchSignal]);
 
   if (error !== null) return <ErrorText error={error} />;
+
+  const options = rows.map((row) => ({
+    value: row[field.valueKey] ?? "",
+    label: row[field.labelKey] ?? row[field.valueKey] ?? "",
+  }));
 
   return (
     <select
       name={field.name}
       value={value}
       disabled={loading}
-      onChange={(event) => { onChange(event.target.value); }}
+      onChange={(event) => {
+        const chosen = rows.find((row) => (row[field.valueKey] ?? "") === event.target.value) ?? null;
+        onChange(event.target.value, chosen);
+      }}
     >
       {/* The placeholder doubles as the "clear" option when allowEmpty: the
           submitted "" is what the roles route maps to null. Without allowEmpty
@@ -541,8 +550,28 @@ function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSig
               <SelectField
                 field={field}
                 value={formValues[key] ?? ""}
-                onChange={(value) => {
-                  setFormValues((previous) => ({ ...previous, [key]: value }));
+                onChange={(value, row) => {
+                  setFormValues((previous) => {
+                    const next = { ...previous, [key]: value };
+                    // A `prefillForm` select seeds its siblings from the chosen
+                    // row, by field name — picking the row to edit populates
+                    // the edit. Only string keys the row carries are seeded:
+                    // a field the row lacks (or another select, which picks
+                    // its own options) keeps what it had, and hidden fields
+                    // keep their declared constant. Fires only on a real
+                    // selection change, never on the placeholder.
+                    if (field.prefillForm === true && row !== null) {
+                      for (const sibling of inst.fields) {
+                        if (sibling !== field && sibling.type !== "select" && sibling.type !== "hidden") {
+                          const seeded = row[sibling.name];
+                          if (seeded !== undefined) {
+                            next[`${index}:${sibling.name}`] = seeded;
+                          }
+                        }
+                      }
+                    }
+                    return next;
+                  });
                 }}
                 refetchSignal={refetchSignal}
               />

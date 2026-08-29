@@ -54,6 +54,31 @@ describe("crimes admin", () => {
     expect(() => TableRowsResponseSchema.parse(list.json())).not.toThrow();
   });
 
+  // Wire-level proof of the edit-UX fix: the served admin payload must carry
+  // prefillForm on the update form's crime select (picking the crime seeds
+  // the form from the selected row) and the formula column in the table —
+  // the client renders exactly what this payload declares, so a dropped
+  // field here is a silently blank edit form there.
+  it("serves the admin page with a prefilling update form and a formula column", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const crimesSection = res.json().sections.find((s: { pluginId: string }) => s.pluginId === "crimes");
+    expect(crimesSection).toBeDefined();
+    const adminPage = crimesSection.pages.find((p: { id: string }) => p.id === "crimes-admin");
+    expect(adminPage).toBeDefined();
+
+    const table = adminPage.view.children.find(
+      (c: { kind: string }) => c.kind === "table",
+    );
+    expect(table.columns.map((c: { key: string }) => c.key)).toContain("successFormula");
+
+    const updateForm = adminPage.view.children.find(
+      (c: { kind: string; action?: string }) => c.kind === "form" && c.action === "POST /api/admin/crimes/update",
+    );
+    const crimeSelect = updateForm.fields.find((f: { name: string }) => f.name === "id");
+    expect(crimeSelect).toMatchObject({ type: "select", prefillForm: true });
+  });
+
   it("updates a crime and persists the change", async () => {
     const crimeId = uuidv7();
     await db.insert(crimes).values({

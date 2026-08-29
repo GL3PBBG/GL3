@@ -5,15 +5,15 @@
  * pure transform is what makes it testable without a DOM.
  */
 /**
- * A select field carries where its options come from; `allowEmpty` is
- * normalised to a required boolean here so the renderer never re-derives the
- * DTO's optionality. A hidden field carries the constant it submits and no
- * label — it draws nothing.
+ * A select field carries where its options come from; `allowEmpty` and
+ * `prefillForm` are normalised to required booleans here so the renderer never
+ * re-derives the DTO's optionality. A hidden field carries the constant it
+ * submits and no label — it draws nothing.
  */
 export type FormField =
   | { name: string; label: string; type: "text" | "number" | "decimal" | "money" | "password" }
   | { name: string; type: "hidden"; value: string }
-  | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean };
+  | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean; prefillForm: boolean };
 
 export type RenderInstruction =
   | { kind: "text"; value: string }
@@ -155,6 +155,8 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
           valueKey: String(f.valueKey),
           labelKey: String(f.labelKey),
           allowEmpty: f.allowEmpty === true,
+          // Same optional-to-required normalisation as `allowEmpty` above.
+          prefillForm: f.prefillForm === true,
         };
       }
       return {

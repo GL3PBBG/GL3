@@ -132,6 +132,25 @@ const ACCEPTED: readonly (readonly [string, unknown])[] = [
       ],
     },
   ],
+  [
+    "form with a prefillForm select field",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Submit form",
+      fields: [
+        {
+          name: "thingId",
+          label: "Thing",
+          type: "select",
+          optionsSource: "GET /api/hello/things",
+          valueKey: "id",
+          labelKey: "name",
+          prefillForm: true,
+        },
+      ],
+    },
+  ],
   ["panel", { kind: "panel", title: "Leaves", children: [{ kind: "text", value: "A leaf." }] }],
   ["panel with an empty body", { kind: "panel", title: "Empty", children: [] }],
   ["list", { kind: "list", items: [{ kind: "text", value: "An item." }] }],
@@ -191,6 +210,15 @@ const REJECTED: readonly (readonly [string, unknown])[] = [
       action: "POST /api/hello/greet",
       submitLabel: "Go",
       fields: [{ name: "thingId", label: "Thing", type: "select", valueKey: "id", labelKey: "name" }],
+    },
+  ],
+  [
+    "prefillForm riding on a text field (select-only property)",
+    {
+      kind: "form",
+      action: "POST /api/hello/greet",
+      submitLabel: "Go",
+      fields: [{ name: "note", label: "Note", type: "text", prefillForm: true }],
     },
   ],
   [
