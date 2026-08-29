@@ -1,6 +1,6 @@
 import type { PlayerSnapshot, PluginManifest } from "@gl3/plugin-sdk";
 import { isPluginError, hasPermission } from "@gl3/plugin-sdk";
-import type { Db } from "../db/client.js";
+import { dumpRecentQueries, type Db } from "../db/client.js";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { players, playerStats, roleModuleAccess } from "../db/schema/index.js";
@@ -137,6 +137,15 @@ export function registerPluginRoutes(
                 },
                 "plugin route failed with a driver error",
               );
+              // A deadlock report names only the two BLOCKED statements; the
+              // locks that formed the cycle came from earlier statements in
+              // each transaction. Dump this process's per-connection recent-
+              // statement rings so the next natural 40P01 (the casino ABBA
+              // flake survived a ~45k-race repro hunt unfired) carries its
+              // own post-mortem instead of another blind chase.
+              if (pg["code"] === "40P01") {
+                console.error(dumpRecentQueries(), "recent statements per pool connection at deadlock");
+              }
             }
             throw error;
           }

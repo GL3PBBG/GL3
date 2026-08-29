@@ -363,6 +363,7 @@ export default defineWorkspace([
         "test/casino-play.test.ts",
         "test/casino-act.test.ts",
         "test/casino-lock-order.test.ts",
+        "test/casino-abba-stress.test.ts",
         "test/casino-lobby.test.ts",
         "test/casino-rogue-game.test.ts",
         "test/casino-rogue-table.test.ts",
