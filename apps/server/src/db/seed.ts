@@ -84,9 +84,9 @@ export async function seedFamilyContent(db: Db, loadedPluginIds: Iterable<string
 
   if (ids.has("houses")) {
     // > 1, not > 0: the houses plugin's own migration seeds Default House.
-    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_houses`)) as unknown as { n: number }[];
+    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_houses_houses`)) as unknown as { n: number }[];
     if ((rows[0]?.n ?? 0) <= 1) {
-      await db.execute(sql`INSERT INTO p_houses (id, name, price, will) VALUES
+      await db.execute(sql`INSERT INTO p_houses_houses (id, name, price, will) VALUES
         (gen_random_uuid(), 'Small Flat', 25000, 150),
         (gen_random_uuid(), 'Townhouse', 120000, 250),
         (gen_random_uuid(), 'Penthouse', 600000, 400)`);
@@ -94,9 +94,9 @@ export async function seedFamilyContent(db: Db, loadedPluginIds: Iterable<string
   }
 
   if (ids.has("education")) {
-    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_courses`)) as unknown as { n: number }[];
+    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_education_courses`)) as unknown as { n: number }[];
     if ((rows[0]?.n ?? 0) === 0) {
-      await db.execute(sql`INSERT INTO p_courses
+      await db.execute(sql`INSERT INTO p_education_courses
         (id, name, description, cost, days, strength_gain, agility_gain, guard_gain, labour_gain, iq_gain) VALUES
         (gen_random_uuid(), 'Street Smarts', 'Two days of hard lessons.', 500, 2, 1, 0, 1, 0, 0),
         (gen_random_uuid(), 'Boxing Basics', 'Learn to take a hit.', 1200, 4, 2, 0, 1, 1, 0),
@@ -105,7 +105,7 @@ export async function seedFamilyContent(db: Db, loadedPluginIds: Iterable<string
   }
 
   if (ids.has("jobs")) {
-    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_jobs`)) as unknown as { n: number }[];
+    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM p_jobs_jobs`)) as unknown as { n: number }[];
     if ((rows[0]?.n ?? 0) === 0) {
       // No FKs on these tables (rule 6 discipline), but first_rank_id must
       // point at a real rank — generate the uuids here so the reference holds.
@@ -113,13 +113,13 @@ export async function seedFamilyContent(db: Db, loadedPluginIds: Iterable<string
       const loaderId = uuidv7();
       const copyShopId = uuidv7();
       const clerkId = uuidv7();
-      await db.execute(sql`INSERT INTO p_job_ranks
+      await db.execute(sql`INSERT INTO p_jobs_ranks
         (id, job_id, name, pay, strength_gain, labour_gain, iq_gain, strength_req, labour_req, iq_req) VALUES
         (${loaderId}, ${warehouseId}, 'Loader', 150, 1, 1, 0, 0, 0, 0),
         (gen_random_uuid(), ${warehouseId}, 'Foreman', 400, 1, 2, 0, 50, 0, 0),
         (${clerkId}, ${copyShopId}, 'Clerk', 120, 0, 1, 1, 0, 0, 0),
         (gen_random_uuid(), ${copyShopId}, 'Manager', 350, 0, 1, 2, 0, 0, 40)`);
-      await db.execute(sql`INSERT INTO p_jobs (id, name, description, first_rank_id) VALUES
+      await db.execute(sql`INSERT INTO p_jobs_jobs (id, name, description, first_rank_id) VALUES
         (${warehouseId}, 'Warehouse Crew', 'Lift, carry, repeat.', ${loaderId}),
         (${copyShopId}, 'Copy Shop', 'Toner and patience.', ${clerkId})`);
     }

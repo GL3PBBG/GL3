@@ -11,7 +11,7 @@ import { adminPage, housesPage } from "./pages.js";
 export { adminPage, housesPage } from "./pages.js";
 
 /** This plugin's own catalog table (migrations.ts creates it). */
-const houses = pgTable("p_houses", {
+const houses = pgTable("p_houses_houses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   price: bigint("price", { mode: "bigint" }).notNull(),
@@ -163,7 +163,7 @@ const sellRoute = route({
 // Admin routes — the catalog editor. Theft's four-route shape
 // (`packages/plugins/theft/src/index.ts`'s admin section): list/create/
 // update/delete, `auth: "admin"`, an update that blanks a rename. No FK
-// references `p_houses`, so unlike theft's cars there is no "in use" row to
+// references `p_houses_houses`, so unlike theft's cars there is no "in use" row to
 // refuse against — a delete is unconditional, the membership packages shape.
 // ---------------------------------------------------------------------------
 

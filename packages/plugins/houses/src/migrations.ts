@@ -20,4 +20,12 @@ export const HOUSES_MIGRATIONS: { name: string; sql: string }[] = [
     sql: `INSERT INTO p_houses (id, name, price, will)
       VALUES (gen_random_uuid(), 'Default House', 0, 100)`,
   },
+  {
+    // `p_houses` predates the migration runner's prefix guard; the convention
+    // is `p_<id>_*` (p_bounties_bounties precedent). History above keeps the
+    // old name — migrations are append-only — and the guard checks only the
+    // final state.
+    name: "0003_prefix_rename",
+    sql: `ALTER TABLE p_houses RENAME TO p_houses_houses`,
+  },
 ];

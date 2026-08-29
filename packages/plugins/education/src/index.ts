@@ -10,7 +10,7 @@ import { coreHud, definePlugin, isInsufficientFundsError, on, PluginError, route
 // the houses precedent.
 export { adminPage, educationPage } from "./pages.js";
 
-const courses = pgTable("p_courses", {
+const courses = pgTable("p_education_courses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -29,7 +29,7 @@ const progress = pgTable("p_education_progress", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
 });
 
-const done = pgTable("p_courses_done", {
+const done = pgTable("p_education_courses_done", {
   playerId: uuid("player_id").notNull(),
   courseId: uuid("course_id").notNull(),
 });
@@ -55,7 +55,7 @@ async function claimCompletion(
       eq(progress.playerId, playerId),
       sql`${progress.startedAt} <= (
         SELECT now() - make_interval(days => c.days)
-        FROM p_courses c WHERE c.id = ${progress.courseId}
+        FROM p_education_courses c WHERE c.id = ${progress.courseId}
       )`,
     ))
     .returning({ courseId: progress.courseId });
@@ -265,7 +265,7 @@ const hudCourse = on(coreHud, async (ctx, value) => {
 // Admin routes — the catalog editor. Houses' four-route shape
 // (`packages/plugins/houses/src/index.ts`'s admin section): list/create/
 // update/delete, `auth: "admin"`, an update that blanks a rename. No FK
-// references `p_courses`, so a delete checks `p_education_progress` for an
+// references `p_education_courses`, so a delete checks `p_education_progress` for an
 // in-flight enrollment first and refuses rather than orphaning it — the
 // theft car-in-use shape (`packages/plugins/theft/src/index.ts`'s
 // `adminCarDeleteRoute`), not the houses/membership unconditional one.
@@ -378,7 +378,7 @@ const adminDeleteRoute = route({
     const outcome = await ctx.transaction(async (tx) => {
       const [existing] = await tx.db.select({ id: courses.id }).from(courses).where(eq(courses.id, params.id));
       if (existing === undefined) return "not_found" as const;
-      // `p_education_progress` carries no FK to `p_courses` by design — a
+      // `p_education_progress` carries no FK to `p_education_courses` by design — a
       // deleted-out-from-under enrollment can never complete (the completion
       // subquery matches nothing) and can never restart (`already_studying`
       // blocks a fresh enrollment with no cancel route to escape it). Refuse

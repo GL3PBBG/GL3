@@ -149,7 +149,7 @@ export const theftGarage = pgTable("p_theft_garage", {
 });
 
 /** Mirrors `packages/plugins/houses/src/migrations.ts` `0001_houses`. */
-export const houses = pgTable("p_houses", {
+export const houses = pgTable("p_houses_houses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   price: bigint("price", { mode: "bigint" }).notNull(),
@@ -157,7 +157,7 @@ export const houses = pgTable("p_houses", {
 });
 
 /** Mirrors `packages/plugins/education/src/migrations.ts` `0001_courses`. */
-export const courses = pgTable("p_courses", {
+export const courses = pgTable("p_education_courses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -171,7 +171,7 @@ export const courses = pgTable("p_courses", {
 });
 
 /** Mirrors `packages/plugins/jobs/src/migrations.ts` `0001_jobs`. */
-export const jobCatalog = pgTable("p_jobs", {
+export const jobCatalog = pgTable("p_jobs_jobs", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -179,7 +179,7 @@ export const jobCatalog = pgTable("p_jobs", {
 });
 
 /** Mirrors `packages/plugins/jobs/src/migrations.ts` `0002_ranks`. */
-export const jobRanks = pgTable("p_job_ranks", {
+export const jobRanks = pgTable("p_jobs_ranks", {
   id: uuid("id").primaryKey(),
   jobId: uuid("job_id").notNull(),
   name: text("name").notNull(),
@@ -193,7 +193,7 @@ export const jobRanks = pgTable("p_job_ranks", {
 });
 
 /** Mirrors `packages/plugins/jobs/src/migrations.ts` `0003_employment`. */
-export const playerJobs = pgTable("p_player_jobs", {
+export const playerJobs = pgTable("p_jobs_players", {
   playerId: uuid("player_id").primaryKey(),
   rankId: uuid("rank_id").notNull(),
   lastWageAt: timestamp("last_wage_at", { withTimezone: true }).notNull(),

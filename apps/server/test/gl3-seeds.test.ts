@@ -52,29 +52,29 @@ describe("gl3 seed pack (gl3-hybrid spec §3)", () => {
   it("family content seeds after plugin migrations, gated on plugin ids, idempotent", async () => {
     await runPluginMigrations(db, [mccodesAttributesPlugin, housesPlugin, educationPlugin, jobsPlugin]);
     await seedFamilyContent(db, ["houses", "education", "jobs"]);
-    const houses = (await db.execute(sql`SELECT name FROM p_houses`)) as unknown as { name: string }[];
+    const houses = (await db.execute(sql`SELECT name FROM p_houses_houses`)) as unknown as { name: string }[];
     expect(houses.length).toBeGreaterThanOrEqual(4); // plugin's Default House + three seeds
-    const courses = (await db.execute(sql`SELECT name FROM p_courses`)) as unknown as { name: string }[];
+    const courses = (await db.execute(sql`SELECT name FROM p_education_courses`)) as unknown as { name: string }[];
     expect(courses.length).toBeGreaterThanOrEqual(3);
-    const ranks = (await db.execute(sql`SELECT name, job_id FROM p_job_ranks`)) as unknown as { name: string }[];
+    const ranks = (await db.execute(sql`SELECT name, job_id FROM p_jobs_ranks`)) as unknown as { name: string }[];
     expect(ranks.length).toBeGreaterThanOrEqual(4);
-    const jobs = (await db.execute(sql`SELECT id, first_rank_id FROM p_jobs`)) as unknown as { id: string; first_rank_id: string }[];
+    const jobs = (await db.execute(sql`SELECT id, first_rank_id FROM p_jobs_jobs`)) as unknown as { id: string; first_rank_id: string }[];
     expect(jobs.length).toBeGreaterThanOrEqual(2);
     // Every job's entry rank exists and belongs to that job.
     for (const job of jobs) {
       const [rank] = (await db.execute(
-        sql`SELECT job_id FROM p_job_ranks WHERE id = ${job.first_rank_id}`,
+        sql`SELECT job_id FROM p_jobs_ranks WHERE id = ${job.first_rank_id}`,
       )) as unknown as { job_id: string }[];
       expect(rank?.job_id).toBe(job.id);
     }
 
     await seedFamilyContent(db, ["houses", "education", "jobs"]); // idempotent
-    const again = (await db.execute(sql`SELECT name FROM p_houses`)) as unknown as unknown[];
+    const again = (await db.execute(sql`SELECT name FROM p_houses_houses`)) as unknown as unknown[];
     expect(again.length).toBe(houses.length);
 
     // Gating: a boot without the plugins seeds nothing new.
     await seedFamilyContent(db, []);
-    expect(((await db.execute(sql`SELECT name FROM p_courses`)) as unknown as unknown[]).length)
+    expect(((await db.execute(sql`SELECT name FROM p_education_courses`)) as unknown as unknown[]).length)
       .toBe(courses.length);
   });
 

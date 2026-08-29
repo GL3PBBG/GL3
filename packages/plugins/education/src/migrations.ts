@@ -36,4 +36,15 @@ export const EDUCATION_MIGRATIONS: { name: string; sql: string }[] = [
       PRIMARY KEY (player_id, course_id)
     )`,
   },
+  // `p_courses`/`p_courses_done` predate the migration runner's prefix guard;
+  // the convention is `p_<id>_*`. History above keeps the old names —
+  // migrations are append-only — and the guard checks only the final state.
+  {
+    name: "0004_prefix_rename_courses",
+    sql: `ALTER TABLE p_courses RENAME TO p_education_courses`,
+  },
+  {
+    name: "0005_prefix_rename_done",
+    sql: `ALTER TABLE p_courses_done RENAME TO p_education_courses_done`,
+  },
 ];

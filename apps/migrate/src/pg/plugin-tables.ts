@@ -117,7 +117,7 @@ export const membershipPackages = pgTable("p_membership_packages", {
 // ---------------------------------------------------------------------------
 
 /** Mirrors `packages/plugins/houses/src/migrations.ts` `0001_houses`. */
-export const housesPlugin = pgTable("p_houses", {
+export const housesPlugin = pgTable("p_houses_houses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   price: bigint("price", { mode: "bigint" }).notNull(),
@@ -125,7 +125,7 @@ export const housesPlugin = pgTable("p_houses", {
 });
 
 /** Mirrors `packages/plugins/education/src/migrations.ts` (three tables). */
-export const coursesPlugin = pgTable("p_courses", {
+export const coursesPlugin = pgTable("p_education_courses", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -144,20 +144,20 @@ export const educationProgress = pgTable("p_education_progress", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
 });
 
-export const coursesDone = pgTable("p_courses_done", {
+export const coursesDone = pgTable("p_education_courses_done", {
   playerId: uuid("player_id").notNull(),
   courseId: uuid("course_id").notNull(),
 }, (t) => ({ pk: primaryKey({ columns: [t.playerId, t.courseId] }) }));
 
 /** Mirrors `packages/plugins/jobs/src/migrations.ts` (three tables). */
-export const jobsPlugin = pgTable("p_jobs", {
+export const jobsPlugin = pgTable("p_jobs_jobs", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
   firstRankId: uuid("first_rank_id").notNull(),
 });
 
-export const jobRanks = pgTable("p_job_ranks", {
+export const jobRanks = pgTable("p_jobs_ranks", {
   id: uuid("id").primaryKey(),
   jobId: uuid("job_id").notNull(),
   name: text("name").notNull(),
@@ -170,7 +170,7 @@ export const jobRanks = pgTable("p_job_ranks", {
   iqReq: integer("iq_req").notNull(),
 });
 
-export const playerJobs = pgTable("p_player_jobs", {
+export const playerJobs = pgTable("p_jobs_players", {
   playerId: uuid("player_id").primaryKey(),
   rankId: uuid("rank_id").notNull(),
   lastWageAt: timestamp("last_wage_at", { withTimezone: true }).notNull(),

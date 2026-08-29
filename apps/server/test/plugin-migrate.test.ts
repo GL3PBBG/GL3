@@ -50,6 +50,49 @@ describe("runPluginMigrations", () => {
     expect(applied).toEqual(["alpha:0001", "alpha:0002", "zeta:0001"]);
   });
 
+  // The prefix rule (`p_<id>_*`, hyphens as underscores) used to be checked
+  // only for manifest-DECLARED tables (plugins/validate.ts), so a table
+  // created in a migration escaped it — houses' `p_houses` and jobs'
+  // `p_player_jobs` shipped exactly that way. The runner now diffs the table
+  // catalog around each plugin's migration run and fails the boot on a stray
+  // name. The check is end-of-plugin, so a legacy bad CREATE followed by its
+  // append-only rename stays legal on a fresh install.
+  it("refuses a migration run that leaves a table outside the plugin's prefix", async () => {
+    const rogue = plugin("m4", [
+      { name: "0001", sql: "CREATE TABLE wrong_prefix_things (id text)" },
+    ]);
+    const error = await rejectionOf(runPluginMigrations(db, [rogue]));
+    expect(String(error)).toContain("m4");
+    expect(String(error)).toContain("wrong_prefix_things");
+    expect(String(error)).toContain("p_m4_");
+  });
+
+  it("maps a hyphenated plugin id onto an underscore prefix", async () => {
+    const hyphenated = plugin("my-plug", [
+      { name: "0001", sql: "CREATE TABLE p_my_plug_things (id text)" },
+    ]);
+    expect(await runPluginMigrations(db, [hyphenated])).toEqual(["my-plug:0001"]);
+  });
+
+  it("allows a transiently bad name that a later migration renames into the prefix", async () => {
+    // The exact shape of houses/education/jobs after their rename migrations:
+    // history keeps the original CREATE, the final state is compliant.
+    const legacy = plugin("m6", [
+      { name: "0001", sql: "CREATE TABLE badly_named (id text)" },
+      { name: "0002", sql: "ALTER TABLE badly_named RENAME TO p_m6_things" },
+    ]);
+    expect(await runPluginMigrations(db, [legacy])).toEqual(["m6:0001", "m6:0002"]);
+  });
+
+  it("refuses a RENAME that leaves the plugin's prefix", async () => {
+    const renamer = plugin("m5", [
+      { name: "0001", sql: "CREATE TABLE p_m5_things (id text)" },
+      { name: "0002", sql: "ALTER TABLE p_m5_things RENAME TO things_free" },
+    ]);
+    const error = await rejectionOf(runPluginMigrations(db, [renamer]));
+    expect(String(error)).toContain("things_free");
+  });
+
   it("rolls back the tracking row when the migration SQL fails", async () => {
     const broken = plugin("m3", [{ name: "0001", sql: "CREATE TABLE (((" }]);
 
