@@ -10,8 +10,9 @@ import crimesPlugin, {
   parseSuccessFormula,
 } from "@gl3/plugin-crimes";
 import { loadConfig } from "../src/config.js";
-import { crimeLog, crimes, playerCrimeSkill, playerStats } from "../src/db/schema/index.js";
+import { crimeLog, crimes, playerCrimeSkill, playerStats, players } from "../src/db/schema/index.js";
 import { runPluginJob } from "../src/plugins/jobs.js";
+import { uuidv7 } from "uuidv7";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -190,6 +191,34 @@ describe("crimes.commit — formula crimes (success_formula set)", () => {
     const listed = res.json().crimes as Array<{ id: string; chance: string | null }>;
     expect(listed.find((c) => c.id === alwaysCrimeId)?.chance).toBeNull();
     expect(listed.find((c) => c.id === skillCrimeId)?.chance).toBe("35.00");
+  });
+});
+
+describe("an unparseable stored formula", () => {
+  it("resolves as a 0% failure instead of killing the job (the growth gate must not re-parse unguarded)", async () => {
+    const brokenId = crypto.randomUUID();
+    await db.insert(crimes).values({
+      id: brokenId, name: "Broken Formula", cooldownSeconds: 60,
+      minPayout: 10n, maxPayout: 20n,
+      // Reaches the DB only behind the migrator/admin validators' backs (a
+      // stale import, a hand-edited row) — but when it does, the job's
+      // documented behavior is a warned 0% resolution, never a dead job.
+      // The growth gate's original second, unguarded parse turned exactly
+      // this into: accepted commit, burned cooldown, BullMQ retries, silence.
+      successFormula: "LEVEL +",
+    });
+    const playerId = uuidv7();
+    await db.insert(players).values({ id: playerId, username: `bf-${playerId.slice(-8)}` });
+    await db.insert(playerStats).values({ playerId });
+
+    await runPluginJob(jobDeps(), crimesPlugin, "commit", {
+      id: `broken-formula-${brokenId}`, data: { playerId, crimeId: brokenId, seed: "fixed-seed" },
+    });
+
+    const [log] = await db.select().from(crimeLog).where(eq(crimeLog.playerId, playerId));
+    expect(log).toBeDefined();
+    expect(log?.success).toBe(false);
+    expect(log?.payout).toBe(0n);
   });
 });
 

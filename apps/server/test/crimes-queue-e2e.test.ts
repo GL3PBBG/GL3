@@ -1,7 +1,7 @@
 import { GameEventSchema } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { crimes, outbox, playerStats } from "../src/db/schema/index.js";
@@ -38,6 +38,45 @@ beforeEach(async () => {
 afterAll(async () => { await closeServer(); await conn.end(); redis.disconnect(); subscriber.disconnect(); });
 
 describe("crimes through the real queue", () => {
+  it("a PRE-SEEDED FORMULA crime (gl3 seed set, brave-priced) resolves via the real worker", async () => {
+    // The beforeEach seeded the v2 set; the gl3 eight are what the formula
+    // copy runs, so start clean.
+    await resetDb(db);
+    await seedCrimes(db, "gl3");
+    // resetDb took the beforeEach's player with it; re-register.
+    ({ token, playerId } = await registerVerifiedPlayer({ app, redis }, { username: "E2ECrook2", remoteAddress: "10.9.0.22" }));
+    // The eight gl3 seeds all carry formulas and brave costs; the v2 three
+    // carry neither. The reported break: formula copy accepts + timer +
+    // silence — this is that copy's exact crime.
+    const [formulaCrime] = await db.select().from(crimes).where(isNotNull(crimes.successFormula));
+    if (!formulaCrime) throw new Error("gl3 seed set has no formula crime");
+
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const seen: unknown[] = [];
+    const onMessage = (channel: string, raw: string): void => {
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.actorId === playerId) seen.push(parsed.data);
+    };
+    subscriber.on("message", onMessage);
+
+    const res = await app.inject({
+      method: "POST", url: `/api/crimes/${formulaCrime.id}/commit`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(202);
+
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && !seen.some((e) => (e as { type: string }).type === "crime.resolved")) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    subscriber.off("message", onMessage);
+
+    const resolved = seen.find((e) => (e as { type: string }).type === "crime.resolved");
+    expect(resolved).toBeDefined();
+    expect(await db.select({ id: outbox.id }).from(outbox)).toEqual([]);
+  });
+
   it("a committed crime resolves via the real BullMQ worker", async () => {
     await subscriber.subscribe(GAME_EVENTS_CHANNEL);
     const seen: unknown[] = [];

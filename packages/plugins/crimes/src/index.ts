@@ -7,6 +7,7 @@ import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { evaluateSuccessFormula, formulaUsesToken, parseSuccessFormula } from "./formula.js";
+import type { FormulaNode } from "./formula.js";
 import { crimeLog, crimes, playerCrimeSkill, playerStats, players } from "./schema.js";
 
 // The sandboxed formula dialect's public API — apps/migrate imports the same
@@ -326,8 +327,26 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
       .where(and(eq(playerCrimeSkill.playerId, playerId), eq(playerCrimeSkill.crimeId, crimeId)));
     const skillChance = Number(skillRow?.chance ?? DEFAULT_CRIME_CHANCE);
 
-    let chance: number;
+    // Parsed ONCE, up front, behind the same guard the evaluation always
+    // had: a stored formula that fails to parse (a stale import, a
+    // hand-edited row — the validators keep new ones out, but the table is
+    // reachable) resolves the attempt as a 0% failure with a warning, the
+    // documented pre-SKILL behavior. The second, unguarded parse the growth
+    // gate originally ran would have thrown past the catch and killed the
+    // job — accepted commit, burned cooldown, three BullMQ retries, silence.
+    let parsedFormula: FormulaNode | null = null;
     if (crime.successFormula !== null) {
+      try {
+        parsedFormula = parseSuccessFormula(crime.successFormula);
+      } catch (error) {
+        ctx.log.warn("crime success formula failed to parse; resolving as 0%", {
+          err: String(error), playerId, crimeId,
+        });
+      }
+    }
+
+    let chance: number;
+    if (parsedFormula !== null) {
       const [stats] = await tx.db.select({
         level: playerStats.level, crimeExp: playerStats.crimeExp,
         exp: playerStats.exp, will: playerStats.will, iq: playerStats.iq,
@@ -335,7 +354,7 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
         .from(playerStats).where(eq(playerStats.playerId, playerId));
       if (!stats) return; // player deleted between enqueue and resolve
       try {
-        chance = evaluateSuccessFormula(parseSuccessFormula(crime.successFormula), {
+        chance = evaluateSuccessFormula(parsedFormula, {
           LEVEL: stats.level,
           CRIMEXP: Number(stats.crimeExp), // exact below 2^53 (formula.ts header)
           EXP: Number(stats.exp),
@@ -349,6 +368,11 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
         });
         chance = 0;
       }
+    } else if (crime.successFormula !== null) {
+      // Parse failed above: 0%, and no skill growth — whether an unparseable
+      // formula "uses" SKILL is unknowable, and a formula that cannot run
+      // has no business accumulating a learned chance.
+      chance = 0;
     } else {
       chance = skillChance;
     }
@@ -375,7 +399,7 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     // AFTER the roll draws above, so the seeded replay of every pre-existing
     // outcome is unchanged.
     const growsSkill = crime.successFormula === null
-      || formulaUsesToken(parseSuccessFormula(crime.successFormula), "SKILL");
+      || (parsedFormula !== null && formulaUsesToken(parsedFormula, "SKILL"));
     if (growsSkill) {
       const add = success ? rng.int(1, 5) : jailed ? 0 : rng.int(1, 3);
       if (add > 0) {
