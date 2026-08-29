@@ -145,6 +145,30 @@ export function outboxErrorLog(
 }
 
 /**
+ * The domain-facing delivery port: hands committed outbox rows to the
+ * delivery machinery. Domain modules — jail/hospital status, rounds settle,
+ * the sentence sweeper, the facility routes — take THIS and never a Redis
+ * client, the structural form of "game rules should not know Redis exists":
+ * the Redis (and BullMQ) knowledge lives in this module and the composition
+ * roots that call `createOutboxDelivery`. The optional per-call error sink
+ * is how a route logs through its own request logger without the domain
+ * knowing fastify either.
+ */
+export type OutboxDelivery = (
+  rows: readonly OutboxClaimedRow[],
+  onError?: (error: unknown, context: Record<string, unknown>) => void,
+) => Promise<void>;
+
+/** Builds the `OutboxDelivery` port over one db and one dispatch deps set. */
+export function createOutboxDelivery(db: Db, deps: OutboxDispatchDeps): OutboxDelivery {
+  // The result counts are the machinery's business; the port answers void —
+  // callers cannot branch on delivery internals they should not see.
+  return async (rows, onError) => {
+    await deliverAndClear(db, onError === undefined ? deps : { ...deps, onError }, rows);
+  };
+}
+
+/**
  * Inserts already-minted core envelopes as event rows, inside the caller's
  * own transaction — the core-routes counterpart of the plugin ctx's
  * automatic buffering. Returns the row shapes so the caller can hand the

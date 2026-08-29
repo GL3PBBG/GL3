@@ -1,9 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { deliverAndClear, insertOutboxEvents, outboxErrorLog } from "../../bus/outbox.js";
+import { insertOutboxEvents, outboxErrorLog, type OutboxDelivery } from "../../bus/outbox.js";
 import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
@@ -26,14 +25,14 @@ const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 const BUST_ENERGY_COST = 10;
 
 export function registerJailRoutes(
-  app: FastifyInstance, db: Db, redis: Redis, settings: Record<string, string>,
+  app: FastifyInstance, db: Db, deliver: OutboxDelivery, settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
   manifests: () => readonly PluginManifest[] = () => [],
 ): void {
   app.get("/api/jail", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
-    return reply.send(await releaseIfExpired(db, redis, playerId));
+    return reply.send(await releaseIfExpired(db, deliver, playerId));
   });
 
   /** Everyone else's live sentence in the caller's own town. Never lists the caller. */
@@ -162,7 +161,7 @@ export function registerJailRoutes(
       // The fast path — never throws: anything undeliverable here is the
       // dispatcher's, not the player's, because the rows committed with the
       // facts.
-      await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+      await deliver(result.outboxRows, outboxErrorLog(request.log));
 
       return reply.send({
         freed: targetId,
@@ -304,7 +303,7 @@ export function registerJailRoutes(
     if (result.kind === "insufficient_energy") return reply.code(409).send({ error: "insufficient_energy" });
 
     // The fast path — never throws; the dispatcher owns what it cannot deliver.
-    await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+    await deliver(result.outboxRows, outboxErrorLog(request.log));
 
     if (result.kind === "failed") {
       return reply.send({ success: false, jailedUntil: result.until.toISOString() });
@@ -372,7 +371,7 @@ export function registerJailRoutes(
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
 
     // The fast path — never throws; the dispatcher owns what it cannot deliver.
-    await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+    await deliver(result.outboxRows, outboxErrorLog(request.log));
 
     if (result.kind === "failed") {
       return reply.send({ success: false, jailedUntil: result.until.toISOString() });

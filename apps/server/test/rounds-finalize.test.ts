@@ -10,6 +10,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db } = testDb();
 const config = loadConfig(process.env);
@@ -71,7 +72,7 @@ describe("ensureCurrentRound finalize", () => {
       await db.insert(roundEntries).values({ roundId: ended, playerId: id, expAtStart: exp });
     }
 
-    const active = await ensureCurrentRound(db, redis, SETTINGS);
+    const active = await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     expect(active?.id).toBe(next);
 
     const [settled] = await db.select().from(rounds).where(eq(rounds.id, ended));
@@ -89,8 +90,8 @@ describe("ensureCurrentRound finalize", () => {
     // Move the live numbers so a re-freeze would be visible.
     await db.update(playerStats).set({ exp: 99_999n }).where(eq(playerStats.playerId, a));
 
-    await ensureCurrentRound(db, redis, SETTINGS);
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
 
     const [again] = await db.select().from(rounds).where(eq(rounds.id, ended));
     expect(again!.finalizedAt?.toISOString()).toBe(stamp?.toISOString());
@@ -106,7 +107,7 @@ describe("ensureCurrentRound finalize", () => {
     for (const id of [first, second]) {
       await db.insert(roundEntries).values({ roundId: ended, playerId: id, expAtStart: 0n });
     }
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
 
     const rows = await db.select().from(transactions)
       .where(and(eq(transactions.reason, "round.payout"), eq(transactions.refId, ended)));
@@ -120,7 +121,7 @@ describe("ensureCurrentRound finalize", () => {
     const ended = await seedRound("Skipped", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
     const idle = await seedPlayer("idle_one", 50n);
     await db.insert(roundEntries).values({ roundId: ended, playerId: idle, expAtStart: 50n });
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     const rows = await db.select().from(transactions).where(eq(transactions.reason, "round.payout"));
     expect(rows).toEqual([]);
   });
@@ -129,7 +130,7 @@ describe("ensureCurrentRound finalize", () => {
     const live = await seedRound("Live", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
     await seedPlayer("live_untouched", 10n);
 
-    const active = await ensureCurrentRound(db, redis, SETTINGS);
+    const active = await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     expect(active?.id).toBe(live);
 
     const [row] = await db.select().from(rounds).where(eq(rounds.id, live));
@@ -157,7 +158,7 @@ describe("ensureCurrentRound finalize", () => {
         await t0`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`;
 
         const active = await withTimeout(
-          ensureCurrentRound(db, redis, SETTINGS),
+          ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS),
           2000,
           "ensureCurrentRound did not return within 2000ms while a foreign session held " +
             "the advisory lock — the fast path must not open a transaction",
@@ -174,7 +175,7 @@ describe("ensureCurrentRound finalize", () => {
 
   it("returns null and writes nothing when there are no rounds", async () => {
     await seedPlayer("no_rounds", 0n);
-    expect(await ensureCurrentRound(db, redis, SETTINGS)).toBeNull();
+    expect(await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS)).toBeNull();
     expect(await db.select().from(roundEntries)).toEqual([]);
   });
 
@@ -184,7 +185,7 @@ describe("ensureCurrentRound finalize", () => {
     const live = await seedRound("Chain 3", ago(3_600_000), ahead(3_600_000));
     await seedPlayer("chain_player", 10n);
 
-    const active = await ensureCurrentRound(db, redis, SETTINGS);
+    const active = await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     expect(active?.id).toBe(live);
     for (const id of [first, second]) {
       const [row] = await db.select().from(rounds).where(eq(rounds.id, id));
@@ -199,7 +200,7 @@ describe("ensureCurrentRound finalize", () => {
     const winner = await seedPlayer("bad_setting_winner", 100n);
     await db.insert(roundEntries).values({ roundId: ended, playerId: winner, expAtStart: 0n });
 
-    await ensureCurrentRound(db, redis, { "rounds.payout_points": "not json" });
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), { "rounds.payout_points": "not json" });
 
     const [paid] = await db.select().from(transactions).where(eq(transactions.reason, "round.payout"));
     expect(paid!.amount).toBe(1000n);
@@ -209,7 +210,7 @@ describe("ensureCurrentRound finalize", () => {
     const ended = await seedRound("Notified", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
     const winner = await seedPlayer("notified_winner", 100n);
     await db.insert(roundEntries).values({ roundId: ended, playerId: winner, expAtStart: 0n });
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
 
     const notes = await db.select().from(notifications).where(eq(notifications.playerId, winner));
     expect(notes).toHaveLength(1);
@@ -231,7 +232,7 @@ describe("ensureCurrentRound finalize", () => {
     const finished = awaitOwnEvent(subscriber, ended);
     const started = awaitOwnEvent(subscriber, next);
 
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
 
     // Promise.all, not two sequential awaits: each of these rejects on its
     // own 5s timeout (awaitOwnEvent's default), and awaiting them one after

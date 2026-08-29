@@ -1,7 +1,6 @@
 import { and, eq, isNotNull } from "drizzle-orm";
-import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
-import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
+import { insertOutboxEvents, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats, ranks } from "../../db/schema/index.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
@@ -131,7 +130,7 @@ async function settleHospitalTx(
  * `player.discharged` exactly once between them.
  */
 export async function dischargeIfExpired(
-  db: Db, redis: Redis, playerId: string,
+  db: Db, deliver: OutboxDelivery, playerId: string,
 ): Promise<{ status: HospitalStatus; discharged: boolean }> {
   const [row] = await db.select({ username: players.username })
     .from(players).where(eq(players.id, playerId));
@@ -158,7 +157,7 @@ export async function dischargeIfExpired(
 
   // The fast path — never throws; the dispatcher owns what it cannot deliver.
   if (outcome.outboxRows.length > 0) {
-    await deliverAndClear(db, { redis }, outcome.outboxRows);
+    await deliver(outcome.outboxRows);
   }
   return outcome;
 }

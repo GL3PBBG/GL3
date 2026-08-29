@@ -6,7 +6,7 @@ import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, 
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
-import { startOutboxLoop } from "./bus/outbox.js";
+import { createOutboxDelivery, startOutboxLoop } from "./bus/outbox.js";
 import { startWealthTaxLoop } from "./economy/tax.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { CORE_PLUGINS, bundledPlugins } from "./plugins/core-plugins.js";
@@ -115,7 +115,7 @@ const loadedSettings = await loadSettings(db);
 // sweeper is kept out of buildApp. The boot call is what absorbs the expensive
 // case: a server that was down across several scheduled rounds settles them all
 // here rather than making the first player of the day pay for it.
-await ensureCurrentRound(db, redis, loadedSettings);
+await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), loadedSettings);
 
 // One driver instance for the whole process, shared by the plugin ctx (reads,
 // through `ctx.assets`) and the core asset routes (writes). Built here rather
@@ -154,7 +154,7 @@ await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config
 // so it alone rides the switch under framework.
 if (config.profile !== "framework" && config.sweepIntervalMs > 0) {
   startSentenceSweeper({
-    db, redis, intervalMs: config.sweepIntervalMs,
+    db, deliver: createOutboxDelivery(db, { redis }), intervalMs: config.sweepIntervalMs,
     onError: (error) => { app.log.error({ err: error }, "sentence sweep failed"); },
   });
 

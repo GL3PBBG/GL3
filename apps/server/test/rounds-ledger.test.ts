@@ -15,6 +15,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -144,7 +145,7 @@ describe("the ledger reconciles across a rollover", () => {
     const winnersInExpectedOrder = playerIds; // already highest-exp first
 
     // --- roll the round over, using the same settings record the server loaded ---
-    const active = await ensureCurrentRound(db, redis, loadedSettings);
+    const active = await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), loadedSettings);
     expect(active?.id).toBe(successorRoundId);
 
     // --- the per-player, per-kind sweep (economy-invariant.test.ts:356-370) ---

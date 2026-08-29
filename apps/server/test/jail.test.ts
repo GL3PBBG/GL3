@@ -9,6 +9,7 @@ import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -58,7 +59,7 @@ describe("releaseIfExpired", () => {
     // own actor.
     const received = awaitOwnEvent(subscriber, playerId);
 
-    const status = await releaseIfExpired(db, redis, playerId);
+    const status = await releaseIfExpired(db, createOutboxDelivery(db, { redis }), playerId);
     expect(status).toEqual({ jailed: false, until: null, remainingSeconds: 0 });
 
     const event = await received;
@@ -69,13 +70,13 @@ describe("releaseIfExpired", () => {
     expect(row?.jailedUntil).toBeNull();
 
     // A second call finds nothing left to release and does not republish.
-    await releaseIfExpired(db, redis, playerId);
+    await releaseIfExpired(db, createOutboxDelivery(db, { redis }), playerId);
   });
 
   it("leaves a currently-jailed player untouched", async () => {
     const future = new Date(Date.now() + 60_000);
     await db.update(playerStats).set({ jailedUntil: future }).where(eq(playerStats.playerId, playerId));
-    const status = await releaseIfExpired(db, redis, playerId);
+    const status = await releaseIfExpired(db, createOutboxDelivery(db, { redis }), playerId);
     expect(status.jailed).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import { createRedis } from "../src/redis.js";
 import { loadConfig } from "../src/config.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { bootTestServer } from "./helpers/server.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -48,7 +49,7 @@ describe("round activation snapshot", () => {
     const ended = await seedRound("Prev", ago(7_200_000), ago(3_600_000), { snapshottedAt: ago(7_200_000) });
     const next = await seedRound("Next", ago(60_000), ahead(3_600_000));
 
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
 
     const entries = await db.select().from(roundEntries).where(eq(roundEntries.roundId, next));
     expect(entries).toHaveLength(3);
@@ -72,7 +73,7 @@ describe("round activation snapshot", () => {
     expect(await db.select().from(roundEntries)).toEqual([]);
 
     const only = await seedRound("Round One", ago(60_000), ahead(3_600_000));
-    const active = await ensureCurrentRound(db, redis, SETTINGS);
+    const active = await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     expect(active?.id).toBe(only);
 
     const [row] = await db.select().from(rounds).where(eq(rounds.id, only));
@@ -84,7 +85,7 @@ describe("round activation snapshot", () => {
       expect(p!.roundId).toBe(only);
     }
 
-    await ensureCurrentRound(db, redis, SETTINGS);
+    await ensureCurrentRound(db, createOutboxDelivery(db, { redis }), SETTINGS);
     const [again] = await db.select().from(rounds).where(eq(rounds.id, only));
     expect(again!.snapshottedAt?.toISOString()).toBe(stamp?.toISOString());
     expect(await db.select().from(roundEntries)).toHaveLength(3);

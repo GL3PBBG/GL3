@@ -13,6 +13,7 @@ import { pgErrorCode } from "./helpers/pg-error.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 /**
  * The sweeper↔combat lock pair, proven against the ABBA it must never form.
@@ -162,7 +163,7 @@ describe("sentence sweeper lock ordering", () => {
 
       const ab = fire(attack(playerB, tokenA));
       const ba = fire(attack(playerA, tokenB));
-      const sweep = sweepExpiredSentences(db, redis);
+      const sweep = sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
       inFlight.push(ab, ba, sweep);
 
       // Three backends parked on their first lock.

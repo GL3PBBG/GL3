@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { players, playerStats, roleModuleAccess } from "../db/schema/index.js";
 import { settleHospital } from "../game/hospital/status.js";
+import { createOutboxDelivery } from "../bus/outbox.js";
 import { releaseIfExpired } from "../game/jail/status.js";
 import { createPluginCtx, type PluginCtxDeps } from "./ctx.js";
 import { collectAssetSlots } from "./asset-slots.js";
@@ -42,7 +43,7 @@ export function registerPluginRoutes(
             // Same call, same order, same response as crimes/bullets/travel —
             // GET-side release still happens here, so a sentence that expired
             // ends on the next action rather than on a poll.
-            const jail = await releaseIfExpired(deps.db, deps.redis, playerId);
+            const jail = await releaseIfExpired(deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), playerId);
             if (jail.jailed) {
               // Core's jail-gated routes set this alongside the body
               // (game/bullets/routes.ts:19). A ported module must not lose it.

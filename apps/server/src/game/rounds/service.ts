@@ -1,8 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { GameEvent } from "@gl3/shared";
-import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
+import { insertOutboxEvents, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, rounds } from "../../db/schema/index.js";
 import { applyBalanceChange, lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
@@ -197,7 +196,7 @@ function startedEvent(round: ProbeRow): GameEvent {
  * §2.3 step 4's re-evaluation are the same statement, run once here).
  */
 async function settle(
-  db: Db, redis: Redis, settings: Record<string, string>,
+  db: Db, deliver: OutboxDelivery, settings: Record<string, string>,
 ): Promise<ActiveRound | null> {
   const pending: GameEvent[] = [];
   let rows: { id: string; kind: string; payload: unknown }[] = [];
@@ -234,7 +233,7 @@ async function settle(
   });
 
   // The fast path — never throws; the dispatcher owns what it cannot deliver.
-  await deliverAndClear(db, { redis }, rows);
+  await deliver(rows);
   return active;
 }
 
@@ -250,10 +249,10 @@ async function settle(
  * at the head of GET /api/leaderboard/:kind, a route that works today.
  */
 export async function ensureCurrentRound(
-  db: Db, redis: Redis, settings: Record<string, string>,
+  db: Db, deliver: OutboxDelivery, settings: Record<string, string>,
 ): Promise<ActiveRound | null> {
   const row = await probe(db);
   if (row === undefined) return null;
   if (!row.ended && row.snapshottedAt !== null) return toActive(row);
-  return settle(db, redis, settings);
+  return settle(db, deliver, settings);
 }

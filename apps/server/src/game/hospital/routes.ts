@@ -1,9 +1,8 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { deliverAndClear, insertOutboxEvents, outboxErrorLog } from "../../bus/outbox.js";
+import { insertOutboxEvents, outboxErrorLog, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
@@ -20,7 +19,7 @@ const TargetBodySchema = z.object({ playerId: z.string().uuid() });
 export function registerHospitalRoutes(
   app: FastifyInstance,
   db: Db,
-  redis: Redis,
+  deliver: OutboxDelivery,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
 ): void {
@@ -299,7 +298,7 @@ export function registerHospitalRoutes(
       if (result.kind === "free") return reply.code(409).send({ error: "not_hospitalised" });
 
       // The fast path — never throws; the dispatcher owns what it cannot deliver.
-      await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+      await deliver(result.outboxRows, outboxErrorLog(request.log));
 
       return reply.send({
         freed: targetId,

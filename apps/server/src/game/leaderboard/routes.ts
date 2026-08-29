@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import { z } from "zod";
 import type { Db } from "../../db/client.js";
 import { ensureCurrentRound } from "../rounds/service.js";
+import type { OutboxDelivery } from "../../bus/outbox.js";
 import { roundStandings } from "../rounds/standings.js";
 import { DEFAULT_LEADERBOARD_PREFIX, topN } from "./service.js";
 
@@ -16,7 +17,7 @@ const ParamsSchema = z.object({ kind: LeaderboardKindSchema });
 const QuerySchema = z.object({ scope: z.enum(["round", "all"]).default("all") }).strict();
 
 export function registerLeaderboardRoutes(
-  app: FastifyInstance, db: Db, redis: Redis,
+  app: FastifyInstance, db: Db, deliver: OutboxDelivery, redis: Redis,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
   leaderboardPrefix = DEFAULT_LEADERBOARD_PREFIX,
@@ -25,7 +26,7 @@ export function registerLeaderboardRoutes(
     // Unconditional, before the params parse: branching on the query param to
     // skip it would let the all-time board observe a round that ended an hour
     // ago as still active, for no saving beyond one indexed SELECT.
-    const active = await ensureCurrentRound(db, redis, settings);
+    const active = await ensureCurrentRound(db, deliver, settings);
 
     const params = ParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_kind" });

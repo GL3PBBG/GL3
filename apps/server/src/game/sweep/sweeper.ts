@@ -1,5 +1,5 @@
 import { and, isNotNull, lte, or } from "drizzle-orm";
-import type { Redis } from "ioredis";
+import type { OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { playerStats } from "../../db/schema/index.js";
 import { dischargeIfExpired } from "../hospital/status.js";
@@ -52,7 +52,7 @@ export interface SweepResult {
  * on the gated routes still releases players if no sweeper is running at all.
  */
 export async function sweepExpiredSentences(
-  db: Db, redis: Redis, limit: number = SWEEP_BATCH_LIMIT,
+  db: Db, deliver: OutboxDelivery, limit: number = SWEEP_BATCH_LIMIT,
 ): Promise<SweepResult> {
   const now = new Date();
   const candidates = await db.select({
@@ -70,11 +70,11 @@ export async function sweepExpiredSentences(
   const result: SweepResult = { released: [], discharged: [] };
   for (const candidate of candidates) {
     if (candidate.jailedUntil !== null) {
-      const { released } = await releaseIfExpiredWithOutcome(db, redis, candidate.playerId);
+      const { released } = await releaseIfExpiredWithOutcome(db, deliver, candidate.playerId);
       if (released) result.released.push(candidate.playerId);
     }
     if (candidate.hospitalUntil !== null) {
-      const { discharged } = await dischargeIfExpired(db, redis, candidate.playerId);
+      const { discharged } = await dischargeIfExpired(db, deliver, candidate.playerId);
       if (discharged) result.discharged.push(candidate.playerId);
     }
   }
@@ -88,7 +88,7 @@ export interface SweeperHandle {
 
 export interface SweeperDeps {
   db: Db;
-  redis: Redis;
+  deliver: OutboxDelivery;
   /** Milliseconds between the END of one pass and the START of the next. */
   intervalMs: number;
   onError?: (error: unknown) => void;
@@ -113,7 +113,7 @@ export function startSentenceSweeper(deps: SweeperDeps): SweeperHandle {
 
   const tick = async (): Promise<void> => {
     try {
-      await sweepExpiredSentences(deps.db, deps.redis);
+      await sweepExpiredSentences(deps.db, deps.deliver);
     } catch (error) {
       deps.onError?.(error);
     }

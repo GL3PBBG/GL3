@@ -10,6 +10,7 @@ import { sweepExpiredSentences } from "../src/game/sweep/sweeper.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -46,12 +47,12 @@ describe("release helpers report their own claim", () => {
       .where(eq(playerStats.playerId, id));
 
     const event = awaitOwnEvent(subscriber, id);
-    const first = await releaseIfExpiredWithOutcome(db, redis, id);
+    const first = await releaseIfExpiredWithOutcome(db, createOutboxDelivery(db, { redis }), id);
     expect(first.released).toBe(true);
     expect(first.status.jailed).toBe(false);
     expect((await event).type).toBe("player.released");
 
-    const second = await releaseIfExpiredWithOutcome(db, redis, id);
+    const second = await releaseIfExpiredWithOutcome(db, createOutboxDelivery(db, { redis }), id);
     expect(second.released).toBe(false);
   });
 
@@ -61,7 +62,7 @@ describe("release helpers report their own claim", () => {
       .set({ jailedUntil: new Date(Date.now() + 60_000) })
       .where(eq(playerStats.playerId, id));
 
-    const outcome = await releaseIfExpiredWithOutcome(db, redis, id);
+    const outcome = await releaseIfExpiredWithOutcome(db, createOutboxDelivery(db, { redis }), id);
     expect(outcome.released).toBe(false);
     expect(outcome.status.jailed).toBe(true);
   });
@@ -73,7 +74,7 @@ describe("release helpers report their own claim", () => {
       .where(eq(playerStats.playerId, id));
 
     const event = awaitOwnEvent(subscriber, id);
-    const first = await dischargeIfExpired(db, redis, id);
+    const first = await dischargeIfExpired(db, createOutboxDelivery(db, { redis }), id);
     expect(first.discharged).toBe(true);
     expect((await event).type).toBe("player.discharged");
 
@@ -81,7 +82,7 @@ describe("release helpers report their own claim", () => {
     expect(row?.health).toBe(140);
     expect(row?.hospitalUntil).toBeNull();
 
-    const second = await dischargeIfExpired(db, redis, id);
+    const second = await dischargeIfExpired(db, createOutboxDelivery(db, { redis }), id);
     expect(second.discharged).toBe(false);
   });
 
@@ -91,7 +92,7 @@ describe("release helpers report their own claim", () => {
       .set({ health: 0, hospitalUntil: new Date(Date.now() + 60_000) })
       .where(eq(playerStats.playerId, id));
 
-    const outcome = await dischargeIfExpired(db, redis, id);
+    const outcome = await dischargeIfExpired(db, createOutboxDelivery(db, { redis }), id);
     expect(outcome.discharged).toBe(false);
     expect(outcome.status.hospitalised).toBe(true);
     const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, id));
@@ -127,7 +128,7 @@ describe("sweepExpiredSentences", () => {
       .where(eq(playerStats.playerId, id));
 
     const event = awaitOwnEvent(subscriber, id);
-    const result = await sweepExpiredSentences(db, redis);
+    const result = await sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
 
     expect(result.released).toContain(id);
     expect((await event).type).toBe("player.released");
@@ -142,7 +143,7 @@ describe("sweepExpiredSentences", () => {
       .where(eq(playerStats.playerId, id));
 
     const event = awaitOwnEvent(subscriber, id);
-    const result = await sweepExpiredSentences(db, redis);
+    const result = await sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
 
     expect(result.discharged).toContain(id);
     expect((await event).type).toBe("player.discharged");
@@ -157,7 +158,7 @@ describe("sweepExpiredSentences", () => {
       .set({ jailedUntil: new Date(Date.now() + 60_000), hospitalUntil: new Date(Date.now() + 60_000) })
       .where(eq(playerStats.playerId, id));
 
-    const result = await sweepExpiredSentences(db, redis);
+    const result = await sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
 
     expect(result.released).toEqual([]);
     expect(result.discharged).toEqual([]);
@@ -169,11 +170,11 @@ describe("sweepExpiredSentences", () => {
       .set({ jailedUntil: new Date(Date.now() - 1000), health: 0, hospitalUntil: new Date(Date.now() - 1000) })
       .where(eq(playerStats.playerId, id));
 
-    const first = await sweepExpiredSentences(db, redis);
+    const first = await sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
     expect(first.released).toEqual([id]);
     expect(first.discharged).toEqual([id]);
 
-    const second = await sweepExpiredSentences(db, redis);
+    const second = await sweepExpiredSentences(db, createOutboxDelivery(db, { redis }));
     expect(second.released).toEqual([]);
     expect(second.discharged).toEqual([]);
   });
@@ -185,8 +186,8 @@ describe("sweepExpiredSentences", () => {
       .where(inArray(playerStats.playerId, ids));
 
     const [a, b] = await Promise.all([
-      sweepExpiredSentences(db, redis),
-      sweepExpiredSentences(db, redis),
+      sweepExpiredSentences(db, createOutboxDelivery(db, { redis })),
+      sweepExpiredSentences(db, createOutboxDelivery(db, { redis })),
     ]);
 
     // Every player released/discharged exactly once ACROSS both passes.

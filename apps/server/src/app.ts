@@ -10,6 +10,7 @@ import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { createMailDriver } from "./mail/driver.js";
 import type { MailDriver } from "./mail/driver.js";
+import { createOutboxDelivery } from "./bus/outbox.js";
 import { registerHospitalRoutes } from "./game/hospital/routes.js";
 import { registerJailRoutes } from "./game/jail/routes.js";
 import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
@@ -93,12 +94,12 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   if (config.profile !== "framework") {
     // The thunk, not `loaded.manifests` itself — same reason as the auth
     // routes above: `loaded` is assigned after this registration runs.
-    registerJailRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, () => loaded!.manifests);
-    registerHospitalRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+    registerJailRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, () => loaded!.manifests);
+    registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   }
-  registerLeaderboardRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
+  registerLeaderboardRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
-  registerRoundsRoutes(app, deps.db, deps.redis, loadedSettings, requireAuth);
+  registerRoundsRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db);
   registerWsRoutes(app, deps.redis, requireAuth);

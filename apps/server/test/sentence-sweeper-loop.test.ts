@@ -7,6 +7,7 @@ import { players, playerStats } from "../src/db/schema/index.js";
 import { startSentenceSweeper } from "../src/game/sweep/sweeper.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { createOutboxDelivery } from "../src/bus/outbox.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
@@ -30,7 +31,7 @@ describe("startSentenceSweeper", () => {
     await db.insert(players).values({ id, username: `loop-${id.slice(-8)}` });
     await db.insert(playerStats).values({ playerId: id, jailedUntil: new Date(Date.now() - 1000) });
 
-    const sweeper = startSentenceSweeper({ db, redis, intervalMs: 50 });
+    const sweeper = startSentenceSweeper({ db, deliver: createOutboxDelivery(db, { redis }), intervalMs: 50 });
     try {
       await until(async () => {
         const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, id));
@@ -70,7 +71,7 @@ describe("startSentenceSweeper", () => {
     await db.insert(players).values({ id, username: `stop-${id.slice(-8)}` });
     await db.insert(playerStats).values({ playerId: id });
 
-    const sweeper = startSentenceSweeper({ db, redis, intervalMs: 25 });
+    const sweeper = startSentenceSweeper({ db, deliver: createOutboxDelivery(db, { redis }), intervalMs: 25 });
     sweeper.stop();
     await db.update(playerStats)
       .set({ jailedUntil: new Date(Date.now() - 1000) })

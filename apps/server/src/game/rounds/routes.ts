@@ -1,8 +1,8 @@
 import { LeaderboardKindSchema, IdSchema } from "@gl3/shared";
 import { desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Redis } from "ioredis";
 import { z } from "zod";
+import type { OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { rounds } from "../../db/schema/index.js";
 import { ensureCurrentRound } from "./service.js";
@@ -38,14 +38,14 @@ const toDto = (row: RoundRow) => ({
 });
 
 export function registerRoundsRoutes(
-  app: FastifyInstance, db: Db, redis: Redis,
+  app: FastifyInstance, db: Db, deliver: OutboxDelivery,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
 ): void {
   app.get("/api/rounds", { preHandler: requireAuth }, async (_request, reply) => {
     // First, so visiting the Rounds page is one of the things that can trigger
     // a rollover.
-    const active = await ensureCurrentRound(db, redis, settings);
+    const active = await ensureCurrentRound(db, deliver, settings);
 
     // ends_at is nullable and Postgres sorts NULLs FIRST under DESC, so a
     // finalized open-ended round — exactly what the V2 migrator brings over —
@@ -68,7 +68,7 @@ export function registerRoundsRoutes(
   app.get("/api/rounds/:id/standings", { preHandler: requireAuth }, async (request, reply) => {
     // An ended-but-unsettled round must settle before it is read, or this same
     // request would report a live board for a round that is over.
-    await ensureCurrentRound(db, redis, settings);
+    await ensureCurrentRound(db, deliver, settings);
 
     const params = ParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });

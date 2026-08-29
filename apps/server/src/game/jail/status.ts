@@ -1,8 +1,7 @@
 import { and, eq, isNotNull } from "drizzle-orm";
-import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { JailStatus } from "@gl3/shared";
-import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
+import { insertOutboxEvents, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { playerStats, players } from "../../db/schema/index.js";
@@ -42,7 +41,7 @@ export async function checkJail(db: Db, playerId: string): Promise<JailStatus> {
  * the expiry at once.
  */
 export async function releaseIfExpiredWithOutcome(
-  db: Db, redis: Redis, playerId: string,
+  db: Db, deliver: OutboxDelivery, playerId: string,
 ): Promise<{ status: JailStatus; released: boolean }> {
   const [row] = await db.select({ jailedUntil: playerStats.jailedUntil, username: players.username })
     .from(playerStats)
@@ -81,12 +80,12 @@ export async function releaseIfExpiredWithOutcome(
   if (outboxRows.length === 0) return { status: FREE, released: false };
 
   // After commit (rule 5); never throws — the dispatcher owns the retry.
-  await deliverAndClear(db, { redis }, outboxRows);
+  await deliver(outboxRows);
   return { status: FREE, released: true };
 }
 
-export async function releaseIfExpired(db: Db, redis: Redis, playerId: string): Promise<JailStatus> {
-  return (await releaseIfExpiredWithOutcome(db, redis, playerId)).status;
+export async function releaseIfExpired(db: Db, deliver: OutboxDelivery, playerId: string): Promise<JailStatus> {
+  return (await releaseIfExpiredWithOutcome(db, deliver, playerId)).status;
 }
 
 /**
