@@ -545,6 +545,7 @@ const CrimeUpdateSchema = z.object({
   maxPayout: AdminMoney,
   expReward: AdminMoney,
   crimeExpReward: AdminMoney.optional(),
+  braveCost: z.coerce.number().int().nonnegative().optional(),
   successFormula: AdminFormula.optional(),
   /** Optional: absent leaves the level gate alone, the crimeExpReward shape. */
   minLevel: z.coerce.number().int().nonnegative().optional(),
@@ -571,6 +572,7 @@ const CrimeCreateSchema = z.object({
   maxBullets: z.coerce.number().int().nonnegative(),
   expReward: AdminMoney,
   crimeExpReward: AdminMoney.optional(),
+  braveCost: z.coerce.number().int().nonnegative().optional(),
   successFormula: AdminFormula.optional(),
   /** Optional, default 0 = ungated — every native seed's value. */
   minLevel: z.coerce.number().int().nonnegative().optional(),
@@ -617,6 +619,7 @@ const adminCrimesListRoute = route({
           maxPayout: c.maxPayout.toString(),
           expReward: c.expReward.toString(),
           crimeExpReward: c.crimeExpReward.toString(),
+          braveCost: String(c.braveCost),
           // "" not null: the table renderer parses rows with
           // z.record(z.string()), and one null cell kills the whole table.
           // The update route already reads "" back as NULL (blank = skill
@@ -652,6 +655,7 @@ const adminCrimesCreateRoute = route({
         maxBullets: body.maxBullets,
         expReward: BigInt(body.expReward),
         crimeExpReward: BigInt(body.crimeExpReward ?? "0"),
+        braveCost: body.braveCost ?? 0,
         successFormula: formula ?? null,
         minLevel: body.minLevel ?? 0,
         jailChancePercent: body.jailChancePercent,
@@ -679,6 +683,7 @@ const adminCrimesUpdateRoute = route({
           maxPayout: BigInt(body.maxPayout),
           expReward: BigInt(body.expReward),
           ...(body.crimeExpReward !== undefined ? { crimeExpReward: BigInt(body.crimeExpReward) } : {}),
+          ...(body.braveCost !== undefined ? { braveCost: body.braveCost } : {}),
           ...(formula !== undefined ? { successFormula: formula } : {}),
           ...(body.minLevel !== undefined ? { minLevel: body.minLevel } : {}),
           jailChancePercent: body.jailChancePercent,
@@ -725,6 +730,7 @@ const adminCrimesPage: PageSchema = {
         { key: "minPayout", label: "Min payout" },
         { key: "maxPayout", label: "Max payout" },
         { key: "expReward", label: "Exp" },
+        { key: "braveCost", label: "Brave" },
         // Blank reads as "skill chance" exactly like the edit field below —
         // the list payload already sends "" for NULL.
         { key: "successFormula", label: "Formula" },
@@ -743,6 +749,7 @@ const adminCrimesPage: PageSchema = {
         { name: "maxBullets", label: "Max bullets", type: "number" },
         { name: "expReward", label: "Exp reward", type: "money" },
         { name: "crimeExpReward", label: "Crime exp reward", type: "money" },
+        { name: "braveCost", label: "Brave cost (0 = free; needs the brave pool plugin)", type: "number" },
         { name: "successFormula", label: "Success formula (LEVEL/CRIMEXP/EXP/WILL/IQ/SKILL; blank = skill chance; SKILL grows with use)", type: "text" },
         { name: "minLevel", label: "Min level (0 = ungated)", type: "number" },
         { name: "jailChancePercent", label: "Jail chance %", type: "number" },
@@ -758,6 +765,7 @@ const adminCrimesPage: PageSchema = {
         { name: "maxPayout", label: "Max payout", type: "money" },
         { name: "expReward", label: "Exp reward", type: "money" },
         { name: "crimeExpReward", label: "Crime exp reward", type: "money" },
+        { name: "braveCost", label: "Brave cost (0 = free)", type: "number" },
         { name: "successFormula", label: "Success formula (empty = back to skill chance)", type: "text" },
         { name: "minLevel", label: "Min level (0 = ungated)", type: "number" },
         { name: "jailChancePercent", label: "Jail chance %", type: "number" },

@@ -107,6 +107,71 @@ describe("crimes admin", () => {
     expect(row?.jailSeconds).toBe(45);
   });
 
+  it("lists a crime's brave cost as a string cell", async () => {
+    const crimeId = uuidv7();
+    await db.insert(crimes).values({
+      id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
+      cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
+      minBullets: 0, maxBullets: 0, expReward: 5n, braveCost: 4,
+      minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+    });
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/crimes/list", headers: auth() });
+    expect(list.statusCode).toBe(200);
+    const row = list.json().rows.find((r: { id: string }) => r.id === crimeId);
+    expect(row?.braveCost).toBe("4");
+  });
+
+  it("creates a crime with a brave cost and persists it", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes", headers: auth(),
+      payload: {
+        name: "Brave job", description: "Takes nerve.",
+        cooldownSeconds: 30, minPayout: "50", maxPayout: "100",
+        minBullets: 0, maxBullets: 0, expReward: "5", braveCost: 7,
+        jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const [row] = await db.select().from(crimes).where(eq(crimes.id, res.json().id));
+    expect(row?.braveCost).toBe(7);
+  });
+
+  it("updates a crime's brave cost and leaves it alone when the field is absent", async () => {
+    const crimeId = uuidv7();
+    await db.insert(crimes).values({
+      id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
+      cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
+      minBullets: 0, maxBullets: 0, expReward: 5n, braveCost: 2,
+      minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+    });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+      payload: {
+        id: crimeId,
+        cooldownSeconds: 30, minPayout: "50", maxPayout: "250",
+        expReward: "5", braveCost: 9, jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    const [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+    expect(row?.braveCost).toBe(9);
+
+    // Absent key: untouched (the crimeExpReward/successFormula contract).
+    const omit = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+      payload: {
+        id: crimeId,
+        cooldownSeconds: 30, minPayout: "50", maxPayout: "250",
+        expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+      },
+    });
+    expect(omit.statusCode).toBe(204);
+    const [after] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+    expect(after?.braveCost).toBe(9);
+  });
+
   it("404s an update to an unknown id", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/admin/crimes/update", headers: auth(),
