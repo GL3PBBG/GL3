@@ -73,7 +73,12 @@ for (const m of modules) {
     if (!key.endsWith("Schema") || !value?._def) continue;
     const name = key.replace(/Schema$/, "");
     if (!registry.has(value)) {
-      registry.set(value, { page: m.page, name, anchor: slug(name), module: m.name });
+      registry.set(value, { page: m.page, name, anchor: slug(name), module: m.name, aliases: [] });
+    } else if (registry.get(value).module === m.name) {
+      // A second export of the same instance from the same module (e.g.
+      // CheckinResponseSchema = HospitalStatusSchema): record it so the page
+      // documents the alias instead of silently dropping the name.
+      registry.get(value).aliases.push(name);
     }
   }
 }
@@ -107,6 +112,9 @@ function stringNotes(checks = []) {
     else if (c.kind === "datetime") notes.push("ISO 8601");
     else if (c.kind === "email") notes.push("email");
     else if (c.kind === "regex") notes.push(`pattern \`${c.regex.source}\``);
+    else if (c.kind === "startsWith") notes.push(`starts with \`${c.value}\``);
+    else if (c.kind === "endsWith") notes.push(`ends with \`${c.value}\``);
+    else if (c.kind === "url") notes.push("URL");
     else if (c.kind === "min") notes.push(`min length ${c.value}`);
     else if (c.kind === "max") notes.push(`max length ${c.value}`);
   }
@@ -116,8 +124,9 @@ function stringNotes(checks = []) {
 function numberNotes(checks = []) {
   const notes = [];
   for (const c of checks) {
-    if (c.kind === "min") notes.push(`≥ ${c.value}`);
-    else if (c.kind === "max") notes.push(`≤ ${c.value}`);
+    // `inclusive` distinguishes .min(n)/.gte(n) from .gt(n)/.positive().
+    if (c.kind === "min") notes.push(`${c.inclusive ? "≥" : ">"} ${c.value}`);
+    else if (c.kind === "max") notes.push(`${c.inclusive ? "≤" : "<"} ${c.value}`);
   }
   return notes.length ? ` (${notes.join(", ")})` : "";
 }
@@ -299,6 +308,9 @@ for (const m of modules) {
     for (const e of owned) {
       const schema = m.exports[e.name + "Schema"];
       md += renderSection(e.name, schema, m.page, 2);
+      for (const alias of e.aliases) {
+        md += `## ${alias}\n\nSame shape as [${e.name}](#${e.anchor}).\n\n`;
+      }
     }
   }
 
