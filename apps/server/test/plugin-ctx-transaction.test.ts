@@ -72,7 +72,13 @@ function watchOwnEvents(actorId: string): { seen: unknown[]; settled: Promise<vo
     resolveFirst();
   };
   subscriber.on("message", onMessage);
-  const settled = Promise.race([first, new Promise<void>((r) => setTimeout(r, 750))])
+  // 2s, the same window outbox.test.ts's watcher uses: 750ms (this helper's
+  // original value, from when only the rollback timeout was the success
+  // case) proved too tight at full-suite worker density — pub/sub roundtrips
+  // through the shared Redis occasionally outlived it, failing three
+  // arrival assertions at once (2026-08-29, gate run 2 of the push-first
+  // intake) while the 2s and 15s windows around it stayed green.
+  const settled = Promise.race([first, new Promise<void>((r) => setTimeout(r, 2000))])
     .then(() => { subscriber.off("message", onMessage); });
   return { seen, settled };
 }
