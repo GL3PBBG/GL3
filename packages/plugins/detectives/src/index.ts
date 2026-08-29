@@ -155,23 +155,18 @@ const hireRoute = route({
         // without reaching into detectives' settings namespace.
         expiresAt: new Date(endsAt.getTime() + expireSeconds * 1000),
       });
+
+      // Enqueued in the SAME transaction via the outbox: the dispatcher only
+      // delivers committed rows, so the old failure modes are both gone — a
+      // fast worker can no longer burn the idempotency slot before the
+      // commit lands, and an enqueue failure can no longer strand the
+      // search. The read path's NULL-past-ends_at-as-failed rule stays as
+      // defense in depth (spec §2).
+      await tx.jobs.enqueue("resolve", {
+        searchId: id, detectives: body.detectives, hours: body.hours,
+      });
       return { id, cash };
     });
-
-    // Enqueue AFTER commit: inside the transaction a fast worker could claim
-    // the job, find no row, and burn the idempotency slot before the commit
-    // lands. If the enqueue itself fails the money stays gambled — the read
-    // path treats NULL past ends_at as failed, so the row can never hang as
-    // pending forever (spec §2).
-    try {
-      await ctx.jobs.enqueue("resolve", {
-        searchId: result.id, detectives: body.detectives, hours: body.hours,
-      });
-    } catch (error) {
-      ctx.log.error("failed to enqueue detectives resolve; search resolves as failed at ends_at", {
-        err: String(error), searchId: result.id,
-      });
-    }
 
     return { status: 201, body: { searchId: result.id, cash: result.cash.toString() } };
   },

@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { GameEvent } from "@gl3/shared";
-import { publishEvent } from "../../bus/publish.js";
+import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, rounds } from "../../db/schema/index.js";
 import { applyBalanceChange, lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
@@ -200,31 +200,41 @@ async function settle(
   db: Db, redis: Redis, settings: Record<string, string>,
 ): Promise<ActiveRound | null> {
   const pending: GameEvent[] = [];
+  let rows: { id: string; kind: string; payload: unknown }[] = [];
 
   const active = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${ROUNDS_LOCK})`);
 
-    for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    let settled: ActiveRound | null = null;
+    for (let pass = 0; ; pass += 1) {
       const current = await probe(tx);
-      if (current === undefined) return null;
+      if (current === undefined) break;
 
       if (!current.ended) {
         if (current.snapshottedAt === null && await activate(tx, current)) {
           pending.push(startedEvent(current));
         }
-        return toActive(current);
+        settled = toActive(current);
+        break;
       }
 
       const finished = await finalize(tx, current, settings);
       if (finished !== null) pending.push(finished);
+      if (pass + 1 >= MAX_SETTLE_PASSES) throw new Error("too many rounds to settle in one pass");
     }
-    throw new Error("too many rounds to settle in one pass");
+
+    // The outbox rows join THIS transaction — a settle and the events it
+    // produced commit together or not at all, which is the whole gap the
+    // outbox closes. Rule 5's ordering half still holds: nothing here is
+    // PUBLISHED inside the transaction, only made durable. Oldest
+    // round.finished first, then round.started — the push order, preserved
+    // by the envelopes' uuidv7 ids.
+    rows = await insertOutboxEvents(tx, pending);
+    return settled;
   });
 
-  // Rule 5: facts, published after the commit, never inside it. Oldest
-  // round.finished first, then round.started if one was activated — which is
-  // the order they were pushed.
-  for (const event of pending) await publishEvent(redis, event);
+  // The fast path — never throws; the dispatcher owns what it cannot deliver.
+  await deliverAndClear(db, { redis }, rows);
   return active;
 }
 

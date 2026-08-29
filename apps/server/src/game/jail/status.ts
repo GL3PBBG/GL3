@@ -1,8 +1,8 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
-import type { GameEvent, JailStatus } from "@gl3/shared";
-import { publishEvent } from "../../bus/publish.js";
+import type { JailStatus } from "@gl3/shared";
+import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { playerStats, players } from "../../db/schema/index.js";
@@ -54,22 +54,34 @@ export async function releaseIfExpiredWithOutcome(
   if (status.jailed) return { status, released: false }; // still serving time
   if (row.jailedUntil === null) return { status: FREE, released: false };
 
-  const cleared = await db.update(playerStats)
-    .set({ jailedUntil: null })
-    .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.jailedUntil)))
-    .returning({ playerId: playerStats.playerId });
+  // One transaction for the release AND its outbox row — the event commits
+  // with the fact (a bare autocommit UPDATE, the pre-outbox shape, had no
+  // transaction to join). The WHERE clause still arbitrates: a racing
+  // release blocks on the row lock and then matches zero rows, so
+  // `player.released` fires exactly once no matter how many requests notice
+  // the expiry at once. A single-row lock held alone cannot form a cycle
+  // (rule 6) — the same shape hospital's dischargeIfExpired has always had.
+  let outboxRows: { id: string; kind: string; payload: unknown }[] = [];
+  await db.transaction(async (tx) => {
+    const cleared = await tx.update(playerStats)
+      .set({ jailedUntil: null })
+      .where(and(eq(playerStats.playerId, playerId), isNotNull(playerStats.jailedUntil)))
+      .returning({ playerId: playerStats.playerId });
+    if (cleared.length === 0) return;
+    outboxRows = await insertOutboxEvents(tx, [{
+      id: uuidv7(),
+      type: "player.released",
+      at: new Date().toISOString(),
+      actorId: playerId,
+      actorName: row.username,
+      audience: { kind: "player", playerId },
+    }]);
+  });
 
-  if (cleared.length === 0) return { status: FREE, released: false };
+  if (outboxRows.length === 0) return { status: FREE, released: false };
 
-  const event: GameEvent = {
-    id: uuidv7(),
-    type: "player.released",
-    at: new Date().toISOString(),
-    actorId: playerId,
-    actorName: row.username,
-    audience: { kind: "player", playerId },
-  };
-  await publishEvent(redis, event);
+  // After commit (rule 5); never throws — the dispatcher owns the retry.
+  await deliverAndClear(db, { redis }, outboxRows);
   return { status: FREE, released: true };
 }
 

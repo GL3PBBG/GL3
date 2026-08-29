@@ -580,7 +580,7 @@ const executeRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    await ctx.transaction(async (tx) => {
+    const jobId = await ctx.transaction(async (tx) => {
       const heist = await lockHeist(tx, params.heistId);            // heist FIRST
       if (!heist) throw new PluginError("heist_not_found", 404);
       if (heist.leaderId !== player.id) throw new PluginError("not_leader", 403);
@@ -621,27 +621,18 @@ const executeRoute = route({
 
       await tx.db.update(ocHeists).set({ status: "executing" }).where(eq(ocHeists.id, heist.id));
       await publishHeistUpdate(tx, player, heist.id, "executing", memberIds);
+
+      // Enqueued in the SAME transaction as the "executing" stamp, via the
+      // outbox: the job cannot run before this commits (the dispatcher only
+      // delivers committed rows), and a crash after commit cannot strand the
+      // heist — the old revert-to-open compensation and the re-fire window
+      // note below are both subsumed. "executing" stays accepted on re-fire
+      // as harmless belt.
+      const enqueuedJobId = await tx.jobs.enqueue("resolve", { heistId: params.heistId });
+      return enqueuedJobId;
     });
 
-    // Enqueue AFTER commit — a job that ran before commit would read status
-    // "open" and no-op, stranding the heist. On enqueue failure, compensate
-    // by reverting to open (the crimes cooldown-release shape); the re-fire
-    // rule above covers the crash-between-commit-and-enqueue window.
-    try {
-      const jobId = await ctx.jobs.enqueue("resolve", { heistId: params.heistId });
-      return { status: 202, body: { jobId } };
-    } catch (error) {
-      try {
-        await ctx.transaction(async (tx) => {
-          await tx.db.update(ocHeists).set({ status: "open" })
-            .where(and(eq(ocHeists.id, params.heistId), eq(ocHeists.status, "executing")));
-        });
-      } catch (revertError) {
-        ctx.log.error("failed to revert heist to open after enqueue failure",
-          { err: String(revertError), heistId: params.heistId });
-      }
-      throw error;
-    }
+    return { status: 202, body: { jobId } };
   },
 });
 

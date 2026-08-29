@@ -262,6 +262,16 @@ export interface PluginTx {
     /** Publishes a core `GameEventSchema` variant verbatim — no envelope. */
     publishCore(event: CoreEventInput): Promise<void>;
   };
+  /**
+   * The transactional twin of `PluginCtx.jobs`: the enqueue commits WITH this
+   * transaction's facts via the outbox, so a crash can never leave committed
+   * state no worker will act on — the plugin does not enqueue after commit
+   * and does not compensate on failure. The jobId (and the outcome seed) are
+   * minted synchronously here, so the returned id can be echoed in a
+   * response exactly like `ctx.jobs`'s. Only meaningful inside the
+   * transaction — the row is otherwise never delivered.
+   */
+  readonly jobs: { enqueue(name: string, data: Record<string, unknown>): Promise<string> };
 }
 
 export interface JobContext { readonly id: string; readonly seed: string; readonly rng: PluginRng }

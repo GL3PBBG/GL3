@@ -4,10 +4,12 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InsufficientGangFundsError as SdkInsufficientGangFundsError } from "@gl3/plugin-sdk";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { settleOutboxOnce } from "../src/bus/outbox.js";
 import { loadConfig } from "../src/config.js";
-import { gangLogs, gangs, players, playerStats, transactions } from "../src/db/schema/index.js";
+import { gangLogs, gangs, outbox, players, playerStats, transactions } from "../src/db/schema/index.js";
 import { createPluginCtx } from "../src/plugins/ctx.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
+import { Redis } from "ioredis";
 import { testDb } from "./helpers/db.js";
 
 // testDb() returns createDb's { db, sql } pair, NOT a drizzle db — using it as
@@ -217,5 +219,84 @@ describe("ctx.transaction", () => {
     );
     expect(ctx.settings.get("greeting")).toBe("hi");
     expect(ctx.settings.get("missing")).toBeNull();
+  });
+
+  // The outbox contract, observed end to end through the ctx a plugin
+  // actually gets. The per-file DB clone means a table-wide count is exact.
+  it("deletes the outbox row once the post-commit fast path has delivered it", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+    const watch = watchOwnEvents(player.id);
+
+    await ctx.transaction(async (tx) => {
+      await tx.events.publish({
+        name: "greeted", actorId: player.id, actorName: player.username,
+        audience: { kind: "global" }, payload: {},
+      });
+    });
+
+    await watch.settled;
+    expect(watch.seen).toHaveLength(1);
+    expect(await db.select({ id: outbox.id }).from(outbox)).toEqual([]);
+  });
+
+  it("writes no outbox row when the transaction rolls back", async () => {
+    const player = await createPlayer();
+    const ctx = createPluginCtx(deps(), opts);
+
+    await expect(ctx.transaction(async (tx) => {
+      await tx.events.publish({
+        name: "greeted", actorId: player.id, actorName: player.username,
+        audience: { kind: "global" }, payload: {},
+      });
+      throw new Error("boom");
+    })).rejects.toThrow("boom");
+
+    expect(await db.select({ id: outbox.id }).from(outbox)).toEqual([]);
+  });
+
+  // The gap the outbox exists to close, proven at the seam it closes: the
+  // DB work commits, Redis cannot take the push, and the event is NOT lost —
+  // the row survives for the dispatcher, which delivers it once Redis is
+  // back. Pre-outbox this was a 500 for committed work and a permanently
+  // silent fact.
+  it("retains the event when the post-commit publish fails, and the dispatcher delivers it", async () => {
+    const player = await createPlayer();
+    // A redis that fails FAST rather than buffering: no offline queue, no
+    // retries — the refused socket rejects the publish immediately, the same
+    // fault-injection shape as sentence-sweeper-loop's refused Postgres.
+    // Constructed directly because createRedis deliberately sets
+    // maxRetriesPerRequest: null (buffer forever), the opposite of what a
+    // failing fast client needs.
+    const deadRedis = new Redis("redis://127.0.0.1:1", {
+      enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: 100,
+      retryStrategy: () => null, lazyConnect: true,
+    });
+    const ctx = createPluginCtx(
+      { db, redis: deadRedis, queues: new Map(), settings: {}, leaderboardPrefix },
+      opts,
+    );
+    const watch = watchOwnEvents(player.id);
+
+    // The COMMITTED transaction: no error escapes, because delivery is the
+    // dispatcher's problem now — the player's work is durable either way.
+    await ctx.transaction(async (tx) => {
+      await tx.events.publish({
+        name: "greeted", actorId: player.id, actorName: player.username,
+        audience: { kind: "global" }, payload: {},
+      });
+    });
+
+    const retained = await db.select({ id: outbox.id }).from(outbox);
+    expect(retained).toHaveLength(1);
+    deadRedis.disconnect();
+
+    const settled = await settleOutboxOnce(db, { redis });
+    expect(settled.claimed).toBe(1);
+    expect(settled.delivered).toBe(1);
+
+    await watch.settled;
+    expect(watch.seen).toHaveLength(1);
+    expect(await db.select({ id: outbox.id }).from(outbox)).toEqual([]);
   });
 });

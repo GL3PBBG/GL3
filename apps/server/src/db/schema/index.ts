@@ -6,3 +6,4 @@ export * from "./economy.js";
 export * from "./social.js";
 export * from "./migration.js";
 export * from "./plugins.js";
+export * from "./outbox.js";

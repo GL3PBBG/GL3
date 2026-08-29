@@ -18,9 +18,9 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import type { StorageDriver } from "../assets/driver.js";
 import { resolveAssets, resolveSingletonAsset } from "../assets/service.js";
-import { publishEvent } from "../bus/publish.js";
+import { deliverAndClear, type OutboxDispatchDeps } from "../bus/outbox.js";
 import type { Db } from "../db/client.js";
-import { players, playerStats, playerTimers, pluginJobRuns } from "../db/schema/index.js";
+import { outbox, players, playerStats, playerTimers, pluginJobRuns } from "../db/schema/index.js";
 import {
   addExp, applyBalanceChange, applyGangBalanceChange, InsufficientFundsError,
   InsufficientGangFundsError, lockGangAndPlayerForUpdate, lockLocationForUpdate,
@@ -34,7 +34,6 @@ import {
 } from "../game/cooldown.js";
 import { sendToHospital } from "../game/hospital/status.js";
 import { sendToJail } from "../game/jail/status.js";
-import { recordScore } from "../game/leaderboard/service.js";
 import { insertNotification } from "../game/notifications/service.js";
 import { newSeed } from "../game/rng.js";
 import { slotKey } from "./asset-slots.js";
@@ -77,15 +76,17 @@ export interface PluginCtxOptions {
 }
 
 /**
- * One buffer holds both kinds so a handler's relative call order survives to
- * the wire. `game/crimes/worker.ts` publishes `crime.resolved` before
- * `player.jailed` deliberately — "so a client that reacts to player.jailed can
- * already cross-reference the crime that caused it" — and a ported crimes
- * module must be able to keep that.
+ * The transaction's delivery buffers. Envelopes are minted (id and all) at
+ * PUSH time, not flush time, because the outbox row and any later dispatcher
+ * retry must carry byte-identical frames — the client dedupes on `event.id`,
+ * which only works if the id is the same on every delivery attempt.
+ *
+ * One array holds both event kinds so a handler's relative call order
+ * survives to the wire. `game/crimes/worker.ts` publishes `crime.resolved`
+ * before `player.jailed` deliberately — "so a client that reacts to
+ * player.jailed can already cross-reference the crime that caused it" — and
+ * a ported crimes module must be able to keep that.
  */
-type BufferedEvent =
-  | { kind: "plugin"; event: PluginEventInput }
-  | { kind: "core"; event: CoreEventInput };
 
 export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions): PluginCtx {
   // Built once per ctx and memoized, so two filter subscribers owned by the
@@ -105,15 +106,32 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     return sibling;
   };
 
+  // The outbox delivery deps shared by every transaction on this ctx: the
+  // queues resolver matches the queue key `ctx.jobs` itself derives, and the
+  // error sink is the console fallback that survives a silenced
+  // test-environment logger (the 3e3e5d7 precedent) — a delivery failure is
+  // reported loudly but never escalates, because the dispatcher owns retry.
+  const outboxDispatchDeps: OutboxDispatchDeps = {
+    redis: deps.redis,
+    queueResolver: (pluginId, jobName) => deps.queues.get(`${pluginId}:${jobName}`),
+    onError: (error, context) => {
+      console.error(
+        { plugin: options.pluginId, ...context },
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  };
+
   const ctx: PluginCtx = {
     pluginId: options.pluginId,
     player: options.player,
     job: options.job,
 
     async transaction<T>(fn: (tx: PluginTx) => Promise<T>): Promise<T> {
-      // The buffer lives in this call's closure, so two concurrent requests on
-      // the same ctx factory cannot see each other's pending events.
-      const buffered: BufferedEvent[] = [];
+      // The buffers live in this call's closure, so two concurrent requests
+      // on the same ctx factory cannot see each other's pending rows.
+      const events: GameEvent[] = [];
+      const jobs: { id: string; kind: "job"; payload: { pluginId: string; jobName: string; data: Record<string, unknown>; seed: string } }[] = [];
 
       // Keyed so a second change to the same player+kind replaces the first:
       // the leaderboard wants the FINAL balance, not each intermediate one.
@@ -121,6 +139,10 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       const bufferScore = (kind: LeaderboardKind, playerId: string, score: bigint): void => {
         scores.set(`${kind}:${playerId}`, { kind, playerId, score });
       };
+
+      // Filled inside the transaction after the handler returns, delivered
+      // after it commits. Empty on rollback — see below.
+      let outboxRows: { id: string; kind: string; payload: unknown }[] = [];
 
       const result = await deps.db.transaction(async (tx) => {
         if (options.job !== null) {
@@ -473,48 +495,99 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               .select({ username: players.username })
               .from(players)
               .where(eq(players.id, playerId));
-            buffered.push({
-              kind: "core",
-              event: {
-                type: "notification.created",
-                actorId: playerId,
-                // "unknown" is the fallback every other event-publishing site
-                // in this codebase uses (gangs/routes.ts).
-                actorName: target?.username ?? "unknown",
-                audience: { kind: "player", playerId },
-                notificationId,
-                body,
-              },
-            });
+            // Minted here, inside the transaction: a malformed core event now
+            // rolls the whole transaction back instead of surfacing after
+            // commit at flush time, where the facts were already durable.
+            events.push(toCoreEvent({
+              type: "notification.created",
+              actorId: playerId,
+              // "unknown" is the fallback every other event-publishing site
+              // in this codebase uses (gangs/routes.ts).
+              actorName: target?.username ?? "unknown",
+              audience: { kind: "player", playerId },
+              notificationId,
+              body,
+            }));
           },
           events: {
-            publish: async (event) => { buffered.push({ kind: "plugin", event }); },
-            publishCore: async (event) => { buffered.push({ kind: "core", event }); },
+            publish: async (event) => { events.push(toEnvelope(options.pluginId, event)); },
+            publishCore: async (event) => { events.push(toCoreEvent(event)); },
+          },
+          jobs: {
+            /**
+             * The transactional twin of `ctx.jobs.enqueue` (below): the job's
+             * outbox row commits WITH the facts, so a crash can never leave
+             * committed state that no worker will ever act on — the window
+             * the three post-commit enqueue sites used to paper over with
+             * hand-written compensations. The seed and jobId are minted here,
+             * synchronously, so the caller can echo the jobId in its response
+             * exactly as before, and a dispatcher re-delivery re-adds the
+             * same BullMQ job id as a no-op.
+             */
+            enqueue: async (name, data) => {
+              // No queue-existence check here, unlike ctx.jobs below: the
+              // outbox row commits with the facts and DELIVERY decides — a
+              // queue that does not exist (plugin not loaded, a typo'd job
+              // name) is dropped loudly by the dispatcher rather than thrown
+              // mid-transaction, where it would roll back committed gameplay.
+              // economy-invariant's empty-queues construction depends on
+              // exactly that: the hire debits, the resolve is logged-lost.
+              const jobId = uuidv7();
+              jobs.push({
+                id: jobId, kind: "job",
+                payload: { pluginId: options.pluginId, jobName: name, data, seed: newSeed() },
+              });
+              return jobId;
+            },
           },
         };
-        return await fn(pluginTx);
+        const value = await fn(pluginTx);
+
+        // The outbox insert: every buffered side effect becomes durable IN
+        // this transaction, atomically with the facts it describes. On
+        // rollback none of this executes — the buffers die with the closure,
+        // exactly the discard semantics the in-memory flush had (NOTES.md
+        // rule 5 holds: nothing is PUBLISHED inside the transaction). The
+        // rows are assigned to the outer binding so the post-commit fast
+        // path delivers — and deletes — exactly what was inserted, ids and
+        // all: a mismatched id would leave the row stranded for the
+        // dispatcher to double-deliver.
+        if (events.length > 0 || scores.size > 0 || jobs.length > 0) {
+          outboxRows = [
+            // Scores first, then events — the order the pre-outbox flush
+            // used ("the order game/crimes/worker.ts uses"), so a client
+            // reacting to an event still finds the leaderboard already
+            // written. The dispatcher's recovery ordering is by id, which
+            // interleaves the two — acceptable on the degraded path.
+            ...[...scores.values()].map((entry) => ({
+              id: uuidv7(),
+              kind: "score",
+              payload: {
+                leaderboard: entry.kind,
+                playerId: entry.playerId,
+                // Decimal string, never a JSON number — money rules apply to
+                // the outbox payload too.
+                score: entry.score.toString(),
+                prefix: deps.leaderboardPrefix,
+              },
+            })),
+            ...events.map((event) => ({ id: event.id, kind: "event", payload: event })),
+            ...jobs,
+          ];
+          await tx.insert(outbox).values(outboxRows);
+        }
+        return value;
       });
 
-      // Only reached on commit — a throw above propagates and `buffered`/
-      // `scores` are discarded with the closure (NOTES.md rule 5).
-
-      // Leaderboard first, then events — the order game/crimes/worker.ts uses.
-      // Deliberately not wrapped in try/catch, for the reason that file states:
-      // the balance that committed is correct, and the next boot's
-      // rebuildLeaderboards repairs the index, so failing loudly beats a
-      // silently stale one. The existing event flush already behaves this way.
-      for (const entry of scores.values()) {
-        await recordScore(deps.redis, entry.kind, entry.playerId, entry.score, deps.leaderboardPrefix);
-      }
-
-      for (const entry of buffered) {
-        await publishEvent(
-          deps.redis,
-          entry.kind === "plugin"
-            ? toEnvelope(options.pluginId, entry.event)
-            : toCoreEvent(entry.event),
-        );
-      }
+      // Only reached on commit (a throw above leaves `outboxRows` empty and
+      // the delivery below a no-op). The rows are already durable — this
+      // flush is the LATENCY path, identical in shape to the pre-outbox
+      // publish-after-commit, not the durability path: anything it cannot
+      // deliver, the outbox dispatcher retries with backoff. That is why it
+      // no longer throws — the old let-it-500 stance existed because a
+      // failed flush was a lost event, and now it is a delayed one. The
+      // player's work is committed and WILL be heard about.
+      await deliverAndClear(deps.db, outboxDispatchDeps, outboxRows);
       return result;
     },
 
@@ -531,6 +604,10 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
         releaseCooldown(deps.redis, cooldownKey(playerId, action)),
     },
     jobs: {
+      // The immediate, outside-a-transaction enqueue. For enqueueing FROM a
+      // transaction, `tx.jobs.enqueue` (above) is the right tool: it commits
+      // the job with the facts via the outbox instead of racing a fast
+      // worker against an uncommitted state change.
       enqueue: async (name, data) => {
         const queue = deps.queues.get(`${options.pluginId}:${name}`);
         if (queue === undefined) throw new Error(`plugin "${options.pluginId}" has no job "${name}"`);

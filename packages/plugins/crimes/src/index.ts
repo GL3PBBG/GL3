@@ -228,9 +228,21 @@ const commitRoute = route({
       // jobs.ts builds it from the single job-owning manifest), never a
       // sibling attribute plugin's — so the figure resolved above travels
       // through as job data, the same way playerId/crimeId already do.
-      const jobId = await ctx.jobs.enqueue("commit", {
-        playerId: player.id, crimeId, costs: Object.fromEntries(priced),
-      });
+      //
+      // Enqueued via the outbox, in its own small transaction AFTER the
+      // cooldown claim: the attribute settle above must stay separate (its
+      // own comment — settling is real bookkeeping that must not roll back
+      // on an affordability 409), and a job row committed before the
+      // cooldown was claimed would fire for a player who then 429s. What
+      // remains outside the outbox's reach is only the Redis↔Postgres seam
+      // itself — a crash between the claim and this commit burns the
+      // cooldown without a job, the same window the old post-commit enqueue
+      // had, now strictly narrower and with the compensation below still
+      // covering the failure branch.
+      const jobId = await ctx.transaction((tx) =>
+        tx.jobs.enqueue("commit", {
+          playerId: player.id, crimeId, costs: Object.fromEntries(priced),
+        }));
       return { status: 202, body: { jobId, accepted: true } };
     } catch (error) {
       try {

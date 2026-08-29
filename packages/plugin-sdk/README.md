@@ -213,10 +213,16 @@ definePlugin({
 });
 ```
 
-Enqueue with `ctx.jobs.enqueue("payout", { playerId })`. At enqueue time the
-loader injects a `seed`; on retry the same seed replays, so a job's outcome is
-reproducible. Inside the handler, `ctx.job.rng` is a deterministic RNG derived
-from that seed (`rng.int(min, max)`, `rng.bigint(min, max)`).
+Enqueue with `ctx.jobs.enqueue("payout", { playerId })` — the immediate form,
+for use outside a transaction. To enqueue FROM a transaction, use
+`tx.jobs.enqueue` instead: it writes an outbox row in the same transaction as
+your facts, so a crash can never leave committed state no worker will act on —
+enqueue after commit and compensating on failure are both gone. The returned
+jobId is minted synchronously and safe to echo in a response, exactly like
+`ctx.jobs`'s. At enqueue time the loader injects a `seed`; on retry the same
+seed replays, so a job's outcome is reproducible. Inside the handler,
+`ctx.job.rng` is a deterministic RNG derived from that seed (`rng.int(min,
+max)`, `rng.bigint(min, max)`).
 
 BullMQ is at-least-once, so a retry can redeliver a job that already committed.
 When the transaction runs in a job context (`ctx.job !== null`), the loader

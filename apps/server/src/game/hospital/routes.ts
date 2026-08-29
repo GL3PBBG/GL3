@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { publishEvent } from "../../bus/publish.js";
+import { deliverAndClear, insertOutboxEvents, outboxErrorLog } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
@@ -268,9 +268,29 @@ export function registerHospitalRoutes(
         const body = `${me?.username ?? "Someone"} paid for your discharge.`;
         await insertNotification(tx, { id: notificationId, playerId: targetId, body });
 
+        // Minted and outboxed INSIDE the transaction, published only after it
+        // commits (NOTES.md rule 5). Both events are addressed to the TARGET
+        // and carry the target as actor: `player.discharged` is what the web
+        // client's invalidation keys off, and `notification.created`'s actor
+        // is the recipient by convention (apps/server/src/plugins/ctx.ts).
+        const at = new Date().toISOString();
+        const outboxRows = await insertOutboxEvents(tx, [
+          {
+            id: uuidv7(), type: "player.discharged", at,
+            actorId: targetId, actorName: target.username,
+            audience: { kind: "player", playerId: targetId },
+          },
+          {
+            id: uuidv7(), type: "notification.created", at,
+            actorId: targetId, actorName: target.username,
+            audience: { kind: "player", playerId: targetId },
+            notificationId,
+            body,
+          },
+        ]);
+
         return {
-          kind: "paid" as const, cash, cost, notificationId, body,
-          targetName: target.username,
+          kind: "paid" as const, cash, cost, outboxRows,
         };
       });
 
@@ -278,24 +298,8 @@ export function registerHospitalRoutes(
       if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
       if (result.kind === "free") return reply.code(409).send({ error: "not_hospitalised" });
 
-      // After commit, never inside the transaction (NOTES.md rule 5). Both
-      // events are addressed to the TARGET and carry the target as actor:
-      // `player.discharged` is what the web client's invalidation keys off,
-      // and `notification.created`'s actor is the recipient by convention
-      // (apps/server/src/plugins/ctx.ts).
-      const at = new Date().toISOString();
-      await publishEvent(redis, {
-        id: uuidv7(), type: "player.discharged", at,
-        actorId: targetId, actorName: result.targetName,
-        audience: { kind: "player", playerId: targetId },
-      });
-      await publishEvent(redis, {
-        id: uuidv7(), type: "notification.created", at,
-        actorId: targetId, actorName: result.targetName,
-        audience: { kind: "player", playerId: targetId },
-        notificationId: result.notificationId,
-        body: result.body,
-      });
+      // The fast path — never throws; the dispatcher owns what it cannot deliver.
+      await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
 
       return reply.send({
         freed: targetId,

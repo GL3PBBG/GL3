@@ -12,6 +12,15 @@ const EnvSchema = z.object({
    * existed. Non-negative rather than positive for that reason.
    */
   SWEEP_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2000),
+  /**
+   * Milliseconds between transactional-outbox dispatcher passes. `0` disables
+   * the dispatcher — strongly discouraged: the post-commit fast path still
+   * delivers in the happy case, but nothing retries a delivery that failed on
+   * a Redis blip or a crash between COMMIT and flush, which is the gap the
+   * outbox exists to close. Every profile runs it (plugin events and job
+   * enqueues exist even on a framework boot), unlike the sweeper.
+   */
+  OUTBOX_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   /** Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard. */
   CORS_ORIGINS: z.string().default("http://localhost:5173").refine(
@@ -127,6 +136,7 @@ export interface Config {
   /** Where those are resolved from; `null` means the server's own node_modules. */
   pluginDir: string | null;
   sweepIntervalMs: number;
+  outboxIntervalMs: number;
   assets: AssetConfig;
   mail: MailConfig;
 }
@@ -145,6 +155,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     pluginPackages: parsed.PLUGIN_PACKAGES.split(",").map((p) => p.trim()).filter(Boolean),
     pluginDir: parsed.PLUGIN_DIR ?? null,
     sweepIntervalMs: parsed.SWEEP_INTERVAL_MS,
+    outboxIntervalMs: parsed.OUTBOX_INTERVAL_MS,
     assets: {
       driver: parsed.ASSET_DRIVER,
       fsRoot: parsed.ASSET_FS_ROOT,

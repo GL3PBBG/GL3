@@ -1,8 +1,7 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
-import type { GameEvent } from "@gl3/shared";
-import { publishEvent } from "../../bus/publish.js";
+import { deliverAndClear, insertOutboxEvents } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats, ranks } from "../../db/schema/index.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
@@ -140,19 +139,26 @@ export async function dischargeIfExpired(
 
   const outcome = await db.transaction(async (tx) => {
     await lockPlayersForUpdate(tx, [playerId]);
-    return settleHospitalTx(tx, playerId);
-  });
-
-  if (outcome.discharged) {
-    const event: GameEvent = {
+    const settled = await settleHospitalTx(tx, playerId);
+    if (!settled.discharged) return { ...settled, outboxRows: [] };
+    // The event commits with the discharge — minted and outboxed inside this
+    // transaction, published after it (rule 5), only when the UPDATE
+    // matched, so two sweepers or a sweeper racing a discharge request
+    // publish `player.discharged` exactly once between them.
+    const outboxRows = await insertOutboxEvents(tx, [{
       id: uuidv7(),
       type: "player.discharged",
       at: new Date().toISOString(),
       actorId: playerId,
       actorName: row.username,
       audience: { kind: "player", playerId },
-    };
-    await publishEvent(redis, event);
+    }]);
+    return { ...settled, outboxRows };
+  });
+
+  // The fast path — never throws; the dispatcher owns what it cannot deliver.
+  if (outcome.outboxRows.length > 0) {
+    await deliverAndClear(db, { redis }, outcome.outboxRows);
   }
   return outcome;
 }

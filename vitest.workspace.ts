@@ -426,6 +426,7 @@ export default defineWorkspace([
         "test/oc.test.ts",
         "test/oc-ledger.test.ts",
         "test/oc-lock-order.test.ts",
+        "test/outbox.test.ts",
         "test/notifications.test.ts",
         "test/plugin-ctx-core-events.test.ts",
         "test/plugin-ctx-port-prereqs.test.ts",

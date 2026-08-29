@@ -211,7 +211,11 @@ describe("core schema", () => {
     // here and returns the existing row instead of storing a second copy.
     // entity_assets' composite (scope, entity_id, slot) primary key is
     // excluded by the same NOT EXISTS clause, so it does not add a second.
-    expect(Number(count)).toBe(30);
+    // 0020_outbox adds one: outbox_not_before_idx, the dispatcher's ready-row
+    // scan (a Redis outage can back up thousands of backoff-stamped rows, and
+    // the scan must not seq-scan them). The outbox table's own primary key is
+    // excluded by this query's NOT EXISTS clause like every other.
+    expect(Number(count)).toBe(31);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'

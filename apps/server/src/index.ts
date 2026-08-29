@@ -6,6 +6,7 @@ import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, 
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
+import { startOutboxLoop } from "./bus/outbox.js";
 import { startWealthTaxLoop } from "./economy/tax.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { CORE_PLUGINS, bundledPlugins } from "./plugins/core-plugins.js";
@@ -196,4 +197,20 @@ if (config.sweepIntervalMs > 0) {
   // sweep is a latency optimisation, and anything it misses this run is picked
   // up next boot.
   assetTimer.unref();
+}
+
+// The outbox dispatcher: recovery for every event push, leaderboard write and
+// job enqueue whose post-commit fast path failed. Out of buildApp for the
+// sweeper's reason (a background dispatcher under bootTestServer would race
+// the very outbox assertions the tests make), every profile — a framework
+// boot still publishes plugin events — and NOT riding the sweeper's switch:
+// `OUTBOX_INTERVAL_MS=0` is its own, discouraged, knob.
+if (config.outboxIntervalMs > 0) {
+  startOutboxLoop({
+    db,
+    redis,
+    intervalMs: config.outboxIntervalMs,
+    queueResolver: (pluginId, jobName) => loadedPlugins.queues.get(`${pluginId}:${jobName}`),
+    onError: (error, context) => { app.log.error({ err: error, ...context }, "outbox delivery failed"); },
+  });
 }

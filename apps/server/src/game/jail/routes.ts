@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { publishEvent } from "../../bus/publish.js";
+import { deliverAndClear, insertOutboxEvents, outboxErrorLog } from "../../bus/outbox.js";
 import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
@@ -129,8 +129,28 @@ export function registerJailRoutes(
         const body = `${me?.username ?? "Someone"} paid your bail.`;
         await insertNotification(tx, { id: notificationId, playerId: targetId, body });
 
+        // Minted and outboxed INSIDE the transaction, published only after
+        // it commits (NOTES.md rule 5) — the envelope ids are stable across
+        // the fast path and any dispatcher retry. Both events are addressed
+        // to the TARGET and carry the target as actor.
+        const at = new Date().toISOString();
+        const outboxRows = await insertOutboxEvents(tx, [
+          {
+            id: uuidv7(), type: "player.released", at,
+            actorId: targetId, actorName: target.username,
+            audience: { kind: "player", playerId: targetId },
+          },
+          {
+            id: uuidv7(), type: "notification.created", at,
+            actorId: targetId, actorName: target.username,
+            audience: { kind: "player", playerId: targetId },
+            notificationId,
+            body,
+          },
+        ]);
+
         return {
-          kind: "paid" as const, cash, cost, notificationId, body,
+          kind: "paid" as const, cash, cost, outboxRows,
           targetName: target.username,
         };
       });
@@ -139,21 +159,10 @@ export function registerJailRoutes(
       if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
       if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
 
-      // After commit, never inside the transaction (NOTES.md rule 5). Both
-      // events are addressed to the TARGET and carry the target as actor.
-      const at = new Date().toISOString();
-      await publishEvent(redis, {
-        id: uuidv7(), type: "player.released", at,
-        actorId: targetId, actorName: result.targetName,
-        audience: { kind: "player", playerId: targetId },
-      });
-      await publishEvent(redis, {
-        id: uuidv7(), type: "notification.created", at,
-        actorId: targetId, actorName: result.targetName,
-        audience: { kind: "player", playerId: targetId },
-        notificationId: result.notificationId,
-        body: result.body,
-      });
+      // The fast path — never throws: anything undeliverable here is the
+      // dispatcher's, not the player's, because the rows committed with the
+      // facts.
+      await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
 
       return reply.send({
         freed: targetId,
@@ -244,7 +253,14 @@ export function registerJailRoutes(
 
       if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
         const until = await sendToJail(tx, playerId, bustFailJailSeconds(settings));
-        return { kind: "failed" as const, until, callerName: caller?.username ?? "unknown" };
+        // Minted and outboxed in-transaction; published after commit (rule 5).
+        const outboxRows = await insertOutboxEvents(tx, [{
+          id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
+          actorId: playerId, actorName: caller?.username ?? "unknown",
+          audience: { kind: "player", playerId },
+          until: until.toISOString(), reason: "bust.failed",
+        }]);
+        return { kind: "failed" as const, until, outboxRows };
       }
 
       await tx.update(playerStats)
@@ -264,7 +280,21 @@ export function registerJailRoutes(
       await insertNotification(tx, {
         id: notificationId, playerId: targetId, body: "Someone busted you out.",
       });
-      return { kind: "busted" as const, notificationId, targetName: target.username };
+      const at = new Date().toISOString();
+      const outboxRows = await insertOutboxEvents(tx, [
+        {
+          id: uuidv7(), type: "player.released", at,
+          actorId: targetId, actorName: target.username,
+          audience: { kind: "player", playerId: targetId },
+        },
+        {
+          id: uuidv7(), type: "notification.created", at,
+          actorId: targetId, actorName: target.username,
+          audience: { kind: "player", playerId: targetId },
+          notificationId, body: "Someone busted you out.",
+        },
+      ]);
+      return { kind: "busted" as const, outboxRows };
     });
 
     if (result.kind === "missing") return reply.code(404).send({ error: "player_not_found" });
@@ -273,29 +303,12 @@ export function registerJailRoutes(
     if (result.kind === "caller_jailed") return reply.code(409).send({ error: "already_jailed" });
     if (result.kind === "insufficient_energy") return reply.code(409).send({ error: "insufficient_energy" });
 
-    // After commit, never inside the transaction (NOTES.md rule 5).
-    const at = new Date().toISOString();
+    // The fast path — never throws; the dispatcher owns what it cannot deliver.
+    await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+
     if (result.kind === "failed") {
-      await publishEvent(redis, {
-        id: uuidv7(), type: "player.jailed", at,
-        actorId: playerId, actorName: result.callerName,
-        audience: { kind: "player", playerId },
-        until: result.until.toISOString(), reason: "bust.failed",
-      });
       return reply.send({ success: false, jailedUntil: result.until.toISOString() });
     }
-
-    await publishEvent(redis, {
-      id: uuidv7(), type: "player.released", at,
-      actorId: targetId, actorName: result.targetName,
-      audience: { kind: "player", playerId: targetId },
-    });
-    await publishEvent(redis, {
-      id: uuidv7(), type: "notification.created", at,
-      actorId: targetId, actorName: result.targetName,
-      audience: { kind: "player", playerId: targetId },
-      notificationId: result.notificationId, body: "Someone busted you out.",
-    });
     return reply.send({ success: true, jailedUntil: null });
   });
 
@@ -335,34 +348,35 @@ export function registerJailRoutes(
         await tx.update(playerStats)
           .set({ jailedUntil: until })
           .where(eq(playerStats.playerId, playerId));
-        return { kind: "failed" as const, until, callerName };
+        // Minted and outboxed in-transaction; published after commit (rule 5).
+        const outboxRows = await insertOutboxEvents(tx, [{
+          id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
+          actorId: playerId, actorName: callerName,
+          audience: { kind: "player", playerId },
+          until: until.toISOString(), reason: "escape.failed",
+        }]);
+        return { kind: "failed" as const, until, outboxRows };
       }
 
       await tx.update(playerStats)
         .set({ jailedUntil: null })
         .where(eq(playerStats.playerId, playerId));
-      return { kind: "escaped" as const, callerName };
+      const outboxRows = await insertOutboxEvents(tx, [{
+        id: uuidv7(), type: "player.released", at: new Date().toISOString(),
+        actorId: playerId, actorName: callerName,
+        audience: { kind: "player", playerId },
+      }]);
+      return { kind: "escaped" as const, outboxRows };
     });
 
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
 
-    // After commit, never inside the transaction (NOTES.md rule 5).
-    const at = new Date().toISOString();
+    // The fast path — never throws; the dispatcher owns what it cannot deliver.
+    await deliverAndClear(db, { redis, onError: outboxErrorLog(request.log) }, result.outboxRows);
+
     if (result.kind === "failed") {
-      await publishEvent(redis, {
-        id: uuidv7(), type: "player.jailed", at,
-        actorId: playerId, actorName: result.callerName,
-        audience: { kind: "player", playerId },
-        until: result.until.toISOString(), reason: "escape.failed",
-      });
       return reply.send({ success: false, jailedUntil: result.until.toISOString() });
     }
-
-    await publishEvent(redis, {
-      id: uuidv7(), type: "player.released", at,
-      actorId: playerId, actorName: result.callerName,
-      audience: { kind: "player", playerId },
-    });
     return reply.send({ success: true, jailedUntil: null });
   });
 }
