@@ -26,7 +26,11 @@ name: CI
 #
 # A green build here is NOT evidence that the integration suite passes.
 on:
-  push: { branches: [main] }
+  # A v* tag push builds release images: metadata-action's semver rule gives
+  # them the bare version tag (v1.0.0 -> 1.0.0) alongside the sha pin, so a
+  # release is deployable by name without hunting the commit. `latest` stays
+  # main-tracking only (is_default_branch), never moved by a release.
+  push: { branches: [main], tags: ["v*"] }
   pull_request:
 
 permissions:
@@ -69,6 +73,7 @@ jobs:
           images: ghcr.io/gl3pbbg/gl3-server
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push server image
@@ -90,6 +95,7 @@ jobs:
           images: ghcr.io/gl3pbbg/gl3-web
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push web image
