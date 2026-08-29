@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { applyTheme } from "../src/lib/applyTheme.js";
+import { applyTheme, getBranding, subscribeBranding } from "../src/lib/applyTheme.js";
 
 // theme.css's :root block is the fallback; applyTheme paints the server's
 // resolved palette over it as inline custom properties on the same element.
@@ -29,5 +29,41 @@ describe("applyTheme", () => {
     expect(document.documentElement.getAttribute("data-nav")).toBe("left");
     applyTheme({ preset: "midnight", colors: COLORS, layout: { nav: "top" } });
     expect(document.documentElement.getAttribute("data-nav")).toBe("top");
+  });
+});
+
+describe("branding", () => {
+  it("stores the payload's branding and titles the document with the game name", () => {
+    applyTheme({
+      preset: "midnight", colors: COLORS, layout: { nav: "top" },
+      branding: { gameName: "Mob City", logoLogin: "/assets/aa", logoHeader: "/assets/bb" },
+    });
+    expect(getBranding()).toEqual({ gameName: "Mob City", logoLogin: "/assets/aa", logoHeader: "/assets/bb" });
+    expect(document.title).toBe("Mob City");
+  });
+
+  it("falls back to the GL3 defaults when the payload omits branding — old server", () => {
+    applyTheme({
+      preset: "midnight", colors: COLORS, layout: { nav: "top" },
+      branding: { gameName: "Mob City", logoLogin: null, logoHeader: null },
+    });
+    applyTheme({ preset: "midnight", colors: COLORS, layout: { nav: "top" } });
+    expect(getBranding()).toEqual({ gameName: "GL3", logoLogin: null, logoHeader: null });
+  });
+
+  it("notifies subscribers on change so useSyncExternalStore re-renders", () => {
+    let calls = 0;
+    const unsubscribe = subscribeBranding(() => { calls += 1; });
+    applyTheme({
+      preset: "midnight", colors: COLORS, layout: { nav: "top" },
+      branding: { gameName: "Ridgeport", logoLogin: null, logoHeader: null },
+    });
+    expect(calls).toBe(1);
+    unsubscribe();
+    applyTheme({
+      preset: "midnight", colors: COLORS, layout: { nav: "top" },
+      branding: { gameName: "Elsewhere", logoLogin: null, logoHeader: null },
+    });
+    expect(calls).toBe(1);
   });
 });

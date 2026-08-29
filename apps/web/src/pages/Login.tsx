@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../api/queries.js";
 import { ErrorText } from "../components/ui.js";
+import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
 
 export function Login(): JSX.Element {
@@ -23,7 +24,7 @@ export function Login(): JSX.Element {
         auth.mutate(mode === "register" ? { username, password, email } : { username, password });
       }}
     >
-      <h1 className={styles.brand}>GL3</h1>
+      <BrandMark variant="login" className={styles.brand} />
       {passwordChanged ? <p role="status">Password changed — log in below.</p> : null}
       {/* aria-label, not a visible <label>: the placeholder is the visual
           design, but a placeholder alone names the field for nobody once it

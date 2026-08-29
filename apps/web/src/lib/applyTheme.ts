@@ -1,4 +1,24 @@
-import { THEME_VARS, ThemeResponseSchema, type ThemeResponse } from "@gl3/shared";
+import { THEME_VARS, ThemeResponseSchema, type Branding, type ThemeResponse } from "@gl3/shared";
+
+/**
+ * Branding is module state rather than React state because it arrives with the
+ * same pre-render fetch that paints the palette — before any component tree
+ * exists to own it. `useBranding` (BrandMark.tsx) reads it through
+ * useSyncExternalStore, so the arrival re-renders whatever is mounted.
+ * The default matches a server predating the field: GL3, no logos.
+ */
+const DEFAULT_BRANDING: Branding = { gameName: "GL3", logoLogin: null, logoHeader: null };
+let branding: Branding = DEFAULT_BRANDING;
+const brandingListeners = new Set<() => void>();
+
+export function getBranding(): Branding {
+  return branding;
+}
+
+export function subscribeBranding(listener: () => void): () => void {
+  brandingListeners.add(listener);
+  return () => { brandingListeners.delete(listener); };
+}
 
 /**
  * Paints the server's resolved palette over theme.css's :root fallback as
@@ -12,6 +32,13 @@ export function applyTheme(theme: ThemeResponse): void {
   // left-sidebar rules off [data-nav="left"], so React never re-renders for a
   // layout change — CSS does all of it.
   root.setAttribute("data-nav", theme.layout.nav);
+
+  branding = theme.branding ?? DEFAULT_BRANDING;
+  // The base title for the pre-auth pages (no Shell mounted). Shell's own
+  // usePageTitle subscribes to this store and rewrites the title afterwards,
+  // so this write never wins over a page label.
+  document.title = branding.gameName;
+  for (const listener of brandingListeners) listener();
 }
 
 /**

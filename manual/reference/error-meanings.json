@@ -80,6 +80,7 @@
  "core:invalid_code": "The email verification code is wrong, expired, or already used.",
  "core:invalid_color": "A theme color override is not a valid hex color string (blank means no override).",
  "core:invalid_credentials": "The login username and password do not match any account.",
+ "core:invalid_game_name": "The submitted game name is longer than 60 characters (blank falls back to the default).",
  "core:invalid_kind": "The requested leaderboard/standings kind is not a recognized board kind.",
  "core:invalid_preset": "The submitted theme preset name is not one of the known presets.",
  "core:invalid_request": "The request's body, URL parameters, or query string failed schema validation.",

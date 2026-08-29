@@ -31,6 +31,21 @@ const NAV_KEY = "theme.nav";
 const OVERRIDE_PREFIX = "theme.override.";
 
 /**
+ * Branding. `game.name` rather than `theme.game_name` — the name is the
+ * game's identity, not a palette choice — but it is edited on the theme form
+ * and served on the theme payload, so its helpers live with the theme keys.
+ */
+export const GAME_NAME_KEY = "game.name";
+export const DEFAULT_GAME_NAME = "GL3";
+
+/** Blank or absent falls back — the theme-override rule, same reason: a
+ *  hand-edited row must degrade, never blank the header. */
+export function resolveGameName(rows: { key: string; value: string }[]): string {
+  const stored = rows.find((r) => r.key === GAME_NAME_KEY)?.value.trim() ?? "";
+  return stored === "" ? DEFAULT_GAME_NAME : stored;
+}
+
+/**
  * Resolve settings rows into the wire shape. Defensive on both limbs: an
  * unknown stored preset falls back to midnight and a non-hex stored override
  * is ignored, because these rows are plain V2-style settings an operator can

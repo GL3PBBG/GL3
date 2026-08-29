@@ -101,7 +101,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   registerRoundsRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
-  registerThemeRoutes(app, deps.db);
+  registerThemeRoutes(app, deps.db, assetDriver);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLogout, useResendVerify, useVerify } from "../api/queries.js";
 import { ErrorText } from "../components/ui.js";
+import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
 
 export function Verify(): JSX.Element {
@@ -33,7 +34,7 @@ export function Verify(): JSX.Element {
         verify.mutate({ code }, { onSuccess: () => navigate("/") });
       }}
     >
-      <h1 className={styles.brand}>GL3</h1>
+      <BrandMark variant="login" className={styles.brand} />
       <p>Check your email for a verification link, or paste the code below.</p>
       <input
         value={code}

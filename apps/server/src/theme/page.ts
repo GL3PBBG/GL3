@@ -22,6 +22,7 @@ export const themePage: PageSchema = {
       { kind: "form", action: "POST /api/admin/theme", submitLabel: "Save theme", fields: [
         { name: "preset", label: "Preset", type: "select", optionsSource: "GET /api/admin/theme/presets", valueKey: "id", labelKey: "name" },
         { name: "navPosition", label: "Menu position", type: "select", optionsSource: "GET /api/admin/theme/nav-options", valueKey: "id", labelKey: "name" },
+        { name: "gameName", label: "Game name (blank = GL3; shown in the header, login page and browser title)", type: "text" },
         ...THEME_VARS.map((v) => ({
           name: v, label: `Override --${v} (#rrggbb, blank = preset)`, type: "text" as const,
         })),

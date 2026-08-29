@@ -46,6 +46,14 @@ export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   { scope: CORE_SCOPE, slot: "page-notifications", label: "Notifications page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-dashboard", label: "Dashboard page banner", singleton: true },
 
+  // Operator branding. Two slots, not one scaled twice: the login page wants
+  // full-size art and the header a small mark, and one binding cannot serve
+  // both shapes. Resolved onto the PUBLIC `GET /api/theme` payload — the
+  // login page renders before any session exists, and the slot-image route
+  // below is authenticated.
+  { scope: CORE_SCOPE, slot: "logo-login", label: "Game logo — login page", singleton: true },
+  { scope: CORE_SCOPE, slot: "logo-header", label: "Game logo — header", singleton: true },
+
   // `page-theft` and `page-garage` used to sit here — they were bindable and
   // NEVER rendered, because theft's pages are manifest-declared and live at
   // /plugins/<pageId>, which the Shell banner map cannot reach. A plugin page's

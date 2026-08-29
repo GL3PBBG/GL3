@@ -12,6 +12,7 @@ import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
 import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.js";
 import { progressToNextRank } from "../lib/ranks.js";
+import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
 import { Meter } from "./Meter.js";
 import { HudIcon } from "./HudIcon.js";
@@ -157,9 +158,11 @@ function usePageTitle(categories: readonly NavCategory[]): void {
   const { pathname } = useLocation();
   // Computed per render, effect keyed on the result: a plugin page's label
   // arrives with the plugins query, possibly after the navigation that needs
-  // it, and the title must catch up when it does.
+  // it, and the title must catch up when it does. The game name arrives the
+  // same way (the theme fetch), through the branding store subscription.
+  const { gameName } = useBranding();
   const label = labelForPath(categories, pathname);
-  const title = label === undefined ? "GL3" : `${label} — GL3`;
+  const title = label === undefined ? gameName : `${label} — ${gameName}`;
   useEffect(() => { document.title = title; }, [title]);
 }
 
@@ -291,7 +294,7 @@ export function Shell(): JSX.Element {
           >
             <span /><span /><span />
           </button>
-          <h1 className={styles.brand}>GL3</h1>
+          <BrandMark variant="header" className={styles.brand} />
           <div className={styles.hud}>
             <div className={styles.hudGroup}>
               <Stat icon="cash" label="Cash">{me.data ? <Money value={me.data.cash} /> : "—"}</Stat>

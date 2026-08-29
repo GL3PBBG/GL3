@@ -1,12 +1,17 @@
 import { hasPermission } from "@gl3/plugin-sdk";
 import { THEME_VARS } from "@gl3/shared";
-import { eq, like } from "drizzle-orm";
+import { eq, like, or } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { StorageDriver } from "../assets/driver.js";
+import { resolveSingletonAsset } from "../assets/service.js";
 import type { Db } from "../db/client.js";
 import { settings } from "../db/schema/index.js";
+import { CORE_SCOPE } from "../plugins/asset-slots.js";
 import { loadGrants } from "../plugins/routes.js";
-import { DEFAULT_PRESET, navKey, overrideKey, presetKey, resolveTheme, THEME_PRESETS } from "./presets.js";
+import {
+  DEFAULT_PRESET, GAME_NAME_KEY, navKey, overrideKey, presetKey, resolveGameName, resolveTheme, THEME_PRESETS,
+} from "./presets.js";
 
 /**
  * The admin form serializes every field as a string, blank included, and the
@@ -20,21 +25,32 @@ const ThemePostSchema = z.object({
   // Defaulted so a client predating the layout field stays valid — the admin
   // form always submits it.
   navPosition: z.enum(["top", "left"]).default("top"),
+  // Same reason: blank clears the stored name back to the default.
+  gameName: z.string().default(""),
   ...Object.fromEntries(THEME_VARS.map((v) => [v, z.string()])),
 }).strict();
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-export function registerThemeRoutes(app: FastifyInstance, db: Db): void {
+export function registerThemeRoutes(app: FastifyInstance, db: Db, driver: StorageDriver): void {
   // Public — the login page is themed too, so this must answer before any
   // session exists. Reads the settings TABLE live, not the boot snapshot:
   // that is what makes an admin's change land on the next page load with no
   // restart, the same table-not-snapshot choice detectives' admin settings
-  // routes made.
+  // routes made. Branding (name + logos) rides the same payload for the same
+  // reason — the login page cannot reach the authenticated slot-image route.
   app.get("/api/theme", async (_request, reply) => {
     const rows = await db.select({ key: settings.key, value: settings.value })
-      .from(settings).where(like(settings.key, "theme.%"));
-    return reply.send(resolveTheme(rows));
+      .from(settings)
+      .where(or(like(settings.key, "theme.%"), eq(settings.key, GAME_NAME_KEY)));
+    const [logoLogin, logoHeader] = await Promise.all([
+      resolveSingletonAsset(db, driver, CORE_SCOPE, "logo-login"),
+      resolveSingletonAsset(db, driver, CORE_SCOPE, "logo-header"),
+    ]);
+    return reply.send({
+      ...resolveTheme(rows),
+      branding: { gameName: resolveGameName(rows), logoLogin, logoHeader },
+    });
   });
 
   // Feeds the admin form's preset select (`optionsSource`).
@@ -66,7 +82,8 @@ export function registerThemeRoutes(app: FastifyInstance, db: Db): void {
     if (!hasPermission(grants, "theme")) return reply.code(403).send({ error: "forbidden" });
 
     const rows = await db.select({ key: settings.key, value: settings.value })
-      .from(settings).where(like(settings.key, "theme.%"));
+      .from(settings)
+      .where(or(like(settings.key, "theme.%"), eq(settings.key, GAME_NAME_KEY)));
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
     const stored = byKey.get(presetKey());
     const preset = stored !== undefined && stored in THEME_PRESETS ? stored : DEFAULT_PRESET;
@@ -74,6 +91,7 @@ export function registerThemeRoutes(app: FastifyInstance, db: Db): void {
       rows: [
         { setting: "preset", value: preset },
         { setting: "nav", value: byKey.get(navKey()) === "left" ? "left" : "top" },
+        { setting: "gameName", value: resolveGameName(rows) },
         ...THEME_VARS.map((v) => ({ setting: v, value: byKey.get(overrideKey(v)) ?? "" })),
       ],
     });
@@ -95,10 +113,20 @@ export function registerThemeRoutes(app: FastifyInstance, db: Db): void {
     if (overrides.some((o) => o.value !== "" && !HEX.test(o.value))) {
       return reply.code(400).send({ error: "invalid_color" });
     }
+    const gameName = body.data.gameName.trim();
+    if (gameName.length > 60) {
+      return reply.code(400).send({ error: "invalid_game_name" });
+    }
 
     await db.transaction(async (tx) => {
       await tx.insert(settings).values({ key: presetKey(), value: body.data.preset })
         .onConflictDoUpdate({ target: settings.key, set: { value: body.data.preset } });
+      if (gameName === "") {
+        await tx.delete(settings).where(eq(settings.key, GAME_NAME_KEY));
+      } else {
+        await tx.insert(settings).values({ key: GAME_NAME_KEY, value: gameName })
+          .onConflictDoUpdate({ target: settings.key, set: { value: gameName } });
+      }
       await tx.insert(settings).values({ key: navKey(), value: body.data.navPosition })
         .onConflictDoUpdate({ target: settings.key, set: { value: body.data.navPosition } });
       for (const { v, value } of overrides) {

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useReset } from "../api/queries.js";
 import { ErrorText } from "../components/ui.js";
+import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
 
 export function Reset(): JSX.Element {
@@ -32,7 +33,7 @@ export function Reset(): JSX.Element {
 
   return (
     <form className={styles.form} onSubmit={onSubmit}>
-      <h1 className={styles.brand}>GL3</h1>
+      <BrandMark variant="login" className={styles.brand} />
       <input
         value={password}
         onChange={(e) => setPassword(e.target.value)}

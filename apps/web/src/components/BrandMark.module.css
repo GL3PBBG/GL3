@@ -1,0 +1,5 @@
+/* The logo is operator-uploaded at arbitrary resolution, so each variant caps
+   the box and lets the image scale inside it — the header must never grow the
+   header bar, and the login mark must never dwarf the form. */
+.logoLogin { display: block; max-height: 96px; max-width: 280px; object-fit: contain; }
+.logoHeader { display: block; max-height: 32px; max-width: 160px; object-fit: contain; }

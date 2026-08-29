@@ -5,6 +5,7 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { players, roleModuleAccess, roles, settings } from "../src/db/schema/index.js";
+import { makePng } from "./helpers/assets.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -63,7 +64,10 @@ describe("GET /api/theme", () => {
     expect(res.statusCode, res.body).toBe(200);
     const parsed = ThemeResponseSchema.safeParse(res.json());
     expect(parsed.success, res.body).toBe(true);
-    expect(parsed.data).toEqual({ preset: "midnight", colors: MIDNIGHT, layout: { nav: "top" } });
+    expect(parsed.data).toEqual({
+      preset: "midnight", colors: MIDNIGHT, layout: { nav: "top" },
+      branding: { gameName: "GL3", logoLogin: null, logoHeader: null },
+    });
   });
 
   it("falls back to midnight when the stored preset name is unknown", async () => {
@@ -71,7 +75,10 @@ describe("GET /api/theme", () => {
     await db.insert(settings).values({ key: "theme.preset", value: "no-such-theme" });
     const res = await app.inject({ method: "GET", url: "/api/theme" });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toEqual({ preset: "midnight", colors: MIDNIGHT, layout: { nav: "top" } });
+    expect(res.json()).toEqual({
+      preset: "midnight", colors: MIDNIGHT, layout: { nav: "top" },
+      branding: { gameName: "GL3", logoLogin: null, logoHeader: null },
+    });
   });
 
   it("ignores a stored override that is not a hex color", async () => {
@@ -250,5 +257,90 @@ describe("GET /api/admin/theme/table", () => {
       method: "GET", url: "/api/admin/theme/table", headers: auth(pleb.token),
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+/**
+ * Branding rides the theme payload because the login page needs it before any
+ * session exists and `GET /api/theme` is the one public settings read — the
+ * slot-image route requires auth, so it cannot carry the login logo.
+ *
+ * Storage: `game.name` row in `settings` (blank/absent -> "GL3"), plus the two
+ * core singleton asset slots `logo-login` / `logo-header` bound through the
+ * ordinary art admin.
+ */
+describe("branding on GET /api/theme", () => {
+  it("defaults to GL3 with no logos on a fresh install", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/theme" });
+    expect(res.statusCode, res.body).toBe(200);
+    expect((res.json() as { branding: unknown }).branding).toEqual({
+      gameName: "GL3", logoLogin: null, logoHeader: null,
+    });
+  });
+
+  it("serves a stored game name live — a hand-edited row lands with no restart", async () => {
+    await db.insert(settings).values({ key: "game.name", value: "Mob City" });
+    const res = await app.inject({ method: "GET", url: "/api/theme" });
+    expect((res.json() as { branding: { gameName: string } }).branding.gameName).toBe("Mob City");
+  });
+
+  it("POST /api/admin/theme stores the game name; a blank clears back to the default", async () => {
+    const admin = await registerPlayer("Founder");
+    const post = await app.inject({
+      method: "POST", url: "/api/admin/theme", headers: auth(admin.token),
+      payload: { preset: "midnight", gameName: "Mob City", ...BLANK_OVERRIDES },
+    });
+    expect(post.statusCode, post.body).toBe(204);
+    let body = (await app.inject({ method: "GET", url: "/api/theme" })).json() as {
+      branding: { gameName: string };
+    };
+    expect(body.branding.gameName).toBe("Mob City");
+
+    const clear = await app.inject({
+      method: "POST", url: "/api/admin/theme", headers: auth(admin.token),
+      payload: { preset: "midnight", gameName: "", ...BLANK_OVERRIDES },
+    });
+    expect(clear.statusCode, clear.body).toBe(204);
+    body = (await app.inject({ method: "GET", url: "/api/theme" })).json() as {
+      branding: { gameName: string };
+    };
+    expect(body.branding.gameName).toBe("GL3");
+    // Cleared means the row is gone, not stored as "" — the theme-override rule.
+    expect(await db.select().from(settings).where(eq(settings.key, "game.name"))).toEqual([]);
+  });
+
+  it("400s invalid_game_name on a name longer than 60 characters and stores nothing", async () => {
+    const admin = await registerPlayer("Founder");
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/theme", headers: auth(admin.token),
+      payload: { preset: "midnight", gameName: "x".repeat(61), ...BLANK_OVERRIDES },
+    });
+    expect(res.statusCode, res.body).toBe(400);
+    expect(res.json()).toEqual({ error: "invalid_game_name" });
+    expect(await db.select().from(settings)).toEqual([]);
+  });
+
+  it("resolves a bound logo slot into a public URL on the theme payload", async () => {
+    const admin = await registerPlayer("Founder");
+    const png = makePng(8, 8);
+    const uploaded = await app.inject({
+      method: "POST", url: "/api/admin/assets", headers: { ...auth(admin.token), "content-type": "image/png" },
+      payload: png,
+    });
+    expect(uploaded.statusCode, uploaded.body).toBe(201);
+    const { assetId, url } = uploaded.json() as { assetId: string; url: string };
+
+    const bind = await app.inject({
+      method: "PUT", url: "/api/admin/assets/bind", headers: auth(admin.token),
+      payload: { scope: "core", slot: "logo-header", assetId },
+    });
+    expect(bind.statusCode, bind.body).toBe(200);
+
+    const body = (await app.inject({ method: "GET", url: "/api/theme" })).json() as {
+      branding: { logoLogin: string | null; logoHeader: string | null };
+    };
+    expect(body.branding.logoHeader).toBe(url);
+    // The other slot stays unbound — the two sizes are independent.
+    expect(body.branding.logoLogin).toBe(null);
   });
 });
