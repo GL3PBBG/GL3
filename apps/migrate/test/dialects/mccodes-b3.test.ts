@@ -80,7 +80,7 @@ describe("mccodes dialect — B3 (content, progression, gangs)", () => {
         jailSeconds: 180, // 3 minutes
         braveCost: 2,
         cooldownSeconds: 0, // brave is the throttle in a pure-MCCodes profile
-        minRank: 0,
+        minLevel: 0,
       });
       expect(pick.successFormula).toBe("min(95, 10 + CRIMEXP / 100)");
 
