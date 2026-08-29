@@ -5,6 +5,14 @@ import { createDb } from "./client.js";
 const config = loadConfig(process.env);
 const { db, sql } = createDb(config.databaseUrl);
 
+// A reset that dropped the public schema and stopped there (the guard below
+// prescribes DROP SCHEMA public CASCADE ... CREATE SCHEMA public, and the
+// last step is easy to miss) leaves migrations dying on
+// `CREATE EXTENSION citext` with 3F000 "no schema has been selected to
+// create in". The deployment database is owned by the app role, so simply
+// recreate it — idempotent, a no-op on every healthy boot.
+await sql`CREATE SCHEMA IF NOT EXISTS public`;
+
 // Guard against the half-reset database. Drizzle's tracking table lives in
 // the `drizzle` SCHEMA, not `public`, so a "fresh start" that only cleared
 // public (DROP SCHEMA public CASCADE, a table-dropping script, a restore)
