@@ -198,7 +198,7 @@ describe("education admin", () => {
     });
     expect(start.statusCode).toBe(200);
 
-    // `p_education_progress` carries no FK to `p_courses` — an unconditional
+    // `p_education_progress` carries no FK to `p_education_courses` — an unconditional
     // delete here would wedge the enrolled player: no completion (the claim
     // subquery matches nothing) and no restart (`already_studying` blocks a
     // fresh enrollment, and there is no cancel route). The theft

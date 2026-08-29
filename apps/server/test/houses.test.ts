@@ -13,10 +13,10 @@ afterAll(async () => { await conn.end(); });
 
 async function seedHouse(name: string, price: number, will: number): Promise<string> {
   const id = crypto.randomUUID();
-  // p_houses is plugin-owned; raw SQL keeps this fixture independent of the
+  // p_houses_houses is plugin-owned; raw SQL keeps this fixture independent of the
   // plugin package's unexported table object.
   await db.execute(
-    sql`INSERT INTO p_houses (id, name, price, will) VALUES (${id}, ${name}, ${price}, ${will})`,
+    sql`INSERT INTO p_houses_houses (id, name, price, will) VALUES (${id}, ${name}, ${price}, ${will})`,
   );
   return id;
 }

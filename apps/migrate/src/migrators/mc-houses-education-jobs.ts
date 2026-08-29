@@ -40,10 +40,10 @@ export async function migrateMcHousesEducationJobs(
   targetTables?: ReadonlySet<string>,
 ): Promise<void> {
   const familyPresent =
-    targetHas(targetTables, "p_houses") && targetHas(targetTables, "p_courses")
-    && targetHas(targetTables, "p_jobs");
+    targetHas(targetTables, "p_houses_houses") && targetHas(targetTables, "p_education_courses")
+    && targetHas(targetTables, "p_jobs_jobs");
   if (!familyPresent) {
-    for (const table of ["p_houses", "p_courses", "p_education_progress", "p_courses_done", "p_jobs", "p_job_ranks", "p_player_jobs"]) {
+    for (const table of ["p_houses_houses", "p_education_courses", "p_education_progress", "p_education_courses_done", "p_jobs_jobs", "p_jobs_ranks", "p_jobs_players"]) {
       if (!targetHas(targetTables, table)) recordAbsentTargetTable(report, table);
     }
     return;
@@ -166,7 +166,7 @@ export async function migrateMcProgress(
   targetTables?: ReadonlySet<string>,
 ): Promise<void> {
   const familyPresent =
-    targetHas(targetTables, "p_courses") && targetHas(targetTables, "p_jobs");
+    targetHas(targetTables, "p_education_courses") && targetHas(targetTables, "p_jobs_jobs");
   if (!familyPresent) return; // absence already reported by the catalog pass
 
   // --- completed courses (PK-less: ordinal id_map keys).

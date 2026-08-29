@@ -36,4 +36,20 @@ export const JOBS_MIGRATIONS: { name: string; sql: string }[] = [
       last_wage_at timestamptz NOT NULL
     )`,
   },
+  // `p_jobs`/`p_job_ranks`/`p_player_jobs` predate the migration runner's
+  // prefix guard; the convention is `p_<id>_*`. History above keeps the old
+  // names — migrations are append-only — and the guard checks only the final
+  // state.
+  {
+    name: "0004_prefix_rename_jobs",
+    sql: `ALTER TABLE p_jobs RENAME TO p_jobs_jobs`,
+  },
+  {
+    name: "0005_prefix_rename_ranks",
+    sql: `ALTER TABLE p_job_ranks RENAME TO p_jobs_ranks`,
+  },
+  {
+    name: "0006_prefix_rename_players",
+    sql: `ALTER TABLE p_player_jobs RENAME TO p_jobs_players`,
+  },
 ];

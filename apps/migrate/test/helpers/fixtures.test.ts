@@ -79,8 +79,8 @@ describe("createIsolatedMccodesFixture (cluster B Task 7)", () => {
     try {
       const { db, sql } = createDb(target.url);
       for (const table of [
-        "p_houses", "p_courses", "p_education_progress", "p_courses_done",
-        "p_jobs", "p_job_ranks", "p_player_jobs", "p_inventory_shop_stock", "p_combat_log",
+        "p_houses_houses", "p_education_courses", "p_education_progress", "p_education_courses_done",
+        "p_jobs_jobs", "p_jobs_ranks", "p_jobs_players", "p_inventory_shop_stock", "p_combat_log",
       ]) {
         await db.execute(sqlTag`SELECT 1 FROM ${sqlTag.identifier(table)} LIMIT 1`);
       }

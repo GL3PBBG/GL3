@@ -23,7 +23,7 @@
     "db:clean-clones": "node scripts/drop-stale-test-clones.mjs",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down -v",
-    "docs:generate": "npm run build -w @gl3/shared && node scripts/generate-reference.mjs",
+    "docs:generate": "npm run build -w @gl3/shared && node scripts/generate-reference.mjs && node scripts/generate-errors.mjs",
     "docs:dev": "npm run docs:generate && vitepress dev manual",
     "docs:build": "npm run docs:generate && vitepress build manual",
     "docs:preview": "vitepress preview manual"

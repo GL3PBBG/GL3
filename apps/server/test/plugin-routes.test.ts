@@ -71,6 +71,21 @@ const testPlugin = definePlugin({
         return { status: 200, body: { unreachable: true } };
       },
     }),
+    route({
+      method: "GET",
+      path: "/api/rt/deadlock-shaped",
+      auth: "public",
+      // A synthetic 40P01-shaped driver error (a REAL deadlock needs two
+      // racing transactions — the lock-order files own that). The loader's
+      // catch reads only `error.cause.code`, so this exercises the same
+      // branch a genuine deadlock takes: the per-connection recent-statement
+      // ring dump that makes the next natural flake self-documenting.
+      handler: async () => {
+        const err = new Error("Failed query: select 1");
+        err.cause = { code: "40P01", detail: "Process A waits for ShareLock; blocked by process B." };
+        throw err;
+      },
+    }),
   ],
 });
 
@@ -199,6 +214,28 @@ describe("plugin routes", () => {
       const fields = call?.[0] as Record<string, unknown>;
       expect(fields["pgCode"]).toBe("42P01");
       expect(fields["plugin"]).toBe("rt");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("dumps the recent-statement rings when the driver error is a 40P01", async () => {
+    // The deadlock post-mortem datum: a 40P01's report names only the two
+    // BLOCKED statements, so the loader prints every pool connection's
+    // recent-statement ring (db/client.ts). Pinned here with a synthetic
+    // 40P01-shaped cause because a real deadlock needs two racing
+    // transactions; the branch under test only reads `cause.code`.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/rt/deadlock-shaped" });
+      expect(res.statusCode).toBe(500);
+
+      const dump = spy.mock.calls.find((c) => c[1] === "recent statements per pool connection at deadlock");
+      expect(dump, "40P01 did not trigger the ring dump").toBeDefined();
+      const rings = dump?.[0] as Record<string, string[]>;
+      // The rings must actually carry history — this file's own traffic.
+      expect(Object.keys(rings).length).toBeGreaterThan(0);
+      expect(Object.values(rings).flat().length).toBeGreaterThan(0);
     } finally {
       spy.mockRestore();
     }

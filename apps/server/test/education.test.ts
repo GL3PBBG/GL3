@@ -17,10 +17,10 @@ describe("education plugin", () => {
 
   beforeEach(async () => {
     if (!server) server = await bootTestServer({ plugins: [mccodesAttributes, educationPlugin] });
-    // After boot: the plugin's migrations (p_courses) exist.
+    // After boot: the plugin's migrations (p_education_courses) exist.
     courseId = crypto.randomUUID();
     await db.execute(sql`
-      INSERT INTO p_courses (id, name, description, cost, days,
+      INSERT INTO p_education_courses (id, name, description, cost, days,
         strength_gain, agility_gain, guard_gain, labour_gain, iq_gain)
       VALUES (${courseId}, ${"Biology 101"}, ${"Learn things."}, ${100}, ${2},
         ${5}, ${0}, ${0}, ${0}, ${10})

@@ -17,14 +17,14 @@ async function seedJob(): Promise<{ jobId: string; loaderId: string; foremanId: 
   const loaderId = crypto.randomUUID();
   const foremanId = crypto.randomUUID();
   await db.execute(sql`
-    INSERT INTO p_job_ranks (id, job_id, name, pay,
+    INSERT INTO p_jobs_ranks (id, job_id, name, pay,
       strength_gain, labour_gain, iq_gain, strength_req, labour_req, iq_req)
     VALUES
       (${loaderId}, ${jobId}, ${"Loader"}, ${100}, ${2}, ${0}, ${1}, ${0}, ${0}, ${0}),
       (${foremanId}, ${jobId}, ${"Foreman"}, ${200}, ${3}, ${0}, ${2}, ${10}, ${0}, ${0})
   `);
   await db.execute(sql`
-    INSERT INTO p_jobs (id, name, description, first_rank_id)
+    INSERT INTO p_jobs_jobs (id, name, description, first_rank_id)
     VALUES (${jobId}, ${"Dock Worker"}, ${"Heavy boxes, honest pay."}, ${loaderId})
   `);
   return { jobId, loaderId, foremanId };
@@ -46,7 +46,7 @@ describe("jobs plugin (exp routing claimed — wages feed levels, never ranks)",
 
       // 3.5 days elapsed: exactly 3 whole days pay out, half a day survives.
       await db.execute(sql`
-        UPDATE p_player_jobs SET last_wage_at = now() - interval '3 days 12 hours'
+        UPDATE p_jobs_players SET last_wage_at = now() - interval '3 days 12 hours'
         WHERE player_id = ${playerId}
       `);
 

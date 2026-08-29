@@ -10,14 +10,14 @@ import { coreHud, definePlugin, on, PluginError, route, type PluginTx } from "@g
 // the education/houses precedent.
 export { adminPage, jobsPage } from "./pages.js";
 
-const jobs = pgTable("p_jobs", {
+const jobs = pgTable("p_jobs_jobs", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
   firstRankId: uuid("first_rank_id").notNull(),
 });
 
-const ranks = pgTable("p_job_ranks", {
+const ranks = pgTable("p_jobs_ranks", {
   id: uuid("id").primaryKey(),
   jobId: uuid("job_id").notNull(),
   name: text("name").notNull(),
@@ -30,7 +30,7 @@ const ranks = pgTable("p_job_ranks", {
   iqReq: integer("iq_req").notNull(),
 });
 
-const employment = pgTable("p_player_jobs", {
+const employment = pgTable("p_jobs_players", {
   playerId: uuid("player_id").primaryKey(),
   rankId: uuid("rank_id").notNull(),
   lastWageAt: timestamp("last_wage_at", { withTimezone: true }).notNull(),
@@ -323,7 +323,7 @@ const hudWage = on(coreHud, async (ctx, value) => {
 
 // ---------------------------------------------------------------------------
 // Admin routes — the two-catalog editor (theft's cars+tiers shape). No FK
-// references either `p_jobs` or `p_job_ranks` (rule 6 discipline — these
+// references either `p_jobs_jobs` or `p_jobs_ranks` (rule 6 discipline — these
 // tables carry no foreign keys at all, per `migrations.ts`), so both deletes
 // are unconditional, the houses/education shape. `job_id`/`first_rank_id`
 // cross-reference each other with no FK to enforce it, which is what makes
