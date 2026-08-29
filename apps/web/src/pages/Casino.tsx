@@ -278,6 +278,7 @@ export function MoveBar({ moves, busy, onMove }: {
           pattern="[0-9]*"
           value={amount}
           aria-label="Amount"
+          placeholder="Amount"
           onChange={(event) => { setAmount(event.target.value.replace(/\D/g, "")); }}
         />
       ) : null}
@@ -287,6 +288,7 @@ export function MoveBar({ moves, busy, onMove }: {
           key={index}
           type="button"
           disabled={busy || (move.needsAmount === true && amount === "")}
+          title={move.needsAmount === true && amount === "" ? "Enter an amount first" : undefined}
           onClick={() => { onMove(mergeMovePayload(move, amount)); }}
         >
           {move.label}
