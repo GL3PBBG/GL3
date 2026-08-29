@@ -7,6 +7,7 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { clearBanned, markBanned } from "../auth/ban.js";
 import { destroyAllSessions } from "../auth/session.js";
+import { readOutboxStats } from "../bus/outbox.js";
 import type { Db } from "../db/client.js";
 import { gangs, playerStats, players, roleModuleAccess, rounds, roles, settings, transactions } from "../db/schema/index.js";
 import { wealthTaxPercent, wealthTaxThreshold } from "../economy/settings.js";
@@ -647,6 +648,48 @@ export function registerAdminRoutes(
       daily,
     };
   }
+
+  // The outbox's operational window (audit follow-up: rows are deleted on
+  // delivery, so the table alone can answer backlog questions but never
+  // delivery latency). One indexed-free scan of a table that is empty in
+  // steady state, plus the process-local delivery counters. The oldest
+  // pending row's age is decoded from its uuidv7 id — the row's own mint
+  // time — because not_before is the RETRY clock (it advances on every
+  // claim) and would understate a long-stuck backlog.
+  app.get("/api/admin/outbox", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, CORE_SCOPE)) return reply.code(403).send({ error: "forbidden" });
+
+    const [backlog] = await db.execute<{
+      pending: number; oldestId: string | null;
+      fresh: number; retriedOnce: number; backingOff: number; persistent: number;
+    }>(sql`
+      SELECT count(*)::int AS pending,
+             min(id::text) AS "oldestId",
+             count(*) FILTER (WHERE attempts = 0)::int AS fresh,
+             count(*) FILTER (WHERE attempts = 1)::int AS "retriedOnce",
+             count(*) FILTER (WHERE attempts BETWEEN 2 AND 5)::int AS "backingOff",
+             count(*) FILTER (WHERE attempts >= 6)::int AS persistent
+      FROM outbox
+    `);
+    const oldestPendingMs = backlog?.oldestId === null || backlog?.oldestId === undefined
+      ? null
+      : Date.now() - Number.parseInt(backlog.oldestId.slice(0, 12), 16);
+
+    return reply.send({
+      pending: backlog?.pending ?? 0,
+      oldestPendingMs,
+      attempts: {
+        fresh: backlog?.fresh ?? 0,
+        retriedOnce: backlog?.retriedOnce ?? 0,
+        backingOff: backlog?.backingOff ?? 0,
+        persistent: backlog?.persistent ?? 0,
+      },
+      process: readOutboxStats(),
+    });
+  });
 
   app.get("/api/admin/economy/overview", { preHandler: [app.requireAuth] }, async (request, reply) => {
     const playerId = request.playerId;

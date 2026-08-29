@@ -1,7 +1,8 @@
 import { asc, inArray, lte, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { Queue } from "bullmq";
 import type { Redis } from "ioredis";
-import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
+import { GameEventSchema, LeaderboardKindSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
 import type { Db } from "../db/client.js";
 import type { Tx } from "../economy/ledger.js";
 import { outbox } from "../db/schema/index.js";
@@ -81,18 +82,39 @@ export interface OutboxDispatchDeps {
 
 /**
  * Delivers one row. Throws on delivery failure (the row stays for retry);
- * throws `UnroutableJobError` when the row can never be delivered and must
- * be dropped instead.
+ * throws `UndeliverableRowError` when the row can never be delivered —
+ * corrupt payload, unroutable job, unknown kind — and must be dropped
+ * loudly instead of retried forever.
  */
-class UnroutableJobError extends Error {
+class UndeliverableRowError extends Error {
   constructor(message: string) {
     super(message);
   }
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+/**
+ * The score/job rows' payloads get the same treatment the event envelope
+ * always had: validated at the delivery boundary, because the row went
+ * through JSON after being built from structurally-typed code. A payload
+ * that cannot parse can never deliver — without this check a corrupt score
+ * row would throw inside BigInt(undefined), be retained, and retry forever
+ * (the no-poison-drop stance is premised on validation, so validation has
+ * to actually happen for every kind).
+ */
+const OutboxScorePayloadSchema = z.object({
+  leaderboard: LeaderboardKindSchema,
+  playerId: z.string().uuid(),
+  // Decimal string, never a JSON number — money rules apply here too.
+  score: z.string().regex(/^\d+$/, "score must be a nonnegative decimal string"),
+  prefix: z.string().min(1),
+}).strict();
+
+const OutboxJobPayloadSchema = z.object({
+  pluginId: z.string().min(1),
+  jobName: z.string().min(1),
+  data: z.record(z.unknown()),
+  seed: z.string(),
+}).strict();
 
 async function deliverRow(deps: OutboxDispatchDeps, row: OutboxClaimedRow): Promise<void> {
   if (row.kind === "event") {
@@ -102,23 +124,29 @@ async function deliverRow(deps: OutboxDispatchDeps, row: OutboxClaimedRow): Prom
     // and is dropped loudly rather than retried forever.
     const parsed = GameEventSchema.safeParse(row.payload);
     if (!parsed.success) {
-      throw new UnroutableJobError(`outbox event row "${row.id}" failed envelope validation — dropping`);
+      throw new UndeliverableRowError(`outbox event row "${row.id}" failed envelope validation — dropping`);
     }
     await publishEvent(deps.redis, parsed.data);
     return;
   }
   if (row.kind === "score") {
-    if (!isObject(row.payload)) throw new Error("outbox score row payload is not an object");
-    const { leaderboard, playerId, score, prefix } = row.payload as unknown as OutboxScorePayload;
+    const parsed = OutboxScorePayloadSchema.safeParse(row.payload);
+    if (!parsed.success) {
+      throw new UndeliverableRowError(`outbox score row "${row.id}" failed payload validation — dropping`);
+    }
+    const { leaderboard, playerId, score, prefix } = parsed.data;
     await recordScore(deps.redis, leaderboard, playerId, BigInt(score), prefix || DEFAULT_LEADERBOARD_PREFIX);
     return;
   }
   if (row.kind === "job") {
-    if (!isObject(row.payload)) throw new Error("outbox job row payload is not an object");
-    const { pluginId, jobName, data, seed } = row.payload as unknown as OutboxJobPayload;
+    const parsed = OutboxJobPayloadSchema.safeParse(row.payload);
+    if (!parsed.success) {
+      throw new UndeliverableRowError(`outbox job row "${row.id}" failed payload validation — dropping`);
+    }
+    const { pluginId, jobName, data, seed } = parsed.data;
     const queue = deps.queueResolver?.(pluginId, jobName);
     if (queue === undefined) {
-      throw new UnroutableJobError(
+      throw new UndeliverableRowError(
         `outbox job row "${row.id}" targets plugin "${pluginId}" job "${jobName}", which is not loaded — dropping`,
       );
     }
@@ -128,7 +156,7 @@ async function deliverRow(deps: OutboxDispatchDeps, row: OutboxClaimedRow): Prom
     await queue.add(jobName, { ...data, seed }, { jobId: row.id });
     return;
   }
-  throw new UnroutableJobError(`outbox row "${row.id}" has unknown kind "${row.kind}" — dropping`);
+  throw new UndeliverableRowError(`outbox row "${row.id}" has unknown kind "${row.kind}" — dropping`);
 }
 
 /**
@@ -183,6 +211,33 @@ export async function insertOutboxEvents(
 }
 
 /**
+ * Process-local delivery counters — the operations half of "rows are
+ * deleted on delivery, so the table cannot tell you delivery latency".
+ * The table answers backlog questions (see `GET /api/admin/outbox`); these
+ * answer throughput and health-of-the-delivery-path questions since boot.
+ * Per-process by design (the table is the cross-process truth); reset on
+ * restart, like every Redis-native counter in this codebase.
+ */
+export interface OutboxStats {
+  delivered: number;
+  /** Delivery attempts that failed and left the row for retry. */
+  failedAttempts: number;
+  /** Rows dropped as undeliverable — corrupt payload, unroutable job, unknown kind. */
+  dropped: number;
+  lastDeliveredAt: string | null;
+  lastErrorAt: string | null;
+}
+
+const stats: OutboxStats = {
+  delivered: 0, failedAttempts: 0, dropped: 0, lastDeliveredAt: null, lastErrorAt: null,
+};
+
+/** A read-only copy — callers must not be able to mutate the module's own counters. */
+export function readOutboxStats(): OutboxStats {
+  return { ...stats };
+}
+
+/**
  * Delivers every row it can and deletes exactly the rows that are done —
  * delivered, or unroutable-by-construction. A row whose delivery THREW is
  * left in place for the dispatcher. This function never throws at all: it
@@ -202,15 +257,22 @@ export async function deliverAndClear(
       done.push(row.id);
       delivered += 1;
     } catch (error) {
-      if (error instanceof UnroutableJobError) {
+      stats.lastErrorAt = new Date().toISOString();
+      if (error instanceof UndeliverableRowError) {
         done.push(row.id);
+        stats.dropped += 1;
         (deps.onError ?? console.error)(error, { outboxRow: row.id });
       } else {
+        stats.failedAttempts += 1;
         (deps.onError ?? console.error)(error, {
           outboxRow: row.id, kind: row.kind, retained: "dispatcher will retry",
         });
       }
     }
+  }
+  if (delivered > 0) {
+    stats.delivered += delivered;
+    stats.lastDeliveredAt = new Date().toISOString();
   }
   if (done.length > 0) {
     try {

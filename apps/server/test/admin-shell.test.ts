@@ -98,6 +98,36 @@ describe("GET /api/admin/plugins", () => {
   });
 });
 
+describe("GET /api/admin/outbox — the ops window", () => {
+  it("reports backlog shape and process counters, and counts a staged row", async () => {
+    // First registration after the truncate is the first-user admin.
+    const f = await register("OpsAdmin");
+    // One staged event row: pending goes to (at least) one and the oldest
+    // pending age decodes from its uuidv7 id. The outbox table is truncated
+    // per test file, so the count is exact.
+    const { uuidv7 } = await import("uuidv7");
+    const { outbox } = await import("../src/db/schema/index.js");
+    const { testDb } = await import("./helpers/db.js");
+    const { db } = testDb();
+    await db.insert(outbox).values({ id: uuidv7(), kind: "event", payload: {} });
+
+    const res = await app.inject({ method: "GET", url: "/api/admin/outbox", headers: auth(f.token) });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.pending).toBeGreaterThanOrEqual(1);
+    expect(body.oldestPendingMs).toBeGreaterThanOrEqual(0);
+    expect(body.attempts).toMatchObject({ fresh: expect.any(Number), retriedOnce: expect.any(Number), backingOff: expect.any(Number), persistent: expect.any(Number) });
+    expect(body.process).toMatchObject({ delivered: expect.any(Number), failedAttempts: expect.any(Number), dropped: expect.any(Number) });
+  });
+
+  it("403s without the core grant", async () => {
+    await register("Founder");
+    const p = await register("Nobody");
+    const res = await app.inject({ method: "GET", url: "/api/admin/outbox", headers: auth(p.token) });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 describe("role management", () => {
   it("lists roles with their module keys", async () => {
     const founder = await register("Founder");

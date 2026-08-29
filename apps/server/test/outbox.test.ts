@@ -3,7 +3,7 @@ import { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  deliverAndClear, insertOutboxEvents, settleOutboxOnce, startOutboxLoop,
+  deliverAndClear, insertOutboxEvents, readOutboxStats, settleOutboxOnce, startOutboxLoop,
   type OutboxClaimedRow,
 } from "../src/bus/outbox.js";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
@@ -112,6 +112,55 @@ describe("deliverAndClear", () => {
     const settled = await settleOutboxOnce(db, { redis });
     expect(settled.delivered).toBe(1);
     expect(await countOutbox()).toBe(0);
+  });
+
+  // The delivery-boundary validation, proven per kind: a corrupt payload
+  // can never deliver, so it must DROP loudly — not throw inside BigInt or
+  // BullMQ and retry forever, which was the gap the follow-up audit named.
+  it("drops a corrupt score row instead of retrying it forever, and counts the drop", async () => {
+    const before = readOutboxStats().dropped;
+    await db.insert(outbox).values({
+      id: uuidv7(), kind: "score",
+      // playerId is not a uuid and score is not a decimal string.
+      payload: { leaderboard: "cash", playerId: "not-a-uuid", score: "12.5", prefix: "leaderboard" },
+    });
+    const logged: unknown[] = [];
+    const result = await deliverAndClear(
+      db, { redis, onError: (e) => logged.push(e) }, await claimedRows(),
+    );
+
+    expect(result.delivered).toBe(0);
+    expect(logged).toHaveLength(1);
+    expect(await countOutbox()).toBe(0);
+    expect(readOutboxStats().dropped).toBe(before + 1);
+  });
+
+  it("drops a corrupt job payload (missing seed) the same way", async () => {
+    await db.insert(outbox).values({
+      id: uuidv7(), kind: "job",
+      payload: { pluginId: "outbox-test", jobName: "resolve", data: {} },
+    });
+    const logged: unknown[] = [];
+    const result = await deliverAndClear(
+      db, { redis, onError: (e) => logged.push(e) }, await claimedRows(),
+    );
+
+    expect(result.delivered).toBe(0);
+    expect(logged).toHaveLength(1);
+    expect(await countOutbox()).toBe(0);
+  });
+
+  it("counts delivered rows and stamps lastDeliveredAt on the process stats", async () => {
+    const actorId = uuidv7();
+    const staged = await stage([envelope(actorId)]);
+    const before = readOutboxStats();
+
+    await deliverAndClear(db, { redis }, staged);
+
+    const after = readOutboxStats();
+    expect(after.delivered).toBe(before.delivered + 1);
+    expect(after.lastDeliveredAt).not.toBeNull();
+    expect(after.lastDeliveredAt! >= (before.lastDeliveredAt ?? "")).toBe(true);
   });
 
   it("drops a job row whose queue does not exist, loudly, instead of retrying forever", async () => {
