@@ -3,17 +3,17 @@ import {
   type PageSchema, type PluginCtx, type Pool, type RankUpResult,
 } from "@gl3/plugin-sdk";
 import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { evaluateSuccessFormula, parseSuccessFormula } from "./formula.js";
+import { evaluateSuccessFormula, formulaUsesToken, parseSuccessFormula } from "./formula.js";
 import { crimeLog, crimes, playerCrimeSkill, playerStats, players } from "./schema.js";
 
 // The sandboxed formula dialect's public API — apps/migrate imports the same
 // parser to validate imported crimePERCFORM expressions (B spec §5): one
 // grammar, two consumers, no drift between them.
 export {
-  parseSuccessFormula, evaluateSuccessFormula,
+  parseSuccessFormula, evaluateSuccessFormula, formulaUsesToken,
   FormulaParseError, FormulaEvalError,
   type FormulaContext, type FormulaNode, type FormulaTokenName,
 } from "./formula.js";
@@ -115,7 +115,14 @@ const listRoute = route({
     const cooldownRemaining = await ctx.cooldown.peek("crime", player.id);
 
     return ctx.transaction(async (tx) => {
-      const rows = await tx.db.select().from(crimes).orderBy(asc(crimes.sort));
+      const [me] = await tx.db.select({ level: playerStats.level })
+        .from(playerStats).where(eq(playerStats.playerId, player.id));
+      // V2's listing gate (crimes.inc: `WHERE C_level <= US_rank`), on GL3's
+      // level axis — a crime above the player's level is not listed at all,
+      // exactly as in V2, so there is nothing under-level to even attempt.
+      const rows = await tx.db.select().from(crimes)
+        .where(lte(crimes.minLevel, me?.level ?? 1))
+        .orderBy(asc(crimes.sort));
       const skills = await tx.db.select().from(playerCrimeSkill)
         .where(eq(playerCrimeSkill.playerId, player.id));
       const skillByCrime = new Map(skills.map((s) => [s.crimeId, s.chance]));
@@ -171,10 +178,20 @@ const commitRoute = route({
     // Look the crime up BEFORE claiming the cooldown so a typo costs nothing.
     const pre = await ctx.transaction(async (tx) => {
       const [row] = await tx.db.select().from(crimes).where(eq(crimes.id, crimeId));
-      return { crime: row ?? null, member: await isMember(tx, player.id) };
+      const [me] = await tx.db.select({ level: playerStats.level })
+        .from(playerStats).where(eq(playerStats.playerId, player.id));
+      return { crime: row ?? null, level: me?.level ?? 1, member: await isMember(tx, player.id) };
     });
     const crime = pre.crime;
     if (crime === null) throw new PluginError("crime_not_found", 404);
+    // The authoritative half of the listing gate: the list route simply does
+    // not show over-level crimes (V2's `WHERE C_level <= US_rank` shape), so
+    // reaching here under-level means a crafted request — refused before
+    // anything is priced and before the cooldown burns, like every other
+    // refusal below.
+    if (crime.minLevel > pre.level) {
+      throw new PluginError("insufficient_level", 409, { required: crime.minLevel });
+    }
 
     // Order: crime lookup, then what this attempt costs, then the cooldown
     // claim — a player who cannot pay is refused before the cooldown burns
@@ -285,15 +302,18 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     if (!actor) return; // player deleted
     const actorName = actor.username;
 
-    // Per-crime chance — two mutually exclusive models per crime (audit §7
+    // Per-crime chance — three composable shapes on two models (audit §7
     // item 5; B0, spec 2026-08-26-mccodes-migrator-design §2.2).
     //
-    // success_formula present: the sandboxed five-token dialect, evaluated
-    // against THIS player's stats. player_crime_skill is V2's shape and has
-    // no MCCodes meaning — a formula crime never reads or writes it. An
-    // eval-time fault (division by zero against a live player's stats, which
-    // parse-time validation cannot foresee) resolves as 0%: the attempt
-    // fails, the job never crashes, and the fault is logged for the admin.
+    // success_formula present: the sandboxed six-token dialect, evaluated
+    // against THIS player's stats. Without SKILL it is the pure MCCodes
+    // model — player_crime_skill is V2's shape and has no MCCodes meaning,
+    // and such a crime never reads or writes it. With SKILL it is the
+    // hybrid: the learned per-crime chance feeds the stat formula, and the
+    // growth below applies so the learned part keeps learning. An eval-time
+    // fault (division by zero against a live player's stats, which parse-time
+    // validation cannot foresee) resolves as 0%: the attempt fails, the job
+    // never crashes, and the fault is logged for the admin.
     //
     // NULL: V2's per-player skill chance, byte-identical to the pre-B0 path
     // — player_crime_skill is one row per (player, crime); core queried by
@@ -301,6 +321,11 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     // port scopes it to the committed crimeId (documented deviation;
     // security-review-confirmed) and falls back to the default when the
     // player has no row for this crime yet.
+    const [skillRow] = await tx.db.select({ chance: playerCrimeSkill.chance })
+      .from(playerCrimeSkill)
+      .where(and(eq(playerCrimeSkill.playerId, playerId), eq(playerCrimeSkill.crimeId, crimeId)));
+    const skillChance = Number(skillRow?.chance ?? DEFAULT_CRIME_CHANCE);
+
     let chance: number;
     if (crime.successFormula !== null) {
       const [stats] = await tx.db.select({
@@ -316,6 +341,7 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
           EXP: Number(stats.exp),
           WILL: stats.will,
           IQ: Number(stats.iq),
+          SKILL: skillChance,
         });
       } catch (error) {
         ctx.log.warn("crime success formula failed to evaluate; resolving as 0%", {
@@ -324,10 +350,7 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
         chance = 0;
       }
     } else {
-      const [skillRow] = await tx.db.select({ chance: playerCrimeSkill.chance })
-        .from(playerCrimeSkill)
-        .where(and(eq(playerCrimeSkill.playerId, playerId), eq(playerCrimeSkill.crimeId, crimeId)));
-      chance = Number(skillRow?.chance ?? DEFAULT_CRIME_CHANCE);
+      chance = skillChance;
     }
 
     // The roll (spec §4.2) — seeded, identical draws to core.
@@ -338,6 +361,33 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     const exp = success ? crime.expReward : 0n;
     const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
     const jailed = jailRoll < crime.jailChancePercent;
+
+    // V2's progression-by-use, read from source (crimes.inc, method_commit):
+    // the attempt's outcome adds to this crime's learned chance —
+    //   success          +mt_rand(1, 4)  (rng.int(1, 5): max-exclusive)
+    //   failed, escaped  +mt_rand(1, 2)  (rng.int(1, 3))
+    //   failed, jailed   +0
+    // capped at 100. The port design's "on successful crimes" was corrected
+    // from the actual source: a clean failure teaches too, only getting
+    // caught does not. Applies iff the crime consumes the skill model —
+    // formula NULL, or formula referencing SKILL; a stats-only formula never
+    // reads the learned chance and so never accumulates one. The draws run
+    // AFTER the roll draws above, so the seeded replay of every pre-existing
+    // outcome is unchanged.
+    const growsSkill = crime.successFormula === null
+      || formulaUsesToken(parseSuccessFormula(crime.successFormula), "SKILL");
+    if (growsSkill) {
+      const add = success ? rng.int(1, 5) : jailed ? 0 : rng.int(1, 3);
+      if (add > 0) {
+        const grown = Math.min(100, skillChance + add);
+        await tx.db.insert(playerCrimeSkill)
+          .values({ playerId, crimeId, chance: grown.toFixed(2) })
+          .onConflictDoUpdate({
+            target: [playerCrimeSkill.playerId, playerCrimeSkill.crimeId],
+            set: { chance: grown.toFixed(2) },
+          });
+      }
+    }
 
     // Authoritative spend (core.actionCost) — inside the same transaction as
     // the idempotency claim above, so a BullMQ redelivery never double-charges
@@ -472,6 +522,8 @@ const CrimeUpdateSchema = z.object({
   expReward: AdminMoney,
   crimeExpReward: AdminMoney.optional(),
   successFormula: AdminFormula.optional(),
+  /** Optional: absent leaves the level gate alone, the crimeExpReward shape. */
+  minLevel: z.coerce.number().int().nonnegative().optional(),
   jailChancePercent: z.coerce.number().int().nonnegative(),
   jailSeconds: z.coerce.number().int().nonnegative(),
 }).strict().refine((b) => BigInt(b.maxPayout) >= BigInt(b.minPayout), {
@@ -496,6 +548,8 @@ const CrimeCreateSchema = z.object({
   expReward: AdminMoney,
   crimeExpReward: AdminMoney.optional(),
   successFormula: AdminFormula.optional(),
+  /** Optional, default 0 = ungated — every native seed's value. */
+  minLevel: z.coerce.number().int().nonnegative().optional(),
   jailChancePercent: z.coerce.number().int().nonnegative().max(100),
   jailSeconds: z.coerce.number().int().nonnegative(),
 }).strict()
@@ -544,6 +598,7 @@ const adminCrimesListRoute = route({
           // The update route already reads "" back as NULL (blank = skill
           // chance), so the round-trip is lossless.
           successFormula: c.successFormula ?? "",
+          minLevel: String(c.minLevel),
           jailChancePercent: String(c.jailChancePercent),
           jailSeconds: String(c.jailSeconds),
         })),
@@ -574,6 +629,7 @@ const adminCrimesCreateRoute = route({
         expReward: BigInt(body.expReward),
         crimeExpReward: BigInt(body.crimeExpReward ?? "0"),
         successFormula: formula ?? null,
+        minLevel: body.minLevel ?? 0,
         jailChancePercent: body.jailChancePercent,
         jailSeconds: body.jailSeconds,
         sort: (top?.sort ?? 0) + 1,
@@ -600,6 +656,7 @@ const adminCrimesUpdateRoute = route({
           expReward: BigInt(body.expReward),
           ...(body.crimeExpReward !== undefined ? { crimeExpReward: BigInt(body.crimeExpReward) } : {}),
           ...(formula !== undefined ? { successFormula: formula } : {}),
+          ...(body.minLevel !== undefined ? { minLevel: body.minLevel } : {}),
           jailChancePercent: body.jailChancePercent,
           jailSeconds: body.jailSeconds,
         })
@@ -639,6 +696,7 @@ const adminCrimesPage: PageSchema = {
     children: [
       { kind: "table", source: "GET /api/admin/crimes/list", columns: [
         { key: "name", label: "Name" },
+        { key: "minLevel", label: "Level" },
         { key: "cooldownSeconds", label: "Cooldown (s)" },
         { key: "minPayout", label: "Min payout" },
         { key: "maxPayout", label: "Max payout" },
@@ -661,7 +719,8 @@ const adminCrimesPage: PageSchema = {
         { name: "maxBullets", label: "Max bullets", type: "number" },
         { name: "expReward", label: "Exp reward", type: "money" },
         { name: "crimeExpReward", label: "Crime exp reward", type: "money" },
-        { name: "successFormula", label: "Success formula (LEVEL/CRIMEXP/EXP/WILL/IQ; blank = skill chance)", type: "text" },
+        { name: "successFormula", label: "Success formula (LEVEL/CRIMEXP/EXP/WILL/IQ/SKILL; blank = skill chance; SKILL grows with use)", type: "text" },
+        { name: "minLevel", label: "Min level (0 = ungated)", type: "number" },
         { name: "jailChancePercent", label: "Jail chance %", type: "number" },
         { name: "jailSeconds", label: "Jail seconds", type: "number" },
       ] },
@@ -676,6 +735,7 @@ const adminCrimesPage: PageSchema = {
         { name: "expReward", label: "Exp reward", type: "money" },
         { name: "crimeExpReward", label: "Crime exp reward", type: "money" },
         { name: "successFormula", label: "Success formula (empty = back to skill chance)", type: "text" },
+        { name: "minLevel", label: "Min level (0 = ungated)", type: "number" },
         { name: "jailChancePercent", label: "Jail chance %", type: "number" },
         { name: "jailSeconds", label: "Jail seconds", type: "number" },
       ] },

@@ -65,7 +65,7 @@ export async function migrateMcCrimes(pool: mysql.Pool, exec: Executor, report: 
       jailChancePercent: 50,
       jailSeconds: row.crimeJAILTIME * 60,
       braveCost: row.crimeBRAVE,
-      minRank: 0,
+      minLevel: 0,
       // Group order, then the source id: crimes in one group list together
       // without colliding on sort.
       sort: (orderByGroup.get(row.crimeGROUP) ?? 0) * 1000 + row.crimeID,

@@ -31,7 +31,7 @@ describe("crimes admin", () => {
       id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
       cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
       minBullets: 0, maxBullets: 0, expReward: 5n,
-      minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+      minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
     });
 
     const list = await app.inject({ method: "GET", url: "/api/admin/crimes/list", headers: auth() });
@@ -85,7 +85,7 @@ describe("crimes admin", () => {
       id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
       cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
       minBullets: 0, maxBullets: 0, expReward: 5n,
-      minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+      minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
     });
 
     const res = await app.inject({
@@ -125,7 +125,7 @@ describe("crimes admin", () => {
       id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
       cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
       minBullets: 0, maxBullets: 0, expReward: 5n,
-      minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+      minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
     });
     const res = await app.inject({
       method: "POST", url: "/api/admin/crimes/update", headers: auth(),
@@ -171,7 +171,7 @@ describe("crimes admin", () => {
       id: uuidv7(), name: "Pickpocket", description: "Lift a wallet.",
       cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
       minBullets: 0, maxBullets: 0, expReward: 5n,
-      minRank: 0, sort: 42, jailChancePercent: 0, jailSeconds: 0,
+      minLevel: 0, sort: 42, jailChancePercent: 0, jailSeconds: 0,
     });
     const res = await app.inject({
       method: "POST", url: "/api/admin/crimes", headers: auth(),
@@ -289,7 +289,7 @@ describe("crimes admin", () => {
       await db.insert(crimes).values({
         id: crimeId, name: "Pickpocket", description: "", cooldownSeconds: 30,
         minPayout: 50n, maxPayout: 250n, minBullets: 0, maxBullets: 0,
-        expReward: 5n, minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+        expReward: 5n, minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
         crimeExpReward: 9n, successFormula: "min(50, LEVEL * 10)",
       });
       const update = {
@@ -320,7 +320,7 @@ describe("crimes admin", () => {
       await db.insert(crimes).values({
         id: crimeId, name: "Pickpocket", description: "", cooldownSeconds: 30,
         minPayout: 50n, maxPayout: 250n, minBullets: 0, maxBullets: 0,
-        expReward: 5n, minRank: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+        expReward: 5n, minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
       });
       const res = await app.inject({
         method: "POST", url: "/api/admin/crimes/update", headers: auth(),

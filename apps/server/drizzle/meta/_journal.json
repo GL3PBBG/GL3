@@ -148,6 +148,13 @@
       "when": 1787962058939,
       "tag": "0020_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787979361825,
+      "tag": "0021_crimes_min_level",
+      "breakpoints": true
     }
   ]
 }

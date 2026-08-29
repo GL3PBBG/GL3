@@ -57,6 +57,10 @@ describe("migratePlayers", () => {
       // every real dump row carries V2's default avatar path.
       expect(vitoStats?.avatarUrl).toBe("themes/default/images/default-profile-picture.png");
       expect(vitoStats?.bio).toBe("Head of the family");
+      // US_rank is the level-gate axis (V2 compared C_level against it
+      // directly): carried onto player_stats.level so the enforced gate keeps
+      // every migrated player's crime access exactly as it was.
+      expect(vitoStats?.level).toBe(2);
 
       const usersTable = report.tables.find((t) => t.table === "users");
       expect(usersTable).toEqual({ table: "users", read: 6, written: 6, skipped: 0 });

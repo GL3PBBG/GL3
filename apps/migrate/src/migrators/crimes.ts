@@ -26,7 +26,7 @@ export async function migrateCrimes(pool: mysql.Pool, exec: Executor, report: Mi
       id: v3Id, name: row.C_name ?? "", description: "",
       cooldownSeconds: row.C_cooldown, minPayout: BigInt(row.C_money), maxPayout: BigInt(row.C_maxMoney),
       minBullets: row.C_bullets, maxBullets: row.C_maxBullets, expReward: BigInt(row.C_exp),
-      minRank: row.C_level, sort: sort++,
+      minLevel: row.C_level, sort: sort++,
     };
     await exec.insert(crimes).values(values).onConflictDoUpdate({ target: crimes.id, set: values });
     bumpTable(report, "crimes", "written");

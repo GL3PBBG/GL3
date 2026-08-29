@@ -24,6 +24,8 @@ const TownBodySchema = z.object({
   name: z.string().min(1).max(80),
   travelCost: AdminMoney,
   travelCooldownSeconds: z.coerce.number().int().nonnegative(),
+  /** Optional, default 0 = open town — the value every V2 location carries. */
+  minLevel: z.coerce.number().int().nonnegative().optional(),
   // Validated in the handler, not by z.enum: the loader answers every zod
   // failure with a generic `invalid_request`, and the spec pins this one to
   // its own code. Optional rather than defaulted: the admin form's untouched
@@ -87,6 +89,8 @@ export interface LocationListing {
   readonly bulletCost: bigint;
   readonly bulletStock: number;
   readonly combatMode: "open" | "underground";
+  /** The town's level gate, 0 = open — carried so subscribers see the lock too. */
+  readonly minLevel: number;
 }
 
 /**
@@ -132,6 +136,7 @@ const listRoute = route({
         bulletCost: l.bulletCost,
         bulletStock: l.bulletStock,
         combatMode: l.combatMode === "underground" ? "underground" as const : "open" as const,
+        minLevel: l.minLevel,
       })),
     );
 
@@ -151,6 +156,7 @@ const listRoute = route({
           bulletCost: l.bulletCost.toString(),
           bulletStock: l.bulletStock,
           combatMode: l.combatMode,
+          minLevel: l.minLevel,
           current: l.id === currentLocationId,
           cooldownRemaining,
           ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
@@ -173,15 +179,24 @@ const travelRoute = route({
     const toLocationId = params.locationId;
 
     // (1) Look the destination up BEFORE claiming the cooldown, so a typo
-    // costs the player nothing (core's ordering).
+    // costs the player nothing (core's ordering). The level gate rides the
+    // same read: a locked town is refused here, before the cooldown, the
+    // fare or anything else — the town stays listed as a teaser, but
+    // travelling to it under level costs exactly nothing.
     const destination = await ctx.transaction(async (tx) => {
       const [row] = await tx.db
-        .select({ travelCooldownSeconds: locations.travelCooldownSeconds })
+        .select({ travelCooldownSeconds: locations.travelCooldownSeconds, minLevel: locations.minLevel })
         .from(locations)
         .where(eq(locations.id, toLocationId));
-      return row ?? null;
+      if (row === undefined) return null;
+      const [me] = await tx.db.select({ level: playerStats.level })
+        .from(playerStats).where(eq(playerStats.playerId, player.id));
+      return { ...row, level: me?.level ?? 1 };
     });
     if (destination === null) throw new PluginError("location_not_found", 404);
+    if (destination.minLevel > destination.level) {
+      throw new PluginError("insufficient_level", 409, { required: destination.minLevel });
+    }
 
     // (2) One cooldown claim for the whole call. Retries below do not
     // re-acquire it, and only a failure that ENDS the call releases it.
@@ -363,6 +378,7 @@ const adminListRoute = route({
           travelCost: l.travelCost.toString(),
           travelCooldownSeconds: String(l.travelCooldownSeconds),
           combatMode: l.combatMode,
+          minLevel: String(l.minLevel),
         })),
       },
     };
@@ -382,6 +398,7 @@ const adminCreateRoute = route({
         travelCooldownSeconds: body.travelCooldownSeconds,
         bulletStock: 0, bulletCost: 0n,
         combatMode,
+        minLevel: body.minLevel ?? 0,
       });
     });
     return { status: 201, body: { id } };
@@ -403,6 +420,7 @@ const adminUpdateRoute = route({
           travelCost: BigInt(body.travelCost),
           travelCooldownSeconds: body.travelCooldownSeconds,
           ...(mode !== undefined ? { combatMode: mode } : {}),
+          ...(body.minLevel !== undefined ? { minLevel: body.minLevel } : {}),
         })
         .where(eq(locations.id, body.id))
         .returning({ id: locations.id });
@@ -509,6 +527,7 @@ const adminPage: PageSchema = {
         { key: "name", label: "Name" },
         { key: "travelCost", label: "Travel cost" },
         { key: "travelCooldownSeconds", label: "Cooldown (s)" },
+        { key: "minLevel", label: "Level" },
         { key: "combatMode", label: "Combat" },
       ] },
       { kind: "form", action: "POST /api/admin/travel/locations", submitLabel: "Add town", fields: [

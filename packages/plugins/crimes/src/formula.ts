@@ -7,13 +7,20 @@
  * no `eval`, no `Function` constructor, nothing dynamic.
  *
  * Fidelity rules, both deliberate:
- * - The five tokens (`LEVEL`, `CRIMEXP`, `EXP`, `WILL`, `IQ`) are
+ * - The stat tokens (`LEVEL`, `CRIMEXP`, `EXP`, `WILL`, `IQ`) are
  *   case-SENSITIVE. MCCodes substitutes them with `str_replace`, which is
  *   itself case-sensitive — `level` was a PHP fatal in the source game, and
  *   it is a parse error here.
  * - Function names are case-INSENSITIVE (`MIN` == `min`), because PHP
  *   function-call semantics are, and a formula that ran in MCCodes must
  *   keep running here.
+ *
+ * `SKILL` is the one GL3-native token: the player's learned per-crime chance
+ * (V2's `US_crimes` value, GL3's `player_crime_skill` row, 35 default). A
+ * formula that references it is the hybrid model — progression-by-use feeding
+ * a stat formula — and referencing it is also what makes the commit job grow
+ * the skill (see `formulaUsesToken`). Imported MCCodes `crimePERCFORM` never
+ * contains it, so the migrator's parse-validate of imports is unaffected.
  *
  * Division or modulo by zero cannot be caught at parse time (it depends on
  * a live player's stats), so `evaluateSuccessFormula` throws
@@ -26,7 +33,7 @@
  * unclamped `rand(1,100) <= sucrate`, so normalization, not divergence.
  */
 
-export type FormulaTokenName = "LEVEL" | "CRIMEXP" | "EXP" | "WILL" | "IQ";
+export type FormulaTokenName = "LEVEL" | "CRIMEXP" | "EXP" | "WILL" | "IQ" | "SKILL";
 
 export type FormulaContext = Readonly<Record<FormulaTokenName, number>>;
 
@@ -53,7 +60,7 @@ export class FormulaEvalError extends Error {
   }
 }
 
-const TOKEN_NAMES: readonly FormulaTokenName[] = ["LEVEL", "CRIMEXP", "EXP", "WILL", "IQ"];
+const TOKEN_NAMES: readonly FormulaTokenName[] = ["LEVEL", "CRIMEXP", "EXP", "WILL", "IQ", "SKILL"];
 
 const FUNCTIONS: Readonly<Record<FormulaFnName, { minArgs: number; maxArgs: number }>> = {
   min: { minArgs: 2, maxArgs: Number.MAX_SAFE_INTEGER },
@@ -207,7 +214,7 @@ export function parseSuccessFormula(text: string): FormulaNode {
       }
       throw new FormulaParseError(
         `unknown identifier ${JSON.stringify(tok.v)} — the dialect allows only ` +
-          "LEVEL, CRIMEXP, EXP, WILL, IQ, min, max, floor, ceil, round, abs",
+          "LEVEL, CRIMEXP, EXP, WILL, IQ, SKILL, min, max, floor, ceil, round, abs",
         tok.pos,
       );
     }
@@ -225,6 +232,27 @@ export function parseSuccessFormula(text: string): FormulaNode {
 }
 
 // --- evaluator -----------------------------------------------------------------
+
+/**
+ * Whether the formula references the named token anywhere in its tree. The
+ * commit job's growth gate: a formula crime grows `player_crime_skill` iff
+ * its formula reads `SKILL` — a formula that never consults the learned
+ * chance has no business silently accumulating one.
+ */
+export function formulaUsesToken(formula: FormulaNode, name: FormulaTokenName): boolean {
+  switch (formula.kind) {
+    case "num":
+      return false;
+    case "token":
+      return formula.name === name;
+    case "neg":
+      return formulaUsesToken(formula.operand, name);
+    case "binary":
+      return formulaUsesToken(formula.left, name) || formulaUsesToken(formula.right, name);
+    case "call":
+      return formula.args.some((arg) => formulaUsesToken(arg, name));
+  }
+}
 
 export function evaluateSuccessFormula(formula: FormulaNode, ctx: FormulaContext): number {
   const value = evalNode(formula, ctx);

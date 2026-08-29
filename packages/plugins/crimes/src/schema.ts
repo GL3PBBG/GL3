@@ -24,6 +24,8 @@ export const crimes = pgTable("crimes", {
   braveCost: integer("brave_cost").notNull().default(0),
   crimeExpReward: bigint("crime_exp_reward", { mode: "bigint" }).notNull(),
   successFormula: text("success_formula"),
+  /** The level gate — read mirror; see the core schema's own comment. */
+  minLevel: integer("min_level").notNull().default(0),
 });
 
 export const playerCrimeSkill = pgTable("player_crime_skill", {

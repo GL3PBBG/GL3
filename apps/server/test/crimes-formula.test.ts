@@ -6,6 +6,7 @@ import crimesPlugin, {
   evaluateSuccessFormula,
   FormulaEvalError,
   FormulaParseError,
+  formulaUsesToken,
   parseSuccessFormula,
 } from "@gl3/plugin-crimes";
 import { loadConfig } from "../src/config.js";
@@ -189,5 +190,21 @@ describe("crimes.commit — formula crimes (success_formula set)", () => {
     const listed = res.json().crimes as Array<{ id: string; chance: string | null }>;
     expect(listed.find((c) => c.id === alwaysCrimeId)?.chance).toBeNull();
     expect(listed.find((c) => c.id === skillCrimeId)?.chance).toBe("35.00");
+  });
+});
+
+describe("SKILL — the GL3-native hybrid token", () => {
+  it("parses and evaluates SKILL, and formulaUsesToken walks the whole tree", () => {
+    const ast = parseSuccessFormula("min(95, SKILL + LEVEL / 2)");
+    expect(formulaUsesToken(ast, "SKILL")).toBe(true);
+    // Not just the root: the token sits inside a call, inside a binary.
+    expect(formulaUsesToken(parseSuccessFormula("LEVEL * 2 + WILL / 20"), "SKILL")).toBe(false);
+    expect(evaluateSuccessFormula(ast, {
+      LEVEL: 10, CRIMEXP: 0, EXP: 0, WILL: 0, IQ: 0, SKILL: 50,
+    })).toBe(55);
+  });
+
+  it("keeps the token case-sensitive like every stat token", () => {
+    expect(() => parseSuccessFormula("skill")).toThrow(FormulaParseError);
   });
 });

@@ -23,6 +23,10 @@ describe("migrateCrimes", () => {
       expect(gta?.minPayout).toBe(500n);
       expect(gta?.maxPayout).toBe(2000n);
       expect(gta?.cooldownSeconds).toBe(600);
+      // C_level -> min_level, the gate the plugin now enforces: GTA's C_level
+      // is 5, Pickpocket's is 0 (ungated) — the fixture's own spread.
+      expect(gta?.minLevel).toBe(5);
+      expect(rows.find((r) => r.name === "Pickpocket")?.minLevel).toBe(0);
 
       await pool.end();
       await sql.end();

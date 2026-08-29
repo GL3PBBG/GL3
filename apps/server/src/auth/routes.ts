@@ -450,6 +450,7 @@ export function registerAuthRoutes(
       health: row.health,
       healthMax: row.healthMaxOverride ?? row.rankMaxHealth ?? 100,
       grants,
+      level: row.level,
       ...(attributes ? { attributes } : {}),
     });
   });

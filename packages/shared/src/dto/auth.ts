@@ -67,6 +67,8 @@ export const MeResponseSchema = z.object({
   health: z.number().int().optional(),
   healthMax: z.number().int().optional(),
   grants: z.array(z.string()),
+  /** The player's level — the level-gate axis (crimes.min_level, locations.min_level). */
+  level: z.number().int().nonnegative(),
   // Absent entirely (not null) when no plugin declares an attribute pool —
   // see PlayerAttributesDtoSchema.
   attributes: PlayerAttributesDtoSchema.optional(),

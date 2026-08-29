@@ -11,7 +11,13 @@ export const crimes = pgTable("crimes", {
   minBullets: integer("min_bullets").notNull().default(0),
   maxBullets: integer("max_bullets").notNull().default(0),
   expReward: bigint("exp_reward", { mode: "bigint" }).notNull().default(sql`0`),
-  minRank: integer("min_rank").notNull().default(0),
+  /**
+   * The crime's level gate — V2's C_level, finally enforced. V2's listing
+   * selected `WHERE C_level <= US_rank`; GL3 compares against
+   * `player_stats.level` (the axis locations.min_level uses and the MCCodes
+   * family grows). 0 = ungated, the value every native seed carries.
+   */
+  minLevel: integer("min_level").notNull().default(0),
   sort: integer("sort").notNull().default(0),
   /**
    * GL3 model addition, not present in V2's audited `crimes` columns (spec

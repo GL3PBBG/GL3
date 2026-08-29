@@ -40,6 +40,10 @@ export function Travel(): JSX.Element {
       <ul className={styles.rows}>
         {locations.data?.locations.map((location) => {
           const affordable = canAfford(cash, location.travelCost);
+          // The town's level lock rides the same row: visible as a teaser
+          // (the requirement), and the button is dead below it rather than
+          // letting the POST 409 after the fact.
+          const levelLocked = location.minLevel > (me.data?.level ?? 1);
           return (
             <li
               key={location.id}
@@ -53,15 +57,16 @@ export function Travel(): JSX.Element {
                   <Money value={location.travelCost} /> · {location.travelCooldownSeconds}s cooldown ·
                   bullets <Money value={location.bulletCost} /> ({location.bulletStock} in stock)
                   {location.combatMode === "underground" ? <> · underground</> : null}
+                  {location.minLevel > 0 ? <> · level {location.minLevel}</> : null}
                 </div>
               </div>
               {location.current ? (
                 <button type="button" disabled>Here</button>
               ) : (
                 <CooldownButton
-                  label={affordable ? "Travel" : "Too poor"}
+                  label={levelLocked ? `Level ${location.minLevel}` : affordable ? "Travel" : "Too poor"}
                   seconds={cooldown}
-                  disabled={jailed || !affordable || travel.isPending}
+                  disabled={jailed || levelLocked || !affordable || travel.isPending}
                   onClick={() => {
                     start(COOLDOWN_ID, location.travelCooldownSeconds);
                     travel.mutate(location.id, {

@@ -19,6 +19,8 @@ export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   cash: bigint("cash", { mode: "bigint" }).notNull(),
   locationId: uuid("location_id"),
+  /** The level-gate axis (locations.min_level compares against it). */
+  level: integer("level").notNull().default(1),
 });
 
 export const locations = pgTable("locations", {
@@ -29,4 +31,6 @@ export const locations = pgTable("locations", {
   bulletStock: integer("bullet_stock").notNull(),
   bulletCost: bigint("bullet_cost", { mode: "bigint" }).notNull(),
   combatMode: text("combat_mode").notNull(),
+  /** The town's level gate — 0 = open (MCCodes parity; V2 locations have none). */
+  minLevel: integer("min_level").notNull().default(0),
 });

@@ -386,6 +386,7 @@ export default defineWorkspace([
         "test/crime-worker-idempotency.test.ts",
         "test/crimes.test.ts",
         "test/crimes-formula.test.ts",
+        "test/crimes-skill-level.test.ts",
         "test/crimes-widget.test.ts",
         "test/detectives-extras.test.ts",
         "test/detectives-worker.test.ts",

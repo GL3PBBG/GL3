@@ -14,6 +14,8 @@ export const LocationDtoSchema = z.object({
   /** Absent when no town image is bound — see `InventoryItemSchema.imageUrl`. */
   imageUrl: z.string().optional(),
   combatMode: CombatModeSchema,
+  /** The town's level gate (0 = open). Travel refuses below it; the list shows it so the lock is a teaser, not a surprise. */
+  minLevel: z.number().int().nonnegative(),
 });
 export type LocationDto = z.infer<typeof LocationDtoSchema>;
 

@@ -81,6 +81,11 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
     // 0 is V2's "nothing equipped" convention, not a real item reference.
     const weaponItemId = stats.US_weapon > 0 ? await lookupV3Id(exec, "items", stats.US_weapon) : null;
     const armorItemId = stats.US_armor > 0 ? await lookupV3Id(exec, "items", stats.US_armor) : null;
+    // V2's crime gate compared C_level against US_rank directly — a numeric
+    // level in practice. GL3's gate compares player_stats.level, so without
+    // this a migrated player would sit at the default 1 and lose access to
+    // crimes they could commit in V2 the moment the gate is enforced.
+    const level = stats.US_rank;
 
     await exec.insert(playerStats).values({
       playerId,
@@ -89,6 +94,7 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
       health: stats.US_health, backfire: stats.US_backfire,
       rankId, locationId, weaponItemId, armorItemId,
       avatarUrl: stats.US_pic, bio: stats.US_bio,
+      level,
       // gang_id / jailed_until / hospital_until: filled by later migrators.
     }).onConflictDoUpdate({
       target: playerStats.playerId,
@@ -98,6 +104,7 @@ export async function migratePlayers(pool: mysql.Pool, exec: Executor, report: M
         health: stats.US_health, backfire: stats.US_backfire,
         rankId, locationId, weaponItemId, armorItemId,
         avatarUrl: stats.US_pic, bio: stats.US_bio,
+        level,
       },
     });
     bumpTable(report, "userStats", "written");

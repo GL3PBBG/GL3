@@ -37,7 +37,7 @@ describe("travel admin", () => {
     const list = await app.inject({ method: "GET", url: "/api/admin/travel/locations", headers: auth() });
     expect(list.statusCode).toBe(200);
     expect(list.json().rows).toEqual([
-      { id, name: "Palermo", travelCost: "500", travelCooldownSeconds: "60", combatMode: "open" },
+      { id, name: "Palermo", travelCost: "500", travelCooldownSeconds: "60", combatMode: "open", minLevel: "0" },
     ]);
 
     const [row] = await db.select().from(locations).where(eq(locations.id, id));
