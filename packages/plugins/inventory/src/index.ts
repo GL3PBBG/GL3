@@ -22,6 +22,7 @@ import {
   guardEffect,
   HEAL_EFFECT_KIND,
   itemEffects,
+  POOL_ORDER,
   readConsumableUse,
 } from "./effect-registry.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
@@ -381,6 +382,30 @@ const useRoute = route({
         });
       }
 
+      // Pool deltas go through tx.attributes — the one authority for pool
+      // writes (clamp on grant, insufficient_<pool> 409 on a short spend).
+      // A refused spend rolls this whole transaction back, the qty decrement
+      // included, so an unaffordable item is never consumed. No lock of its
+      // own: the tx.locks.player at the top of this transaction is the
+      // contract tx.attributes documents.
+      const touched = POOL_ORDER.filter((pool) => bounded.poolDeltas[pool] !== undefined);
+      for (const pool of touched) {
+        const delta = bounded.poolDeltas[pool] ?? 0;
+        if (delta < 0) await tx.attributes.spend(player.id, pool, -delta);
+        else await tx.attributes.grant(player.id, pool, delta);
+      }
+      let pools:
+        | { energy: number; energyMax: number; will: number; willMax: number; brave: number; braveMax: number }
+        | undefined;
+      if (touched.length > 0) {
+        const after = await tx.attributes.read(player.id);
+        pools = {
+          energy: after.energy, energyMax: after.energyMax,
+          will: after.will, willMax: after.willMax,
+          brave: after.brave, braveMax: after.braveMax,
+        };
+      }
+
       return {
         status: 200,
         body: {
@@ -392,6 +417,7 @@ const useRoute = route({
           // Omitted rather than null when the def said nothing:
           // `exactOptionalPropertyTypes` makes the spread the honest form.
           ...(bounded.message !== null ? { message: bounded.message } : {}),
+          ...(pools !== undefined ? { pools } : {}),
         },
       };
     });

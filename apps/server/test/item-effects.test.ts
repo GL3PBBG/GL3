@@ -261,3 +261,85 @@ describe("GET /api/inventory", () => {
       .toMatchObject({ kind: "tonic", kick: 5 });
   });
 });
+
+async function poolsOf(): Promise<{ energy: number; brave: number }> {
+  const [row] = await db
+    .select({ energy: playerStats.energy, brave: playerStats.brave })
+    .from(playerStats)
+    .where(eq(playerStats.playerId, playerId));
+  if (!row) throw new Error("no player_stats row");
+  return row;
+}
+
+describe("the built-in pools def through the route", () => {
+  it("refills brave, spends energy, and answers the settled pools", async () => {
+    const tonic = await seedItem({ kind: "pools", pools: { brave: 3, energy: -4 } });
+    await grant(tonic, 2);
+    await db.update(playerStats).set({ energy: 10, brave: 1 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(tonic);
+
+    expect(res.statusCode, res.body).toBe(200);
+    const body = UseItemResponseSchema.parse(res.json());
+    expect(body.qty).toBe(1);
+    // mccodes-attributes declares energy max 12, brave max 5; regen stamps
+    // start null, so the settle seeds maxes and adds nothing.
+    expect(body.pools).toEqual({
+      energy: 6, energyMax: 12, will: 100, willMax: 100, brave: 4, braveMax: 5,
+    });
+    expect(await poolsOf()).toEqual({ energy: 6, brave: 4 });
+  });
+
+  it("clamps a grant at the pool's max", async () => {
+    const overfill = await seedItem({ kind: "pools", pools: { brave: 100 } });
+    await grant(overfill, 1);
+    await db.update(playerStats).set({ brave: 4 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(overfill);
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(UseItemResponseSchema.parse(res.json()).pools?.brave).toBe(5);
+  });
+
+  it("409s an unaffordable cost and does not consume the item", async () => {
+    const tonic = await seedItem({ kind: "pools", pools: { brave: 3, energy: -4 } });
+    await grant(tonic, 1);
+    await db.update(playerStats).set({ energy: 1, brave: 1 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(tonic);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "insufficient_energy" });
+    expect(await qtyOf(tonic)).toBe(1);
+    expect(await poolsOf()).toMatchObject({ brave: 1 });
+  });
+
+  it("409s already_full and does not consume the item or the cost", async () => {
+    const tonic = await seedItem({ kind: "pools", pools: { brave: 3, energy: -4 } });
+    await grant(tonic, 1);
+    await db.update(playerStats).set({ energy: 10, brave: 5 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(tonic);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "already_full" });
+    expect(await qtyOf(tonic)).toBe(1);
+    expect((await poolsOf()).energy).toBe(10);
+  });
+
+  it("a heal item's response carries no pools field", async () => {
+    const medkit = await seedItem({ heal: 30 });
+    await grant(medkit, 1);
+    await db.update(playerStats).set({ health: 50 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(medkit);
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).not.toHaveProperty("pools");
+  });
+});

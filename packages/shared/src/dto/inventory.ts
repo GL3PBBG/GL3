@@ -83,5 +83,15 @@ export const UseItemResponseSchema = z.object({
   exp: z.string().optional(),
   cash: z.string().optional(),
   message: z.string().optional(),
+  /**
+   * Post-use settled pool figures — present only when the def moved a pool.
+   * Optional for the same reason exp/cash are: a server predating pool
+   * effects still parses.
+   */
+  pools: z.object({
+    energy: z.number().int(), energyMax: z.number().int(),
+    will: z.number().int(), willMax: z.number().int(),
+    brave: z.number().int(), braveMax: z.number().int(),
+  }).optional(),
 });
 export type UseItemResponse = z.infer<typeof UseItemResponseSchema>;
