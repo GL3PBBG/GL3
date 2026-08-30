@@ -354,6 +354,24 @@ describe("POST /api/inventory/use/:itemId", () => {
     expect(res.json()).toMatchObject({ error: "already_full" });
   });
 
+  it("honours the per-player health_max override — a gym-trained cap is not the rank's 100", async () => {
+    // player_stats.health_max (migration 0017) overrides the rank cap; the
+    // heal path resolving only ranks.max_health ?? 100 made a trained
+    // 500-cap player read as "already full" at 100.
+    const medkit = await seedItem("consumable", { heal: 30 });
+    await grant(playerId, medkit, 1);
+    await db.update(playerStats).set({ health: 100, healthMax: 500 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "POST", url: `/api/inventory/use/${medkit}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ health: 130, healed: 30 });
+  });
+
   it("400s a non-consumable", async () => {
     const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
     await grant(playerId, pistol, 1);

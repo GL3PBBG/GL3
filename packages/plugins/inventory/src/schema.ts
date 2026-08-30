@@ -43,6 +43,8 @@ export const playerStats = pgTable("player_stats", {
   cash: bigint("cash", { mode: "bigint" }).notNull(),
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
+  /** Per-player cap override (core migration 0017); NULL = the rank's cap. */
+  healthMax: integer("health_max"),
   rankId: uuid("rank_id"),
   locationId: uuid("location_id"),
   weaponItemId: uuid("weapon_item_id"),

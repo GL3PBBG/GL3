@@ -296,6 +296,7 @@ const useRoute = route({
       const [stats] = await tx.db
         .select({
           health: playerStats.health,
+          healthMaxOverride: playerStats.healthMax,
           exp: playerStats.exp,
           cash: playerStats.cash,
           maxHealth: ranks.maxHealth,
@@ -305,11 +306,13 @@ const useRoute = route({
         .where(eq(playerStats.playerId, player.id));
       if (!stats) throw new PluginError("unauthorized", 401);
 
-      // 100 matches core's `ranks.max_health` column default and
-      // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player has no
-      // rank row yet. A plugin cannot import that constant from apps/server,
-      // so the two must be kept in step by hand.
-      const maxHealth = stats.maxHealth ?? 100;
+      // Same resolution order as core's auth/routes.ts and hospital/status.ts:
+      // the per-player health_max override (gym-trained, migration 0017) wins,
+      // then the rank cap, then 100 — which matches core's `ranks.max_health`
+      // column default and hospital's DEFAULT_MAX_HEALTH for a player with no
+      // rank row. A plugin cannot import those constants from apps/server, so
+      // the three sites must be kept in step by hand.
+      const maxHealth = stats.healthMaxOverride ?? stats.maxHealth ?? 100;
       // Only the built-in heal refuses at full health. A def that grants exp
       // or pays out has nothing to do with health, and gating it on a full
       // health bar would make it unusable for no reason.
