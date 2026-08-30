@@ -394,6 +394,25 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     expect(row?.health).toBe(140);
   });
 
+  it("the elapsed-sentence settle heals to the player's own health_max override, not the rank cap", async () => {
+    // player_stats.health_max (migration 0017) beats ranks.max_health — a
+    // gym-trained 500-cap target discharged at the rank's 100 would step out
+    // of hospital at a fifth of their real health.
+    await makeAttackable();
+    await db
+      .update(playerStats)
+      .set({ healthMax: 500, hospitalUntil: new Date(Date.now() - 1000), health: 0 })
+      .where(eq(playerStats.playerId, targetId));
+    await equipWeapon(attackerId, { accuracy: 100, damageMin: 10, damageMax: 10 });
+
+    const res = await attack(targetId);
+
+    expect(res.statusCode, res.body).toBe(200);
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, targetId));
+    expect(row?.hospitalUntil).toBeNull();
+    expect(row?.health).toBe(490);
+  });
+
   it("429s a second attack inside the cooldown", async () => {
     await makeAttackable();
     await equipWeapon(attackerId, { accuracy: 100, damageMin: 1, damageMax: 1 });
@@ -1044,6 +1063,17 @@ describe("GET /api/combat/targets", () => {
     const row = list.find((t) => t.playerId === victim.id);
     expect(row).toMatchObject({ attackable: true, reason: null, username: victim.username });
     expect(row?.maxHealth).toBeGreaterThan(0);
+  });
+
+  it("reports a target's health_max override as their cap, not the rank's", async () => {
+    const attacker = await register();
+    const victim = await register();
+    await makeAttackable(attacker.id, victim.id);
+    await db.update(playerStats).set({ healthMax: 500 })
+      .where(eq(playerStats.playerId, victim.id));
+
+    const list = (await targets(attacker.token)).json<{ targets: Target[] }>().targets;
+    expect(list.find((t) => t.playerId === victim.id)?.maxHealth).toBe(500);
   });
 
   it("excludes the caller's own row", async () => {

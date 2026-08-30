@@ -81,7 +81,11 @@ function pricedEntries(costs: Partial<Record<Pool, number>>): [Pool, number][] {
  */
 async function settleHospitalIfElapsed(tx: PluginTx, targetId: string): Promise<void> {
   const [row] = await tx.db
-    .select({ hospitalUntil: playerStats.hospitalUntil, maxHealth: ranks.maxHealth })
+    .select({
+      hospitalUntil: playerStats.hospitalUntil,
+      healthMaxOverride: playerStats.healthMax,
+      maxHealth: ranks.maxHealth,
+    })
     .from(playerStats)
     .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
     .where(eq(playerStats.playerId, targetId));
@@ -89,7 +93,10 @@ async function settleHospitalIfElapsed(tx: PluginTx, targetId: string): Promise<
   if (row.hospitalUntil.getTime() > Date.now()) return;
   await tx.db
     .update(playerStats)
-    .set({ hospitalUntil: null, health: row.maxHealth ?? 100 })
+    // health_max ?? rank cap ?? 100 — core's resolution order (auth/routes.ts,
+    // hospital/status.ts); discharging a gym-trained 500-cap player at the
+    // rank's 100 sent them out at a fifth of their real health.
+    .set({ hospitalUntil: null, health: row.healthMaxOverride ?? row.maxHealth ?? 100 })
     .where(and(eq(playerStats.playerId, targetId), isNotNull(playerStats.hospitalUntil)));
 }
 
@@ -810,6 +817,7 @@ const targetsRoute = route({
           username: players.username,
           rank: ranks.name,
           health: playerStats.health,
+          healthMaxOverride: playerStats.healthMax,
           maxHealth: ranks.maxHealth,
           gangId: playerStats.gangId,
           exp: playerStats.exp,
@@ -853,11 +861,12 @@ const targetsRoute = route({
               username: row.username,
               rank: row.rank,
               health: row.health,
-              // 100 matches core's ranks.max_health default and
-              // hospital/status.ts's DEFAULT_MAX_HEALTH, used when the player
-              // has no rank row yet. A plugin cannot import that constant from
-              // apps/server, so the two are kept in step by hand.
-              maxHealth: row.maxHealth ?? 100,
+              // health_max ?? rank cap ?? 100 — core's resolution order
+              // (auth/routes.ts, hospital/status.ts). 100 matches core's
+              // ranks.max_health default, used when the player has no rank
+              // row yet; a plugin cannot import that constant from
+              // apps/server, so the sites are kept in step by hand.
+              maxHealth: row.healthMaxOverride ?? row.maxHealth ?? 100,
               attackable: reason === null,
               // null, not absent, when attackable: a nullable field is
               // friendlier to zod and to exactOptionalPropertyTypes than an

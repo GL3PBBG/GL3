@@ -30,6 +30,8 @@ export const playerStats = pgTable("player_stats", {
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   bullets: bigint("bullets", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
+  /** Per-player cap override (core migration 0017); NULL = the rank's cap. */
+  healthMax: integer("health_max"),
   // The melee leg's resolution inputs (C6): MCCodes damage is
   // power × strength ÷ (guard / 1.5), hit chance the agility ratio.
   strength: bigint("strength", { mode: "bigint" }).notNull(),
