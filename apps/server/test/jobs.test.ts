@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import jobsPlugin from "@gl3/plugin-jobs";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
 import progressionPlugin from "@gl3/plugin-progression";
-import { playerStats } from "../src/db/schema/index.js";
+import { notifications, playerStats } from "../src/db/schema/index.js";
 import { testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -67,11 +67,25 @@ describe("jobs plugin (exp routing claimed — wages feed levels, never ranks)",
       expect(wageAgeMs).toBeGreaterThan(11 * 3_600_000);
       expect(wageAgeMs).toBeLessThan(13 * 3_600_000);
 
+      // The payout is visible, not silent: a lazy settle the player never
+      // asked for must leave a record they can see — the notification.
+      const notes = await db.select().from(notifications)
+        .where(eq(notifications.playerId, playerId));
+      const payday = notes.filter((n) => n.body.includes("Payday"));
+      expect(payday, JSON.stringify(notes.map((n) => n.body))).toHaveLength(1);
+      expect(payday[0]?.body).toContain("3");
+      expect(payday[0]?.body).toContain("$300");
+      expect(payday[0]?.body).toContain("Loader");
+
       // An immediate re-read settles nothing.
       const again = await server.app.inject({ method: "GET", url: "/api/jobs/mine", headers: auth });
       expect(again.json().daysSettled).toBe(0);
       const [unchanged] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
       expect(unchanged?.cash).toBe(300n);
+      // And notifies nothing — zero-day reads must not spam paydays.
+      const notesAfter = await db.select().from(notifications)
+        .where(eq(notifications.playerId, playerId));
+      expect(notesAfter.filter((n) => n.body.includes("Payday"))).toHaveLength(1);
     } finally {
       await server.close();
     }

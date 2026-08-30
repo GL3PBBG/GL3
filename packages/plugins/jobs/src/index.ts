@@ -65,10 +65,18 @@ async function settleWages(tx: PluginTx, playerId: string): Promise<number> {
   if (days <= 0) return 0;
 
   if (row.pay > 0n) {
+    const total = row.pay * BigInt(days);
     await tx.economy.applyBalanceChange(
-      { playerId, amount: row.pay * BigInt(days), kind: "cash", reason: "jobs.wage", refId: row.rankId },
+      { playerId, amount: total, kind: "cash", reason: "jobs.wage", refId: row.rankId },
     );
-    await tx.economy.applyExpAndRankUp(playerId, (row.pay * BigInt(days)) / 20n);
+    await tx.economy.applyExpAndRankUp(playerId, total / 20n);
+    // A lazy payout the player never asked for is invisible without a record
+    // — the cash just IS higher. The notification is that record (the
+    // properties-seizure precedent: one audience, tx.notify, not an event).
+    await tx.notify(
+      playerId,
+      `Payday: ${days} ${days === 1 ? "day" : "days"}' wages at ${row.rankName} — $${total}.`,
+    );
   }
   if (row.strengthGain > 0) await tx.attributes.train(playerId, "strength", BigInt(row.strengthGain * days));
   if (row.labourGain > 0) await tx.attributes.train(playerId, "labour", BigInt(row.labourGain * days));
