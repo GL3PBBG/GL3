@@ -69,6 +69,19 @@ describe("houses plugin", () => {
     await db.update(playerStats).set({ cash: 500n, willMax: 150, will: 0 })
       .where(eq(playerStats.playerId, playerId));
 
+    // Equal-will is a rebuy of the house you live in, not a downgrade — the
+    // Default House is in the buy list, so every fresh player can hit this
+    // and "downgrade_refused" read as "refused, yet I have the house".
+    const rebuy = await server.app.inject({
+      method: "POST", url: "/api/houses/buy",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { houseId: shackId },
+    });
+    expect(rebuy.statusCode).toBe(409);
+    expect(rebuy.json().error).toBe("already_owned");
+
+    await db.update(playerStats).set({ willMax: 300 })
+      .where(eq(playerStats.playerId, playerId));
     const downgrade = await server.app.inject({
       method: "POST", url: "/api/houses/buy",
       headers: { authorization: `Bearer ${token}` },
@@ -76,6 +89,9 @@ describe("houses plugin", () => {
     });
     expect(downgrade.statusCode).toBe(409);
     expect(downgrade.json().error).toBe("downgrade_refused");
+
+    await db.update(playerStats).set({ willMax: 150 })
+      .where(eq(playerStats.playerId, playerId));
 
     const broke = await server.app.inject({
       method: "POST", url: "/api/houses/buy",

@@ -117,8 +117,12 @@ const buyRoute = route({
       const attrs = await tx.attributes.read(player.id);
       // Upgrades only (estate.php:37-39): "You cannot go backwards in
       // houses!" — an equal-will buy is also refused; there is nothing to
-      // gain and the will reset would be pure loss.
-      if (house.will <= attrs.willMax) throw new PluginError("downgrade_refused", 409);
+      // gain and the will reset would be pure loss. Equal-will is a rebuy
+      // of the house the player lives in (the Default House is in the buy
+      // list, so every fresh player can hit it) and answers already_owned
+      // — calling it a downgrade read as "refused, yet I have the house".
+      if (house.will === attrs.willMax) throw new PluginError("already_owned", 409);
+      if (house.will < attrs.willMax) throw new PluginError("downgrade_refused", 409);
 
       try {
         await tx.economy.applyBalanceChange(
