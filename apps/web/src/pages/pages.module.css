@@ -10,6 +10,8 @@
   background: var(--bg);
 }
 .rowCurrent { border-color: var(--accent); }
+.rowLead { display: flex; align-items: center; gap: 0.75rem; }
+.rowLead > img, .rowLead > span:first-child { flex-shrink: 0; }
 /* Middle cell of an image · text · button row: absorb the free space so the
    text left-aligns beside the image instead of floating centered (space-
    between treats three children as evenly spread otherwise). */
