@@ -155,7 +155,7 @@
  "houses:no_house_to_sell": "The caller owns no house above the baseline 100-will lodging, so there is nothing to sell",
  "houses:unauthorized": "The caller is not signed in (no authenticated player on the request)",
  "insufficient_level": "The player's level is below the gate — the crime or town requires a higher one (crimes.min_level / locations.min_level vs player_stats.level)",
- "inventory:already_full": "A heal item cannot be used at full health",
+ "inventory:already_full": "The item's restorative effect has nothing to restore — a heal item at full health, or a pools item whose every positive delta targets a pool already at its max",
  "inventory:effect_failed": "The item's third-party effect threw while applying, so the use was refused",
  "inventory:insufficient_funds": "The caller cannot afford the purchase",
  "inventory:insufficient_stock": "The shop has fewer units in stock than the quantity requested",
