@@ -106,6 +106,33 @@ const dashboardWidget = on(coreDashboard, async (ctx, value) => {
 // GET /api/crimes — port of routes.ts:26-47
 // ---------------------------------------------------------------------------
 
+/**
+ * The listing's preview of a formula crime's chance: the commit job's own
+ * evaluation (parse guarded, six tokens, SKILL from the learned per-crime
+ * chance) against the caller's current stats. Null on any fault — the same
+ * degrade-not-500 stance the job takes, and the web's "chance by stats"
+ * fallback renders it.
+ */
+function previewFormulaChance(
+  formula: string,
+  stats: { level: number; crimeExp: bigint; exp: bigint; will: number; iq: bigint } | undefined,
+  skillChance: string | undefined,
+): string | null {
+  if (stats === undefined) return null;
+  try {
+    return evaluateSuccessFormula(parseSuccessFormula(formula), {
+      LEVEL: stats.level,
+      CRIMEXP: Number(stats.crimeExp),
+      EXP: Number(stats.exp),
+      WILL: stats.will,
+      IQ: Number(stats.iq),
+      SKILL: Number(skillChance ?? DEFAULT_CRIME_CHANCE),
+    }).toFixed(2);
+  } catch {
+    return null;
+  }
+}
+
 const listRoute = route({
   method: "GET",
   path: "/api/crimes",
@@ -116,7 +143,10 @@ const listRoute = route({
     const cooldownRemaining = await ctx.cooldown.peek("crime", player.id);
 
     return ctx.transaction(async (tx) => {
-      const [me] = await tx.db.select({ level: playerStats.level })
+      const [me] = await tx.db.select({
+        level: playerStats.level, crimeExp: playerStats.crimeExp,
+        exp: playerStats.exp, will: playerStats.will, iq: playerStats.iq,
+      })
         .from(playerStats).where(eq(playerStats.playerId, player.id));
       // V2's listing gate (crimes.inc: `WHERE C_level <= US_rank`), on GL3's
       // level axis — a crime above the player's level is not listed at all,
@@ -143,12 +173,14 @@ const listRoute = route({
             cooldownSeconds: memberCooldown(crime.cooldownSeconds, member),
             minPayout: crime.minPayout.toString(),
             maxPayout: crime.maxPayout.toString(),
-            // null = a formula crime: the chance is computed per attempt from
-            // the player's stats (the success_formula dialect), so no static
-            // per-player number exists to list.
+            // A formula crime previews its chance evaluated against the
+            // CALLER's stats — the same figure the commit job would roll
+            // against right now. Unlocked point-in-time preview (detectives'
+            // list precedent); a parse or eval fault previews null and the
+            // web renders "chance by stats" for it.
             chance: crime.successFormula === null
               ? (skillByCrime.get(crime.id) ?? DEFAULT_CRIME_CHANCE)
-              : null,
+              : previewFormulaChance(crime.successFormula, me, skillByCrime.get(crime.id)),
             cooldownRemaining,
             ...(art.has(crime.id) ? { imageUrl: art.get(crime.id) as string } : {}),
           })),

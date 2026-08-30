@@ -178,7 +178,7 @@ describe("crimes.commit — formula crimes (success_formula set)", () => {
     expect(skills).toHaveLength(0);
   });
 
-  it("lists formula crimes with chance null, skill crimes with the default", async () => {
+  it("lists a formula crime's chance evaluated against the caller's own stats", async () => {
     const skillCrimeId = crypto.randomUUID();
     await db.insert(crimes).values({
       id: skillCrimeId, name: "Skill Crime", cooldownSeconds: 60,
@@ -189,8 +189,36 @@ describe("crimes.commit — formula crimes (success_formula set)", () => {
       method: "GET", url: "/api/crimes", headers: { authorization: `Bearer ${token}` },
     });
     const listed = res.json().crimes as Array<{ id: string; chance: string | null }>;
-    expect(listed.find((c) => c.id === alwaysCrimeId)?.chance).toBeNull();
+    // A fresh player is level 1: min(100, LEVEL) previews as 1.00, the same
+    // figure the commit job would roll against right now. Unlocked preview —
+    // the job re-evaluates in-transaction, the detectives-list precedent.
+    expect(listed.find((c) => c.id === alwaysCrimeId)?.chance).toBe("1.00");
+    expect(listed.find((c) => c.id === neverCrimeId)?.chance).toBe("0.00");
+    // 100/WILL is NOT a fault for a real registered player: the gl3-profile
+    // registration flow seeds the will pool to its declared 100, so this
+    // previews honestly as 1.00 (the job-side "eval fault" test relies on a
+    // raw-inserted player whose will stays at the column default 0).
+    expect(listed.find((c) => c.id === faultCrimeId)?.chance).toBe("1.00");
     expect(listed.find((c) => c.id === skillCrimeId)?.chance).toBe("35.00");
+  });
+
+  it("previews null for a formula that faults at eval time, never a 500", async () => {
+    const divZeroId = crypto.randomUUID();
+    await db.insert(crimes).values({
+      id: divZeroId, name: "DivZero Always", cooldownSeconds: 60,
+      minPayout: 10n, maxPayout: 20n,
+      // Deterministic division by zero for EVERY player — parse-valid, so
+      // only the evaluator can refuse it. The web renders "chance by stats"
+      // for null, so a broken formula degrades instead of 500ing the list.
+      successFormula: "100 / (LEVEL - LEVEL)",
+    });
+    const { token } = await registerVerifiedPlayer({ app, redis });
+    const res = await app.inject({
+      method: "GET", url: "/api/crimes", headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const listed = res.json().crimes as Array<{ id: string; chance: string | null }>;
+    expect(listed.find((c) => c.id === divZeroId)?.chance).toBeNull();
   });
 });
 
