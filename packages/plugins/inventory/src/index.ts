@@ -305,6 +305,7 @@ const useRoute = route({
         .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
         .where(eq(playerStats.playerId, player.id));
       if (!stats) throw new PluginError("unauthorized", 401);
+      const attrs = await tx.attributes.read(player.id);
 
       // Same resolution order as core's auth/routes.ts and hospital/status.ts:
       // the per-player health_max override (gym-trained, migration 0017) wins,
@@ -341,6 +342,11 @@ const useRoute = route({
         maxHealth,
         exp: Number(stats.exp),
         cash: stats.cash.toString(),
+        pools: {
+          energy: { value: attrs.energy, max: attrs.energyMax },
+          will: { value: attrs.will, max: attrs.willMax },
+          brave: { value: attrs.brave, max: attrs.braveMax },
+        },
       };
       // The def is pure and third-party; `guardEffect` is what keeps its throw
       // a 400 rather than a 500, and `boundOutcome` is what keeps its figures
@@ -1024,12 +1030,14 @@ export {
   MAX_CASH_PER_USE,
   MAX_EXP_PER_USE,
   MIN_HEALTH_AFTER_USE,
+  POOL_ORDER,
   readConsumableUse,
   type BoundedOutcome,
   type ConsumableUse,
   type ItemEffectDef,
   type ItemEffectOutcome,
   type ItemEffectSnapshot,
+  type PoolSnapshot,
 } from "./effect-registry.js";
 
 export default definePlugin({

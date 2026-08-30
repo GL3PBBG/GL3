@@ -37,7 +37,14 @@ function fakeDef(kind: string, outcome: ItemEffectOutcome = {}): ItemEffectDef {
   return { kind, label: `${kind} label`, apply: () => outcome };
 }
 
-const snapshot = { health: 50, maxHealth: 100, exp: 0, cash: "1000" };
+const snapshot = {
+  health: 50, maxHealth: 100, exp: 0, cash: "1000",
+  pools: {
+    energy: { value: 10, max: 12 },
+    will: { value: 100, max: 100 },
+    brave: { value: 2, max: 5 },
+  },
+};
 
 describe("buildEffectRegistry", () => {
   it("always carries the built-in heal, with no subscriber involved", async () => {
@@ -124,7 +131,7 @@ describe("boundOutcome", () => {
   it("leaves health exactly alone for a zero delta", () => {
     // Not the same as clamping to maxHealth: a player whose maxHealth just
     // dropped can be ABOVE it, and an unrelated item must not trim them.
-    const over = { health: 140, maxHealth: 100, exp: 0, cash: "0" };
+    const over = { health: 140, maxHealth: 100, exp: 0, cash: "0", pools: snapshot.pools };
     expect(boundOutcome({ expDelta: 5 }, over).health).toBe(140);
     expect(boundOutcome({}, over).healed).toBe(0);
   });
@@ -162,6 +169,24 @@ describe("boundOutcome", () => {
     expect(boundOutcome({ message: "x".repeat(500) }, snapshot).message).toHaveLength(200);
     expect(boundOutcome({ message: "" }, snapshot).message).toBeNull();
     expect(boundOutcome({}, snapshot).message).toBeNull();
+  });
+});
+
+describe("boundOutcome — pool deltas", () => {
+  it("passes integer deltas through and always answers a poolDeltas object", () => {
+    const b = boundOutcome({ poolDeltas: { brave: 3, energy: -4 } }, snapshot);
+    expect(b.poolDeltas).toEqual({ brave: 3, energy: -4 });
+    expect(boundOutcome({}, snapshot).poolDeltas).toEqual({});
+  });
+
+  it("truncates fractions and drops zero, NaN and Infinity", () => {
+    const b = boundOutcome(
+      { poolDeltas: { energy: 2.9, will: 0, brave: Number.NaN } },
+      snapshot,
+    );
+    expect(b.poolDeltas).toEqual({ energy: 2 });
+    expect(boundOutcome({ poolDeltas: { brave: Number.POSITIVE_INFINITY } }, snapshot).poolDeltas)
+      .toEqual({});
   });
 });
 

@@ -1,4 +1,4 @@
-import { filterPoint, isPluginError, PluginError, type PluginCtx } from "@gl3/plugin-sdk";
+import { filterPoint, isPluginError, PluginError, type PluginCtx, type Pool } from "@gl3/plugin-sdk";
 
 /**
  * What using an item does, stated as FIGURES. A def never touches the database,
@@ -17,9 +17,24 @@ export interface ItemEffectOutcome {
   expDelta?: number;
   /** A decimal string, never a JSON number (the money rule). May be negative. */
   cashDelta?: string;
+  /**
+   * Signed, per pool. Positive is a grant — clamped at the pool's max by
+   * `tx.attributes.grant`; negative is a cost — refused with a 409
+   * `insufficient_<pool>` by `tx.attributes.spend`, which rolls the whole
+   * transaction back, qty decrement included, so an unaffordable item is
+   * never consumed. Unlike health/exp/cash, the BOUNDS live in
+   * `tx.attributes` (the one authority for pool writes, player-attributes
+   * cluster); `boundOutcome` only sanitises shape.
+   */
+  poolDeltas?: Partial<Record<Pool, number>>;
   /** Shown to the player after the use. Truncated — a def controls its length. */
   message?: string;
 }
+
+/** Fixed iteration order for pool deltas — the route applies in this order too. */
+export const POOL_ORDER = ["energy", "will", "brave"] as const satisfies readonly Pool[];
+
+export interface PoolSnapshot { value: number; max: number }
 
 export interface ItemEffectSnapshot {
   health: number;
@@ -32,6 +47,14 @@ export interface ItemEffectSnapshot {
   exp: number;
   /** Decimal string, per the money rule. Always a non-negative integer. */
   cash: string;
+  /**
+   * The three regen pools, settled under the player lock before the def runs
+   * (`tx.attributes.read`), so regen counts. `max === 0` means the pool is
+   * inactive on this install — no plugin declared it, and the settle never
+   * seeds an undeclared max. A def that needs the pool should refuse rather
+   * than no-op (the built-in `pools` def answers `pool_not_active`).
+   */
+  pools: Record<Pool, PoolSnapshot>;
 }
 
 export interface ItemEffectDef {
@@ -163,6 +186,7 @@ export interface BoundedOutcome {
   healed: number;
   expDelta: bigint;
   cashDelta: bigint;
+  poolDeltas: Partial<Record<Pool, number>>;
   message: string | null;
 }
 
@@ -217,7 +241,16 @@ export function boundOutcome(
     ? outcome.message.slice(0, MAX_MESSAGE_LENGTH)
     : null;
 
-  return { health, healed: health - snapshot.health, expDelta, cashDelta, message };
+  const poolDeltas: Partial<Record<Pool, number>> = {};
+  const rawPools = outcome.poolDeltas;
+  if (rawPools !== undefined) {
+    for (const pool of POOL_ORDER) {
+      const delta = intOrZero(rawPools[pool]);
+      if (delta !== 0) poolDeltas[pool] = delta;
+    }
+  }
+
+  return { health, healed: health - snapshot.health, expDelta, cashDelta, poolDeltas, message };
 }
 
 /**
