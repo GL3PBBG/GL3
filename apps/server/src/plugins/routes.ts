@@ -145,7 +145,13 @@ export function registerPluginRoutes(
               // flake survived a ~45k-race repro hunt unfired) carries its
               // own post-mortem instead of another blind chase.
               if (pg["code"] === "40P01") {
-                console.error(dumpRecentQueries(), "recent statements per pool connection at deadlock");
+                // JSON, not console.error's object inspection: Node truncates
+                // arrays at 100 entries ("... 20 more items"), and the 2026-08-30
+                // capture lost the exact statement that closed the cycle to it.
+                console.error(
+                  JSON.stringify(dumpRecentQueries()),
+                  "recent statements per pool connection at deadlock",
+                );
               }
             }
             throw error;
