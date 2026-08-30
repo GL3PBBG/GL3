@@ -167,6 +167,7 @@
  "inventory:no_location": "The caller is not standing in any town, so there is no local shop to buy from",
  "inventory:not_owned": "The caller owns no copies of that item",
  "inventory:not_sold_here": "That item is not stocked in the shop of the caller's current town",
+ "inventory:pool_not_active": "The consumable names a pool (energy/will/brave) with max 0 — nobody declared it on this install",
  "inventory:rank_too_low": "The caller's experience is below the weapon's minimum rank requirement to equip it",
  "inventory:stock_not_found": "No shop-stock row exists for that town-and-item pair",
  "inventory:unauthorized": "The caller is not signed in, or their player-stats row is missing",
