@@ -17,6 +17,11 @@ export function Login(): JSX.Element {
   const passwordChanged = (location.state as { passwordChanged?: boolean } | null)?.passwordChanged === true;
 
   return (
+    <div className={styles.landing}>
+      {/* The landing hero: this page is the game's front door, so the brand
+          stands above the form at full size rather than inside it. The other
+          auth pages (Verify/Forgot/Reset) keep the compact in-form mark. */}
+      <BrandMark variant="login" className={styles.landingBrand} />
     <form
       className={styles.form}
       onSubmit={(event) => {
@@ -24,7 +29,6 @@ export function Login(): JSX.Element {
         auth.mutate(mode === "register" ? { username, password, email } : { username, password });
       }}
     >
-      <BrandMark variant="login" className={styles.brand} />
       {passwordChanged ? <p role="status">Password changed — log in below.</p> : null}
       {/* aria-label, not a visible <label>: the placeholder is the visual
           design, but a placeholder alone names the field for nobody once it
@@ -57,5 +61,6 @@ export function Login(): JSX.Element {
       {/* describeError turns "401 invalid_credentials" into a sentence. */}
       <ErrorText error={auth.error} />
     </form>
+    </div>
   );
 }

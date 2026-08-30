@@ -9,4 +9,20 @@
   background: var(--panel);
 }
 .brand { margin: 0 0 0.5rem; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* The landing hero. `.form`'s own 12vh margin stays for the other three auth
+   pages that use it bare; inside the landing the wrapper owns the spacing. */
+.landing { max-width: 320px; margin: 8vh auto 0; display: grid; gap: 1.2rem; }
+.landing .form { margin: 0; }
+.landingBrand {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  text-align: center;
+  font-size: 2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+/* A bound logo renders hero-sized here, overriding BrandMark's in-form cap. */
+.landingBrand img { max-height: 200px; max-width: 100%; }
 .toggle { background: transparent; color: var(--muted); border: 1px solid var(--line); }
