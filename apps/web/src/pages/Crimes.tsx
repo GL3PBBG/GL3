@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ApiError } from "../api/client.js";
+import { refusalCooldownSeconds } from "../lib/errors.js";
 import { useCommitCrime, useCrimes, useJail } from "../api/queries.js";
 import { useCountdowns } from "../hooks/useCountdowns.js";
 import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
@@ -65,10 +66,13 @@ export function Crimes(): JSX.Element {
                 start(COOLDOWN_ID, crime.cooldownSeconds);
                 commit.mutate(crime.id, {
                   onError: (error) => {
-                    // The optimistic guess was wrong — take the server's number.
-                    if (!(error instanceof ApiError)) return;
-                    if (error.retryAfter !== undefined) start(COOLDOWN_ID, error.retryAfter);
-                    void jail.refetch();
+                    // The optimistic guess was wrong — take the server's
+                    // number, and RELEASE the lock on a refusal that never
+                    // burned the cooldown (insufficient_brave and friends):
+                    // a dead button beside no message read as no feedback.
+                    const seconds = refusalCooldownSeconds(error);
+                    if (seconds !== null) start(COOLDOWN_ID, seconds);
+                    if (error instanceof ApiError) void jail.refetch();
                   },
                 });
               }}

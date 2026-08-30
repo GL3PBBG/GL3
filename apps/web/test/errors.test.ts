@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api/client.js";
-import { describeError, formatDuration } from "../src/lib/errors.js";
+import { describeError, formatDuration, refusalCooldownSeconds } from "../src/lib/errors.js";
 
 describe("formatDuration", () => {
   it("renders sub-minute waits in seconds", () => {
@@ -51,6 +51,21 @@ describe("describeError", () => {
     expect(describeError(new Error("boom"))).toBe("boom");
     expect(describeError("boom")).toBe("Something went wrong.");
     expect(describeError(null)).toBe("Something went wrong.");
+  });
+
+  it("gives every attribute-pool refusal a sentence — the route mints insufficient_<pool> dynamically", () => {
+    for (const code of ["insufficient_energy", "insufficient_will", "insufficient_brave"]) {
+      const message = describeError(new ApiError(409, code));
+      expect(message, code).not.toBe(code);
+      expect(message).toMatch(/[a-z] /);
+    }
+    expect(describeError(new ApiError(409, "insufficient_level"))).not.toBe("insufficient_level");
+  });
+
+  it("refusalCooldownSeconds: server refusal without retryAfter unlocks (0), a 429 adopts the server's number, a transport error leaves the lock alone (null)", () => {
+    expect(refusalCooldownSeconds(new ApiError(409, "insufficient_brave"))).toBe(0);
+    expect(refusalCooldownSeconds(new ApiError(429, "on_cooldown", { retryAfter: 12 }))).toBe(12);
+    expect(refusalCooldownSeconds(new Error("network down"))).toBe(null);
   });
 
   it("describes insufficient_stock without naming bullets", () => {

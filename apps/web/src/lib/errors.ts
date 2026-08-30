@@ -36,11 +36,15 @@ const MESSAGES: Record<string, string> = {
   gang_not_found: "That gang no longer exists.",
   hospitalised: "You're in hospital.",
   house_cannot_cover: "The house can't cover a win that big — bet less.",
+  insufficient_brave: "You're not feeling brave enough — it comes back over time.",
   insufficient_bullets: "You don't have enough bullets.",
   insufficient_cash: "You don't have enough cash on hand.",
+  insufficient_energy: "You're out of energy — it comes back over time.",
   insufficient_funds: "You don't have enough money.",
   insufficient_gang_funds: "The gang doesn't have enough money.",
+  insufficient_level: "Your level is too low for that.",
   insufficient_stock: "Not enough in stock.",
+  insufficient_will: "You don't have the will for that right now — it comes back over time.",
   lever_above_cap: "That price is above the limit the admin set.",
   min_above_max: "The hourly minimum can't be above the maximum.",
   quantity_above_max: "That's more than you can buy at once.",
@@ -145,4 +149,17 @@ export function describeError(error: unknown): string {
     return `You can buy at most ${error.maxBuy} bullets at a time.`;
   }
   return base;
+}
+
+/**
+ * What an optimistically-started action cooldown should become after the
+ * server refused the action. A 429 carries the server's own remaining time; a
+ * refusal without one (insufficient_brave, jailed, a 404) happened BEFORE the
+ * cooldown burned, so the optimistic lock must release — a dead button next to
+ * no message was exactly how a brave shortfall looked like nothing at all.
+ * A transport error returns null: the request may have landed, keep the lock.
+ */
+export function refusalCooldownSeconds(error: unknown): number | null {
+  if (!(error instanceof ApiError)) return null;
+  return error.retryAfter ?? 0;
 }

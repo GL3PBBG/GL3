@@ -42,6 +42,22 @@ describe("describeEvent", () => {
     expect(describeEvent(crime)).toBe("Pickpocket: succeeded, +$1,500 (+12 exp)");
   });
 
+  it("distinguishes a pool-shortfall no-attempt from a failed roll", () => {
+    const shortfall = event({
+      type: "crime.resolved", crimeName: "Pickpocket", success: false,
+      cause: "insufficient_pool",
+      payout: "0", exp: "0", bullets: "0", jailedUntil: null,
+      crimeId: "00000000-0000-7000-8000-000000000009",
+    });
+    expect(describeEvent(shortfall)).toBe("Pickpocket: called off — you couldn't cover the cost");
+    const failed = event({
+      type: "crime.resolved", crimeName: "Pickpocket", success: false,
+      payout: "0", exp: "0", bullets: "0", jailedUntil: null,
+      crimeId: "00000000-0000-7000-8000-000000000009",
+    });
+    expect(describeEvent(failed)).toBe("Pickpocket: failed");
+  });
+
   it("renders a plugin event through its manifest template", () => {
     expect(describeEvent(pluginEvent(), metas)).toBe("Ron greeted Vic 3 times");
   });

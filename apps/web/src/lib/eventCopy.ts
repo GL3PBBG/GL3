@@ -23,8 +23,13 @@ import { formatMoney } from "./money.js";
 export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[] = []): string {
   switch (event.type) {
     case "crime.resolved":
-      return event.success
-        ? `${event.crimeName}: succeeded, +${formatMoney(event.payout)} (+${event.exp} exp)`
+      if (event.success) {
+        return `${event.crimeName}: succeeded, +${formatMoney(event.payout)} (+${event.exp} exp)`;
+      }
+      // A pool shortfall at resolve time is a no-attempt, not a bad roll —
+      // rendering it as a plain "failed" left the player with no idea why.
+      return event.cause === "insufficient_pool"
+        ? `${event.crimeName}: called off — you couldn't cover the cost`
         : `${event.crimeName}: failed`;
     case "player.jailed":
       return `Jailed — ${event.reason}`;
