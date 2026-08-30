@@ -38,7 +38,7 @@ function Row({ item, cash }: { item: ShopItem; cash: string }) {
   return (
     <li className={styles.row}>
       <span>
-        <GameImage url={item.imageUrl} alt={item.name} size="sm" />{" "}
+        <GameImage url={item.imageUrl} alt={item.name} size="md" />{" "}
         <strong>{item.name}</strong> <Stats item={item} />
         <span className={styles.meta}> <Money value={item.price} /> each · {item.stock} in stock</span>
       </span>
