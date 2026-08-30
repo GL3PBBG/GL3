@@ -9,6 +9,8 @@ import {
   MAX_CASH_PER_USE,
   MAX_EXP_PER_USE,
   MIN_HEALTH_AFTER_USE,
+  POOLS_EFFECT,
+  POOLS_EFFECT_KIND,
   readConsumableUse,
   type ItemEffectDef,
   type ItemEffectOutcome,
@@ -37,6 +39,11 @@ function fakeDef(kind: string, outcome: ItemEffectOutcome = {}): ItemEffectDef {
   return { kind, label: `${kind} label`, apply: () => outcome };
 }
 
+function captureError(fn: () => unknown): unknown {
+  try { fn(); } catch (error) { return error; }
+  throw new Error("expected a throw");
+}
+
 const snapshot = {
   health: 50, maxHealth: 100, exp: 0, cash: "1000",
   pools: {
@@ -50,7 +57,8 @@ describe("buildEffectRegistry", () => {
   it("always carries the built-in heal, with no subscriber involved", async () => {
     const registry = await buildEffectRegistry(ctxWith([]));
     expect(registry.get(HEAL_EFFECT_KIND)?.label).toBe("Heal");
-    expect(registry.size).toBe(1);
+    // Two built-ins now: heal and pools.
+    expect(registry.size).toBe(2);
   });
 
   it("collects a subscribed def", async () => {
@@ -217,5 +225,51 @@ describe("readConsumableUse", () => {
     // with psql can put anything there.
     expect(readConsumableUse({ heal: 20 }, null)?.config).toEqual({ heal: 20 });
     expect(readConsumableUse({ heal: 20 }, "junk")?.config).toEqual({ heal: 20 });
+  });
+});
+
+describe("the built-in pools def", () => {
+  const at = (pools: Partial<Record<"energy" | "will" | "brave", { value: number; max: number }>>) => ({
+    ...snapshot,
+    pools: { ...snapshot.pools, ...pools },
+  });
+
+  it("is in the base registry beside heal", async () => {
+    const registry = await buildEffectRegistry(ctxWith([]));
+    expect(registry.get(POOLS_EFFECT_KIND)?.label).toBe("Pools");
+  });
+
+  it("states the configured deltas", () => {
+    expect(POOLS_EFFECT.apply({ pools: { brave: 3, energy: -4 } }, snapshot))
+      .toEqual({ poolDeltas: { energy: -4, brave: 3 } });
+  });
+
+  it("refuses malformed config with wrong_slot", () => {
+    for (const config of [
+      {}, { pools: 5 }, { pools: {} }, { pools: { brave: 0 } },
+      { pools: { brave: 1.5 } }, { pools: { brave: "3" } },
+    ]) {
+      const err = captureError(() => POOLS_EFFECT.apply(config, snapshot));
+      expect(isPluginError(err) && err.code).toBe("wrong_slot");
+    }
+  });
+
+  it("refuses a pool nobody declared (max 0) with pool_not_active", () => {
+    const err = captureError(() =>
+      POOLS_EFFECT.apply({ pools: { brave: 3 } }, at({ brave: { value: 0, max: 0 } })));
+    expect(isPluginError(err) && err.code).toBe("pool_not_active");
+  });
+
+  it("refuses when every positive delta targets a full pool", () => {
+    const full = at({ brave: { value: 5, max: 5 } });
+    const err = captureError(() =>
+      POOLS_EFFECT.apply({ pools: { brave: 3, energy: -4 } }, full));
+    expect(isPluginError(err) && err.code).toBe("already_full");
+    // One non-full positive target is enough to proceed.
+    expect(POOLS_EFFECT.apply({ pools: { brave: 3, energy: 1 } }, full))
+      .toEqual({ poolDeltas: { energy: 1, brave: 3 } });
+    // A negative-only item has no refill to be full OF.
+    expect(POOLS_EFFECT.apply({ pools: { energy: -2 } }, full))
+      .toEqual({ poolDeltas: { energy: -2 } });
   });
 });

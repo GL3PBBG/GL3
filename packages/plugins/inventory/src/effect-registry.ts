@@ -135,6 +135,53 @@ export const HEAL_EFFECT: ItemEffectDef = {
   },
 };
 
+export const POOLS_EFFECT_KIND = "pools";
+
+/**
+ * The second built-in: `{ kind: "pools", pools: { brave: 3, energy: -4 } }`
+ * moves the named pools by the named amounts. Refusals are PluginErrors so
+ * `guardEffect` passes them through untouched:
+ * - `wrong_slot`: config the def cannot read — same code the route gives any
+ *   unusable consumable.
+ * - `pool_not_active`: a named pool has `max === 0` (nobody declared it on
+ *   this install) — refusing beats silently burning the item as a no-op.
+ * - `already_full`: positive deltas exist and EVERY one targets a full pool —
+ *   using "refill brave, cost energy" at full brave would waste both the item
+ *   and the energy. Mirrors the route's heal-at-full-health 409.
+ */
+export const POOLS_EFFECT: ItemEffectDef = {
+  kind: POOLS_EFFECT_KIND,
+  label: "Pools",
+  apply(config, snapshot) {
+    const raw = config["pools"];
+    if (!isRecord(raw)) throw new PluginError("wrong_slot", 400);
+    const deltas: Partial<Record<Pool, number>> = {};
+    for (const pool of POOL_ORDER) {
+      const value = raw[pool];
+      if (value === undefined) continue;
+      if (typeof value !== "number" || !Number.isInteger(value) || value === 0) {
+        throw new PluginError("wrong_slot", 400);
+      }
+      deltas[pool] = value;
+    }
+    const named = POOL_ORDER.filter((pool) => deltas[pool] !== undefined);
+    if (named.length === 0) throw new PluginError("wrong_slot", 400);
+    for (const pool of named) {
+      if (snapshot.pools[pool].max === 0) {
+        throw new PluginError("pool_not_active", 400, { pool });
+      }
+    }
+    const positives = named.filter((pool) => (deltas[pool] ?? 0) > 0);
+    if (
+      positives.length > 0
+      && positives.every((pool) => snapshot.pools[pool].value >= snapshot.pools[pool].max)
+    ) {
+      throw new PluginError("already_full", 409);
+    }
+    return { poolDeltas: deltas };
+  },
+};
+
 /**
  * Built on first use, request-time rather than boot-time for the reason
  * `casino.buildRegistry` records: a def arrives inside a filter subscription
@@ -149,7 +196,10 @@ export async function buildEffectRegistry(
   ctx: Pick<PluginCtx, "filters">,
 ): Promise<Map<string, ItemEffectDef>> {
   const declared = await ctx.filters.apply(itemEffects, []);
-  const registry = new Map<string, ItemEffectDef>([[HEAL_EFFECT.kind, HEAL_EFFECT]]);
+  const registry = new Map<string, ItemEffectDef>([
+    [HEAL_EFFECT.kind, HEAL_EFFECT],
+    [POOLS_EFFECT.kind, POOLS_EFFECT],
+  ]);
   for (const def of declared) {
     if (registry.has(def.kind)) throw new Error(`duplicate item effect kind "${def.kind}"`);
     registry.set(def.kind, def);

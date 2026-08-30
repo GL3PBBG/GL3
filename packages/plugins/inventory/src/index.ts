@@ -1031,6 +1031,8 @@ export {
   MAX_EXP_PER_USE,
   MIN_HEALTH_AFTER_USE,
   POOL_ORDER,
+  POOLS_EFFECT,
+  POOLS_EFFECT_KIND,
   readConsumableUse,
   type BoundedOutcome,
   type ConsumableUse,
