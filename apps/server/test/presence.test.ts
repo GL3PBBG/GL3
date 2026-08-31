@@ -33,7 +33,7 @@ describe("touchPresence", () => {
     const id = await makePlayer();
     const now = new Date();
 
-    await touchPresence(redis, db, id, now);
+    await touchPresence(redis, db, id, null, now);
 
     const score = await redis.zscore(PRESENCE_KEY, id);
     expect(score).not.toBeNull();
@@ -47,7 +47,7 @@ describe("touchPresence", () => {
     // Second call within the same 60s guard window: ZSET score moves, but the
     // DB stamp does not — the NX outcome on lastseenmark:<id> is the decision.
     const later = new Date(now.getTime() + 5000);
-    await touchPresence(redis, db, id, later);
+    await touchPresence(redis, db, id, null, later);
 
     const scoreAfterSecond = await redis.zscore(PRESENCE_KEY, id);
     expect(Number(scoreAfterSecond)).toBe(later.getTime());

@@ -350,6 +350,7 @@ export default defineWorkspace([
         "test/auth-reset.test.ts",
         "test/auth-verify.test.ts",
         "test/auth.test.ts",
+        "test/ip-telemetry.test.ts",
         "test/bank.test.ts",
         "test/bounties-claim.test.ts",
         "test/bounties.test.ts",

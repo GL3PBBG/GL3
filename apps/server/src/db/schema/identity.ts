@@ -56,6 +56,11 @@ export const players = pgTable("players", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  /** Client IP at registration (anti-bot layer 0). NULL predates 0022. */
+  signupIp: text("signup_ip"),
+  /** Client IP of the most recent stamped request — written by register,
+   *  login, and the SET-NX-EX-throttled presence touch, never per request. */
+  lastIp: text("last_ip"),
   /** NULL = not banned. With bannedAt set, a NULL banExpiresAt is permanent. */
   bannedAt: timestamp("banned_at", { withTimezone: true }),
   banReason: text("ban_reason"),

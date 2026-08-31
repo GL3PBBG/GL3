@@ -11,7 +11,7 @@ import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
-import { DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
+import { clientIp, DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { collectAttributePools, memberRegenMultiplier } from "../plugins/attribute-pools.js";
 import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
@@ -76,7 +76,7 @@ export function registerAuthRoutes(
     if (await isBanned(redis, playerId)) {
       await reply.code(403).send({ error: "banned" }); return;
     }
-    await touchPresence(redis, db, playerId);
+    await touchPresence(redis, db, playerId, clientIp(request, config.clientIpHeader));
     const url = request.url.split("?")[0] ?? request.url;
     if (!GATE_EXEMPT.some((p) => url === p || url.startsWith(`${p}/`))) {
       if (await isUnverified(redis, playerId)) {
@@ -133,6 +133,8 @@ export function registerAuthRoutes(
           username: parsed.data.username,
           email: parsed.data.email,
           passwordHash,
+          signupIp: clientIp(request, config.clientIpHeader),
+          lastIp: clientIp(request, config.clientIpHeader),
         });
         await tx.insert(playerStats).values({ playerId, ...seededStats });
 
@@ -290,6 +292,11 @@ export function registerAuthRoutes(
     } else {
       await clearUnverified(redis, player.id);
     }
+
+    // Unthrottled, unlike the presence touch: logins are rare, rate-limited
+    // above, and the address at session start is the one worth keeping.
+    await db.update(players).set({ lastIp: clientIp(request, config.clientIpHeader) })
+      .where(eq(players.id, player.id));
 
     const token = await createSession(redis, player.id, config.sessionTtlSeconds);
     return reply.code(200).send({ token, playerId: player.id, username: player.username });
