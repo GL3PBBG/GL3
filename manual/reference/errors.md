@@ -16,13 +16,13 @@ report is all just "no report").
 | `already_boss` | 409 | gangs | The leadership-transfer target is already the boss |
 | `already_completed` | 409 | education | The caller has already completed that course |
 | `already_employed` | 409 | jobs | The caller already holds a job |
-| `already_full` | 409 | inventory, temple | inventory: A heal item cannot be used at full health; temple: Caller's energy is already at maximum, so a refill would buy nothing |
+| `already_full` | 409 | inventory, temple | inventory: The item's restorative effect has nothing to restore — a heal item at full health, or a pools item whose every positive delta targets a pool already at its max; temple: Caller's energy is already at maximum, so a refill would buy nothing |
 | `already_hospitalised` | 409 | core | The caller is already in hospital and cannot check in again. |
 | `already_in_a_gang` | 409 | gangs | The player (the caller, or the invite target) already belongs to a gang |
 | `already_in_heist` | 409 | oc | The caller already has an active (accepted, unreleased) heist membership |
 | `already_invited` | 409 | oc | The target already has an invite or membership row on that heist |
 | `already_jailed` | 409 | core | The caller is in jail themselves and cannot attempt a bust. |
-| `already_owned` | 409 | properties | That property in this town already has an owner (including the caller themselves) |
+| `already_owned` | 409 | houses, properties | That property in this town already has an owner (including the caller themselves) |
 | `already_seated` | 409 | casino | The caller already holds a seat at a table (one seat per player, game-wide) |
 | `already_studying` | 409 | education | The caller is already enrolled in a course and can only study one at a time |
 | `already_there` | 409 | travel | Caller is already standing in the requested destination town |
@@ -41,6 +41,7 @@ report is all just "no report").
 | `cannot_transfer_to_self` | 409 | properties | Caller tried to transfer the property to themselves |
 | `car_in_use` | 409 | theft | Admin cannot delete a car model that players still hold in their garages |
 | `car_not_found` | 404 | theft | The garage car (or admin-named car model) does not exist or does not belong to the caller |
+| `challenge_required` | 409 | core | Anti-bot gate: a moderator flagged this account for a human check; every mutating request 409s until the /challenge question is answered (GETs, /api/challenge and /api/auth/* stay open) |
 | `cooldown` | 429 | combat | Attack cooldown live (`retry-after` header carries the wait; a refused attack still burns it) |
 | `cooldown_active` | 429 | theft | Caller's theft cooldown has not expired yet |
 | `cost_above_max` | 400 | bullets | Admin tried to set a town's bullet cost above the configured max-cost cap (`maxCost` in details) |
@@ -85,6 +86,7 @@ report is all just "no report").
 | `invalid_effects` | 400 | inventory | The admin-supplied effect figures do not form a valid effects payload for that item type |
 | `invalid_formula` | 400 | crimes | Admin submitted a success formula that fails to parse (parser message in details) |
 | `invalid_game_multiplier` | 500 | casino | Installed-game defect: the game declares a non-finite or negative maxPayoutMultiplier |
+| `invalid_game_name` | 400 | core | The submitted game name is longer than 60 characters (blank falls back to the default). |
 | `invalid_kind` | 400 | core | The requested leaderboard/standings kind is not a recognized board kind. |
 | `invalid_payout` | 500 | casino | Installed-game defect at settle: a negative payout figure, or (tables) a payout naming a seat not in the hand or the same seat twice |
 | `invalid_preset` | 400 | core | The submitted theme preset name is not one of the known presets. |
@@ -124,6 +126,7 @@ report is all just "no report").
 | `no_such_table` | 404 | casino | The table chosen for sit is gone (deleted after settling empty) — a retry opens a fresh one |
 | `no_such_target` | 404 | combat | Target player does not exist |
 | `not_a_member` | 403 / 404 | gangs | The player concerned (the caller, or the targeted player) is not a member of that gang |
+| `not_challenged` | 409 | core | GET/POST /api/challenge without a live challenge flag — there is nothing to solve |
 | `not_employed` | 409 | jobs | The caller has no job to promote from or quit |
 | `not_found` | 404 | core, detectives | core: No stored asset exists under the given content-hash key.; detectives: No such search of the caller's to remove — a nonexistent id and another player's search answer identically by design |
 | `not_hospitalised` | 409 | core | The player this acts on is not currently in hospital. |
@@ -140,6 +143,7 @@ report is all just "no report").
 | `on_cooldown` | 429 | crimes, forum, oc, travel | crimes: Crime cooldown live (`retryAfter` in details and the `retry-after` header carry the wait); forum: The caller created a topic or posted too recently and must wait out the posting cooldown; oc: The caller is still on the heist cooldown set when their last heist resolved and cannot join a new one yet; travel: Caller's travel cooldown has not expired yet |
 | `package_not_found` | 404 | membership | The named membership package does not exist |
 | `player_not_found` | 404 | core, gangs, membership, properties | core: The named player does not exist (or the caller's own player row is missing).; gangs: The named target player does not exist; membership: No player with that recipient username exists; properties: No player with the given username exists to transfer the property to |
+| `pool_not_active` | 400 | inventory | The consumable names a pool (energy/will/brave) with max 0 — nobody declared it on this install |
 | `post_not_found` | 404 | forum | The named post does not exist |
 | `property_not_found` | 404 | properties | No property row with that id exists |
 | `property_owned` | 409 | properties | Admin delete refused: the property has an owner and their deed must be disowned or dropped first |
@@ -158,6 +162,7 @@ report is all just "no report").
 | `round_not_scheduled` | 409 | core | Only a round that has not yet started can be deleted; this one is active, ended, or finalized. |
 | `round_overlap` | 400 | core | The round's time window overlaps another unfinalized round. |
 | `same_gang` | 409 | bounties, combat | bounties: Target is in the placer's own gang; combat: Target is in the caller's gang |
+| `same_ip_blocked` | 409 | membership, properties | membership: Gift refused: giver and recipient share a recorded signup or last-seen IP and `membership.block_same_ip_transfer` is not set to false (anti-bot layer 3); properties: Transfer refused: giver and recipient share a recorded signup or last-seen IP and `properties.block_same_ip_transfer` is not set to false (anti-bot layer 3) |
 | `self_attack` | 400 | combat | Caller tried to attack themselves |
 | `self_bounty` | 409 | bounties | Caller tried to place a bounty on themselves |
 | `self_invite` | 409 | oc | The leader cannot invite themselves to their own heist |
@@ -185,6 +190,7 @@ report is all just "no report").
 | `wager_above_max` | 400 | casino | Wager exceeds the house's maximum bet (the owner's lever, or the default when unset) |
 | `wager_below_min` | 400 | casino | Wager is below the configured minimum bet |
 | `weapon_not_found` | 404 | combat | The item is not a weapon the caller owns (repair refused) |
+| `wrong_answer` | 400 | core | The challenge answer did not match; the stored question is burnt (GETDEL), fetch a fresh one |
 | `wrong_location` | 409 | casino, core, properties, theft | casino: The caller has travelled away from the table's town (bet/act refused; leave still works); core: The target player is not in the caller's own town, and this action only reaches local players.; properties: Caller is not standing in the town where they tried to buy; theft: Caller is not in the required town (moved cities mid-steal, or not standing where the car is garaged for sell/repair) |
 | `wrong_phase` | 409 | casino | The request does not match the table's phase (betting during a live hand, or acting during betting/with no hand state) |
 | `wrong_slot` | 400 | inventory | The item's type or effects do not fit the requested slot or use — a non-weapon in the firearm slot, a non-melee item in the melee slot, a non-armor item in the armor slot, a non-consumable being used, or an effects payload too malformed to read |

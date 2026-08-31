@@ -104,3 +104,10 @@ own game. Contributor material lives in the rest of the manual.
   string appears automatically. Read it before retuning payouts or sink
   prices — it answers "which faucet is running hot" with numbers instead of
   guesses.
+- **Anti-bot moderation**: IP telemetry (set `CLIENT_IP_HEADER` behind a
+  trusted proxy or every player shares the tunnel's address), the `anti-bot`
+  admin section (ledger-scored suspects, IP clusters), the admin-triggered
+  human-check challenge, and the default-on same-IP blocks on property
+  transfers and membership gifts — see [Anti-bot](./anti-bot.md). Nothing
+  automated bans anyone; the tools surface evidence and leave the call to
+  you.

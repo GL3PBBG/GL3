@@ -59,6 +59,7 @@ export default defineConfig({
           { text: 'First boot', link: '/operators/first-boot' },
           { text: 'Game modes (profiles)', link: '/operators/framework-profile' },
           { text: 'Installing plugins', link: '/operators/installing-plugins' },
+          { text: 'Anti-bot moderation', link: '/operators/anti-bot' },
         ],
       },
     ],
