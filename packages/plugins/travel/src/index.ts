@@ -102,6 +102,64 @@ export interface LocationListing {
  */
 export const locationsListed = filterPoint<LocationListing[]>("travel.locationsListed", "propagate");
 
+/** One destination's fare as quoted to one caller. `baseFare` is the figure
+ *  AFTER `memberFare` — the chain runs on top of the membership discount, so
+ *  a subscriber lowering `fare` composes with it rather than replacing it. */
+export interface FareQuoteEntry {
+  readonly toLocationId: string;
+  readonly baseFare: bigint;
+  readonly fare: bigint;
+}
+
+/** Batched by construction (the `ctx.assets.resolve` lesson): the listing
+ *  applies the chain ONCE over every town, so a subscriber prices the whole
+ *  board with one read instead of N. `travelRoute` applies a one-entry batch. */
+export interface FareQuoteBatch {
+  readonly playerId: string;
+  readonly fromLocationId: string | null;
+  readonly quotes: readonly FareQuoteEntry[];
+}
+
+/**
+ * Runs over every fare travel is about to show or charge. `"collect"`, not
+ * `"propagate"`: dropping a throwing subscriber here degrades toward the FULL
+ * fare — the safe direction — where `core.actionCost` had to propagate
+ * because dropping a subscriber there ran the action for free. The applier
+ * also clamps each returned fare to `[0, baseFare]` (see `clampedFare`), so a
+ * buggy or hostile subscriber can discount but never gouge or credit.
+ */
+export const fares = filterPoint<FareQuoteBatch>("travel.fares", "collect");
+
+/** What `travel.completed` announces: the trip as it actually committed. */
+export interface TravelCompleted {
+  readonly playerId: string;
+  readonly fromLocationId: string | null;
+  readonly toLocationId: string;
+  readonly baseFare: bigint;
+  readonly fare: bigint;
+}
+
+/**
+ * Fired once per SUCCESSFUL travel, after the transaction commits — the
+ * `combat.killResolved` shape. Filters run outside any transaction (spec:
+ * Filters), so a subscriber that writes opens its own; its failure is logged
+ * by the applier and cannot un-travel anyone.
+ */
+export const travelCompleted = filterPoint<TravelCompleted>("travel.completed", "collect");
+
+/**
+ * The one figure the chain is trusted to produce: a subscriber may lower a
+ * fare, never raise it past the member fare and never make it negative. A
+ * missing entry (a subscriber dropped it from the batch) falls back to
+ * `baseFare` — absence must not mean free.
+ */
+function clampedFare(batch: FareQuoteBatch, toLocationId: string, baseFare: bigint): bigint {
+  const entry = batch.quotes.find((q) => q.toLocationId === toLocationId);
+  if (entry === undefined) return baseFare;
+  if (entry.fare < 0n) return 0n;
+  return entry.fare > baseFare ? baseFare : entry.fare;
+}
+
 const listRoute = route({
   method: "GET",
   path: "/api/locations",
@@ -145,13 +203,25 @@ const listRoute = route({
     // page, not one per row.
     const art = await ctx.assets.resolve("core", listed.map((l) => l.id), "location");
 
+    // The fare chain runs on top of memberFare, once for the whole board.
+    // The DTO shows the clamped figure so the board never quotes a number
+    // travelRoute would not charge.
+    const quoted = await ctx.filters.apply(fares, {
+      playerId: player.id,
+      fromLocationId: currentLocationId,
+      quotes: listed.map((l) => {
+        const base = memberFare(l.travelCost, member);
+        return { toLocationId: l.id, baseFare: base, fare: base };
+      }),
+    });
+
     return {
       status: 200,
       body: {
         locations: listed.map((l) => ({
           id: l.id,
           name: l.name,
-          travelCost: memberFare(l.travelCost, member).toString(),
+          travelCost: clampedFare(quoted, l.id, memberFare(l.travelCost, member)).toString(),
           travelCooldownSeconds: l.travelCooldownSeconds,
           bulletCost: l.bulletCost.toString(),
           bulletStock: l.bulletStock,
@@ -275,19 +345,48 @@ async function attemptTravel(
   player: PlayerSnapshot,
   toLocationId: string,
 ): Promise<RouteResult> {
-  // (3) Unlocked pre-read — see the note above.
-  const expectedFrom = await ctx.transaction(async (tx) => {
+  // (3) Unlocked pre-read — see the note above. It also gathers the fare
+  // inputs (destination cost, membership), because the quote below runs
+  // through a filter chain and filters run OUTSIDE any transaction — the
+  // in-tx recompute this replaced could never have applied one. `isMember`
+  // keeps its lazy-expiry side effect (it may claim and notify an expired
+  // timer); it still runs inside this transaction.
+  const pre = await ctx.transaction(async (tx) => {
     const [stats] = await tx.db
       .select({ locationId: playerStats.locationId })
       .from(playerStats)
       .where(eq(playerStats.playerId, player.id));
-    return stats?.locationId ?? null;
+    const [dest] = await tx.db
+      .select({ travelCost: locations.travelCost })
+      .from(locations)
+      .where(eq(locations.id, toLocationId));
+    return {
+      expectedFrom: stats?.locationId ?? null,
+      destCost: dest?.travelCost ?? null,
+      member: await isMember(tx, player.id),
+    };
   });
+  const expectedFrom = pre.expectedFrom;
   // Rejected outright rather than silently no-oped: the fare would be a bug,
   // and succeeding would hide a stale client re-submitting the current location.
   if (expectedFrom === toLocationId) throw new PluginError("already_there", 409);
+  if (pre.destCost === null) throw new PluginError("location_not_found", 404);
 
-  return await ctx.transaction(async (tx) => {
+  // (3b) The quote, resolved in the route and threaded into the transaction —
+  // the crimes `core.actionCost` shape. The figure is frozen from here to the
+  // commit: an admin fare edit or a membership lapse inside that window
+  // charges the quoted number (milliseconds; accepted, as crimes accepted it).
+  // A LocationMovedRetry re-enters attemptTravel and re-quotes against the
+  // fresh origin, so a stale-origin quote never survives a retry.
+  const baseFare = memberFare(pre.destCost, pre.member);
+  const quotedBatch = await ctx.filters.apply(fares, {
+    playerId: player.id,
+    fromLocationId: expectedFrom,
+    quotes: [{ toLocationId, baseFare, fare: baseFare }],
+  });
+  const fare = clampedFare(quotedBatch, toLocationId, baseFare);
+
+  const result = await ctx.transaction(async (tx) => {
     // (4) LOCATIONS FIRST, both of them, ascending id inside the helper.
     await tx.locks.locations([expectedFrom, toLocationId]);
     // (5) Then the player. Explicit, because a zero-fare travel never calls
@@ -308,15 +407,13 @@ async function attemptTravel(
     const actualFrom = current?.locationId ?? null;
     if (actualFrom !== expectedFrom) throw new LocationMovedRetry();
 
-    // (7) Fare read under the lock. Absent = deleted since step 1.
+    // (7) Existence re-check under the lock. Absent = deleted since step 1.
+    // The fare itself is the pre-quoted `fare` from (3b), not re-read here.
     const [destination] = await tx.db
-      .select({ id: locations.id, travelCost: locations.travelCost })
+      .select({ id: locations.id })
       .from(locations)
       .where(eq(locations.id, toLocationId));
     if (!destination) throw new PluginError("location_not_found", 404);
-
-    const member = await isMember(tx, player.id);
-    const fare = memberFare(destination.travelCost, member);
 
     if (fare > 0n) {
       try {
@@ -362,6 +459,22 @@ async function attemptTravel(
 
     return { status: 200, body: { locationId: destination.id, cash: fresh.cash.toString() } };
   });
+
+  // (10) The trip is committed and earned; a subscriber's failure is its own
+  // problem (the combat.killResolved posture). Log and return the response
+  // the transaction built.
+  try {
+    await ctx.filters.apply(travelCompleted, {
+      playerId: player.id,
+      fromLocationId: expectedFrom,
+      toLocationId,
+      baseFare,
+      fare,
+    });
+  } catch (err) {
+    ctx.log.error("travel.completed subscriber failed", { error: String(err) });
+  }
+  return result;
 }
 
 // --- Admin routes ---
@@ -569,6 +682,9 @@ export default definePlugin({
   routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
   filters: [declareBenefit],
+  // `locationsListed` predates this list and shipped undeclared; declaring all
+  // three now costs nothing and gives validate.ts its prefix check.
+  provides: [locationsListed, fares, travelCompleted],
   // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot if
