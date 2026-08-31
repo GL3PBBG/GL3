@@ -23,6 +23,7 @@ import {
   HEAL_EFFECT_KIND,
   itemEffects,
   POOL_ORDER,
+  POOLS_EFFECT_KIND,
   readConsumableUse,
 } from "./effect-registry.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
@@ -503,6 +504,17 @@ function storedItemType(formType: string): string {
 const ConsumableStatsShape = {
   heal: blankable(z.coerce.number().int().positive()),
   kind: blankable(z.string().min(1).max(40)),
+  /**
+   * The built-in `pools` def's config, one signed delta per pool — the one
+   * kind whose config had no form field, so a UI-authored pools item shipped
+   * `{ kind: "pools" }` alone and 400d `wrong_slot` on its first use. Zero is
+   * refused rather than dropped: the def treats a zero delta as malformed
+   * config, so a stated 0 dies at authoring, not in a player's use attempt.
+   * Blank means "no delta on this pool", per `blankable`.
+   */
+  energy: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
+  will: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
+  brave: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
 } as const;
 
 const ItemBodySchema = z.discriminatedUnion("itemType", [
@@ -593,9 +605,29 @@ function effectsFor(body: ItemStatsBody): unknown {
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
       case ITEM_TYPE_CONSUMABLE: {
-        // The built-in heal def refuses an item with no heal figure. Catching
-        // that here makes it a 400 at authoring time rather than a `wrong_slot`
+        const deltas: Partial<Record<(typeof POOL_ORDER)[number], number>> = {};
+        for (const pool of POOL_ORDER) {
+          const value = body[pool];
+          if (value !== undefined) deltas[pool] = value;
+        }
+        if (Object.keys(deltas).length > 0) {
+          // The delta fields author the built-in pools def alone — a
+          // third-party def's config is not expressible through this form,
+          // and no def reads both a heal figure and pool deltas.
+          if (body.kind !== undefined && body.kind !== POOLS_EFFECT_KIND) {
+            throw new Error("pool deltas belong to the pools kind");
+          }
+          if (body.heal !== undefined) {
+            throw new Error("a consumable is a heal item or a pools item, not both");
+          }
+          return ConsumableEffectsSchema.parse({ kind: POOLS_EFFECT_KIND, pools: deltas });
+        }
+        // Both refusals mirror each other: a def whose config the body does
+        // not carry is a 400 at authoring time rather than the `wrong_slot`
         // the first player to spend the item discovers.
+        if (body.kind === POOLS_EFFECT_KIND) {
+          throw new Error("a pools consumable needs at least one delta");
+        }
         if (body.kind === undefined && body.heal === undefined) {
           throw new Error("a heal consumable needs a heal figure");
         }
@@ -636,11 +668,30 @@ const ShopStockBodySchema = z.object({
  * shipped types beyond these three — gets blanks everywhere: this plugin has
  * no schema for it and inventing one would be a lie.
  */
+/**
+ * The pools column for a consumable row: "energy -4, brave +3" in POOL_ORDER,
+ * em dash when the item states no deltas (a heal consumable — the stat exists
+ * for the type, this item does not carry it). `pools` arrives through
+ * `ConsumableEffectsSchema`'s passthrough, so it is narrowed by hand here —
+ * a malformed value renders as absent rather than 500ing the listing.
+ */
+function poolDeltaCell(parsed: Record<string, unknown>): string {
+  const pools = parsed["pools"];
+  if (typeof pools !== "object" || pools === null) return "—";
+  const record = pools as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const pool of POOL_ORDER) {
+    const value = record[pool];
+    if (typeof value === "number") parts.push(`${pool} ${value > 0 ? "+" : ""}${value}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : "—";
+}
+
 function statCells(itemType: string, effects: unknown): Record<string, string> {
   const blank = {
     damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
     critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", power: "",
-    armor: "", heal: "", effect: "",
+    armor: "", heal: "", effect: "", pools: "",
   };
   const parsed = readEffects(itemType, effects);
   const known = itemType === ITEM_TYPE_WEAPON
@@ -690,6 +741,7 @@ function statCells(itemType: string, effects: unknown): Record<string, string> {
         // The kind the item selects in the effect registry. Whether a def for
         // it is installed is a runtime question this listing does not ask.
         effect: consumableKind(parsed) ?? HEAL_EFFECT_KIND,
+        pools: poolDeltaCell(c),
       };
     }
   }
@@ -926,7 +978,13 @@ const WEAPON_STAT_FORM_FIELDS = [
  */
 const CONSUMABLE_STAT_FORM_FIELDS = [
   { name: "heal", label: "Heal (blank for a non-heal effect)", type: "number" },
-  { name: "kind", label: "Effect kind (blank = heal)", type: "text" },
+  { name: "kind", label: "Effect kind (blank = heal, or pools when a delta is set)", type: "text" },
+  // The built-in pools def's config. Any delta auto-selects the pools kind;
+  // negative is a cost the player must afford, positive a grant clamped at
+  // the pool's max.
+  { name: "energy", label: "Energy delta (negative = cost)", type: "number" },
+  { name: "will", label: "Will delta (negative = cost)", type: "number" },
+  { name: "brave", label: "Brave delta (negative = cost)", type: "number" },
 ] as const satisfies readonly { name: string; label: string; type: "number" | "text" }[];
 
 const adminPage: PageSchema = {
@@ -953,6 +1011,7 @@ const adminPage: PageSchema = {
             { key: "armor", label: "Armor" },
             { key: "heal", label: "Heal" },
             { key: "effect", label: "Effect" },
+            { key: "pools", label: "Pools" },
           ], rowActions: [
             { label: "Delete", action: "DELETE /api/admin/inventory/items/:id", confirm: "Delete this item? Refused while any player owns or wields one." },
           ] },
