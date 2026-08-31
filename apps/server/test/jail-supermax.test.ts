@@ -224,6 +224,101 @@ describe("jail bail — super max parity", () => {
   });
 });
 
+describe("GET /api/jail — superMax flag", () => {
+  it("reports superMax: true for a super-maxed player, false for a plainly jailed one", async () => {
+    const maxed = await registerOn("StatusMaxed");
+    const plain = await registerOn("StatusPlain");
+    const jailedUntil = new Date(Date.now() + 600_000);
+    await place(maxed, townA, { jailedUntil, level: 1 });
+    await place(plain, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: maxed.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    const maxedRes = await app.inject({ method: "GET", url: "/api/jail", headers: auth(maxed) });
+    expect(maxedRes.statusCode).toBe(200);
+    expect(maxedRes.json()).toMatchObject({ jailed: true, superMax: true });
+
+    const plainRes = await app.inject({ method: "GET", url: "/api/jail", headers: auth(plain) });
+    expect(plainRes.statusCode).toBe(200);
+    expect(plainRes.json()).toMatchObject({ jailed: true, superMax: false });
+  });
+});
+
+describe("GET /api/jail/local — caller-relative percent and superMax", () => {
+  it("computes percent off the target's level and the caller's own jailed state", async () => {
+    const freeViewer = await registerOn("FreeViewer");
+    const jailedViewer = await registerOn("JailedViewer");
+    const plainInmate = await registerOn("PlainInmate");
+    const maxedInmate = await registerOn("MaxedInmate");
+    const jailedUntil = new Date(Date.now() + 600_000);
+
+    await place(freeViewer, townA);
+    await place(jailedViewer, townA, { jailedUntil, level: 1 });
+    await place(plainInmate, townA, { jailedUntil, level: 1 });
+    await place(maxedInmate, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: maxedInmate.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    const freeRes = await app.inject({ method: "GET", url: "/api/jail/local", headers: auth(freeViewer) });
+    expect(freeRes.statusCode).toBe(200);
+    const freeInmates: { playerId: string; percent: number; superMax: boolean }[] = freeRes.json().inmates;
+    const freePlain = freeInmates.find((row) => row.playerId === plainInmate.playerId);
+    const freeMaxed = freeInmates.find((row) => row.playerId === maxedInmate.playerId);
+    expect(freePlain).toMatchObject({ percent: 90, superMax: false });
+    expect(freeMaxed).toMatchObject({ percent: 0, superMax: true });
+
+    // Same roster, viewed by a jailed caller — the caller's own jailed state
+    // halves the un-maxed row's percent (the caller sees the jailed-viewer
+    // roster; the jailed viewer itself never appears in its own list).
+    const jailedRes = await app.inject({ method: "GET", url: "/api/jail/local", headers: auth(jailedViewer) });
+    expect(jailedRes.statusCode).toBe(200);
+    const jailedInmates: { playerId: string; percent: number; superMax: boolean }[] = jailedRes.json().inmates;
+    const jailedPlain = jailedInmates.find((row) => row.playerId === plainInmate.playerId);
+    expect(jailedPlain).toMatchObject({ percent: 45, superMax: false });
+  });
+});
+
+describe("escape/bust HTTP replies — superMax flag", () => {
+  it("carries superMax: true on escape's failed reply, and omits it on bust's", async () => {
+    // The route generates its own seed via newSeed() (not injectable — see
+    // jail-escape.test.ts's own note), so a fail is driven by minimizing the
+    // win chance instead: level 100 puts escape at breakoutPercent's floor
+    // (5%, callerJailed halves the level>16 base of 10) and bust at its own
+    // floor (10%, callerJailed is always false on that path). A bounded
+    // retry over fresh players converges near-certainly without flakiness.
+    type Reply = { success: boolean; jailedUntil: string | null; superMax?: boolean };
+
+    let escapeReply: Reply | null = null;
+    for (let i = 0; i < 20 && !escapeReply; i++) {
+      const p = await registerOn(`ER${i}`);
+      await place(p, townA, { jailedUntil: new Date(Date.now() + 600_000), level: 100 });
+      const res = await app.inject({ method: "POST", url: "/api/jail/escape", headers: auth(p) });
+      const body = res.json() as Reply;
+      if (body.success === false) escapeReply = body;
+    }
+    expect(escapeReply).toMatchObject({ success: false, superMax: true });
+    expect(typeof escapeReply?.jailedUntil).toBe("string");
+
+    let bustReply: Reply | null = null;
+    for (let i = 0; i < 60 && !bustReply; i++) {
+      const caller = await registerOn(`BC${i}`);
+      const target = await registerOn(`BT${i}`);
+      await place(caller, townA);
+      await place(target, townA, { jailedUntil: new Date(Date.now() + 600_000), level: 100 });
+      const res = await app.inject({
+        method: "POST", url: "/api/jail/bust", headers: auth(caller),
+        payload: { playerId: target.playerId },
+      });
+      const body = res.json() as Reply;
+      if (body.success === false) bustReply = body;
+    }
+    expect(bustReply).toMatchObject({ success: false });
+    expect(bustReply && "superMax" in bustReply).toBe(false);
+  });
+});
+
 describe("sendToJail — a fresh sentence starts clean", () => {
   it("clears any super max row on the same statement as the new sentence", async () => {
     const p = await registerOn("FreshStart");

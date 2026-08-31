@@ -5,22 +5,36 @@ import { insertOutboxEvents, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { playerStats, players, playerTimers } from "../../db/schema/index.js";
-import { SUPER_MAX_KEY } from "./breakout.js";
+import { superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
 
-const FREE: JailStatus = { jailed: false, until: null, remainingSeconds: 0 };
+const FREE: JailStatus = { jailed: false, until: null, remainingSeconds: 0, superMax: false };
 
-function statusFrom(jailedUntil: Date | null): JailStatus {
+function statusFrom(jailedUntil: Date | null, superMaxUntil: Date | null): JailStatus {
   if (!jailedUntil) return FREE;
   const remainingMs = jailedUntil.getTime() - Date.now();
   if (remainingMs <= 0) return FREE;
-  return { jailed: true, until: jailedUntil.toISOString(), remainingSeconds: Math.ceil(remainingMs / 1000) };
+  return {
+    jailed: true,
+    until: jailedUntil.toISOString(),
+    remainingSeconds: Math.ceil(remainingMs / 1000),
+    superMax: superMaxLive(jailedUntil, superMaxUntil),
+  };
 }
 
-/** Read-only. Does NOT clear an expired jailed_until — see releaseIfExpired. */
+/**
+ * Read-only. Does NOT clear an expired jailed_until — see releaseIfExpired.
+ * The super-max lookup only runs when the sentence itself is live — a free
+ * player is `superMax: false` without a second query.
+ */
 export async function checkJail(db: Db, playerId: string): Promise<JailStatus> {
   const [row] = await db.select({ jailedUntil: playerStats.jailedUntil })
     .from(playerStats).where(eq(playerStats.playerId, playerId));
-  return statusFrom(row?.jailedUntil ?? null);
+  const jailedUntil = row?.jailedUntil ?? null;
+  if (jailedUntil === null || jailedUntil.getTime() <= Date.now()) return FREE;
+
+  const [smRow] = await db.select({ expiresAt: playerTimers.expiresAt }).from(playerTimers)
+    .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, SUPER_MAX_KEY)));
+  return statusFrom(jailedUntil, smRow?.expiresAt ?? null);
 }
 
 /**
@@ -50,9 +64,15 @@ export async function releaseIfExpiredWithOutcome(
     .where(eq(playerStats.playerId, playerId));
   if (!row) return { status: FREE, released: false };
 
-  const status = statusFrom(row.jailedUntil);
-  if (status.jailed) return { status, released: false }; // still serving time
-  if (row.jailedUntil === null) return { status: FREE, released: false };
+  const jailedUntil = row.jailedUntil;
+  const stillLive = jailedUntil !== null && jailedUntil.getTime() > Date.now();
+  if (stillLive) {
+    // Super-max lookup only when the sentence is live, same as checkJail.
+    const [smRow] = await db.select({ expiresAt: playerTimers.expiresAt }).from(playerTimers)
+      .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, SUPER_MAX_KEY)));
+    return { status: statusFrom(jailedUntil, smRow?.expiresAt ?? null), released: false }; // still serving time
+  }
+  if (jailedUntil === null) return { status: FREE, released: false };
 
   // One transaction for the release AND its outbox row — the event commits
   // with the fact (a bare autocommit UPDATE, the pre-outbox shape, had no

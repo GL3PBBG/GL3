@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { newSeed } from "../rng.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { bustAttempt, escapeAttempt } from "./attempts.js";
-import { superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
+import { breakoutPercent, superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
 import { releaseIfExpired } from "./status.js";
 import { bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent } from "./settings.js";
 
@@ -39,17 +39,40 @@ export function registerJailRoutes(
     // The caller's wealth sizes each fee, so the roster's prices are what THIS
     // caller would pay. Plain read, no lock: a preview may lag the authoritative
     // computation the bail route does under lock — never the reverse.
-    const [me] = await db.select({ cash: playerStats.cash, bank: playerStats.bank })
+    const [me] = await db.select({
+      cash: playerStats.cash, bank: playerStats.bank, jailedUntil: playerStats.jailedUntil,
+    })
       .from(playerStats).where(eq(playerStats.playerId, playerId));
     const wealth = (me?.cash ?? 0n) + (me?.bank ?? 0n);
+    const callerJailed = (me?.jailedUntil?.getTime() ?? 0) > Date.now();
     const rate = bailCostPerSecond(settings);
-    const percent = bailWealthPercent(settings);
+    const feePercent = bailWealthPercent(settings);
     const capMultiplier = bailWealthCapMultiplier(settings);
+
+    // One extra query for every listed inmate's super-max state — skipped
+    // when the roster is empty. `breakoutPercent` is caller-relative and
+    // server-computed here so the client never re-derives the formula.
+    const superMaxIds = rows.length === 0 ? new Set<string>() : new Set(
+      (await db.select({ playerId: playerTimers.playerId }).from(playerTimers)
+        .where(and(
+          eq(playerTimers.key, SUPER_MAX_KEY),
+          gt(playerTimers.expiresAt, new Date()),
+          inArray(playerTimers.playerId, rows.map((row) => row.playerId)),
+        ))).map((row) => row.playerId),
+    );
+
     return reply.send({
-      inmates: rows.map((row) => ({
-        ...row,
-        bailCost: wealthScaledFee(BigInt(row.remainingSeconds) * rate, wealth, percent, capMultiplier).toString(),
-      })),
+      inmates: rows.map((row) => {
+        const rowSuperMax = superMaxIds.has(row.playerId);
+        return {
+          ...row,
+          superMax: rowSuperMax,
+          percent: breakoutPercent(row.level, callerJailed, rowSuperMax),
+          bailCost: wealthScaledFee(
+            BigInt(row.remainingSeconds) * rate, wealth, feePercent, capMultiplier,
+          ).toString(),
+        };
+      }),
     });
   });
 
@@ -244,7 +267,9 @@ export function registerJailRoutes(
     await deliver(result.outboxRows, outboxErrorLog(request.log));
 
     if (result.kind === "failed") {
-      return reply.send({ success: false, jailedUntil: result.until.toISOString() });
+      // A failed escape always sets the co-expiring super max (attempts.ts's
+      // escapeAttempt) — unlike bust's fail arm, which never touches it.
+      return reply.send({ success: false, jailedUntil: result.until.toISOString(), superMax: true });
     }
     return reply.send({ success: true, jailedUntil: null });
   });

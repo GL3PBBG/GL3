@@ -10,6 +10,8 @@ export interface RosterEntry {
   rankName: string;
   until: string;
   remainingSeconds: number;
+  /** Needed by jail's `/local` route for `breakoutPercent` — unused by hospital's mapper, which just spreads the row. */
+  level: number;
 }
 
 /** Mirrors `ranks.max_health`'s own fallback shape: a player may have no rank row. */
@@ -42,6 +44,7 @@ export async function listSentencedAtLocation(
     username: players.username,
     rankName: ranks.name,
     until: column,
+    level: playerStats.level,
   })
     .from(playerStats)
     .innerJoin(players, eq(players.id, playerStats.playerId))
@@ -60,5 +63,6 @@ export async function listSentencedAtLocation(
     // Non-null: the `gt(column, now)` predicate above already excludes null rows.
     until: (row.until as Date).toISOString(),
     remainingSeconds: Math.max(0, Math.ceil(((row.until as Date).getTime() - Date.now()) / 1000)),
+    level: row.level,
   }));
 }

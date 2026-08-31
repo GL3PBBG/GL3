@@ -26,7 +26,7 @@ afterAll(async () => { await conn.end(); redis.disconnect(); subscriber.disconne
 
 describe("checkJail", () => {
   it("reports free when jailed_until is null", async () => {
-    expect(await checkJail(db, playerId)).toEqual({ jailed: false, until: null, remainingSeconds: 0 });
+    expect(await checkJail(db, playerId)).toEqual({ jailed: false, until: null, remainingSeconds: 0, superMax: false });
   });
 
   it("reports jailed with remaining seconds when jailed_until is in the future", async () => {
@@ -60,7 +60,7 @@ describe("releaseIfExpired", () => {
     const received = awaitOwnEvent(subscriber, playerId);
 
     const status = await releaseIfExpired(db, createOutboxDelivery(db, { redis }), playerId);
-    expect(status).toEqual({ jailed: false, until: null, remainingSeconds: 0 });
+    expect(status).toEqual({ jailed: false, until: null, remainingSeconds: 0, superMax: false });
 
     const event = await received;
     expect(event.type).toBe("player.released");
