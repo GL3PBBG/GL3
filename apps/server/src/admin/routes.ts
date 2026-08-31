@@ -20,6 +20,7 @@ import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { ipClusterRows, suspectRows } from "./anti-bot.js";
+import { antiBotPage } from "./anti-bot-page.js";
 import { buildAssetsPage } from "./assets-page.js";
 import { economyPage } from "./economy-page.js";
 import { facilitiesPage } from "./facilities-page.js";
@@ -199,6 +200,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "players",
         pages: [{ pluginId: "players", id: playersPage.id, path: playersPage.path, view: playersPage.view }],
+      });
+    }
+    if (hasPermission(grants, "anti-bot")) {
+      sections.push({
+        pluginId: "anti-bot",
+        pages: [{ pluginId: "anti-bot", id: antiBotPage.id, path: antiBotPage.path, view: antiBotPage.view }],
       });
     }
     if (hasPermission(grants, "theme")) {

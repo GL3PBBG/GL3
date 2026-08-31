@@ -104,6 +104,25 @@ describe("admin anti-bot: suspects", () => {
   });
 });
 
+describe("admin anti-bot: section", () => {
+  it("appears in the sections payload for the granted admin and not for others", async () => {
+    const mod = await bootMod();
+    const pleb = await registerVerifiedPlayer({ app, redis }, { username: "Bystander" });
+
+    const granted = await app.inject({
+      method: "GET", url: "/api/admin/plugins", headers: { authorization: `Bearer ${mod.token}` },
+    });
+    expect(granted.statusCode).toBe(200);
+    const sections = (granted.json() as { sections: { pluginId: string }[] }).sections;
+    expect(sections.some((s) => s.pluginId === "anti-bot")).toBe(true);
+
+    const denied = await app.inject({
+      method: "GET", url: "/api/admin/plugins", headers: { authorization: `Bearer ${pleb.token}` },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+});
+
 describe("admin anti-bot: ip clusters", () => {
   it("groups accounts sharing an address and omits singletons", async () => {
     const mod = await bootMod();
