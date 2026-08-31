@@ -177,6 +177,70 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({ heal: 25 });
     });
 
+    // The pool delta fields author the built-in `pools` def's config — the
+    // one effect kind whose config had no form field at all, so a UI-authored
+    // pools item shipped `{ kind: "pools" }` with no `pools` key and 400d
+    // `wrong_slot` on its first use.
+    it("creates a pools consumable from the delta fields, auto-selecting the kind", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Energy Tonic", itemType: "consumable", heal: "", kind: "", energy: -4, brave: 3 },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toEqual({ kind: "pools", pools: { energy: -4, brave: 3 } });
+    });
+
+    it("creates a pools consumable when the kind is stated explicitly", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Willpower Pill", itemType: "consumable", kind: "pools", will: 10 },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toEqual({ kind: "pools", pools: { will: 10 } });
+    });
+
+    // Mirrors the heal check's reasoning: refuse at authoring time rather
+    // than as the `wrong_slot` the first player to spend the item discovers.
+    it("rejects a pools consumable with no delta", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Empty Vial", itemType: "consumable", kind: "pools" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    // The delta fields belong to the built-in `pools` def alone — a
+    // third-party def's config is not expressible through this form.
+    it("rejects pool deltas under a non-pools kind", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Confused Brew", itemType: "consumable", kind: "heal", heal: 10, energy: 2 },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    // No def reads both: heal is the heal def's config, deltas are pools'.
+    it("rejects a heal figure mixed with pool deltas", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Kitchen Sink", itemType: "consumable", heal: 10, brave: 3 },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    // The pools def refuses a zero delta as malformed config, so a stated 0
+    // dies here rather than in every player's use attempt. Blank still means
+    // "no delta on this pool".
+    it("rejects a stated zero delta", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Placebo", itemType: "consumable", kind: "pools", energy: 0, brave: 3 },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
     // Melee weapons: `power` in the effects IS the model marker (combat C6),
     // so the form authors them under its own discriminant "melee" while the
     // row stores item_type "weapon" — the melee slot's equip gate and
@@ -249,6 +313,8 @@ describe("inventory admin", () => {
         heal: "",
         // The effect kind cell, blank for anything that is not a consumable.
         effect: "",
+        // Pool deltas — a consumable-only stat, blank here like `heal`.
+        pools: "",
       });
       expect(rows[0]).not.toHaveProperty("effects");
     });
@@ -274,6 +340,30 @@ describe("inventory admin", () => {
       const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
       const rows = list.json().rows as Array<Record<string, string>>;
       expect(rows[0]).toMatchObject({ itemType: "consumable", heal: "25", damage: "", armor: "" });
+    });
+
+    it("lists a pools consumable's deltas in the pools column", async () => {
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Energy Tonic", itemType: "consumable", energy: -4, brave: 3 },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
+      const rows = list.json().rows as Array<Record<string, string>>;
+      expect(rows[0]).toMatchObject({
+        itemType: "consumable", effect: "pools", heal: "—", pools: "energy -4, brave +3",
+      });
+    });
+
+    // Em dash, matching heal's own convention: the stat exists for the type
+    // and this item does not state it.
+    it("dashes the pools column of a heal consumable", async () => {
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Medkit", itemType: "consumable", heal: 25 },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
+      const rows = list.json().rows as Array<Record<string, string>>;
+      expect(rows[0]).toMatchObject({ heal: "25", pools: "—" });
     });
 
     // A V2-migrated weapon has no accuracy: `itemEffects` had no such column,
@@ -428,6 +518,21 @@ describe("inventory admin", () => {
       expect(res.statusCode).toBe(204);
       const [row] = await db.select().from(items).where(eq(items.id, id));
       expect(row?.effects).toEqual({ heal: 60 });
+    });
+
+    it("rewrites a consumable's pool deltas", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Energy Tonic", itemType: "consumable", energy: -4, brave: 3 },
+      });
+      const id: string = create.json().id;
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, itemType: "consumable", kind: "pools", energy: -2, will: 5 },
+      });
+      expect(res.statusCode).toBe(204);
+      const [row] = await db.select().from(items).where(eq(items.id, id));
+      expect(row?.effects).toEqual({ kind: "pools", pools: { energy: -2, will: 5 } });
     });
 
     // The form's item select lists every item regardless of type, so an admin
