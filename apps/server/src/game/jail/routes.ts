@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { insertOutboxEvents, outboxErrorLog, type OutboxDelivery } from "../../bus/outbox.js";
-import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
+import type { PluginManifest } from "@gl3/plugin-sdk";
 import { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
@@ -12,17 +12,11 @@ import { wealthScaledFee } from "../../economy/wealth-fee.js";
 import { newSeed } from "../rng.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
-import { bustSucceeds } from "./bust.js";
-import { releaseIfExpired, sendToJail } from "./status.js";
-import {
-  bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent,
-  bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds,
-} from "./settings.js";
+import { bustAttempt, escapeAttempt } from "./attempts.js";
+import { releaseIfExpired } from "./status.js";
+import { bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent } from "./settings.js";
 
 const TargetBodySchema = z.object({ playerId: z.string().uuid() });
-
-/** MCCodes' flat bust charge (`jailbust.php:12-18`, audit §7 item 12). */
-const BUST_ENERGY_COST = 10;
 
 export function registerJailRoutes(
   app: FastifyInstance, db: Db, deliver: OutboxDelivery, settings: Record<string, string>,
@@ -196,105 +190,7 @@ export function registerJailRoutes(
 
     const attributePools = collectAttributePools(manifests());
 
-    const result = await db.transaction(async (tx) => {
-      // ONE sorted call over both players, FIRST statement, before either row
-      // is read (NOTES.md rule 6) — same shape as bail above.
-      await lockPlayersForUpdate(tx, [playerId, targetId]);
-
-      const [caller] = await tx.select({
-        locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
-        username: players.username,
-        energy: playerStats.energy, energyMax: playerStats.energyMax,
-        energyRegenAt: playerStats.energyRegenAt,
-        level: playerStats.level,
-      })
-        .from(playerStats)
-        .innerJoin(players, eq(players.id, playerStats.playerId))
-        .where(eq(playerStats.playerId, playerId));
-      if (caller && (caller.jailedUntil?.getTime() ?? 0) > Date.now()) {
-        return { kind: "caller_jailed" as const };
-      }
-
-      const [target] = await tx.select({
-        locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
-        username: players.username,
-      })
-        .from(playerStats)
-        .innerJoin(players, eq(players.id, playerStats.playerId))
-        .where(eq(playerStats.playerId, targetId));
-
-      if (!target) return { kind: "missing" as const };
-      if (target.locationId === null || target.locationId !== caller?.locationId) {
-        return { kind: "elsewhere" as const };
-      }
-      if ((target.jailedUntil?.getTime() ?? 0) <= Date.now()) return { kind: "free" as const };
-
-      // The attempt charge, on both outcomes, under the lock this transaction
-      // already holds. The lazy settle is persisted with the spend so the
-      // regen bookkeeping and the charge commit atomically; a shortfall 409s
-      // before any state moves. Skipped entirely with no declaration — the
-      // opt-in property.
-      const energyDecl = attributePools.get("energy") ?? null;
-      if (energyDecl !== null) {
-        const settled = settlePool(
-          caller?.energy ?? 0, caller?.energyMax ?? 0, caller?.energyRegenAt ?? null,
-          new Date(), energyDecl,
-        );
-        if (settled.value < BUST_ENERGY_COST) return { kind: "insufficient_energy" as const };
-        await tx.update(playerStats)
-          .set({
-            energy: settled.value - BUST_ENERGY_COST,
-            energyMax: settled.max,
-            energyRegenAt: settled.stamp,
-          })
-          .where(eq(playerStats.playerId, playerId));
-      }
-
-      if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
-        const until = await sendToJail(tx, playerId, bustFailJailSeconds(settings));
-        // Minted and outboxed in-transaction; published after commit (rule 5).
-        const outboxRows = await insertOutboxEvents(tx, [{
-          id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
-          actorId: playerId, actorName: caller?.username ?? "unknown",
-          audience: { kind: "player", playerId },
-          until: until.toISOString(), reason: "bust.failed",
-        }]);
-        return { kind: "failed" as const, until, outboxRows };
-      }
-
-      await tx.update(playerStats)
-        .set({ jailedUntil: null })
-        .where(eq(playerStats.playerId, targetId));
-
-      // Audit §7 item 4: a successful bust grants the BUSTER level×5
-      // crime_exp — the counter's only MCCodes producer besides per-crime
-      // rewards, keeping its economy intact for the crime odds that read
-      // it. Unconditional by that decision: with no formula crime in the
-      // catalog the column is inert, accumulating harmlessly.
-      await tx.update(playerStats)
-        .set({ crimeExp: sql`${playerStats.crimeExp} + ${BigInt((caller?.level ?? 1) * 5)}` })
-        .where(eq(playerStats.playerId, playerId));
-
-      const notificationId = uuidv7();
-      await insertNotification(tx, {
-        id: notificationId, playerId: targetId, body: "Someone busted you out.",
-      });
-      const at = new Date().toISOString();
-      const outboxRows = await insertOutboxEvents(tx, [
-        {
-          id: uuidv7(), type: "player.released", at,
-          actorId: targetId, actorName: target.username,
-          audience: { kind: "player", playerId: targetId },
-        },
-        {
-          id: uuidv7(), type: "notification.created", at,
-          actorId: targetId, actorName: target.username,
-          audience: { kind: "player", playerId: targetId },
-          notificationId, body: "Someone busted you out.",
-        },
-      ]);
-      return { kind: "busted" as const, outboxRows };
-    });
+    const result = await bustAttempt(db, settings, attributePools, playerId, targetId, newSeed());
 
     if (result.kind === "missing") return reply.code(404).send({ error: "player_not_found" });
     if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
@@ -325,48 +221,7 @@ export function registerJailRoutes(
     const playerId = request.playerId;
     if (!playerId) return reply.code(401).send({ error: "unauthorized" });
 
-    const result = await db.transaction(async (tx) => {
-      // First statement, before the row is read (NOTES.md rule 6).
-      await lockPlayersForUpdate(tx, [playerId]);
-
-      const [caller] = await tx.select({
-        jailedUntil: playerStats.jailedUntil, username: players.username,
-      })
-        .from(playerStats)
-        .innerJoin(players, eq(players.id, playerStats.playerId))
-        .where(eq(playerStats.playerId, playerId));
-
-      const jailedUntil = caller?.jailedUntil ?? null;
-      if (jailedUntil === null || jailedUntil.getTime() <= Date.now()) {
-        return { kind: "free" as const };
-      }
-
-      const callerName = caller?.username ?? "unknown";
-      if (!bustSucceeds(newSeed(), bustSuccessPercent(settings))) {
-        const until = new Date(jailedUntil.getTime() + escapeFailExtraSeconds(settings) * 1000);
-        await tx.update(playerStats)
-          .set({ jailedUntil: until })
-          .where(eq(playerStats.playerId, playerId));
-        // Minted and outboxed in-transaction; published after commit (rule 5).
-        const outboxRows = await insertOutboxEvents(tx, [{
-          id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
-          actorId: playerId, actorName: callerName,
-          audience: { kind: "player", playerId },
-          until: until.toISOString(), reason: "escape.failed",
-        }]);
-        return { kind: "failed" as const, until, outboxRows };
-      }
-
-      await tx.update(playerStats)
-        .set({ jailedUntil: null })
-        .where(eq(playerStats.playerId, playerId));
-      const outboxRows = await insertOutboxEvents(tx, [{
-        id: uuidv7(), type: "player.released", at: new Date().toISOString(),
-        actorId: playerId, actorName: callerName,
-        audience: { kind: "player", playerId },
-      }]);
-      return { kind: "escaped" as const, outboxRows };
-    });
+    const result = await escapeAttempt(db, settings, playerId, newSeed());
 
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
 
