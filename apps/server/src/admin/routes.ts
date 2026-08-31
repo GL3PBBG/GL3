@@ -18,6 +18,7 @@ import {
 import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
+import { ipClusterRows, suspectRows } from "./anti-bot.js";
 import { buildAssetsPage } from "./assets-page.js";
 import { economyPage } from "./economy-page.js";
 import { facilitiesPage } from "./facilities-page.js";
@@ -67,6 +68,13 @@ const BanBodySchema = z.object({
     .pipe(z.union([z.null(), z.number().int().positive()])),
 }).strict();
 
+// The web renderer never sends this; it exists for curl. Capped at a week —
+// the lag() pass is a scan of the window, and an unbounded window is an
+// admin-triggered full-table sort.
+const SuspectsQuerySchema = z.object({
+  hours: z.coerce.number().int().min(1).max(168).default(24),
+});
+
 /** Shared with `game/rounds/service.ts`'s settle() — an admin write and a
  *  rollover can then never interleave, so an edit cannot move `ends_at` out
  *  from under a finalize that has already frozen `final_*` against it. */
@@ -108,6 +116,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     { id: "economy", name: "economy (ledger dashboard)" },
     { id: "facilities", name: "facilities (jail & hospital fees)" },
     { id: "players", name: "players (moderation)" },
+    { id: "anti-bot", name: "anti-bot (detection & challenges)" },
     { id: "theme", name: "theme" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
@@ -876,6 +885,24 @@ export function registerAdminRoutes(
         };
       }),
     });
+  });
+
+  app.get("/api/admin/anti-bot/suspects", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "anti-bot")) return reply.code(403).send({ error: "forbidden" });
+    const parsed = SuspectsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+    return reply.send({ rows: await suspectRows(db, parsed.data.hours) });
+  });
+
+  app.get("/api/admin/anti-bot/ip-clusters", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "anti-bot")) return reply.code(403).send({ error: "forbidden" });
+    return reply.send({ rows: await ipClusterRows(db) });
   });
 
   app.post("/api/admin/players/ban", { preHandler: [app.requireAuth] }, async (request, reply) => {
