@@ -109,6 +109,10 @@ export interface FareQuoteEntry {
   readonly toLocationId: string;
   readonly baseFare: bigint;
   readonly fare: bigint;
+  /** A discounting subscriber's own words for why ("Driving your Junker").
+   *  Carried into the listing DTO as `fareLabel` when the fare was lowered;
+   *  meaningless (and dropped) on an entry that didn't undercut baseFare. */
+  readonly label?: string;
 }
 
 /** Batched by construction (the `ctx.assets.resolve` lesson): the listing
@@ -158,6 +162,23 @@ function clampedFare(batch: FareQuoteBatch, toLocationId: string, baseFare: bigi
   if (entry === undefined) return baseFare;
   if (entry.fare < 0n) return 0n;
   return entry.fare > baseFare ? baseFare : entry.fare;
+}
+
+/** The listing's view of one quote: the clamped fare, plus the base fare and
+ *  the subscriber's label — the latter two ONLY when the chain actually
+ *  undercut the base, so an undiscounted row's DTO is byte-identical to the
+ *  pre-label payload. */
+function listedFare(
+  batch: FareQuoteBatch, toLocationId: string, baseFare: bigint,
+): { travelCost: string; baseFare?: string; fareLabel?: string } {
+  const fare = clampedFare(batch, toLocationId, baseFare);
+  if (fare >= baseFare) return { travelCost: baseFare.toString() };
+  const entry = batch.quotes.find((q) => q.toLocationId === toLocationId);
+  return {
+    travelCost: fare.toString(),
+    baseFare: baseFare.toString(),
+    ...(entry?.label === undefined ? {} : { fareLabel: entry.label }),
+  };
 }
 
 const listRoute = route({
@@ -221,7 +242,7 @@ const listRoute = route({
         locations: listed.map((l) => ({
           id: l.id,
           name: l.name,
-          travelCost: clampedFare(quoted, l.id, memberFare(l.travelCost, member)).toString(),
+          ...listedFare(quoted, l.id, memberFare(l.travelCost, member)),
           travelCooldownSeconds: l.travelCooldownSeconds,
           bulletCost: l.bulletCost.toString(),
           bulletStock: l.bulletStock,

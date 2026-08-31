@@ -105,6 +105,41 @@ describe("travel.fares filter point", () => {
     expect(away?.travelCost).toBe((FARE / 2n).toString());
   });
 
+  it("a discounted row carries baseFare and the subscriber's label; others carry neither", async () => {
+    const halveWithLabel = bind(on(fares, (_ctx, batch: FareQuoteBatch) => ({
+      ...batch,
+      quotes: batch.quotes.map((q) =>
+        q.toLocationId === awayId ? { ...q, fare: q.fare / 2n, label: "Driving your Junker" } : q),
+    })));
+    const result = await callTravelRoute("GET", "/api/locations", undefined, [halveWithLabel]);
+    const body = result.body as {
+      locations: { id: string; travelCost: string; baseFare?: string; fareLabel?: string }[];
+    };
+    const away = body.locations.find((l) => l.id === awayId);
+    expect(away).toMatchObject({
+      travelCost: (FARE / 2n).toString(), baseFare: FARE.toString(), fareLabel: "Driving your Junker",
+    });
+    // The undiscounted row's payload is byte-identical to the pre-label shape.
+    const home = body.locations.find((l) => l.id === homeId);
+    expect(home).not.toHaveProperty("baseFare");
+    expect(home).not.toHaveProperty("fareLabel");
+  });
+
+  it("a label without a real discount is dropped along with baseFare", async () => {
+    const labelOnly = bind(on(fares, (_ctx, batch: FareQuoteBatch) => ({
+      ...batch,
+      quotes: batch.quotes.map((q) => ({ ...q, label: "free ride!" })),
+    })));
+    const result = await callTravelRoute("GET", "/api/locations", undefined, [labelOnly]);
+    const body = result.body as {
+      locations: { id: string; baseFare?: string; fareLabel?: string }[];
+    };
+    for (const row of body.locations) {
+      expect(row).not.toHaveProperty("baseFare");
+      expect(row).not.toHaveProperty("fareLabel");
+    }
+  });
+
   it("the fares batch carries the caller's origin", async () => {
     const seen: FareQuoteBatch[] = [];
     const probe = bind(on(fares, (_ctx, batch: FareQuoteBatch) => {

@@ -6,6 +6,12 @@ export const LocationDtoSchema = z.object({
   id: IdSchema,
   name: z.string(),
   travelCost: MoneySchema,
+  /** The undiscounted fare, present ONLY when a `travel.fares` subscriber
+   *  lowered `travelCost` below it — the client renders it struck through. */
+  baseFare: MoneySchema.optional(),
+  /** A discounting subscriber's own words for WHY ("Driving your Junker").
+   *  Only ever present alongside `baseFare`. */
+  fareLabel: z.string().optional(),
   travelCooldownSeconds: z.number().int().nonnegative(),
   bulletCost: MoneySchema,
   bulletStock: z.number().int().nonnegative(),
