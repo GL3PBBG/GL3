@@ -208,13 +208,13 @@ export function registerJailRoutes(
   });
 
   /**
-   * V2's self-targeted breakout (the template labels it "Escape"). Same roll
-   * and the same `jail.bust_success_percent` as bust, but failure EXTENDS the
-   * caller's existing sentence by `jail.escape_fail_extra_seconds` — V2 added
-   * 90s to the timer rather than restarting it, so `sendToJail` (which
-   * overwrites from now) is deliberately not used here. Free, no cooldown:
-   * the added time is the whole cost, same reasoning as bust. No
-   * notification either — the player did this to themselves and already
+   * V2's self-targeted breakout (the template labels it "Escape"). The
+   * chance is level-derived (`breakoutPercent`, via `escapeAttempt`) rather
+   * than `jail.bust_success_percent`, and a failed attempt sets a
+   * co-expiring super max that 409s the next attempt until the extended
+   * sentence itself expires — see `escapeAttempt`'s own doc comment. Free,
+   * no cooldown: the added time is the whole cost, same reasoning as bust.
+   * No notification either — the player did this to themselves and already
    * holds the response, the hospital check-in precedent.
    */
   app.post("/api/jail/escape", { preHandler: requireAuth }, async (request, reply) => {
@@ -224,6 +224,7 @@ export function registerJailRoutes(
     const result = await escapeAttempt(db, settings, playerId, newSeed());
 
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
+    if (result.kind === "super_max") return reply.code(409).send({ error: "in_super_max" });
 
     // The fast path — never throws; the dispatcher owns what it cannot deliver.
     await deliver(result.outboxRows, outboxErrorLog(request.log));

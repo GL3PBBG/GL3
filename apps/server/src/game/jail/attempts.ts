@@ -1,12 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { insertOutboxEvents } from "../../bus/outbox.js";
 import { settlePool } from "@gl3/plugin-sdk";
 import type { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
-import { players, playerStats } from "../../db/schema/index.js";
+import { players, playerStats, playerTimers } from "../../db/schema/index.js";
 import { lockPlayersForUpdate } from "../../economy/ledger.js";
 import { insertNotification } from "../notifications/service.js";
+import { breakoutPercent, superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
 import { bustSucceeds } from "./bust.js";
 import { sendToJail } from "./status.js";
 import { bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "./settings.js";
@@ -18,18 +19,23 @@ const BUST_ENERGY_COST = 10;
 
 export type EscapeResult =
   | { kind: "free" }
+  | { kind: "super_max" }
   | { kind: "failed"; until: Date; outboxRows: OutboxRow[] }
   | { kind: "escaped"; outboxRows: OutboxRow[] };
 
 /**
- * V2's self-targeted breakout (the template labels it "Escape"). Same roll
- * and the same `jail.bust_success_percent` as bust, but failure EXTENDS the
- * caller's existing sentence by `jail.escape_fail_extra_seconds` — V2 added
- * 90s to the timer rather than restarting it, so `sendToJail` (which
- * overwrites from now) is deliberately not used here. Free, no cooldown:
- * the added time is the whole cost, same reasoning as bust. No
- * notification either — the player did this to themselves and already
- * holds the response, the hospital check-in precedent.
+ * V2's self-targeted breakout (the template labels it "Escape"). The chance
+ * is `breakoutPercent`, derived from the CALLER's own level (callerJailed is
+ * always true here — the caller is, definitionally, the one jailed) rather
+ * than `jail.bust_success_percent`. Failure EXTENDS the caller's existing
+ * sentence by `jail.escape_fail_extra_seconds` — V2 added 90s to the timer
+ * rather than restarting it, so `sendToJail` (which overwrites from now) is
+ * deliberately not used here — AND sets a co-expiring super max
+ * (`SUPER_MAX_KEY`) that blocks the next attempt until the extended sentence
+ * itself expires. Free, no cooldown: the added time is the whole cost, same
+ * reasoning as bust. No notification either — the player did this to
+ * themselves and already holds the response, the hospital check-in
+ * precedent.
  */
 export async function escapeAttempt(
   db: Db, settings: Record<string, string>, playerId: string, seed: string,
@@ -40,6 +46,7 @@ export async function escapeAttempt(
 
     const [caller] = await tx.select({
       jailedUntil: playerStats.jailedUntil, username: players.username,
+      level: playerStats.level,
     })
       .from(playerStats)
       .innerJoin(players, eq(players.id, playerStats.playerId))
@@ -50,12 +57,22 @@ export async function escapeAttempt(
       return { kind: "free" as const };
     }
 
+    // Caller's own super max — one attempt per sentence (V2 jail.inc.php:106-110).
+    const [smRow] = await tx.select({ expiresAt: playerTimers.expiresAt }).from(playerTimers)
+      .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, SUPER_MAX_KEY)));
+    if (superMaxLive(jailedUntil, smRow?.expiresAt ?? null)) return { kind: "super_max" as const };
+
     const callerName = caller?.username ?? "unknown";
-    if (!bustSucceeds(seed, bustSuccessPercent(settings))) {
+    const percent = breakoutPercent(caller?.level ?? 0, true, false);
+    if (!bustSucceeds(seed, percent)) {
       const until = new Date(jailedUntil.getTime() + escapeFailExtraSeconds(settings) * 1000);
       await tx.update(playerStats)
         .set({ jailedUntil: until })
         .where(eq(playerStats.playerId, playerId));
+      // V2's co-expiry (jail.inc.php:141-147): super max lives exactly as
+      // long as the extended sentence, expiring the same instant it does.
+      await tx.insert(playerTimers).values({ playerId, key: SUPER_MAX_KEY, expiresAt: until })
+        .onConflictDoUpdate({ target: [playerTimers.playerId, playerTimers.key], set: { expiresAt: until } });
       // Minted and outboxed in-transaction; published after commit (rule 5).
       const outboxRows = await insertOutboxEvents(tx, [{
         id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
