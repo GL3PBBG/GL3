@@ -64,16 +64,19 @@ describe("admin anti-bot: suspects", () => {
       headers: { authorization: `Bearer ${mod.token}` },
     });
     expect(res.statusCode).toBe(200);
+    // Every cell a STRING: the admin table renderer zod-parses cells as
+    // strings (the form-fed-routes rule's read-side twin) — numbers broke
+    // the live page.
     const { rows } = res.json() as {
-      rows: { username: string; events: number; activeHours: number; score: number }[];
+      rows: { username: string; events: string; activeHours: string; score: string }[];
     };
     const botRow = rows.find((r) => r.username === "TickTock");
     const humanRow = rows.find((r) => r.username === "Sunday");
     expect(botRow).toBeDefined();
     expect(humanRow).toBeDefined();
-    expect(botRow!.events).toBe(120);
-    expect(botRow!.activeHours).toBeGreaterThanOrEqual(20);
-    expect(botRow!.score).toBeGreaterThan(humanRow!.score);
+    expect(botRow!.events).toBe("120");
+    expect(Number(botRow!.activeHours)).toBeGreaterThanOrEqual(20);
+    expect(Number(botRow!.score)).toBeGreaterThan(Number(humanRow!.score));
     // Usernames identify rows; raw ids must not render (admin-ids-hidden).
     expect(rows.indexOf(botRow!)).toBeLessThan(rows.indexOf(humanRow!));
   });
@@ -135,10 +138,10 @@ describe("admin anti-bot: ip clusters", () => {
       headers: { authorization: `Bearer ${mod.token}` },
     });
     expect(res.statusCode).toBe(200);
-    const { rows } = res.json() as { rows: { ip: string; usernames: string; accounts: number }[] };
+    const { rows } = res.json() as { rows: { ip: string; usernames: string; accounts: string }[] };
     const twins = rows.find((r) => r.ip === "203.0.113.9");
     expect(twins).toBeDefined();
-    expect(twins!.accounts).toBe(2);
+    expect(twins!.accounts).toBe("2");
     expect(twins!.usernames).toContain("TwinA");
     expect(twins!.usernames).toContain("TwinB");
     expect(rows.find((r) => r.ip === "198.51.100.7")).toBeUndefined();

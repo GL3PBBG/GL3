@@ -1,18 +1,24 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 
+/**
+ * Every field a STRING, numbers included: these rows feed the admin `table`
+ * view nodes, and the client's cell schema parses strings only (the same
+ * boundary rule that makes form-fed routes take string bodies). A numeric
+ * cell here took the whole anti-bot page down with a zod parse error.
+ */
 export interface SuspectRow {
   username: string;
-  events: number;
-  meanGapSeconds: number;
-  gapStddev: number;
-  activeHours: number;
-  score: number;
+  events: string;
+  meanGapSeconds: string;
+  gapStddev: string;
+  activeHours: string;
+  score: string;
 }
 
 export interface IpClusterRow {
   ip: string;
-  accounts: number;
+  accounts: string;
   usernames: string;
 }
 
@@ -60,11 +66,11 @@ export async function suspectRows(db: Db, hours: number): Promise<SuspectRow[]> 
     const r = row as Record<string, unknown>;
     return {
       username: String(r.username),
-      events: Number(r.events),
-      meanGapSeconds: Number(r.mean_gap),
-      gapStddev: Number(r.gap_stddev),
-      activeHours: Number(r.active_hours),
-      score: Number(r.score),
+      events: String(Number(r.events)),
+      meanGapSeconds: String(Math.round(Number(r.mean_gap))),
+      gapStddev: String(Math.round(Number(r.gap_stddev))),
+      activeHours: String(Number(r.active_hours)),
+      score: String(Math.round(Number(r.score))),
     };
   });
 }
@@ -90,6 +96,6 @@ export async function ipClusterRows(db: Db): Promise<IpClusterRow[]> {
     limit 100`);
   return [...result].map((row) => {
     const r = row as Record<string, unknown>;
-    return { ip: String(r.ip), accounts: Number(r.accounts), usernames: String(r.usernames) };
+    return { ip: String(r.ip), accounts: String(Number(r.accounts)), usernames: String(r.usernames) };
   });
 }
