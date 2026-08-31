@@ -4,7 +4,8 @@ import type { JailStatus } from "@gl3/shared";
 import { insertOutboxEvents, type OutboxDelivery } from "../../bus/outbox.js";
 import type { Db } from "../../db/client.js";
 import { lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
-import { playerStats, players } from "../../db/schema/index.js";
+import { playerStats, players, playerTimers } from "../../db/schema/index.js";
+import { SUPER_MAX_KEY } from "./breakout.js";
 
 const FREE: JailStatus = { jailed: false, until: null, remainingSeconds: 0 };
 
@@ -102,6 +103,12 @@ export async function releaseIfExpired(db: Db, deliver: OutboxDelivery, playerId
 export async function sendToJail(tx: Tx, playerId: string, seconds: number): Promise<Date> {
   await lockPlayersForUpdate(tx, [playerId]);
   const until = new Date(Date.now() + seconds * 1000);
+  // A fresh sentence starts clean — V2's timer-equality trick naturally
+  // diverges on a new jail time; our explicit-timer model needs the explicit
+  // delete. Every existing caller (crimes worker, theft chase, oc, bust
+  // failure) inherits this with no call-site change.
+  await tx.delete(playerTimers)
+    .where(and(eq(playerTimers.playerId, playerId), eq(playerTimers.key, SUPER_MAX_KEY)));
   await tx.update(playerStats).set({ jailedUntil: until }).where(eq(playerStats.playerId, playerId));
   return until;
 }

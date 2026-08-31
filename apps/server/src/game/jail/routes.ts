@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -6,13 +6,14 @@ import { insertOutboxEvents, outboxErrorLog, type OutboxDelivery } from "../../b
 import type { PluginManifest } from "@gl3/plugin-sdk";
 import { collectAttributePools } from "../../plugins/attribute-pools.js";
 import type { Db } from "../../db/client.js";
-import { players, playerStats } from "../../db/schema/index.js";
+import { players, playerStats, playerTimers } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
 import { wealthScaledFee } from "../../economy/wealth-fee.js";
 import { newSeed } from "../rng.js";
 import { insertNotification } from "../notifications/service.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { bustAttempt, escapeAttempt } from "./attempts.js";
+import { superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
 import { releaseIfExpired } from "./status.js";
 import { bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent } from "./settings.js";
 
@@ -95,6 +96,17 @@ export function registerJailRoutes(
         if (remainingMs <= 0) return { kind: "free" as const };
         const remainingSeconds = Math.ceil(remainingMs / 1000);
 
+        // V2 jail.inc.php:94-98 blocks a super-maxed inmate from being CHOSEN
+        // (bust); the user's 2026-08-31 decision extends the same wall to
+        // bail — GL3-deliberate, spec §3.4. The caller side is unreachable
+        // (bail already refuses self_target above), so only the target is
+        // checked here.
+        const [smRow] = await tx.select({ expiresAt: playerTimers.expiresAt }).from(playerTimers)
+          .where(and(eq(playerTimers.playerId, targetId), eq(playerTimers.key, SUPER_MAX_KEY)));
+        if (superMaxLive(target.jailedUntil, smRow?.expiresAt ?? null)) {
+          return { kind: "target_super_max" as const };
+        }
+
         // Scaled on the PAYER's wealth (cash + bank), computed under the lock
         // taken above — the /local roster previews the same formula unlocked.
         // Wealth includes the bank on purpose: cash-only scaling would make
@@ -151,6 +163,7 @@ export function registerJailRoutes(
       if (result.kind === "missing") return reply.code(404).send({ error: "player_not_found" });
       if (result.kind === "elsewhere") return reply.code(409).send({ error: "wrong_location" });
       if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
+      if (result.kind === "target_super_max") return reply.code(409).send({ error: "target_in_super_max" });
 
       // The fast path — never throws: anything undeliverable here is the
       // dispatcher's, not the player's, because the rows committed with the

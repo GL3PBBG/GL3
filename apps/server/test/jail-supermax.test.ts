@@ -2,13 +2,14 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { locations, playerStats, playerTimers } from "../src/db/schema/index.js";
+import { locations, playerStats, playerTimers, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { bustSucceeds } from "../src/game/jail/bust.js";
 import { breakoutPercent, SUPER_MAX_KEY } from "../src/game/jail/breakout.js";
 import { bustAttempt, escapeAttempt } from "../src/game/jail/attempts.js";
+import { sendToJail } from "../src/game/jail/status.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
@@ -193,5 +194,73 @@ describe("jail bust — parity", () => {
     expect(seconds).toBeLessThanOrEqual(95);
 
     expect(await superMaxRow(caller.playerId)).toBeNull();
+  });
+});
+
+describe("jail bail — super max parity", () => {
+  it("refuses bail against a super-maxed inmate (GL3-deliberate, spec §3.4)", async () => {
+    const caller = await registerOn("Payer");
+    const target = await registerOn("SuperMaxTarget");
+    await place(caller, townA, { cash: 1_000_000n });
+    const jailedUntil = new Date(Date.now() + 600_000);
+    await place(target, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: target.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bail", headers: auth(caller),
+      payload: { playerId: target.playerId },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "target_in_super_max" });
+
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, target.playerId));
+    expect(row?.jailedUntil?.getTime()).toBe(jailedUntil.getTime());
+
+    const bailRows = await db.select().from(transactions)
+      .where(and(eq(transactions.playerId, caller.playerId), eq(transactions.reason, "jail.bail")));
+    expect(bailRows).toHaveLength(0);
+  });
+});
+
+describe("sendToJail — a fresh sentence starts clean", () => {
+  it("clears any super max row on the same statement as the new sentence", async () => {
+    const p = await registerOn("FreshStart");
+    const jailedUntil = new Date(Date.now() + 600_000);
+    await place(p, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: p.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    const before = Date.now();
+    await db.transaction(async (tx) => {
+      await sendToJail(tx, p.playerId, 60);
+    });
+
+    expect(await superMaxRow(p.playerId)).toBeNull();
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, p.playerId));
+    const seconds = Math.round(((row?.jailedUntil?.getTime() ?? 0) - before) / 1000);
+    expect(seconds).toBeGreaterThanOrEqual(58);
+    expect(seconds).toBeLessThanOrEqual(62);
+  });
+
+  it("does not let an orphaned super-max row block escape after an early release and a fresh sentence", async () => {
+    const p = await registerOn("EarlyRelease");
+    const jailedUntil = new Date(Date.now() + 600_000);
+    await place(p, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: p.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    // Simulate early release (e.g. bail) clearing the sentence but leaving the timer row behind.
+    await db.update(playerStats).set({ jailedUntil: null }).where(eq(playerStats.playerId, p.playerId));
+
+    await db.transaction(async (tx) => {
+      await sendToJail(tx, p.playerId, 600);
+    });
+
+    const result = await escapeAttempt(db, {}, p.playerId, "any-seed");
+    expect(result.kind).not.toBe("super_max");
   });
 });
