@@ -17,6 +17,9 @@ import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { definePlugin, type PluginManifest } from "@gl3/plugin-sdk";
+import { breakoutPercent } from "../src/game/jail/breakout.js";
+import { bustAttempt } from "../src/game/jail/attempts.js";
+import { bustSucceeds } from "../src/game/jail/bust.js";
 
 const { db, sql: conn } = testDb();
 const redisUrl = loadConfig(process.env).redisUrl;
@@ -45,6 +48,15 @@ async function registerOn(target: FastifyInstance, name: string): Promise<Player
 
 async function place(p: Player, locationId: string | null, patch: Record<string, unknown> = {}): Promise<void> {
   await db.update(playerStats).set({ locationId, ...patch }).where(eq(playerStats.playerId, p.playerId));
+}
+
+/** First seed from a fixed enumeration with the wanted outcome — deterministic across runs. */
+function seedWhere(percent: number, wanted: boolean): string {
+  for (let i = 0; i < 10_000; i++) {
+    const s = `jail-bail-bust-seed-${i}`;
+    if (bustSucceeds(s, percent) === wanted) return s;
+  }
+  throw new Error(`no seed found for ${percent}% → ${wanted}`);
 }
 
 beforeEach(async () => {
@@ -265,11 +277,7 @@ describe("POST /api/jail/bail — wealth scaling", () => {
   });
 });
 
-/**
- * `jail.bust_success_percent` is read once at boot, so each branch gets its
- * own app. 100 and 0 make the outcome independent of the draw — the roll
- * itself is unit-tested in facility-settings.test.ts.
- */
+/** A settings row is read once at boot, so a branch keyed on one gets its own app. */
 async function bootWith(rows: Record<string, string>): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
   await db.insert(settingsTable)
     .values(Object.entries(rows).map(([key, value]) => ({ key, value })));
@@ -277,70 +285,57 @@ async function bootWith(rows: Record<string, string>): Promise<{ app: FastifyIns
 }
 
 describe("POST /api/jail/bust", () => {
-  it("frees the target and leaves the caller free when the roll always wins", async () => {
-    const own = await bootWith({ "jail.bust_success_percent": "100" });
-    try {
-      const buster = await registerOn(own.app, "Buster");
-      const inmate = await registerOn(own.app, "Inmate");
-      await place(buster, townA);
-      await place(inmate, townA, { jailedUntil: new Date(Date.now() + 300_000) });
+  it("frees the target and leaves the caller free when the roll wins", async () => {
+    const buster = await register("Buster");
+    const inmate = await register("Inmate");
+    await place(buster, townA);
+    await place(inmate, townA, { jailedUntil: new Date(Date.now() + 300_000) });
 
-      const res = await own.app.inject({
-        method: "POST", url: "/api/jail/bust", headers: auth(buster),
-        payload: { playerId: inmate.playerId },
-      });
+    // Default level 1 — same figure the crimeExp assertion below relies on.
+    const percent = breakoutPercent(1, false, false);
+    const result = await bustAttempt(db, {}, new Map(), buster.playerId, inmate.playerId, seedWhere(percent, true));
+    expect(result.kind).toBe("busted");
 
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ success: true, jailedUntil: null });
+    const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
+    expect(target?.jailedUntil).toBeNull();
+    const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
+    expect(caller?.jailedUntil).toBeNull();
+    // Audit §7 item 4: a successful bust grants the BUSTER level×5
+    // crime_exp (level 1 here) — the counter's jail-side producer, riding
+    // the same transaction as the release.
+    expect(caller?.crimeExp).toBe(5n);
 
-      const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
-      expect(target?.jailedUntil).toBeNull();
-      const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
-      expect(caller?.jailedUntil).toBeNull();
-      // Audit §7 item 4: a successful bust grants the BUSTER level×5
-      // crime_exp (level 1 here) — the counter's jail-side producer, riding
-      // the same transaction as the release.
-      expect(caller?.crimeExp).toBe(5n);
-
-      // Busting is free on both branches — a successful bust moves no money.
-      const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
-      expect(ledger).toHaveLength(0);
-    } finally {
-      await own.close();
-    }
+    // Busting is free on both branches — a successful bust moves no money.
+    const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
+    expect(ledger).toHaveLength(0);
   });
 
-  it("jails the caller and leaves the target in when the roll always loses", async () => {
-    const own = await bootWith({ "jail.bust_success_percent": "0", "jail.bust_fail_jail_seconds": "120" });
-    try {
-      const buster = await registerOn(own.app, "Buster");
-      const inmate = await registerOn(own.app, "Inmate");
-      await place(buster, townA);
-      const inmateUntil = new Date(Date.now() + 300_000);
-      await place(inmate, townA, { jailedUntil: inmateUntil });
+  it("jails the caller and leaves the target in when the roll loses", async () => {
+    const buster = await register("Buster");
+    const inmate = await register("Inmate");
+    await place(buster, townA);
+    const inmateUntil = new Date(Date.now() + 300_000);
+    await place(inmate, townA, { jailedUntil: inmateUntil });
 
-      const res = await own.app.inject({
-        method: "POST", url: "/api/jail/bust", headers: auth(buster),
-        payload: { playerId: inmate.playerId },
-      });
+    const percent = breakoutPercent(1, false, false);
+    const result = await bustAttempt(
+      db, { "jail.bust_fail_jail_seconds": "120" }, new Map(),
+      buster.playerId, inmate.playerId, seedWhere(percent, false),
+    );
+    expect(result.kind).toBe("failed");
+    if (result.kind !== "failed") throw new Error("expected failed");
 
-      expect(res.statusCode).toBe(200);
-      expect(res.json().success).toBe(false);
+    const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
+    expect(target?.jailedUntil?.getTime()).toBe(inmateUntil.getTime());
 
-      const [target] = await db.select().from(playerStats).where(eq(playerStats.playerId, inmate.playerId));
-      expect(target?.jailedUntil?.getTime()).toBe(inmateUntil.getTime());
+    const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
+    const callerSeconds = Math.round(((caller?.jailedUntil?.getTime() ?? 0) - Date.now()) / 1000);
+    expect(callerSeconds).toBeGreaterThan(110);
+    expect(callerSeconds).toBeLessThanOrEqual(120);
 
-      const [caller] = await db.select().from(playerStats).where(eq(playerStats.playerId, buster.playerId));
-      const callerSeconds = Math.round(((caller?.jailedUntil?.getTime() ?? 0) - Date.now()) / 1000);
-      expect(callerSeconds).toBeGreaterThan(110);
-      expect(callerSeconds).toBeLessThanOrEqual(120);
-
-      // A failed bust is free too — the caller's own jail time is the whole cost.
-      const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
-      expect(ledger).toHaveLength(0);
-    } finally {
-      await own.close();
-    }
+    // A failed bust is free too — the caller's own jail time is the whole cost.
+    const ledger = await db.select().from(transactions).where(eq(transactions.playerId, buster.playerId));
+    expect(ledger).toHaveLength(0);
   });
 
   it("refuses a jailed caller, another town, a free target, and yourself", async () => {

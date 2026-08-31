@@ -197,6 +197,7 @@ export function registerJailRoutes(
     if (result.kind === "free") return reply.code(409).send({ error: "not_jailed" });
     if (result.kind === "caller_jailed") return reply.code(409).send({ error: "already_jailed" });
     if (result.kind === "insufficient_energy") return reply.code(409).send({ error: "insufficient_energy" });
+    if (result.kind === "target_super_max") return reply.code(409).send({ error: "target_in_super_max" });
 
     // The fast path — never throws; the dispatcher owns what it cannot deliver.
     await deliver(result.outboxRows, outboxErrorLog(request.log));

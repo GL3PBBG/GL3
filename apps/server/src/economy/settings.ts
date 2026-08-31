@@ -12,7 +12,7 @@ const DEFAULT_WEALTH_TAX_THRESHOLD = 10_000_000n;
 /**
  * Daily demurrage on banked wealth (see economy/tax.ts). 0 is valid and means
  * the tax is off — the operator's rollback — so only a non-integer falls back;
- * out-of-range integers clamp like jail's bustSuccessPercent.
+ * out-of-range integers clamp like jail's bailWealthPercent.
  */
 export function wealthTaxPercent(settings: Record<string, string>): number {
   const raw = settings["economy.wealth_tax_percent"];

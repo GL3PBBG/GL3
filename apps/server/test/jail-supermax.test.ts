@@ -8,7 +8,7 @@ import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 import { bustSucceeds } from "../src/game/jail/bust.js";
 import { breakoutPercent, SUPER_MAX_KEY } from "../src/game/jail/breakout.js";
-import { escapeAttempt } from "../src/game/jail/attempts.js";
+import { bustAttempt, escapeAttempt } from "../src/game/jail/attempts.js";
 
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;
@@ -128,5 +128,70 @@ describe("jail escape — super max parity", () => {
 
     const result = await escapeAttempt(db, {}, p.playerId, "any-seed");
     expect(result.kind === "failed" || result.kind === "escaped").toBe(true);
+  });
+});
+
+describe("jail bust — parity", () => {
+  it("refuses a bust against a super-maxed target", async () => {
+    const caller = await registerOn("Buster");
+    const target = await registerOn("SuperMaxed");
+    await place(caller, townA);
+    const jailedUntil = new Date(Date.now() + 600_000);
+    await place(target, townA, { jailedUntil, level: 1 });
+    await db.insert(playerTimers).values({
+      playerId: target.playerId, key: SUPER_MAX_KEY, expiresAt: jailedUntil,
+    });
+
+    const result = await bustAttempt(db, {}, new Map(), caller.playerId, target.playerId, "any-seed");
+    expect(result.kind).toBe("target_super_max");
+
+    const res = await app.inject({
+      method: "POST", url: "/api/jail/bust", headers: auth(caller),
+      payload: { playerId: target.playerId },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "target_in_super_max" });
+
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, target.playerId));
+    expect(row?.jailedUntil?.getTime()).toBe(jailedUntil.getTime());
+  });
+
+  it("derives bust chance from the target's level", async () => {
+    const percent = breakoutPercent(17, false, false);
+    expect(percent).toBe(10);
+
+    const winCaller = await registerOn("WinBuster");
+    const winTarget = await registerOn("WinTarget");
+    await place(winCaller, townA);
+    await place(winTarget, townA, { jailedUntil: new Date(Date.now() + 600_000), level: 17 });
+    const win = await bustAttempt(db, {}, new Map(), winCaller.playerId, winTarget.playerId, seedWhere(percent, true));
+    expect(win.kind).toBe("busted");
+
+    const loseCaller = await registerOn("LoseBuster");
+    const loseTarget = await registerOn("LoseTarget");
+    await place(loseCaller, townA);
+    await place(loseTarget, townA, { jailedUntil: new Date(Date.now() + 600_000), level: 17 });
+    const lose = await bustAttempt(
+      db, {}, new Map(), loseCaller.playerId, loseTarget.playerId, seedWhere(percent, false),
+    );
+    expect(lose.kind).toBe("failed");
+  });
+
+  it("jails a free caller 90s on a failed bust, with no super max", async () => {
+    const caller = await registerOn("FailBuster");
+    const target = await registerOn("FailTarget");
+    await place(caller, townA);
+    await place(target, townA, { jailedUntil: new Date(Date.now() + 600_000), level: 17 });
+
+    const percent = breakoutPercent(17, false, false);
+    const result = await bustAttempt(db, {}, new Map(), caller.playerId, target.playerId, seedWhere(percent, false));
+    expect(result.kind).toBe("failed");
+    if (result.kind !== "failed") throw new Error("expected failed");
+
+    const seconds = Math.round((result.until.getTime() - Date.now()) / 1000);
+    expect(seconds).toBeGreaterThanOrEqual(85);
+    expect(seconds).toBeLessThanOrEqual(95);
+
+    expect(await superMaxRow(caller.playerId)).toBeNull();
   });
 });

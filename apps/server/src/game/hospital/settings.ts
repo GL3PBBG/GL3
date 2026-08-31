@@ -44,7 +44,7 @@ export function dischargeCostPerSecond(settings: Record<string, string>): bigint
  * The wealth-scaling knobs for discharge (see economy/wealth-fee.ts): the fee
  * is raised toward this percent of the PAYER's cash + bank, floored at the
  * flat fee. 0 is the rollback to pure flat; out-of-range integers clamp the
- * same way jail's bustSuccessPercent does — typed intent beats silent default.
+ * same way jail's bailWealthPercent does — typed intent beats silent default.
  */
 export function dischargeWealthPercent(settings: Record<string, string>): number {
   const raw = settings["hospital.discharge_wealth_percent"];

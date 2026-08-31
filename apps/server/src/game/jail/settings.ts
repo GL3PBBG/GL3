@@ -1,8 +1,7 @@
 import { parseNonNegativeBigint, parsePositiveInt } from "../hospital/settings.js";
 
 const DEFAULT_BAIL_COST_PER_SECOND = 1000n;
-const DEFAULT_BUST_SUCCESS_PERCENT = 25;
-const DEFAULT_BUST_FAIL_JAIL_SECONDS = 300;
+const DEFAULT_BUST_FAIL_JAIL_SECONDS = 90;
 const DEFAULT_ESCAPE_FAIL_EXTRA_SECONDS = 90;
 const DEFAULT_BAIL_WEALTH_PERCENT = 1;
 const DEFAULT_BAIL_WEALTH_CAP_MULTIPLIER = 10;
@@ -15,8 +14,9 @@ export function bailCostPerSecond(settings: Record<string, string>): bigint {
  * The wealth-scaling knobs for bail (see economy/wealth-fee.ts): the fee is
  * raised toward this percent of the PAYER's cash + bank, floored at the flat
  * fee above. 0 is valid and means flat — the operator's rollback — so only a
- * non-integer falls back, and out-of-range integers clamp like
- * bustSuccessPercent: an admin who types 150 meant "always max", not "25... 1".
+ * non-integer falls back, and out-of-range integers clamp the same way
+ * dischargeWealthPercent does: an admin who types 150 meant "always max",
+ * not the untouched default.
  */
 export function bailWealthPercent(settings: Record<string, string>): number {
   const raw = settings["jail.bail_wealth_percent"];
@@ -29,19 +29,6 @@ export function bailWealthPercent(settings: Record<string, string>): number {
 /** Ceiling multiple of the flat bail fee, whatever the payer's wealth. */
 export function bailWealthCapMultiplier(settings: Record<string, string>): number {
   return parsePositiveInt(settings["jail.bail_wealth_cap_multiplier"], DEFAULT_BAIL_WEALTH_CAP_MULTIPLIER);
-}
-
-/**
- * Clamped rather than defaulted: an admin who types 250 meant "always", and
- * silently reverting that to 25 would be a worse surprise than honouring the
- * intent. Anything non-numeric still falls back like every other key.
- */
-export function bustSuccessPercent(settings: Record<string, string>): number {
-  const raw = settings["jail.bust_success_percent"];
-  if (raw === undefined || raw.trim() === "") return DEFAULT_BUST_SUCCESS_PERCENT;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) return DEFAULT_BUST_SUCCESS_PERCENT;
-  return Math.min(100, Math.max(0, parsed));
 }
 
 export function bustFailJailSeconds(settings: Record<string, string>): number {

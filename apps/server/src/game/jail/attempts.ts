@@ -10,7 +10,7 @@ import { insertNotification } from "../notifications/service.js";
 import { breakoutPercent, superMaxLive, SUPER_MAX_KEY } from "./breakout.js";
 import { bustSucceeds } from "./bust.js";
 import { sendToJail } from "./status.js";
-import { bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds } from "./settings.js";
+import { bustFailJailSeconds, escapeFailExtraSeconds } from "./settings.js";
 
 type OutboxRow = Awaited<ReturnType<typeof insertOutboxEvents>>[number];
 
@@ -98,6 +98,7 @@ export async function escapeAttempt(
 export type BustResult =
   | { kind: "missing" } | { kind: "elsewhere" } | { kind: "free" }
   | { kind: "caller_jailed" } | { kind: "insufficient_energy" }
+  | { kind: "target_super_max" }
   | { kind: "failed"; until: Date; outboxRows: OutboxRow[] }
   | { kind: "busted"; outboxRows: OutboxRow[] };
 
@@ -130,13 +131,17 @@ export async function bustAttempt(
       .from(playerStats)
       .innerJoin(players, eq(players.id, playerStats.playerId))
       .where(eq(playerStats.playerId, callerId));
+    // A jailed caller is rejected here, before the target's own super-max
+    // state is ever read — so the caller's own super max (relevant only to
+    // self-targeted escape, above) is unreachable on this path and
+    // deliberately not checked as dead code. Spec §3.4.
     if (caller && (caller.jailedUntil?.getTime() ?? 0) > Date.now()) {
       return { kind: "caller_jailed" as const };
     }
 
     const [target] = await tx.select({
       locationId: playerStats.locationId, jailedUntil: playerStats.jailedUntil,
-      username: players.username,
+      username: players.username, level: playerStats.level,
     })
       .from(playerStats)
       .innerJoin(players, eq(players.id, playerStats.playerId))
@@ -147,6 +152,12 @@ export async function bustAttempt(
       return { kind: "elsewhere" as const };
     }
     if ((target.jailedUntil?.getTime() ?? 0) <= Date.now()) return { kind: "free" as const };
+
+    // V2 jail.inc.php:94-98 — a super-maxed inmate cannot be chosen. The user's
+    // 2026-08-31 decision extends the same wall to bail (Task 5).
+    const [smRow] = await tx.select({ expiresAt: playerTimers.expiresAt }).from(playerTimers)
+      .where(and(eq(playerTimers.playerId, targetId), eq(playerTimers.key, SUPER_MAX_KEY)));
+    if (superMaxLive(target.jailedUntil, smRow?.expiresAt ?? null)) return { kind: "target_super_max" as const };
 
     // The attempt charge, on both outcomes, under the lock this transaction
     // already holds. The lazy settle is persisted with the spend so the
@@ -169,7 +180,11 @@ export async function bustAttempt(
         .where(eq(playerStats.playerId, callerId));
     }
 
-    if (!bustSucceeds(seed, bustSuccessPercent(settings))) {
+    // callerJailed is false by construction — the caller_jailed arm above
+    // rejected a jailed caller already, so this is always the free-caller
+    // branch of breakoutPercent.
+    const percent = breakoutPercent(target.level ?? 0, false, false);
+    if (!bustSucceeds(seed, percent)) {
       const until = await sendToJail(tx, callerId, bustFailJailSeconds(settings));
       // Minted and outboxed in-transaction; published after commit (rule 5).
       const outboxRows = await insertOutboxEvents(tx, [{
