@@ -245,6 +245,7 @@ export default defineWorkspace([
         "test/facility-settings.test.ts",
         "test/password.test.ts",
         "test/health-settle.test.ts",
+        "test/jail-breakout.test.ts",
         "test/admin-ids-hidden.test.ts",
         "test/admin-hidden-discriminator.test.ts",
         "test/admin-validate.test.ts",
