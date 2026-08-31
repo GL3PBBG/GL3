@@ -22,6 +22,17 @@ const EnvSchema = z.object({
    */
   OUTBOX_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  /**
+   * Header carrying the real client IP when the origin sits behind a trusted
+   * proxy (Cloudflare zero-trust tunnel: `cf-connecting-ip`). Without it,
+   * `request.ip` is the tunnel/pod socket — the SAME address for every player,
+   * which collapses every IP-keyed rate-limit bucket into one shared bucket.
+   * Setting this is the operator's assertion that the origin is unreachable
+   * except through the proxy; on a directly reachable origin the header is
+   * client-forgeable and this must stay unset. Never auto-detected for that
+   * reason. Blank means unset.
+   */
+  CLIENT_IP_HEADER: z.string().optional(),
   /** Comma-separated allowlist. Strict CORS per spec §7 — never a wildcard. */
   CORS_ORIGINS: z.string().default("http://localhost:5173").refine(
     (value) => !value.split(",").map((o) => o.trim()).includes("*"),
@@ -127,6 +138,8 @@ export interface Config {
   sessionTtlSeconds: number;
   corsOrigins: string[];
   nodeEnv: "development" | "test" | "production";
+  /** Trusted client-IP header (e.g. `cf-connecting-ip`), or null to use the socket address. */
+  clientIpHeader: string | null;
   /** The game mode: `gl3` (hybrid union), `v2` (the GL2 port), `mccodes`
    *  (the MCCodes-parity set), `framework` (game-agnostic subset). */
   profile: "gl3" | "v2" | "mccodes" | "framework";
@@ -150,6 +163,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     sessionTtlSeconds: parsed.SESSION_TTL,
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     nodeEnv: parsed.NODE_ENV,
+    clientIpHeader: parsed.CLIENT_IP_HEADER?.trim() ? parsed.CLIENT_IP_HEADER.trim() : null,
     profile: parsed.GL3_PROFILE,
     pluginIds: parsed.PLUGIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
     pluginPackages: parsed.PLUGIN_PACKAGES.split(",").map((p) => p.trim()).filter(Boolean),

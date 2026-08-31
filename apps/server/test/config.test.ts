@@ -33,6 +33,13 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...valid, CORS_ORIGINS: "http://a.com,*" })).toThrow(/wildcard/);
   });
 
+  it("defaults clientIpHeader to null and passes a configured header through", () => {
+    expect(loadConfig(valid).clientIpHeader).toBeNull();
+    expect(loadConfig({ ...valid, CLIENT_IP_HEADER: "cf-connecting-ip" }).clientIpHeader).toBe("cf-connecting-ip");
+    // Blank means unset, not "trust the empty-named header".
+    expect(loadConfig({ ...valid, CLIENT_IP_HEADER: "  " }).clientIpHeader).toBeNull();
+  });
+
   it("defaults SWEEP_INTERVAL_MS to 2000 and allows 0 to disable", () => {
     const base = { DATABASE_URL: "postgres://x", REDIS_URL: "redis://x" };
     expect(loadConfig({ ...base }).sweepIntervalMs).toBe(2000);

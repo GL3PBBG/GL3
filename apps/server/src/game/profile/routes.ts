@@ -16,6 +16,7 @@ export function registerProfileRoutes(
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
   coreFilters: CoreFilters,
   rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
+  clientIpHeader: string | null = null,
 ): void {
   // Public — no requireAuth. The response is a public surface: only the
   // explicit columns selected below ever leave this handler. `players`
@@ -25,7 +26,7 @@ export function registerProfileRoutes(
   // resolve the `money_ranks` label, and neither is ever returned. This
   // never selects a whole row and spreads it into the response.
   app.get("/api/players/:playerId/profile", {
-    preHandler: tokenBucket(redis, { name: "profile", limit: 60, windowSeconds: 60 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "profile", limit: 60, windowSeconds: 60, ipHeader: clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const params = ProfileParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });

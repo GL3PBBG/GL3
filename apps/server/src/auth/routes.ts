@@ -88,7 +88,7 @@ export function registerAuthRoutes(
   app.decorate("requireAuth", requireAuth);
 
   app.post("/api/auth/register", {
-    preHandler: tokenBucket(redis, { name: "register", limit: 5, windowSeconds: 3600 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "register", limit: 5, windowSeconds: 3600, ipHeader: config.clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = RegisterRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
@@ -215,7 +215,7 @@ export function registerAuthRoutes(
   });
 
   app.post("/api/auth/login", {
-    preHandler: tokenBucket(redis, { name: "login", limit: 10, windowSeconds: 900 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "login", limit: 10, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = LoginRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -302,7 +302,7 @@ export function registerAuthRoutes(
   });
 
   app.post("/api/auth/verify", {
-    preHandler: tokenBucket(redis, { name: "verify", limit: 10, windowSeconds: 900 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "verify", limit: 10, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = VerifyRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -314,7 +314,7 @@ export function registerAuthRoutes(
   });
 
   app.post("/api/auth/verify/resend", {
-    preHandler: [tokenBucket(redis, { name: "verifyresend", limit: 3, windowSeconds: 3600 }, rateLimitPrefix), requireAuth],
+    preHandler: [tokenBucket(redis, { name: "verifyresend", limit: 3, windowSeconds: 3600, ipHeader: config.clientIpHeader }, rateLimitPrefix), requireAuth],
   }, async (request, reply) => {
     const playerId = request.playerId!;
     const [row] = await db.select({ email: players.email, verifiedAt: players.emailVerifiedAt })
@@ -328,7 +328,7 @@ export function registerAuthRoutes(
   });
 
   app.post("/api/auth/forgot", {
-    preHandler: tokenBucket(redis, { name: "forgot", limit: 5, windowSeconds: 3600 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "forgot", limit: 5, windowSeconds: 3600, ipHeader: config.clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = ForgotRequestSchema.safeParse(request.body);
     // Every path answers 200 with the same body: the response must not reveal
@@ -359,7 +359,7 @@ export function registerAuthRoutes(
   });
 
   app.post("/api/auth/reset", {
-    preHandler: tokenBucket(redis, { name: "reset", limit: 10, windowSeconds: 900 }, rateLimitPrefix),
+    preHandler: tokenBucket(redis, { name: "reset", limit: 10, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
   }, async (request, reply) => {
     const parsed = ResetRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

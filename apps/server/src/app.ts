@@ -170,7 +170,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // Moved here (after `loaded` resolves) rather than alongside the other
   // core routes above: this route applies the `core.profileView` filter
   // chain, which needs `loaded.coreFilters` — plugins must be loaded first.
-  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix);
+  registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix, config.clientIpHeader);
   registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
   registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests);

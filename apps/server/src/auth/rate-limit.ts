@@ -8,6 +8,27 @@ export interface TokenBucketOptions {
   name: string;
   limit: number;
   windowSeconds: number;
+  /** Header carrying the real client IP (`config.clientIpHeader`). See `clientIp`. */
+  ipHeader?: string | null | undefined;
+}
+
+/**
+ * The client's IP for keying and telemetry. Behind Cloudflare (zero-trust
+ * tunnel), `request.ip` is the tunnel/pod socket — one address for every
+ * player — so buckets keyed on it collapse into a single shared bucket.
+ * `CLIENT_IP_HEADER=cf-connecting-ip` names the header to trust instead.
+ *
+ * Trust is the OPERATOR's assertion, never auto-detected: honoring a
+ * client-supplied header on a deployment whose origin is directly reachable
+ * would let anyone forge their identity, so the fallback when the configured
+ * header is absent or blank is the socket address, and no header is read at
+ * all when none is configured.
+ */
+export function clientIp(request: Pick<FastifyRequest, "ip" | "headers">, headerName: string | null | undefined): string {
+  if (!headerName) return request.ip;
+  const raw = request.headers[headerName.toLowerCase()];
+  const first = (Array.isArray(raw) ? raw[0] : raw)?.split(",")[0]?.trim();
+  return first ? first : request.ip;
 }
 
 // `prefix` defaults to the real "ratelimit" key space used in production —
@@ -17,7 +38,7 @@ export interface TokenBucketOptions {
 // leaderboardPrefix already uses for the same reason.
 export function tokenBucket(redis: Redis, opts: TokenBucketOptions, prefix = DEFAULT_RATE_LIMIT_PREFIX) {
   return async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const bucketKey = `${prefix}:${opts.name}:${request.ip}`;
+    const bucketKey = `${prefix}:${opts.name}:${clientIp(request, opts.ipHeader)}`;
     const hits = await countHit(redis, bucketKey, opts.windowSeconds);
     if (hits > opts.limit) {
       const ttl = await redis.ttl(bucketKey);
