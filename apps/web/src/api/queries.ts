@@ -4,6 +4,7 @@ import { z } from "zod";
 // self-contained page and this keeps its one dependency easy to remove with it.
 import {
   AdminEconomyOverviewSchema, type AdminEconomyOverview, GameStatsResponseSchema, type GameStatsResponse,
+  type ChallengeAnswerResponse, type ChallengeQuestion,
 } from "@gl3/shared";
 import {
   AdminSectionsResponseSchema,
@@ -248,6 +249,24 @@ export function useVerify() {
   return useMutation<void, Error, { code: string }>({
     mutationFn: async (input) =>
       api<void>("/api/auth/verify", { method: "POST", body: JSON.stringify(input) }),
+  });
+}
+
+export function useChallengeQuestion() {
+  return useQuery<ChallengeQuestion, Error>({
+    queryKey: keys.challenge(),
+    queryFn: async () => api<ChallengeQuestion>("/api/challenge"),
+    // Every GET mints a fresh question and burns nothing; but background
+    // refetches would invalidate the one the player is mid-typing on.
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useAnswerChallenge() {
+  return useMutation<ChallengeAnswerResponse, Error, string>({
+    mutationFn: async (answer) =>
+      api<ChallengeAnswerResponse>("/api/challenge", { method: "POST", body: JSON.stringify({ answer }) }),
   });
 }
 

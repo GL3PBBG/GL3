@@ -78,6 +78,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (response.status === 403 && code === "email_unverified" && window.location.pathname !== "/verify") {
       window.location.assign("/verify");
     }
+    // Same shape as the verify gate: a moderator-flagged account 409s every
+    // mutating request until the /challenge check is answered. Guarded the
+    // same way against a self-redirect loop from the challenge page's own
+    // POSTs (wrong answers 400, never 409, so only the flag itself lands here).
+    if (response.status === 409 && code === "challenge_required" && window.location.pathname !== "/challenge") {
+      window.location.assign("/challenge");
+    }
     throw new ApiError(response.status, code, {
       retryAfter: asCount(body["retryAfter"]) ?? fromHeader,
       remainingSeconds: asCount(body["remainingSeconds"]) ?? fromHeader,

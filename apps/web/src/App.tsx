@@ -25,6 +25,7 @@ import { Reset } from "./pages/Reset.js";
 import { Rounds } from "./pages/Rounds.js";
 import { Stats } from "./pages/Stats.js";
 import { Verify } from "./pages/Verify.js";
+import { Challenge } from "./pages/Challenge.js";
 import { PluginPage } from "./plugins/PluginPage.js";
 import { useGameEvents } from "./ws/useGameEvents.js";
 
@@ -65,6 +66,10 @@ export function App(): JSX.Element {
               reload.
             */}
             <Route path="/verify" element={<Verify />} />
+            {/* Same standing as /verify: the anti-bot challenge gate 409s the
+                gameplay chrome's own mutations, so the page lives outside
+                Shell — see pages/Challenge.tsx. */}
+            <Route path="/challenge" element={<Challenge />} />
             <Route element={<Shell />}>
               <Route index element={<Dashboard />} />
               {/* The gameplay pages (crimes, combat, bounties, detectives,

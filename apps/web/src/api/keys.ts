@@ -9,6 +9,7 @@ import type { LeaderboardKind } from "@gl3/shared";
  */
 export const keys = {
   me: () => ["me"] as const,
+  challenge: () => ["challenge"] as const,
   jail: () => ["jail"] as const,
   crimes: () => ["crimes"] as const,
   locations: () => ["locations"] as const,
