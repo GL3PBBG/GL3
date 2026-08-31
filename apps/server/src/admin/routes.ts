@@ -6,6 +6,7 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { clearBanned, markBanned } from "../auth/ban.js";
+import { clearChallenged, setChallenged } from "../auth/challenge.js";
 import { destroyAllSessions } from "../auth/session.js";
 import { readOutboxStats } from "../bus/outbox.js";
 import type { Db } from "../db/client.js";
@@ -67,6 +68,8 @@ const BanBodySchema = z.object({
     .transform((v) => (v === undefined || v === "" ? null : Number(v)))
     .pipe(z.union([z.null(), z.number().int().positive()])),
 }).strict();
+
+const ChallengeBodySchema = z.object({ username: z.string().min(1) }).strict();
 
 // The web renderer never sends this; it exists for curl. Capped at a week —
 // the lag() pass is a scan of the window, and an unbounded window is an
@@ -903,6 +906,38 @@ export function registerAdminRoutes(
     const grants = await loadGrants(db, playerId);
     if (!hasPermission(grants, "anti-bot")) return reply.code(403).send({ error: "forbidden" });
     return reply.send({ rows: await ipClusterRows(db) });
+  });
+
+  const challengeTarget = async (body: unknown): Promise<string | null> => {
+    const parsed = ChallengeBodySchema.safeParse(body);
+    if (!parsed.success) return null;
+    const [target] = await db.select({ id: players.id }).from(players)
+      .where(eq(players.username, parsed.data.username));
+    return target?.id ?? null;
+  };
+
+  app.post("/api/admin/anti-bot/challenge", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "anti-bot")) return reply.code(403).send({ error: "forbidden" });
+    const targetId = await challengeTarget(request.body);
+    if (targetId === null) return reply.code(404).send({ error: "player_not_found" });
+    // Flagging yourself is pointless but harmless — you can always solve it —
+    // so unlike ban there is no cannot-self guard to lock an admin out.
+    await setChallenged(redis, targetId);
+    return reply.send({ challenged: true });
+  });
+
+  app.post("/api/admin/anti-bot/challenge/clear", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const grants = await loadGrants(db, playerId);
+    if (!hasPermission(grants, "anti-bot")) return reply.code(403).send({ error: "forbidden" });
+    const targetId = await challengeTarget(request.body);
+    if (targetId === null) return reply.code(404).send({ error: "player_not_found" });
+    await clearChallenged(redis, targetId);
+    return reply.send({ challenged: false });
   });
 
   app.post("/api/admin/players/ban", { preHandler: [app.requireAuth] }, async (request, reply) => {

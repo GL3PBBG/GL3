@@ -352,6 +352,7 @@ export default defineWorkspace([
         "test/auth.test.ts",
         "test/ip-telemetry.test.ts",
         "test/admin-anti-bot.test.ts",
+        "test/challenge-gate.test.ts",
         "test/bank.test.ts",
         "test/bounties-claim.test.ts",
         "test/bounties.test.ts",

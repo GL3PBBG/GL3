@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
+import { ChallengeAnswerRequestSchema, ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
 import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
@@ -11,6 +11,7 @@ import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
 import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
+import { answerChallenge, isChallenged, mintQuestion } from "./challenge.js";
 import { clientIp, DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { collectAttributePools, memberRegenMultiplier } from "../plugins/attribute-pools.js";
@@ -82,6 +83,15 @@ export function registerAuthRoutes(
       if (await isUnverified(redis, playerId)) {
         await reply.code(403).send({ error: "email_unverified" }); return;
       }
+    }
+    // Anti-bot challenge gate: mutating requests only — reading the game is
+    // not botting's payoff, and the client needs GETs to render the challenge
+    // screen. /api/challenge itself and the auth routes must stay reachable
+    // or a flagged player could never solve their way out (or log out).
+    if (request.method !== "GET"
+      && !url.startsWith("/api/challenge") && !url.startsWith("/api/auth/")
+      && await isChallenged(redis, playerId)) {
+      await reply.code(409).send({ error: "challenge_required" }); return;
     }
     request.playerId = playerId;
   };
@@ -300,6 +310,32 @@ export function registerAuthRoutes(
 
     const token = await createSession(redis, player.id, config.sessionTtlSeconds);
     return reply.code(200).send({ token, playerId: player.id, username: player.username });
+  });
+
+  // Challenge routes live here, not in a plugin: the gate is core (requireAuth)
+  // and a flagged player must reach them regardless of which plugins loaded.
+  app.get("/api/challenge", { preHandler: requireAuth }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    if (!await isChallenged(redis, playerId)) return reply.code(409).send({ error: "not_challenged" });
+    return reply.send({ question: await mintQuestion(redis, playerId) });
+  });
+
+  app.post("/api/challenge", {
+    preHandler: [
+      tokenBucket(redis, { name: "challenge", limit: 10, windowSeconds: 60, ipHeader: config.clientIpHeader }, rateLimitPrefix),
+      requireAuth,
+    ],
+  }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
+    const parsed = ChallengeAnswerRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+    if (!await isChallenged(redis, playerId)) return reply.code(409).send({ error: "not_challenged" });
+    if (!await answerChallenge(redis, playerId, parsed.data.answer)) {
+      return reply.code(400).send({ error: "wrong_answer" });
+    }
+    return reply.send({ solved: true });
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
