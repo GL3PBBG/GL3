@@ -6,7 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { locations, playerStats, transactions } from "../src/db/schema/index.js";
+import { locations, playerStats, settings, transactions } from "../src/db/schema/index.js";
 import { cooldownKey } from "../src/game/cooldown.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -215,6 +215,12 @@ async function propertyIdAt(locId: string): Promise<string | undefined> {
 beforeAll(async () => {
   await resetDb(db);
   ({ app, close: closeServer } = await bootTestServer());
+
+  // Every inject in this file arrives from 127.0.0.1, so both racers' last_ip
+  // converges and the anti-bot same-IP transfer block would 409 the handover
+  // before the lock race this file exists to exercise. Policy off; the policy
+  // has its own tests (same-ip-block.test.ts).
+  await db.insert(settings).values({ key: "properties.block_same_ip_transfer", value: "false" });
 
   // L before C, so `lId < cId` as uuidv7s. travel locks its two location rows
   // in ascending id order, which makes L the row it blocks on in the barrier

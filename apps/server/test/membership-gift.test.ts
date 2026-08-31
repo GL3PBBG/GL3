@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { settings } from "../src/db/schema/index.js";
 import { loadConfig } from "../src/config.js";
 import { createSubscriber } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
@@ -37,6 +38,12 @@ describe("membership gift route", () => {
   beforeAll(async () => {
     await runPluginMigrations(db, [membershipPlugin]);
     ({ app, close: closeServer, redis } = await bootTestServer());
+
+    // Every inject here arrives from 127.0.0.1, so the racers' last_ip
+    // converges and the anti-bot same-IP transfer block would 409 handovers
+    // this file tests for their own semantics. Policy off; it has its own
+    // tests (same-ip-block.test.ts).
+    await db.insert(settings).values({ key: "membership.block_same_ip_transfer", value: "false" });
   });
 
   afterAll(async () => {

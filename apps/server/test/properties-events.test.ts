@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { locations, playerStats } from "../src/db/schema/index.js";
+import { locations, playerStats, settings } from "../src/db/schema/index.js";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -78,6 +78,12 @@ async function setupOwnedProperty(): Promise<{
 
 beforeEach(async () => {
   await resetDb(db);
+
+  // Every inject here arrives from 127.0.0.1, so the racers' last_ip
+  // converges and the anti-bot same-IP transfer block would 409 handovers
+  // this file tests for their own semantics. Policy off; it has its own
+  // tests (same-ip-block.test.ts).
+  await db.insert(settings).values({ key: "properties.block_same_ip_transfer", value: "false" });
   if (!app) ({ app, close: closeServer } = await bootTestServer());
 });
 

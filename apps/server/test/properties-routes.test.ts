@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { locations, playerStats } from "../src/db/schema/index.js";
+import { locations, playerStats, settings } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -82,6 +82,12 @@ const cashOf = async (id: string): Promise<bigint> => {
 beforeAll(async () => {
   await resetDb(db);
   ({ app, close: closeServer, redis } = await bootTestServer());
+
+  // Every inject here arrives from 127.0.0.1, so the racers' last_ip
+  // converges and the anti-bot same-IP transfer block would 409 handovers
+  // this file tests for their own semantics. Policy off; it has its own
+  // tests (same-ip-block.test.ts).
+  await db.insert(settings).values({ key: "properties.block_same_ip_transfer", value: "false" });
 
   const owner = await register();
   playerId = owner.playerId;

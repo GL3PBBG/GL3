@@ -41,10 +41,13 @@ export const playerStats = pgTable("player_stats", {
   cash: bigint("cash", { mode: "bigint" }).notNull(),
 });
 
-/** Core-owned, mirrored for the list route's owner-name join. */
+/** Core-owned, mirrored for the list route's owner-name join and the
+ *  transfer route's same-IP pair check (anti-bot layer 3). */
 export const players = pgTable("players", {
   id: uuid("id").primaryKey(),
   username: text("username").notNull(),
+  signupIp: text("signup_ip"),
+  lastIp: text("last_ip"),
 });
 
 /**

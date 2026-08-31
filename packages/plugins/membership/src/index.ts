@@ -1,11 +1,11 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { coreHud, coreProfileView, definePlugin, isInsufficientFundsError, on, PluginError, route } from "@gl3/plugin-sdk";
+import { coreHud, coreProfileView, definePlugin, isInsufficientFundsError, on, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
 import { MEMBERSHIP_MIGRATIONS } from "./migrations.js";
 import { benefits, isMember, MEMBERSHIP_TIMER_KEY, membershipUntil } from "./api.js";
 import { adminPage, membershipPage } from "./pages.js";
-import { membershipPackages, players } from "./schema.js";
+import { membershipPackages, players, settings } from "./schema.js";
 
 export { MEMBERSHIP_TIMER_KEY, benefits, isMember, membershipUntil, type BenefitDecl } from "./api.js";
 export { adminPage, membershipPage } from "./pages.js";
@@ -146,6 +146,25 @@ const buyRoute = route({
  * consumer after `combat`'s pattern of locking both sides via one sorted
  * call before any balance change (rule 6, player↔player edge).
  */
+/** Anti-bot layer 3: same shape and reasoning as properties' sameIpBlocked —
+ *  a gift between two accounts sharing a signup or last-seen address is
+ *  refused unless `membership.block_same_ip_transfer` turns the block off.
+ *  Duplicated rather than shared: neither plugin can import the other for a
+ *  ten-line policy, and settings namespaces are per-plugin by design. */
+async function sameIpBlocked(tx: PluginTx, aId: string, bId: string): Promise<boolean> {
+  const [flag] = await tx.db.select({ value: settings.value }).from(settings)
+    .where(eq(settings.key, "membership.block_same_ip_transfer"));
+  if (flag !== undefined && ["false", "0", "off"].includes(flag.value.trim().toLowerCase())) return false;
+  const rows = await tx.db
+    .select({ id: players.id, signupIp: players.signupIp, lastIp: players.lastIp })
+    .from(players).where(inArray(players.id, [aId, bId]));
+  const a = rows.find((r) => r.id === aId);
+  const b = rows.find((r) => r.id === bId);
+  if (a === undefined || b === undefined) return false;
+  const match = (x: string | null, y: string | null): boolean => x !== null && y !== null && x === y;
+  return match(a.lastIp, b.lastIp) || match(a.signupIp, b.signupIp);
+}
+
 const giftRoute = route({
   method: "POST",
   path: "/api/membership/gift",
@@ -168,6 +187,11 @@ const giftRoute = route({
       // participants share the helper, so a test would prove only the
       // already-safe case (NOTES.md rule-6 corollary).
       await tx.locks.player([player.id, recipient.id]);
+
+      // After the locks, before any points move (anti-bot layer 3).
+      if (await sameIpBlocked(tx, player.id, recipient.id)) {
+        throw new PluginError("same_ip_blocked", 409);
+      }
 
       try {
         await tx.economy.applyBalanceChange({

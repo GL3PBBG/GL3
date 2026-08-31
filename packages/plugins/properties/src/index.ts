@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { definePlugin, filterPoint, PluginError, route, type PluginTx } from "@gl3/plugin-sdk";
@@ -365,6 +365,30 @@ const TransferBodySchema = z.object({ username: z.string().min(1).max(64) }).str
  * before the property's own `property_not_found` / `not_owned` — verified
  * against every existing test, none of which relied on the old order.
  */
+/**
+ * Anti-bot layer 3 (spec 2026-08-31-anti-bot-design): a voluntary handover
+ * between two accounts sharing a signup or last-seen address is refused
+ * unless the admin turns the block off. The setting is read LIVE from the
+ * settings table (the payOwner skim-knob precedent) so a flip needs no
+ * reboot, and the key is namespaced by hand because this runs inside a
+ * transaction, not through ctx.settings. Plain reads of two rows the route
+ * has already locked (or has no need to lock) — nothing here touches the
+ * lock graph.
+ */
+async function sameIpBlocked(tx: PluginTx, aId: string, bId: string): Promise<boolean> {
+  const [flag] = await tx.db.select({ value: settings.value }).from(settings)
+    .where(eq(settings.key, "properties.block_same_ip_transfer"));
+  if (flag !== undefined && ["false", "0", "off"].includes(flag.value.trim().toLowerCase())) return false;
+  const rows = await tx.db
+    .select({ id: players.id, signupIp: players.signupIp, lastIp: players.lastIp })
+    .from(players).where(inArray(players.id, [aId, bId]));
+  const a = rows.find((r) => r.id === aId);
+  const b = rows.find((r) => r.id === bId);
+  if (a === undefined || b === undefined) return false;
+  const match = (x: string | null, y: string | null): boolean => x !== null && y !== null && x === y;
+  return match(a.lastIp, b.lastIp) || match(a.signupIp, b.signupIp);
+}
+
 const transferRoute = route({
   method: "POST",
   path: "/api/properties/:id/transfer",
@@ -385,6 +409,12 @@ const transferRoute = route({
       if (target.id === player.id) throw new PluginError("cannot_transfer_to_self", 409);
 
       const row = await loadOwnedRow(tx, params.id, player.id, [target.id]);
+
+      // After the locks so the answer cannot change under the write, before
+      // the write so a blocked pair changes nothing.
+      if (await sameIpBlocked(tx, player.id, target.id)) {
+        throw new PluginError("same_ip_blocked", 409);
+      }
 
       await tx.db
         .update(propertiesTable)
