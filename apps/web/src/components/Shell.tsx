@@ -97,7 +97,9 @@ function CountdownValue({ to }: { to: string }): JSX.Element {
  */
 const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
   "/plugins/crimes.index": { slot: "page-crimes", alt: "Crimes" },
-  "/plugins/jail": { slot: "page-jail", alt: "Jail" },
+  // Jail draws its own banner rather than living in this map: it is the one
+  // state-dependent slot, switching to `page-supermax` while the caller sits
+  // in super max — see Jail.tsx.
   "/plugins/hospital": { slot: "page-hospital", alt: "Hospital" },
   "/bank": { slot: "page-bank", alt: "Bank" },
   "/plugins/casino.index": { slot: "page-casino", alt: "Casino" },
