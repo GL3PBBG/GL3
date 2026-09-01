@@ -311,6 +311,7 @@ export default defineWorkspace([
         "test/assets-service.test.ts",
         "test/asset-sweep.test.ts",
         "test/player-attributes-schema.test.ts",
+        "test/rank-level-sync.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],
