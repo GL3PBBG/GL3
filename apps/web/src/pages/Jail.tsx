@@ -4,7 +4,7 @@ import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatDuration } from "../lib/errors.js";
 import { canAfford } from "../lib/money.js";
 import { PlayerLink } from "../components/PlayerLink.js";
-import { SlotImage } from "../components/GameImage.js";
+import { SlotImage, useSlotImage } from "../components/GameImage.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 
@@ -25,6 +25,11 @@ export function Jail(): JSX.Element {
     jail.dataUpdatedAt,
   );
 
+  // Resolved ahead of the early returns below — hooks can't follow them —
+  // so the render can fall back to page-jail (spec §3.6) when an install has
+  // jail art bound but no super-max art of its own.
+  const supermaxUrl = useSlotImage("core", "page-supermax");
+
   if (jail.isLoading) return <Loading what="jail status" />;
 
   if (!jail.data) return <Loading what="jail status" />;
@@ -33,16 +38,19 @@ export function Jail(): JSX.Element {
   const cash = me.data?.cash ?? "0";
 
   const inSuperMax = status.jailed && status.superMax;
+  const showSupermaxBanner = inSuperMax && supermaxUrl !== null;
 
   return (
     <>
       {/* The one state-dependent banner: which slot renders depends on whether
           the caller is currently super-maxed, so this can't live in Shell's
-          static route→slot map — see the PAGE_BANNERS comment there. */}
+          static route→slot map — see the PAGE_BANNERS comment there. Falls
+          back to page-jail when super-maxed but no super-max art is bound
+          (spec §3.6), rather than showing no banner at all. */}
       <SlotImage
         scope="core"
-        slot={inSuperMax ? "page-supermax" : "page-jail"}
-        alt={inSuperMax ? "Super max" : "Jail"}
+        slot={showSupermaxBanner ? "page-supermax" : "page-jail"}
+        alt={showSupermaxBanner ? "Super max" : "Jail"}
         size="banner" zoomable={false}
       />
 

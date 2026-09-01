@@ -96,7 +96,8 @@ describe("jail escape — super max parity", () => {
     const jailedUntil = new Date(Date.now() + 600_000);
     await place(p, townA, { jailedUntil, level: 1 });
 
-    const result = await escapeAttempt(db, {}, p.playerId, seedWhere(45, true));
+    const percent = breakoutPercent(1, true, false);
+    const result = await escapeAttempt(db, {}, p.playerId, seedWhere(percent, true));
 
     expect(result.kind).toBe("escaped");
     const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, p.playerId));

@@ -118,7 +118,7 @@ export async function bustAttempt(
 ): Promise<BustResult> {
   return db.transaction(async (tx) => {
     // ONE sorted call over both players, FIRST statement, before either row
-    // is read (NOTES.md rule 6) — same shape as bail above.
+    // is read (NOTES.md rule 6) — same shape as the bail route in routes.ts.
     await lockPlayersForUpdate(tx, [callerId, targetId]);
 
     const [caller] = await tx.select({

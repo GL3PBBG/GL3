@@ -207,13 +207,10 @@ export function registerJailRoutes(
   });
 
   /**
-   * The failure branch — the caller doing the target's kind of time — is the
-   * whole cost, which is why there is no cooldown. The seed is generated
+   * V2's bust-out attempt against a jailed target. The seed is generated
    * here and never accepted from the client: a client-chosen seed is a
-   * client-chosen outcome. Since 2026-08-26 (audit §7 item 12) a boot with
-   * the energy pool declared also charges a flat 10 energy per attempt, on
-   * both outcomes — MCCodes' own number; a default install's bust stays
-   * free and byte-identical, because no pool is declared.
+   * client-chosen outcome — see `bustAttempt`'s own doc comment for the
+   * chance derivation, the no-cooldown reasoning and the energy-pool charge.
    */
   app.post("/api/jail/bust", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
