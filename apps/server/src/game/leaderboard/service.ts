@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import type { Redis } from "ioredis";
-import type { LeaderboardEntry, LeaderboardKind } from "@gl3/shared";
+import { encodeLevelScore, type LeaderboardEntry, type LeaderboardKind } from "@gl3/shared";
 import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 
@@ -16,6 +16,11 @@ import { players, playerStats } from "../../db/schema/index.js";
 export const DEFAULT_LEADERBOARD_PREFIX = "leaderboard";
 
 const key = (kind: LeaderboardKind, prefix: string): string => `${prefix}:${kind}`;
+
+/** Raw exp when unrouted; level-composite when routed. One writer-side rule. */
+export function expScore(level: number, exp: bigint, routed: boolean): bigint {
+  return routed ? encodeLevelScore(level, exp) : exp;
+}
 
 /**
  * Redis sorted-set scores are IEEE-754 doubles, not arbitrary-precision —

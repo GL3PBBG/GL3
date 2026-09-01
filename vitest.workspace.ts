@@ -469,6 +469,7 @@ export default defineWorkspace([
         "test/presence.test.ts",
         "test/profile-extras-bounties.test.ts",
         "test/profile.test.ts",
+        "test/rank-level-routed.test.ts",
         "test/ranks.test.ts",
         "test/rounds-finalize.test.ts",
         "test/rounds-ledger.test.ts",
