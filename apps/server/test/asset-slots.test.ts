@@ -46,6 +46,14 @@ describe("collectAssetSlots", () => {
     expect(registry.get(slotKey("garageco", "car"))?.label).toBe("Also a car");
   });
 
+  it("registers page-supermax as a singleton beside page-jail", () => {
+    const registry = collectAssetSlots([]);
+
+    expect(registry.get(slotKey("core", "page-supermax"))).toMatchObject({
+      scope: "core", slot: "page-supermax", singleton: true,
+    });
+  });
+
   it("carries `singleton` through to the registry", () => {
     const plugin = definePlugin({
       id: "casino", version: "1.0.0", basePaths: ["/api/casino"],

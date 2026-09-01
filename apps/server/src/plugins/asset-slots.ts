@@ -22,6 +22,7 @@ export const CORE_ASSET_SLOTS: readonly AssetSlot[] = [
   // puts a `slotImage` node in its view; both paths end at the same table.
   { scope: CORE_SCOPE, slot: "page-crimes", label: "Crimes page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-jail", label: "Jail page banner", singleton: true },
+  { scope: CORE_SCOPE, slot: "page-supermax", label: "Super max page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-hospital", label: "Hospital page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-bank", label: "Bank page banner", singleton: true },
   { scope: CORE_SCOPE, slot: "page-casino", label: "Casino page banner", singleton: true },

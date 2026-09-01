@@ -4,7 +4,7 @@ import {
 } from "../src/game/hospital/settings.js";
 import {
   bailCostPerSecond, bailWealthCapMultiplier, bailWealthPercent,
-  bustFailJailSeconds, bustSuccessPercent, escapeFailExtraSeconds,
+  bustFailJailSeconds, escapeFailExtraSeconds,
 } from "../src/game/jail/settings.js";
 import { bustSucceeds } from "../src/game/jail/bust.js";
 
@@ -20,8 +20,7 @@ describe("facility settings parsers", () => {
     expect(dischargeCostPerSecond({})).toBe(1000n);
     expect(checkinSecondsPerHp({})).toBe(30);
     expect(bailCostPerSecond({})).toBe(1000n);
-    expect(bustSuccessPercent({})).toBe(25);
-    expect(bustFailJailSeconds({})).toBe(300);
+    expect(bustFailJailSeconds({})).toBe(90);
     expect(escapeFailExtraSeconds({})).toBe(90);
     expect(bailWealthPercent({})).toBe(1);
     expect(bailWealthCapMultiplier({})).toBe(10);
@@ -32,8 +31,6 @@ describe("facility settings parsers", () => {
   it("reads well-formed values", () => {
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "5" })).toBe(5);
     expect(bailCostPerSecond({ "jail.bail_cost_per_second": "42" })).toBe(42n);
-    expect(bustSuccessPercent({ "jail.bust_success_percent": "0" })).toBe(0);
-    expect(bustSuccessPercent({ "jail.bust_success_percent": "100" })).toBe(100);
     expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "60" })).toBe(60);
     expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": "120" })).toBe(120);
     expect(bailWealthPercent({ "jail.bail_wealth_percent": "0" })).toBe(0);
@@ -46,7 +43,7 @@ describe("facility settings parsers", () => {
   it.each(["", "   ", "abc", "1.5"])("falls back on %j", (raw) => {
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": raw })).toBe(30);
     expect(bailCostPerSecond({ "jail.bail_cost_per_second": raw })).toBe(1000n);
-    expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": raw })).toBe(300);
+    expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": raw })).toBe(90);
     expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": raw })).toBe(90);
     expect(bailWealthPercent({ "jail.bail_wealth_percent": raw })).toBe(1);
     expect(bailWealthCapMultiplier({ "jail.bail_wealth_cap_multiplier": raw })).toBe(10);
@@ -56,7 +53,7 @@ describe("facility settings parsers", () => {
 
   it("falls back on -1 everywhere except the percents, which clamp it to 0", () => {
     // -1 is an integer, so the percent parsers clamp it (the case above) the
-    // way bustSuccessPercent does, while every other parser treats it as
+    // way bailWealthPercent does, while every other parser treats it as
     // malformed — which is why it is not in the each-matrix above.
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "-1" })).toBe(30);
     expect(bailCostPerSecond({ "jail.bail_cost_per_second": "-1" })).toBe(1000n);
@@ -66,7 +63,7 @@ describe("facility settings parsers", () => {
     expect(dischargeWealthCapMultiplier({ "hospital.discharge_wealth_cap_multiplier": "-1" })).toBe(10);
   });
 
-  it("clamps the wealth percent like bustSuccessPercent — typed intent over silent default", () => {
+  it("clamps the wealth percent — typed intent over silent default", () => {
     expect(bailWealthPercent({ "jail.bail_wealth_percent": "150" })).toBe(100);
     expect(bailWealthPercent({ "jail.bail_wealth_percent": "-5" })).toBe(0);
     expect(dischargeWealthPercent({ "hospital.discharge_wealth_percent": "250" })).toBe(100);
@@ -84,13 +81,8 @@ describe("facility settings parsers", () => {
     // write a sentence with a deadline already in the past, and a zero
     // `escape_fail_extra_seconds` would make escape a free reroll forever.
     expect(checkinSecondsPerHp({ "hospital.checkin_seconds_per_hp": "0" })).toBe(30);
-    expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "0" })).toBe(300);
+    expect(bustFailJailSeconds({ "jail.bust_fail_jail_seconds": "0" })).toBe(90);
     expect(escapeFailExtraSeconds({ "jail.escape_fail_extra_seconds": "0" })).toBe(90);
-  });
-
-  it("clamps an out-of-range bust percentage instead of falling back", () => {
-    expect(bustSuccessPercent({ "jail.bust_success_percent": "250" })).toBe(100);
-    expect(bustSuccessPercent({ "jail.bust_success_percent": "-5" })).toBe(0);
   });
 
   it("never succeeds at 0 and always succeeds at 100", () => {
