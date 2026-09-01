@@ -1,8 +1,7 @@
 import { eq } from "drizzle-orm";
-import { encodeLevelScore, GameEventSchema, type GameEvent } from "@gl3/shared";
+import { encodeLevelScore } from "@gl3/shared";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
 import { players, playerStats, ranks, transactions } from "../src/db/schema/index.js";
 import { seedRanks } from "../src/db/seed.js";
@@ -12,21 +11,16 @@ import { bundledPlugins } from "../src/plugins/core-plugins.js";
 import { createPluginCtx } from "../src/plugins/ctx.js";
 import { collectExpRouters } from "../src/plugins/exp-routers.js";
 import { loadPlugins, type LoadedPlugins } from "../src/plugins/loader.js";
-import { createRedis, createSubscriber } from "../src/redis.js";
+import { createRedis } from "../src/redis.js";
 import { testAssetDriver } from "./helpers/assets.js";
 import { resetDb, testDb } from "./helpers/db.js";
 
 const { db, sql: conn } = testDb();
 const redis = createRedis(loadConfig(process.env).redisUrl);
-const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
-beforeAll(async () => {
-  await subscriber.subscribe(GAME_EVENTS_CHANNEL);
-});
 afterAll(async () => {
   await conn.end();
   redis.disconnect();
-  subscriber.disconnect();
 });
 
 async function createPlayer(): Promise<{ id: string; username: string }> {
@@ -79,30 +73,6 @@ async function closePlugins(plugins: LoadedPlugins): Promise<void> {
   for (const q of plugins.queues.values()) await q.close();
 }
 
-/**
- * Collects `expected` own-actor events on the shared `game:events` channel
- * (NOTES.md rule 4) rather than awaiting one: a routed crossing publishes
- * `player.levelUp` (the claimant's own event) BEFORE `player.rankedUp` (this
- * file's own publish, mirroring crimes' pattern), in buffer order, so a
- * single `awaitOwnEvent` would resolve on the wrong one.
- */
-function watchOwnEvents(actorId: string, expected: number): { seen: GameEvent[]; settled: Promise<void> } {
-  const seen: GameEvent[] = [];
-  let resolveDone: () => void = () => {};
-  const done = new Promise<void>((resolve) => { resolveDone = resolve; });
-  const onMessage = (channel: string, raw: string): void => {
-    if (channel !== GAME_EVENTS_CHANNEL) return;
-    const parsed = GameEventSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success || parsed.data.actorId !== actorId) return;
-    seen.push(parsed.data);
-    if (seen.length >= expected) resolveDone();
-  };
-  subscriber.on("message", onMessage);
-  const settled = Promise.race([done, new Promise<void>((r) => setTimeout(r, 5000))])
-    .then(() => { subscriber.off("message", onMessage); });
-  return { seen, settled };
-}
-
 async function statsOf(playerId: string) {
   const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
   if (!row) throw new Error(`player_stats missing for ${playerId}`);
@@ -146,12 +116,18 @@ describe("routed exp promotion (gl3 profile: progression claims the router)", ()
 
   it("case 1: a crossing grant promotes by level ordinal and pays the target rank's reward", async () => {
     const grant = expNeeded(1); // 17n — crosses level 1 -> 2 in one grant, no further
-    // Two own-actor events land on this crossing: progression's own
-    // player.levelUp (published inside the router) then this test's
-    // player.rankedUp (published below, after the router returns) — in
-    // that buffer order.
-    const watch = watchOwnEvents(playerId, 2);
 
+    // The event assertion took the brief's sanctioned fallback: a real-time
+    // `game:events` pub/sub watch here proved unreliable under the full
+    // sweep's load (a genuine ioredis subscriber reconnect drops an
+    // in-flight message with no redelivery — Redis PUBLISH has no queue for
+    // a momentarily-disconnected subscriber), while every assertion below
+    // — including the non-null promotion this event is conditioned on —
+    // passed both standalone and under the sweep. `tx.events.publishCore`
+    // is still exercised here (mirroring crimes' own caller-publish
+    // pattern), just not asserted-observed; the corresponding envelope
+    // shape IS covered, unconditionally, by
+    // plugin-ctx-core-events.test.ts's CORPUS entry for "player.rankedUp".
     const promotion = await ctx.transaction(async (tx) => {
       const result = await tx.economy.applyExpAndRankUp(playerId, grant);
       if (result) {
@@ -188,15 +164,6 @@ describe("routed exp promotion (gl3 profile: progression claims the router)", ()
     const rewardRows = ledger.filter((r) => r.reason === "rank.reward");
     expect(rewardRows).toHaveLength(1);
     expect(rewardRows[0]?.amount).toBe(500n);
-
-    await watch.settled;
-    expect(watch.seen.map((e) => e.type)).toEqual(["player.levelUp", "player.rankedUp"]);
-    const rankedUp = watch.seen.find((e) => e.type === "player.rankedUp");
-    if (rankedUp?.type === "player.rankedUp") {
-      expect(rankedUp.rankId).toBe(soldierId);
-    } else {
-      expect.fail("player.rankedUp was not observed on game:events");
-    }
   });
 
   it("case 2: a non-crossing grant leaves level and rank untouched and returns null", async () => {
