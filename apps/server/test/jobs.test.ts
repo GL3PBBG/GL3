@@ -1,16 +1,22 @@
 import { eq, sql } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import jobsPlugin from "@gl3/plugin-jobs";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
 import progressionPlugin from "@gl3/plugin-progression";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import { notifications, playerStats } from "../src/db/schema/index.js";
+import { createSubscriber } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
+import { awaitOwnPluginEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
-afterAll(async () => { await conn.end(); });
+beforeAll(async () => { await subscriber.subscribe(GAME_EVENTS_CHANNEL); });
+afterAll(async () => { subscriber.disconnect(); await conn.end(); });
 
 async function seedJob(): Promise<{ jobId: string; loaderId: string; foremanId: string }> {
   const jobId = crypto.randomUUID();
@@ -31,6 +37,15 @@ async function seedJob(): Promise<{ jobId: string; loaderId: string; foremanId: 
 }
 
 describe("jobs plugin (exp routing claimed — wages feed levels, never ranks)", () => {
+  it("declares the wages event silent and invalidating the HUD and me", () => {
+    const decl = jobsPlugin.events.find((e) => e.name === "wages");
+    expect(decl).toBeDefined();
+    // Silent: the payday notification is already the visible record; a feed
+    // line on top would say the same thing twice.
+    expect(decl?.silent).toBe(true);
+    expect(decl?.invalidates).toEqual(expect.arrayContaining(["hudExtras", "me"]));
+  });
+
   it("interviews, settles whole backdated days lazily, and leaves the remainder", async () => {
     const server = await bootTestServer({ plugins: [mccodesAttributes, progressionPlugin, jobsPlugin] });
     try {
@@ -50,9 +65,16 @@ describe("jobs plugin (exp routing claimed — wages feed levels, never ranks)",
         WHERE player_id = ${playerId}
       `);
 
+      // The settle is a READ the plugin page fetches with no action behind
+      // it, so nothing client-side invalidates the HUD's "Wages: N day(s)
+      // unclaimed" line or the cash stat — the silent event is what does.
+      const wages = awaitOwnPluginEvent(subscriber, playerId, "jobs", "wages");
       const mine = await server.app.inject({ method: "GET", url: "/api/jobs/mine", headers: auth });
       expect(mine.statusCode).toBe(200);
       expect(mine.json().daysSettled).toBe(3);
+      const paid = await wages;
+      expect(paid.audience).toEqual({ kind: "player", playerId });
+      expect(paid.payload).toEqual({ days: 3, total: "300", rankName: "Loader" });
       expect(mine.json().job.rankName).toBe("Loader");
 
       const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));

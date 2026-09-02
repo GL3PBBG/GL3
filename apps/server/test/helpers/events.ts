@@ -32,3 +32,34 @@ export function awaitOwnEvent(subscriber: Redis, actorId: string, timeoutMs = 50
     subscriber.on("message", onMessage);
   });
 }
+
+type PluginEnvelope = Extract<GameEvent, { type: "plugin.event" }>;
+
+/**
+ * `awaitOwnEvent` for one specific plugin event. The actor filter alone is
+ * not enough when the transaction under test also notifies: `tx.notify`
+ * publishes a `notification.created` naming the SAME actor, and whichever
+ * envelope the outbox delivers first would settle `awaitOwnEvent` — a test
+ * asserting on the plugin event would then flake on delivery order.
+ */
+export function awaitOwnPluginEvent(
+  subscriber: Redis, actorId: string, pluginId: string, name: string, timeoutMs = 5000,
+): Promise<PluginEnvelope> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (channel: string, raw: string): void => {
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success || parsed.data.actorId !== actorId) return;
+      const event = parsed.data;
+      if (event.type !== "plugin.event" || event.pluginId !== pluginId || event.name !== name) return;
+      clearTimeout(timer);
+      subscriber.off("message", onMessage);
+      resolve(event);
+    };
+    const timer = setTimeout(() => {
+      subscriber.off("message", onMessage);
+      reject(new Error(`awaitOwnPluginEvent: no ${pluginId}.${name} for actorId ${actorId} within ${timeoutMs}ms`));
+    }, timeoutMs);
+    subscriber.on("message", onMessage);
+  });
+}
