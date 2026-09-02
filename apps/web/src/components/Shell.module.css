@@ -72,6 +72,10 @@
     linear-gradient(100deg, transparent 42%, color-mix(in oklab, white 85%, transparent) 50%, transparent 58%),
     var(--chrome);
   background-size: 250% 100%, 100% 100%;
+  /* no-repeat is load-bearing: a tiled sweep layer puts a second copy of
+     the band on the glyphs — parked in view as a static highlight, and
+     leaving early on the right while the real one enters on the left. */
+  background-repeat: no-repeat, no-repeat;
   background-position: 200% 0, 0 0;
   -webkit-background-clip: text;
   background-clip: text;
