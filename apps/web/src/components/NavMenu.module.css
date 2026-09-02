@@ -41,7 +41,9 @@
 .catBtn::after { display: none; }
 .catBtn:hover:not(:disabled) { filter: none; color: var(--fg); box-shadow: none; }
 .catBtn:active:not(:disabled) { transform: none; box-shadow: none; }
-.open .catBtn { background: var(--accent-soft); color: var(--fg); }
+.open .catBtn { background: var(--surface-raised); color: var(--fg); border-bottom-color: var(--surface-raised); }
+/* An open tab that is also the active one keeps its gold underline. */
+.open .catActive { border-bottom-color: var(--accent); }
 .catActive {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -84,9 +86,11 @@
   display: grid;
   gap: 0.05rem;
   background: var(--surface-raised);
+  /* A hairline, not gold: a gold edge here read as a second active
+     underline beside the real one. The open tab's tint says which tab the
+     panel belongs to; gold on this row means "you are here" and nothing else. */
   border: 1px solid var(--line);
-  border-top: 2px solid var(--accent);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: 0 var(--radius) var(--radius) var(--radius);
   box-shadow: var(--shadow-lift);
   animation: drop var(--dur-fast) var(--ease-out);
 }
