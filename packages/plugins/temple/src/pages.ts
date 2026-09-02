@@ -8,7 +8,9 @@ import type { PageSchema } from "@gl3/plugin-sdk";
 export const templePage: PageSchema = {
   id: "temple.index",
   path: "/temple",
-  menu: { label: "Temple", order: 25, category: "town" },
+  // Account, not Town: the temple trades the player's own points/IQ/cash, a
+  // personal ledger like Inventory; order 25 keeps it above Membership (60).
+  menu: { label: "Temple", order: 25, category: "account" },
   view: {
     kind: "panel",
     title: "Temple",

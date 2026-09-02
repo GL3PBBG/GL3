@@ -60,7 +60,7 @@ const ACTIONS: NavCategory = {
   items: [],
 };
 
-/* Bank and Shop are the framework's town services; bullets/casino/travel/
+/* Bank and Shop are the framework's town services; casino/travel/
    jail/hospital are plugin/synthetic pages folded in from the payload. */
 const TOWN: NavCategory = {
   id: "town",

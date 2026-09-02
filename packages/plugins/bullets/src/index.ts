@@ -426,7 +426,9 @@ export default definePlugin({
   pages: [{
     id: "bullets.index",
     path: "/bullets",
-    menu: { label: "Bullets", order: 30, category: "town" },
+    // Crimes, not Town: bullets are ammunition for the fights in this group,
+    // ordered right behind Combat.
+    menu: { label: "Bullets", order: 13, category: "crimes" },
     // Stub view: the client renders a hand-written override (apps/web
     // PAGE_OVERRIDES) for this id; the schema view exists because a
     // page declaration requires one.
