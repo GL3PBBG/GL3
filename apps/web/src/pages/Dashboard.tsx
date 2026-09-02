@@ -3,7 +3,7 @@ import { useDashboardWidgets, useJail, useLocations, useMe, usePlugins, useRanks
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { formatAmount } from "../lib/money.js";
 import { formatDuration } from "../lib/errors.js";
-import { progressToNextRank } from "../lib/ranks.js";
+import { rankProgress } from "../lib/ranks.js";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { renderNode } from "../plugins/render.js";
@@ -24,7 +24,11 @@ export function Dashboard(): JSX.Element {
 
   if (!me.data) return <Loading />;
 
-  const progress = progressToNextRank(me.data.exp, ranks.data?.ranks ?? []);
+  // Model-aware, like the HUD and the ranks page: on a routed boot rank is
+  // ordinal by level and `exp` is within-level exp, so the exp bar and the
+  // "exp to go" figure are replaced by the level gate.
+  const level = plugins.data?.progression === "level";
+  const progress = rankProgress(plugins.data?.progression, me.data, ranks.data?.ranks ?? []);
   const here = locations.data?.locations.find((location) => location.current);
 
   return (
@@ -44,16 +48,25 @@ export function Dashboard(): JSX.Element {
           {progress.current?.name ?? "Unranked"}
           {progress.next !== null ? ` → ${progress.next.name}` : " — top of the ladder"}
         </p>
-        <div className={styles.bar}>
-          <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
-        </div>
-        <p className={styles.meta}>
-          {progress.next === null
-            ? `${progress.pct.toFixed(0)}%`
-            : `${progress.pct.toFixed(1)}% — ${formatAmount(
-                (BigInt(progress.next.expRequired) - BigInt(me.data.exp)).toString(),
-              )} exp to go`}
-        </p>
+        {level ? (
+          <p className={styles.meta}>
+            Level {me.data.level}
+            {progress.next === null ? "" : ` — ${progress.next.name} at level ${me.data.level + 1}`}
+          </p>
+        ) : (
+          <>
+            <div className={styles.bar}>
+              <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
+            </div>
+            <p className={styles.meta}>
+              {progress.next === null
+                ? `${progress.pct.toFixed(0)}%`
+                : `${progress.pct.toFixed(1)}% — ${formatAmount(
+                    (BigInt(progress.next.expRequired) - BigInt(me.data.exp)).toString(),
+                  )} exp to go`}
+            </p>
+          </>
+        )}
       </Panel>
 
       {/* Travel-town panel: absent entirely when the travel plugin is not

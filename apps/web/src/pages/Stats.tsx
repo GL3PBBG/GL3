@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { GameStatsResponse, PropertyRow } from "@gl3/shared";
 import { useMe, usePlugins, useProperties, useRanks, useStats } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
-import { progressToNextRank } from "../lib/ranks.js";
+import { rankProgress } from "../lib/ranks.js";
 import {
   barPath, countFractions, indexOfMax, layoutBars, moneyFractions,
 } from "../lib/chart.js";
@@ -115,7 +115,8 @@ function You(): JSX.Element | null {
   const installed = plugins.data?.installed;
   const showBullets = installed === undefined || installed.includes("combat") || installed.includes("bullets");
 
-  const rank = progressToNextRank(me.data.exp, ranks.data?.ranks ?? []);
+  // Model-aware, like the HUD: on a routed boot rank is ordinal by level.
+  const rank = rankProgress(plugins.data?.progression, me.data, ranks.data?.ranks ?? []);
   const owned = ownedProperties(properties.data?.rows ?? [], me.data.username);
 
   return (
