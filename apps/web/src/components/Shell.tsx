@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges,
+  useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges,
   useNotifications, usePlugins, useRanks,
 } from "../api/queries.js";
 import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
 import { secondsLeft } from "../lib/countdown.js";
+import { facilityArrival, type FacilityState } from "../lib/facilityRedirect.js";
 import { formatDuration } from "../lib/errors.js";
 import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
@@ -172,6 +173,7 @@ function usePageTitle(categories: readonly NavCategory[]): void {
 export function Shell(): JSX.Element {
   const me = useMe();
   const jail = useJail();
+  const hospital = useHospital();
   const ranks = useRanks();
   const locations = useLocations();
   const logout = useLogout();
@@ -186,6 +188,22 @@ export function Shell(): JSX.Element {
 
   const { pathname } = useLocation();
   const activeKey = navKeyFor(pathname);
+
+  // Landing in jail or hospital moves the player to that page. Keyed off the
+  // queries' `false → true` flip rather than any event, because every route
+  // into either facility invalidates these queries and not all of them
+  // publish — see facilityRedirect.ts. The ref holds the last seen state so a
+  // refetch that changes nothing (the sentence poll) never re-navigates.
+  const navigate = useNavigate();
+  const jailed = jail.data?.jailed;
+  const hospitalised = hospital.data?.hospitalised;
+  const lastFacility = useRef<FacilityState>({ jailed, hospitalised });
+  useEffect(() => {
+    const next: FacilityState = { jailed, hospitalised };
+    const target = facilityArrival(lastFacility.current, next);
+    lastFacility.current = next;
+    if (target !== null && target !== pathname) navigate(target);
+  }, [jailed, hospitalised, pathname, navigate]);
 
   // The drawer (phones) and the account menu (desktop) are the two pieces of
   // transient chrome the header owns; both close on Escape and on the outside
