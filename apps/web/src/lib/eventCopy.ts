@@ -24,7 +24,8 @@ export function describeEvent(event: GameEvent, eventMetas: readonly EventMeta[]
   switch (event.type) {
     case "crime.resolved":
       if (event.success) {
-        return `${event.crimeName}: succeeded, +${formatMoney(event.payout)} (+${event.exp} exp)`;
+        return `${event.crimeName}: succeeded, +${formatMoney(event.payout)} (+${event.exp} exp` +
+          (event.bullets !== "0" ? `, +${event.bullets} bullets)` : ")");
       }
       // A pool shortfall at resolve time is a no-attempt, not a bad roll —
       // rendering it as a plain "failed" left the player with no idea why.

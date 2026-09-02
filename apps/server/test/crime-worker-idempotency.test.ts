@@ -97,6 +97,45 @@ describe("plugin commit job idempotency", () => {
   });
 });
 
+describe("plugin commit job bullet reward", () => {
+  it("credits the rolled bullets to player_stats exactly once, even on a retry", async () => {
+    // V2 pays `mt_rand(C_bullets, C_maxBullets)` into US_bullets on success
+    // (crimes.inc.php:128). GL3 rolled the figure and reported it in
+    // crime.resolved from the first crime slice on, but never wrote it —
+    // this is the regression test for that credit. Armoured Van is the v2
+    // seed with a live range (1..5); Pickpocket's is 0..0 and proves nothing.
+    const [van] = await db.select().from(crimes).where(eq(crimes.name, "Armoured Van"));
+    await db.insert(playerCrimeSkill).values({ playerId, crimeId: van!.id, chance: "100.00" });
+
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    const events: Array<{ type: string; bullets?: string }> = [];
+    subscriber.on("message", (channel, raw) => {
+      if (channel !== GAME_EVENTS_CHANNEL) return;
+      const parsed = GameEventSchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.actorId === playerId && parsed.data.type === "crime.resolved") {
+        events.push(parsed.data);
+      }
+    });
+
+    const job = {
+      id: "bullet-reward-job-1",
+      data: { playerId, crimeId: van!.id, seed: "fixed-seed-for-bullet-reward-test" },
+    };
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
+    await runPluginJob(deps(), crimesPlugin, "commit", job);
+
+    const [stats] = await db.select({ bullets: playerStats.bullets })
+      .from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(stats?.bullets).toBeGreaterThanOrEqual(BigInt(van!.minBullets));
+    expect(stats?.bullets).toBeLessThanOrEqual(BigInt(van!.maxBullets));
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // The figure the event reports is the figure that landed on the row.
+    expect(events).toHaveLength(1);
+    expect(events[0]?.bullets).toBe(stats?.bullets?.toString());
+  });
+});
+
 describe("plugin commit job vs legacy core rows", () => {
   // The deleted core worker's queue (`bull:crime`) and the plugin's queue
   // (`crimes-commit`) number their jobs independently from 1, so a live DB

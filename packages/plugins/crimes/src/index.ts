@@ -509,6 +509,17 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
         .set({ crimeExp: sql`${playerStats.crimeExp} + ${crime.crimeExpReward}` })
         .where(eq(playerStats.playerId, playerId));
     }
+    // The bullet reward (V2 crimes.inc.php:128: `US_bullets + mt_rand(C_bullets,
+    // C_maxBullets)`). Rolled above since the first crime slice and reported
+    // in crime.resolved, but never credited until now — ranks' promotion
+    // reward (economy/ranks.ts) is the same plain-column write. Bullets are
+    // not a ledgered balance (rule 3 covers cash/bank/points), so no
+    // transactions row; idempotency is the plugin_job_runs claim above.
+    if (bullets > 0n) {
+      await tx.db.update(playerStats)
+        .set({ bullets: sql`${playerStats.bullets} + ${bullets}` })
+        .where(eq(playerStats.playerId, playerId));
+    }
     if (jailed) await tx.jail.sendToJail(playerId, crime.jailSeconds);
 
     // In-tx read for effectiveJailedUntil (spec §4.4) — same connection sees

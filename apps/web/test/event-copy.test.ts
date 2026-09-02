@@ -42,6 +42,15 @@ describe("describeEvent", () => {
     expect(describeEvent(crime)).toBe("Pickpocket: succeeded, +$1,500 (+12 exp)");
   });
 
+  it("names the bullet reward on a successful crime that paid one", () => {
+    const crime = event({
+      type: "crime.resolved", crimeName: "Armoured Van", success: true,
+      payout: "4000", exp: "40", bullets: "3", jailedUntil: null,
+      crimeId: "00000000-0000-7000-8000-000000000009",
+    });
+    expect(describeEvent(crime)).toBe("Armoured Van: succeeded, +$4,000 (+40 exp, +3 bullets)");
+  });
+
   it("distinguishes a pool-shortfall no-attempt from a failed roll", () => {
     const shortfall = event({
       type: "crime.resolved", crimeName: "Pickpocket", success: false,
