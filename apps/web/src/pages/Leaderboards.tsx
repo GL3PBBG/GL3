@@ -3,6 +3,8 @@ import type { LeaderboardKind } from "@gl3/shared";
 import { useLeaderboard, useMe } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { PlayerLink } from "../components/PlayerLink.js";
+import { useMoneyFormat } from "../lib/formatContext.js";
+import { formatBoardScore } from "../lib/level-score-display.js";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [
@@ -21,6 +23,8 @@ export function Leaderboards(): JSX.Element {
   const [scope, setScope] = useState<"round" | "all">("all");
   const board = useLeaderboard(kind, scope);
   const me = useMe();
+  const moneyFormat = useMoneyFormat();
+  const mode = board.data?.mode;
 
   // A round board that has not loaded and one that loaded empty both render
   // as "no rows yet" — distinguish them, or an empty season reads as a bug.
@@ -66,7 +70,7 @@ export function Leaderboards(): JSX.Element {
             <tr>
               <th>#</th>
               <th>Player</th>
-              <th>{kind === "exp" ? "Exp" : "Amount"}</th>
+              <th>{mode === "level" ? "Level" : kind === "exp" ? "Exp" : "Amount"}</th>
             </tr>
           </thead>
           <tbody>
@@ -77,7 +81,15 @@ export function Leaderboards(): JSX.Element {
               >
                 <td>{entry.rank}</td>
                 <td><PlayerLink playerId={entry.playerId} username={entry.username} /></td>
-                <td>{kind === "exp" ? <Amount value={entry.score} /> : <Money value={entry.score} />}</td>
+                <td>
+                  {mode === "level" ? (
+                    formatBoardScore(kind, mode, entry.score, moneyFormat)
+                  ) : kind === "exp" ? (
+                    <Amount value={entry.score} />
+                  ) : (
+                    <Money value={entry.score} />
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

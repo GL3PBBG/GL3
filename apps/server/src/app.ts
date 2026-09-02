@@ -21,6 +21,7 @@ import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { registerStatsRoutes } from "./stats/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
 import { bundledPlugins } from "./plugins/core-plugins.js";
+import { collectExpRouters } from "./plugins/exp-routers.js";
 import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
@@ -97,9 +98,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     registerJailRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, () => loaded!.manifests);
     registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   }
-  registerLeaderboardRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), deps.redis, loadedSettings, requireAuth, leaderboardPrefix);
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
-  registerRoundsRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db, assetDriver);
   registerWsRoutes(app, deps.redis, requireAuth);
@@ -155,6 +154,24 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     assetDriver,
   };
   registerPluginRoutes(app, loaded.manifests, pluginCtxDeps);
+
+  // Registered here rather than alongside the other core routes above: the
+  // "level" mode flag depends on whether a claimant plugin (progression) is
+  // among `loaded.manifests`, which isn't resolved until this point.
+  // `collectExpRouters` over the SAME manifest list `registerPluginRoutes`
+  // above and its per-request ctx (`plugins/routes.ts`) already read — not a
+  // second source of truth, just a second call over one shared list.
+  const routed = collectExpRouters(loaded.manifests) !== null;
+  registerLeaderboardRoutes(
+    app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), deps.redis, loadedSettings, requireAuth,
+    leaderboardPrefix, routed,
+  );
+  // Same reason as registerLeaderboardRoutes above, and moved down here for
+  // the same `loaded.manifests` dependency — round standings' `mode` field
+  // needs the same flag.
+  registerRoundsRoutes(
+    app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, routed,
+  );
 
   // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`
   // is owned by that caller (e.g. bootTestServer's own `close()`), and closing

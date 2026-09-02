@@ -83,7 +83,10 @@ export const GameEventSchema = z.discriminatedUnion("type", [
     rankId: IdSchema, rankName: z.string(), cashReward: MoneySchema, bulletReward: MoneySchema, maxHealth: z.number().int().positive(),
   }),
   // actor = the player who leveled up (the MCCodes ladder; fires only on a
-  // boot whose exp routing is claimed — rankedUp never fires there).
+  // boot whose exp routing is claimed). rankedUp still fires there too, on
+  // the same grant: the claimed level ladder is reconciled to the GL3 rank
+  // ladder's ordinal position (level-derived, not exp-threshold-derived) and
+  // a crossing still returns a RankUpResult for the caller to publish.
   z.object({ ...base, type: z.literal("player.levelUp"), level: z.number().int().positive() }),
   // actor = the account holder. Private audience — bank state is not broadcast.
   z.object({

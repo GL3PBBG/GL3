@@ -21,6 +21,7 @@ export function registerLeaderboardRoutes(
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
   leaderboardPrefix = DEFAULT_LEADERBOARD_PREFIX,
+  routed = false,
 ): void {
   app.get("/api/leaderboard/:kind", { preHandler: requireAuth }, async (request, reply) => {
     // Unconditional, before the params parse: branching on the query param to
@@ -33,16 +34,22 @@ export function registerLeaderboardRoutes(
     const query = QuerySchema.safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "invalid_scope" });
 
+    // "level" only for the exp kind on a routed boot; absent (raw exp)
+    // otherwise — cash/bank never carry this field, and it applies the same
+    // way to both scopes below, since round deltas are deltas of whatever
+    // score the ZSET holds (composite when routed).
+    const mode = params.data.kind === "exp" && routed ? "level" as const : undefined;
+
     if (query.data.scope === "round") {
       // No active round is an empty board, not a 404: an empty board is the
       // honest answer for "this season's standings" on a game with no season.
       const entries = active === null
         ? []
         : await roundStandings(db, active.id, params.data.kind, 10, false);
-      return reply.send({ kind: params.data.kind, entries });
+      return reply.send({ kind: params.data.kind, entries, ...(mode !== undefined ? { mode } : {}) });
     }
 
     const entries = await topN(db, redis, params.data.kind, 10, leaderboardPrefix);
-    return reply.send({ kind: params.data.kind, entries });
+    return reply.send({ kind: params.data.kind, entries, ...(mode !== undefined ? { mode } : {}) });
   });
 }

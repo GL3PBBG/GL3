@@ -26,7 +26,8 @@ import {
   InsufficientGangFundsError, lockGangAndPlayerForUpdate, lockLocationForUpdate,
   lockLocationsForUpdate, lockPlayersForUpdate, type Tx,
 } from "../economy/ledger.js";
-import { applyExpAndRankUp } from "../economy/ranks.js";
+import { applyExpAndRankUp, syncRankToLevel } from "../economy/ranks.js";
+import { expScore } from "../game/leaderboard/service.js";
 import { appendGangLog } from "../game/gangs/logs.js";
 import { GANG_PERMISSIONS, hasGangPermission, type GangPermission } from "../game/gangs/permissions.js";
 import {
@@ -211,21 +212,43 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               // Nothing was written, so there is nothing to record.
               if (amount === 0n) return;
               const fresh = await freshStats(tx, playerId);
-              if (fresh) bufferScore("exp", playerId, fresh.exp);
+              if (fresh) bufferScore("exp", playerId, expScore(fresh.level, fresh.exp, Boolean(options.expRouter)));
             },
             applyExpAndRankUp: async (playerId, expGain) => {
-              // Exp routing (C spec §1.2): a claimant applies exp to its own
-              // ladder INSIDE this transaction and the rank path never runs —
-              // reward-bearing ranks stay silent on an MCCodes-profile boot.
-              // RankUpResult is a rank concept; a routed boot has none, so
-              // the caller's promotion is null and its rankedUp event does
-              // not fire. The claimant publishes its own levelUp events.
-              if (options.expRouter !== null) {
+              // Exp routing (C spec §3.2/§3.4): a claimant applies exp to its
+              // own level ladder INSIDE this transaction — `player_stats.exp`
+              // becomes WITHIN-level exp once routed, not lifetime exp, and
+              // the rank ladder's own threshold path never runs. The GL3
+              // rank ladder still exists on a routed boot, though: it is
+              // reconciled to the player's new level's ORDINAL position
+              // (`syncRankToLevel`, level-derived, not exp-threshold-
+              // derived), so reward-bearing ranks still pay out and a
+              // crossing still returns a `RankUpResult` — the caller
+              // publishes `player.rankedUp` exactly as it would on an
+              // unrouted boot. The claimant separately publishes its own
+              // `player.levelUp` events; this path never does.
+              if (options.expRouter) {
                 if (expGain === 0n) return null;
+                const [before] = await tx
+                  .select({ level: playerStats.level })
+                  .from(playerStats)
+                  .where(eq(playerStats.playerId, playerId));
                 await options.expRouter(pluginTx, playerId, expGain);
                 const fresh = await freshStats(tx, playerId);
-                if (fresh) bufferScore("exp", playerId, fresh.exp);
-                return null;
+                if (!fresh) return null;
+                const promotion = await syncRankToLevel(tx, playerId, {
+                  pay: fresh.level > (before?.level ?? 0),
+                });
+                bufferScore("exp", playerId, expScore(fresh.level, fresh.exp, true));
+                // A promotion pays its cash reward through syncRankToLevel's own
+                // internal applyBalanceChange, invisible to this wrapper — same
+                // reasoning as the unrouted arm below, so re-read post-sync and
+                // buffer cash too, or the board goes stale by the reward amount.
+                if (promotion) {
+                  const paid = await freshStats(tx, playerId);
+                  if (paid) bufferScore("cash", playerId, paid.cash);
+                }
+                return promotion;
               }
               const result = await applyExpAndRankUp(tx, playerId, expGain);
               // Same reasoning as addExp above: core's applyExpAndRankUp
@@ -238,7 +261,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               // wrapper never sees, so buffering exp alone leaves cash stale.
               const fresh = await freshStats(tx, playerId);
               if (fresh) {
-                bufferScore("exp", playerId, fresh.exp);
+                bufferScore("exp", playerId, expScore(fresh.level, fresh.exp, Boolean(options.expRouter)));
                 bufferScore("cash", playerId, fresh.cash);
               }
               return result;
@@ -657,9 +680,9 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
  * leaves behind. `addExp` returns void and `applyExpAndRankUp` returns only
  * the promotion, so there is nothing to buffer without this read.
  */
-async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash: bigint } | undefined> {
+async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash: bigint; level: number } | undefined> {
   const [row] = await tx
-    .select({ exp: playerStats.exp, cash: playerStats.cash })
+    .select({ exp: playerStats.exp, cash: playerStats.cash, level: playerStats.level })
     .from(playerStats)
     .where(eq(playerStats.playerId, playerId));
   return row;

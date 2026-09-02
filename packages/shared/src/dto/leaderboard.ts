@@ -9,5 +9,9 @@ export const LeaderboardEntrySchema = z.object({
 });
 export type LeaderboardEntry = z.infer<typeof LeaderboardEntrySchema>;
 
-export const LeaderboardResponseSchema = z.object({ kind: LeaderboardKindSchema, entries: z.array(LeaderboardEntrySchema) });
+export const LeaderboardResponseSchema = z.object({
+  kind: LeaderboardKindSchema,
+  entries: z.array(LeaderboardEntrySchema),
+  mode: z.enum(["exp", "level"]).optional(), // "level" = composite scores (level + within-level exp), absent = raw exp
+});
 export type LeaderboardResponse = z.infer<typeof LeaderboardResponseSchema>;

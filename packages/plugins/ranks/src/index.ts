@@ -260,7 +260,7 @@ export default definePlugin({
           return {
             status: 200,
             body: {
-              ranks: rows.map((r) => ({
+              ranks: rows.map((r, i) => ({
                 id: r.id,
                 name: r.name,
                 expRequired: r.expRequired.toString(),
@@ -268,6 +268,11 @@ export default definePlugin({
                 bulletReward: r.bulletReward,
                 maxHealth: r.maxHealth,
                 current: r.id === player?.rankId,
+                // Ordinal position in the ladder (1-based), ordered by
+                // expRequired ascending — the same ordering `syncRankToLevel`
+                // promotes into on a routed boot. Display only; the plugin
+                // cannot see whether this install is routed.
+                levelRequired: i + 1,
                 ...(art.has(r.id) ? { imageUrl: art.get(r.id) as string } : {}),
               })),
               moneyRanks: money.map((m) => ({
