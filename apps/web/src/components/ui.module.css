@@ -22,6 +22,10 @@
   /* A stacking context of its own, so the spotlight below (z-index -1) sits
      above the panel's background and under everything in it. */
   isolation: isolate;
+  /* Rows inside query the panel's width, not the viewport's: a panel is
+     narrow on a phone AND beside a sidebar on a desktop, and the same
+     stacking rules (pages.module.css) should fire in both. */
+  container-type: inline-size;
 }
 .panel:has(> .panelTitle) { margin-top: 1.55rem; }
 /* The spotlight: a soft gold light centred on the pointer (`--mx`/`--my`,

@@ -17,6 +17,16 @@
 .rows > .row:first-child { border-top: 0; }
 .row:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
 .rowCurrent { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent), inset 14px 0 18px -14px var(--accent-glow); }
+/* In a narrow panel — a phone, or beside the sidebar — a row's lead cell
+   takes the whole first line and the figures and buttons regroup on the
+   next, left-aligned, instead of five cells fighting for 340px and a
+   button's label being cut mid-figure. */
+@container (max-width: 560px) {
+  .row { flex-wrap: wrap; justify-content: flex-start; gap: 0.5rem 0.6rem; }
+  .row > :first-child { flex: 1 1 100%; min-width: 0; }
+  .row > span { white-space: nowrap; font-size: 0.92rem; }
+  .row > button { flex: 0 0 auto; padding: 0.38rem 0.6rem 0.34rem; font-size: 0.8rem; letter-spacing: 0.06em; }
+}
 .rowLead { display: flex; align-items: center; gap: 0.75rem; }
 .rowLead > img, .rowLead > span:first-child { flex-shrink: 0; }
 /* Middle cell of an image · text · button row: absorb the free space so the

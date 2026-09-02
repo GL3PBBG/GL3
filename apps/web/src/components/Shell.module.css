@@ -20,10 +20,14 @@
    the double rule an accountant draws under a heading — one hairline, one
    brass line fading out. */
 .header {
-  display: flex;
+  /* Three fixed columns — brand, vitals, account — so the chip can never
+     wrap under the brand when the vitals run wide; the vitals cell wraps
+     internally instead. The phone's visible children are hamburger, brand
+     and mini HUD, which fall into the same three columns. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 1.25rem;
-  flex-wrap: wrap;
   /* Sticky glass: the balances stay on screen however far a page scrolls,
      over a blurred, translucent slab of the page behind. The negative
      margins run the slab out to the shell's padding edges so nothing
@@ -109,7 +113,7 @@
 /* The HUD in related pairs — money, combat, pools, progression — icons
    carrying the identity, dividers carrying the grouping. Centered, not
    baseline: glyphs and slim pool bars have no baseline to share. */
-.hud { display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.hud { display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: 0; }
 .hudGroup {
   display: flex;
   gap: 0.8rem;
@@ -273,8 +277,40 @@
   50% { box-shadow: 0 0 22px var(--danger-soft); }
 }
 
-/* Positioning for the NavMenu the shell hosts. In top-nav mode the component
-   needs nothing from here — its own padding and border carry the bar. */
+/* ---- The nav row: categories left, status line right ------------------- */
+.navRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+/* The row owns the rule; the bar's own is switched off so an active tab's
+   2px underline (margin-bottom: -1px in NavMenu) lands on this one.
+   Priorities: the nav never shrinks (it is the way around the game); the
+   status line takes what is left and clips, rank and town first in line,
+   plugin extras giving way — ellipsised, full text in their tooltips. */
+.navRow > .navSlot { flex: 1 0 auto; border-bottom: 0; }
+/* Below a useful width the line does not clip to nothing: `min-width` makes
+   it wrap under the nav as its own right-aligned row instead. */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex: 0 1 auto;
+  min-width: min(24rem, 100%);
+  margin-left: auto;
+  overflow: hidden;
+  padding: 0.35rem 0.25rem 0.3rem;
+  color: var(--muted);
+}
+.statusCore, .statusExtras { display: inline-flex; align-items: center; gap: 0.9rem; }
+.statusCore { flex: none; padding-right: 0.9rem; border-right: 1px solid var(--line); }
+.statusCore:last-child { padding-right: 0; border-right: 0; }
+.statusExtras { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.status .stat { color: var(--fg); }
+.statusExtras .stat { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.clip { display: block; min-width: 0; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navSlot { }
 .body {
   display: grid;
@@ -304,8 +340,14 @@
   .header { margin: 0 -0.9rem; padding: 0.7rem 0.9rem 0.6rem; }
   .body { grid-template-columns: 1fr; }
   /* The bar hides; its drawer copy takes over, and the header trades the full
-     HUD and the account chip for the hamburger and the condensed stats. */
+     HUD and the account chip for the hamburger and the condensed stats. Rank
+     and town already ride the mini HUD, so the status line only stays for
+     plugin countdowns — and only when there are any. */
   .navSlot { display: none; }
+  .navRow { border-bottom: 0; }
+  .status { display: none; }
+  .status:has(.statusExtras) { display: flex; width: 100%; padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
+  .statusCore { display: none; }
   .hamburger { display: flex; }
   .hud { display: none; }
   .account { display: none; }
@@ -324,11 +366,16 @@
   column-gap: 1.5rem;
   grid-template-areas:
     "header header"
+    "nav    status"
     "nav    banner"
     "nav    body";
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
 }
 :global([data-nav="left"]) .header { grid-area: header; }
+/* The row dissolves: the nav takes the sidebar area, the status line its own
+   row under the header, above the page. */
+:global([data-nav="left"]) .navRow { display: contents; }
+:global([data-nav="left"]) .status { grid-area: status; margin-left: 0; padding: 0.7rem 0 0; }
 :global([data-nav="left"]) .jailBanner { grid-area: banner; }
 /* Sticky inside its grid area: a tall accordion scrolls with the page until
    its column's top edge reaches the viewport's, then rides along. */
@@ -344,7 +391,9 @@
 /* The sidebar has no room on a phone — the drawer takes over. */
 @media (max-width: 860px) {
   :global([data-nav="left"]) .shell { display: block; }
+  :global([data-nav="left"]) .navRow { display: flex; }
   :global([data-nav="left"]) .navSlot { display: none; }
+  :global([data-nav="left"]) .status { padding: 0.45rem 0; }
 }
 
 /* The page banner sits above the page's own content, framed like a plate in

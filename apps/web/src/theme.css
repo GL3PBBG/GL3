@@ -180,6 +180,7 @@ button {
   border: 1px solid var(--accent-lo);
   border-radius: var(--radius);
   padding: 0.5rem 1rem 0.45rem;
+  white-space: nowrap;
   cursor: pointer;
   box-shadow: var(--shadow-press);
   transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast), box-shadow var(--dur-fast);

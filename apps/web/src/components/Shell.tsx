@@ -325,20 +325,7 @@ export function Shell(): JSX.Element {
             ) : null}
              
             {me.data?.attributes ? <PoolBars attributes={me.data.attributes} /> : null}
-              <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
-              {showLocation ? <Stat icon="location" label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
             </div>
-            {(hudExtras.data?.entries ?? []).length > 0 ? (
-              <div className={styles.hudGroup}>
-                {(hudExtras.data?.entries ?? []).map((entry) => (
-                  <Stat key={`${entry.pluginId}:${entry.label}`} icon="clock" label={entry.label}>
-                    {entry.countdownTo !== undefined
-                      ? <CountdownValue to={entry.countdownTo} />
-                      : entry.value}
-                  </Stat>
-                ))}
-              </div>
-            ) : null}
           </div>
           {/* The phone's condensed HUD: cash plus rank·location, one line each.
               The full hud above is display:none at that width. */}
@@ -380,12 +367,43 @@ export function Shell(): JSX.Element {
           ([data-nav="left"]), and the copy inside the phone drawer below. The
           slot class Shell passes only positions it on the page.
         */}
-        <NavMenu
-          categories={categories}
-          badges={badges}
-          activeKey={activeKey}
-          className={styles.navSlot}
-        />
+        {/*
+          The header carries only what moves while you play — money, ammo,
+          pools. Everything slower lives on the nav row's right-hand side as a
+          status line: rank, town, and the plugin-supplied countdowns whose
+          labels are any length a plugin likes. Splitting by tempo is what
+          keeps the sticky strip one line; the ellipsis on the extras is what
+          keeps a long label from ever breaking it. In sidebar mode the row
+          dissolves (display: contents) and the status line takes its own grid
+          area under the header — see Shell.module.css.
+        */}
+        <div className={styles.navRow}>
+          <NavMenu
+            categories={categories}
+            badges={badges}
+            activeKey={activeKey}
+            className={styles.navSlot}
+          />
+          <div className={styles.status}>
+            <span className={styles.statusCore}>
+              <Stat icon="rank" label="Rank">{rank?.current?.name ?? "Unranked"}</Stat>
+              {showLocation ? <Stat icon="location" label="Location">{here?.name ?? "Nowhere"}</Stat> : null}
+            </span>
+            {(hudExtras.data?.entries ?? []).length > 0 ? (
+              <span className={styles.statusExtras}>
+                {(hudExtras.data?.entries ?? []).map((entry) => (
+                  <Stat key={`${entry.pluginId}:${entry.label}`} icon="clock" label={entry.label}>
+                    <span className={styles.clip}>
+                      {entry.countdownTo !== undefined
+                        ? <CountdownValue to={entry.countdownTo} />
+                        : entry.value}
+                    </span>
+                  </Stat>
+                ))}
+              </span>
+            ) : null}
+          </div>
+        </div>
 
         {drawerOpen ? (
           <>
