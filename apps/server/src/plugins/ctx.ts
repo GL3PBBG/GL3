@@ -240,6 +240,14 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
                   pay: fresh.level > (before?.level ?? 0),
                 });
                 bufferScore("exp", playerId, expScore(fresh.level, fresh.exp, true));
+                // A promotion pays its cash reward through syncRankToLevel's own
+                // internal applyBalanceChange, invisible to this wrapper — same
+                // reasoning as the unrouted arm below, so re-read post-sync and
+                // buffer cash too, or the board goes stale by the reward amount.
+                if (promotion) {
+                  const paid = await freshStats(tx, playerId);
+                  if (paid) bufferScore("cash", playerId, paid.cash);
+                }
                 return promotion;
               }
               const result = await applyExpAndRankUp(tx, playerId, expGain);

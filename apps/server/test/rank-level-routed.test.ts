@@ -164,6 +164,12 @@ describe("routed exp promotion (gl3 profile: progression claims the router)", ()
     const rewardRows = ledger.filter((r) => r.reason === "rank.reward");
     expect(rewardRows).toHaveLength(1);
     expect(rewardRows[0]?.amount).toBe(500n);
+
+    // The cash board must reflect the reward `syncRankToLevel` just paid
+    // through core's own internal applyBalanceChange — invisible to the
+    // wrapper unless it re-reads post-sync (see case 1's cash-buffer fix).
+    const cashScore = await redis.zscore(`${leaderboardPrefix}:cash`, playerId);
+    expect(cashScore).toBe(stats.cash.toString());
   });
 
   it("case 2: a non-crossing grant leaves level and rank untouched and returns null", async () => {
