@@ -98,12 +98,15 @@
   background: var(--surface-raised);
 }
 
-.money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; display: inline-block; }
-/* A figure that just changed: lit gold for a beat, then back. */
+/* Stays inline (no inline-block): a struck-through price is <s><Money/></s>,
+   and an ancestor's text-decoration does not reach into an inline-block. */
+.money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+/* A figure that just changed: lit gold for a beat, then back. Colour and
+   glow only — a transform would need inline-block, see above. */
 .tick { animation: tick 700ms var(--ease-out) 1; }
 @keyframes tick {
-  0% { color: var(--accent-hi); text-shadow: 0 0 14px var(--accent-glow); transform: translateY(-1px); }
-  100% { color: inherit; text-shadow: none; transform: none; }
+  0% { color: var(--accent-hi); text-shadow: 0 0 14px var(--accent-glow); }
+  100% { color: inherit; text-shadow: none; }
 }
 /* Loading: a shimmering skeleton bar ahead of the words, so a fetch in
    flight reads as motion rather than a stalled page. */

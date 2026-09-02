@@ -238,6 +238,9 @@ time, td { font-variant-numeric: tabular-nums; }
 
 hr { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
 p { text-wrap: pretty; }
+/* A struck price (travel's discounted fare): the line is the muted tone and
+   the figure dims, so the live price beside it is the one the eye lands on. */
+s { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--muted); text-decoration-thickness: 1.5px; }
 
 /* ---- Scrollbars: thin and dark, so a scrolling feed does not grow a grey
    Windows gutter down the middle of the layout. ---- */
