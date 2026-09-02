@@ -52,11 +52,14 @@ describe("invalidationKeys", () => {
     ]);
   });
 
-  it("refreshes the wallet and locations on travel", () => {
+  it("refreshes the wallet, locations and combat targets on travel", () => {
     // The bullet shop is per-location and its key is not, so a traveller would
-    // otherwise keep seeing the stock and price of the town they left.
+    // otherwise keep seeing the stock and price of the town they left. Combat
+    // targets are "Here now" — the same per-location-data-under-a-global-key
+    // shape — so without this a traveller keeps seeing the old town's roster
+    // until the query remounts.
     expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([
-      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(),
+      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(),
     ]);
   });
 
