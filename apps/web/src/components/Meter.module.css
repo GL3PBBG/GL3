@@ -1,28 +1,31 @@
-.meter { display: flex; flex-direction: column; gap: 0.15rem; min-width: 5rem; }
+.meter { display: flex; flex-direction: column; gap: 0.2rem; min-width: 5rem; }
 /* The Shell's icon HUD: bar only, sized to sit beside a 15px glyph. */
-.compact { min-width: 2.6rem; }
-.compact .meterTrack { height: 0.3rem; }
+.compact { min-width: 2.8rem; }
+.compact .meterTrack { height: 0.32rem; }
 .meterLabel {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
+  font: 700 0.7rem/1 var(--font-display);
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
 }
+/* A gauge, not a pill: a sunk track with a brass fill whose top edge catches
+   the light. Square ends so the fill's edge is a readable line, not a blob. */
 .meterTrack {
   position: relative;
   height: 0.5rem;
-  border-radius: 999px;
-  background: var(--line);
+  border-radius: 2px;
+  background: var(--surface-sunk);
+  box-shadow: 0 1px 2px color-mix(in oklab, black 50%, transparent) inset;
   overflow: hidden;
 }
 .meterFill {
   position: absolute;
   inset: 0;
   width: 0%;
-  background: var(--accent);
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 45%, var(--accent-lo));
   border-radius: inherit;
-  transition: width 0.2s ease;
+  transition: width var(--dur) var(--ease-out);
 }

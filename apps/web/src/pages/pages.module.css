@@ -1,24 +1,40 @@
-.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+/* ---- Ledger lines ---------------------------------------------------------
+   A list of things — crimes, players, items, mail — is a column in the books:
+   hairline-ruled entries, no boxes inside boxes. The current entry gets a
+   brass margin tick, the way a clerk marks the line they are on. */
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
+  padding: 0.65rem 0.6rem;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color var(--dur-fast);
 }
-.rowCurrent { border-color: var(--accent); }
+.rows > .row:first-child { border-top: 0; }
+.row:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
+.rowCurrent { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .rowLead { display: flex; align-items: center; gap: 0.75rem; }
 .rowLead > img, .rowLead > span:first-child { flex-shrink: 0; }
 /* Middle cell of an image · text · button row: absorb the free space so the
    text left-aligns beside the image instead of floating centered (space-
    between treats three children as evenly spread otherwise). */
 .rowGrow { flex: 1; min-width: 0; }
-.meta { color: var(--muted); font-size: 0.9rem; }
+.meta { color: var(--muted); font-size: 0.88rem; }
 .muted { color: var(--muted); }
-.big { font-size: 1.6rem; font-variant-numeric: tabular-nums; margin: 0; }
+/* The page's headline figure — cash on hand, a bounty, a bank balance — set
+   in the ledger face at display size. Proportional-looking enough at 500
+   weight that it does not need the tabular override switched off. */
+.big {
+  font: 500 2.1rem/1.1 var(--font-mono);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+.big .meta, .big > span:not(:first-child) { font-family: var(--font-body); letter-spacing: 0; }
 
 .form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
@@ -37,31 +53,60 @@
  */
 .formCard {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
   align-items: end;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
 }
 
-.bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 0.5rem 0; }
-.barFill { height: 100%; background: var(--accent); }
+/* The rank bar and its kin: a sunk track, a brass fill with a lit top edge. */
+.bar {
+  height: 10px;
+  border-radius: 2px;
+  background: var(--surface-sunk);
+  box-shadow: 0 1px 2px color-mix(in oklab, black 50%, transparent) inset;
+  overflow: hidden;
+  margin: 0.6rem 0;
+}
+.barFill {
+  height: 100%;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 45%, var(--accent-lo));
+  transition: width var(--dur) var(--ease-out);
+}
 
-.tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.85rem; }
 
 /* Write/Preview markdown editor (components/MarkdownEditor.tsx). */
 .editor { display: grid; gap: 0.25rem; }
 .editor .tabs { margin-bottom: 0; }
 .editorTools { display: flex; gap: 0.25rem; margin-left: auto; }
 .editorTools button { min-width: 2rem; }
-.tabActive { background: var(--accent); }
-.tabIdle { background: var(--panel); color: var(--fg); border: 1px solid var(--line); }
+.tabActive { background: var(--accent); color: var(--ink-on-accent); border-color: var(--accent-lo); }
+.tabIdle {
+  background: var(--surface-sunk);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.tabIdle:hover:not(:disabled) { filter: none; color: var(--fg); border-color: var(--line-strong); }
 
 .table { width: 100%; border-collapse: collapse; }
-.table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.85rem; padding: 0.3rem 0.5rem; }
-.table td { padding: 0.35rem 0.5rem; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.table th {
+  text-align: left;
+  color: var(--muted);
+  font: 700 0.72rem/1.2 var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.5rem 0.45rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+.table td { padding: 0.45rem 0.5rem; border-top: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.table tbody tr:first-child td { border-top: 0; }
+.table tbody tr:hover td { background: color-mix(in oklab, var(--fg) 3%, transparent); }
+.numeric { text-align: right; font-family: var(--font-mono); }
 .self { color: var(--accent); }
 
 /* Player-written text (mail bodies, bios, news). pre-wrap keeps the author's
@@ -78,12 +123,13 @@
 .markdown blockquote {
   margin: 0 0 0.5rem;
   padding: 0.1rem 0 0.1rem 0.75rem;
-  border-left: 3px solid var(--line, currentColor);
+  border-left: 3px solid var(--accent-lo);
   opacity: 0.85;
 }
 .markdown ul, .markdown ol { margin: 0 0 0.5rem; padding-left: 1.5rem; }
-.markdown code { font-size: 0.9em; }
-.markdown pre { overflow-x: auto; }
+.markdown code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-sunk); padding: 0 0.25em; border-radius: 2px; }
+.markdown pre { overflow-x: auto; background: var(--surface-sunk); padding: 0.6rem 0.8rem; border-radius: var(--radius); }
+.markdown pre code { background: none; padding: 0; }
 .markdown img { max-width: 100%; }
 .markdown h1, .markdown h2, .markdown h3, .markdown h4 {
   font-size: 1em;
@@ -92,32 +138,31 @@
 
 .stack { display: grid; gap: 1rem; }
 .rowStack { display: grid; gap: 0.25rem; min-width: 0; }
-/* 0.5rem, not the 0.35rem this shipped with: at that gap a run of buttons with
-   theme.css's solid accent fill reads as one wide button with seams, which is
-   what the casino table's Hit/Stand/Double row was reported as. Shared with
-   every other page's action run, all of which were the same 0.35rem. */
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 /* A vertical run of control groups. `Panel` puts no space between its
    children, so the casino table's bet row, hand actions and Leave button sat
-   flush against each other and against the cards above them — the vertical
-   half of the same report. `justify-items: start` keeps each group its own
-   width rather than stretching a lone button across the panel. */
+   flush against each other and against the cards above them. `justify-items:
+   start` keeps each group its own width rather than stretching a lone button
+   across the panel. */
 .controls { display: grid; gap: 0.75rem; justify-items: start; margin-top: 0.75rem; }
 .chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 /* Also worn by <button> for the editable permission chips, so it has to undo
-   theme.css's solid-accent button fill — muted text on that fill is unreadable
-   and .chipOn's accent text on it is invisible. Same shape as Login's .toggle. */
+   theme.css's brass-plate button — muted text on that fill is unreadable and
+   .chipOn's accent text on it is invisible. Same shape as Login's .toggle. */
 .chip {
-  font: inherit;
-  font-size: 0.75rem;
-  padding: 0.1rem 0.4rem;
+  font: 500 0.74rem/1.5 var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0.05rem 0.5rem;
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 2px;
   color: var(--muted);
+  white-space: nowrap;
+  box-shadow: none;
 }
-.chipOn { border-color: var(--accent); color: var(--accent); background: rgb(200 150 62 / 0.15); }
-.unread { border-color: var(--accent); }
+.chipOn { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.unread { box-shadow: inset 3px 0 0 var(--accent); }
 .link { color: var(--accent); text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .field { display: grid; gap: 0.25rem; }
@@ -154,4 +199,4 @@
 
 /* A keyValue label carrying a pool glyph (PageRenderer's PoolLabel). */
 .iconLabel { display: inline-flex; align-items: center; gap: 0.3rem; }
-.iconLabel svg { color: var(--muted); flex: none; }
+.iconLabel svg { color: color-mix(in oklab, var(--accent) 65%, var(--muted)); flex: none; }

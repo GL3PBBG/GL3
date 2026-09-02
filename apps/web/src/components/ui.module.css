@@ -1,27 +1,81 @@
+/* ---- The dossier ---------------------------------------------------------
+   Every page is a stack of Panels, so this one shape is the skin's signature:
+   a case file. The title is a folder tab standing on the panel's top edge —
+   absolutely positioned above it, its own border running into the panel's,
+   the seam covered by the ::after strip — with a brass tick where a typed
+   label would be. `:has()` reserves the tab's height only on titled panels;
+   an untitled panel (a casino table, a bare form) is a plain sheet. */
 .panel {
+  position: relative;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0 var(--radius) var(--radius) var(--radius);
   background: var(--panel);
-  padding: 1rem 1.25rem;
+  padding: 1rem 1.25rem 1.1rem;
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent) inset,
+    0 10px 28px color-mix(in oklab, black 32%, transparent);
+  min-width: 0;
 }
+.panel:has(> .panelTitle) { margin-top: 1.55rem; }
 .panelTitle {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  margin: 0;
+  padding: 0.38rem 0.95rem 0.3rem 1.15rem;
+  font: 800 0.82rem/1 var(--font-display);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  white-space: nowrap;
+  max-width: calc(100% + 2px);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.money { font-variant-numeric: tabular-nums; }
+.panelTitle::before {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  top: 0.42rem;
+  bottom: 0.32rem;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.panelTitle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--panel);
+}
+
+.money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
 .muted { color: var(--muted); }
-.error { color: var(--danger); margin: 0.5rem 0 0; }
+.error {
+  margin: 0.6rem 0 0;
+  padding: 0.45rem 0.75rem;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 0.92rem;
+}
 
 .avatar {
   width: 72px;
   height: 72px;
   object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
   background: var(--bg);
+  box-shadow: 0 2px 6px color-mix(in oklab, black 45%, transparent);
 }
 
 /* Game art. The box is fixed at every state — loading, loaded and missing — so
@@ -30,8 +84,8 @@
   display: inline-block;
   object-fit: cover;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--panel);
+  border-radius: 2px;
+  background: var(--surface-sunk);
   vertical-align: middle;
 }
 .gameImageSm { width: 32px; height: 32px; }
@@ -64,11 +118,14 @@
   padding: 0;
   border: 0;
   background: none;
+  box-shadow: none;
   cursor: zoom-in;
   line-height: 0;
 }
+.gameImageButton:hover:not(:disabled) { filter: none; }
+.gameImageButton:active:not(:disabled) { transform: none; box-shadow: none; }
 .gameImageButton:focus-visible {
-  outline: 2px solid var(--accent, #6af);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -79,9 +136,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 0.8);
+  background: color-mix(in oklab, black 82%, transparent);
+  backdrop-filter: blur(4px);
   cursor: zoom-out;
+  animation: lightboxIn var(--dur-fast) var(--ease-out);
 }
+@keyframes lightboxIn { from { opacity: 0; } to { opacity: 1; } }
 .lightboxImage {
   /* Natural size, bounded by the viewport: art uploaded at 64px stays 64px
      rather than being smeared across the screen, and a 2048px image still
@@ -91,6 +151,7 @@
   max-height: 90vh;
   cursor: default;
   image-rendering: pixelated;
+  box-shadow: 0 24px 64px color-mix(in oklab, black 70%, transparent);
 }
 .lightboxClose {
   position: absolute;
