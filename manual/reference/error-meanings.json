@@ -115,6 +115,7 @@
  "core:wrong_location": "The target player is not in the caller's own town, and this action only reaches local players.",
  "crimes:crime_not_found": "No crime exists with that id (commit attempt, or admin update/delete of a missing row)",
  "crimes:insufficient_<var>": "The crime prices a cost in an attribute pool (brave, energy, ...) that the caller cannot pay; the code names the pool, e.g. insufficient_brave",
+ "crimes:invalid_bullet_range": "Admin update would leave maxBullets below minBullets, checked as a pair against the stored row so a one-sided edit cannot invert the range",
  "crimes:invalid_formula": "Admin submitted a success formula that fails to parse (parser message in details)",
  "crimes:on_cooldown": "Crime cooldown live (`retryAfter` in details and the `retry-after` header carry the wait)",
  "crimes:unauthorized": "No authenticated player on the request",
