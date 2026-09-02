@@ -1,17 +1,47 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { formatAmount, formatMoney } from "../lib/money.js";
 import { describeError } from "../lib/errors.js";
 import { useMoneyFormat } from "../lib/formatContext.js";
 import styles from "./ui.module.css";
 
-/** A titled block. Every page is a stack of these. */
+/**
+ * A titled block. Every page is a stack of these.
+ *
+ * The pointer's position inside the panel is written to two custom
+ * properties so ui.module.css can hang a spotlight under the cursor — a
+ * hover-only effect that CSS alone cannot place. Written straight to the
+ * element's style rather than through state: it changes on every pointer
+ * move and must not re-render the panel's children.
+ */
 export function Panel({ title, children }: { title?: string; children: ReactNode }): JSX.Element {
+  const onPointerMove = (event: PointerEvent<HTMLElement>): void => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+    event.currentTarget.style.setProperty("--my", `${event.clientY - rect.top}px`);
+  };
   return (
-    <section className={styles.panel}>
+    <section className={styles.panel} onPointerMove={onPointerMove}>
       {title !== undefined ? <h2 className={styles.panelTitle}>{title}</h2> : null}
       {children}
     </section>
   );
+}
+
+/**
+ * True for one animation after `value` changes from what it was — a figure
+ * that ticks over (a crime paid out, a bet settled) gets a flash so the eye
+ * lands on the number that moved. The first render is not a change; a page
+ * load must not flash every figure on it.
+ */
+function useTick(value: string): { ticking: boolean; settle: () => void } {
+  const previous = useRef(value);
+  const [ticking, setTicking] = useState(false);
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    setTicking(true);
+  }, [value]);
+  return { ticking, settle: () => { setTicking(false); } };
 }
 
 /** A money string rendered as `$1,234` — or whatever `moneyFormat` the loaded
@@ -19,7 +49,12 @@ export function Panel({ title, children }: { title?: string; children: ReactNode
  *  lib/money.ts. */
 export function Money({ value }: { value: string }): JSX.Element {
   const format = useMoneyFormat();
-  return <span className={styles.money}>{formatMoney(value, format)}</span>;
+  const { ticking, settle } = useTick(value);
+  return (
+    <span className={ticking ? `${styles.money} ${styles.tick}` : styles.money} onAnimationEnd={settle}>
+      {formatMoney(value, format)}
+    </span>
+  );
 }
 
 /** A bigint-string count (bullets, exp) with thousands separators and no `$`
@@ -27,7 +62,12 @@ export function Money({ value }: { value: string }): JSX.Element {
  *  shared with plain amounts. */
 export function Amount({ value }: { value: string }): JSX.Element {
   const format = useMoneyFormat();
-  return <span className={styles.money}>{formatAmount(value, format)}</span>;
+  const { ticking, settle } = useTick(value);
+  return (
+    <span className={ticking ? `${styles.money} ${styles.tick}` : styles.money} onAnimationEnd={settle}>
+      {formatAmount(value, format)}
+    </span>
+  );
 }
 
 /**
@@ -40,7 +80,7 @@ export function When({ iso }: { iso: string }): JSX.Element {
 }
 
 export function Loading({ what = "" }: { what?: string }): JSX.Element {
-  return <p className={styles.muted}>Loading{what ? ` ${what}` : ""}…</p>;
+  return <p className={`${styles.muted} ${styles.loading}`}>Loading{what ? ` ${what}` : ""}…</p>;
 }
 
 /** Renders nothing when there is no error, so callers can drop it in unguarded. */

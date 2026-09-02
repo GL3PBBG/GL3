@@ -30,6 +30,13 @@ describe("applyTheme", () => {
     applyTheme({ preset: "midnight", colors: COLORS, layout: { nav: "top" } });
     expect(document.documentElement.getAttribute("data-nav")).toBe("top");
   });
+
+  it("stamps the preset name as data-theme so a skin can key effects off one preset", () => {
+    applyTheme({ preset: "gangster", colors: COLORS, layout: { nav: "top" } });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("gangster");
+    applyTheme({ preset: "midnight", colors: COLORS, layout: { nav: "top" } });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("midnight");
+  });
 });
 
 describe("branding", () => {

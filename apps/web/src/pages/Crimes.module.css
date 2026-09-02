@@ -1,16 +1,29 @@
-.crimeList { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+/* The crime sheet: one ledger line per job — art, name, the odds and the
+   take in the meta line, the Commit plate at the right. Same rule as
+   pages.module.css's .row so the two lists read as one book. */
+.crimeList { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
 .crime {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
+  padding: 0.75rem 0.6rem;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 2px;
+  transition: background-color var(--dur-fast);
 }
+.crime:first-child { border-top: 0; }
+.crime:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
+.crime strong { font: 800 1.05rem/1.2 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; }
 /* Middle cell of the image · text · button row: absorb the free space so the
    text left-aligns beside the image (space-between would centre it). */
 .crimeGrow { flex: 1; min-width: 0; }
-.meta { color: var(--muted); font-size: 0.9rem; }
-.note { margin: 0 0 0.75rem; color: var(--danger); }
+.meta { color: var(--muted); font-size: 0.88rem; margin-top: 0.1rem; }
+.note {
+  margin: 0 0 0.85rem;
+  padding: 0.45rem 0.75rem;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}

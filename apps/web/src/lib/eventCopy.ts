@@ -138,3 +138,35 @@ export function isSilentEvent(event: GameEvent, eventMetas: readonly EventMeta[]
   const meta = eventMetas.find((m) => m.pluginId === event.pluginId && m.name === event.name);
   return meta?.silent === true;
 }
+
+/**
+ * How an event lands on the player: something went their way, something went
+ * against them, or it is simply news. Drives the colour of the pop-up toast
+ * (components/EventToasts.tsx); the feed itself stays one colour, because a
+ * scrolling column of red and green would shout over the words. Kept
+ * deliberately short — only the outcomes a player feels in the gut are
+ * classified, everything else is neutral, and an unknown plugin event never
+ * guesses.
+ */
+export type EventTone = "good" | "bad" | "neutral";
+
+export function eventTone(event: GameEvent): EventTone {
+  switch (event.type) {
+    case "crime.resolved":
+    case "oc.resolved":
+      return event.success ? "good" : "bad";
+    case "player.jailed":
+    case "player.attacked":
+    case "player.backfired":
+    case "player.killed":
+      return "bad";
+    case "player.released":
+    case "player.discharged":
+    case "bounty.claimed":
+    case "player.rankedUp":
+    case "player.levelUp":
+      return "good";
+    default:
+      return "neutral";
+  }
+}

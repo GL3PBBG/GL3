@@ -32,6 +32,15 @@ export function applyTheme(theme: ThemeResponse): void {
   // left-sidebar rules off [data-nav="left"], so React never re-renders for a
   // layout change — CSS does all of it.
   root.setAttribute("data-nav", theme.layout.nav);
+  // The preset's name rides along too, so a stylesheet can do more than
+  // recolour for a particular preset — the gangster skin plates its type in
+  // chrome and gold and hangs a skyline behind the page only under
+  // [data-theme="gangster"]. Every other preset gets the same structure in
+  // flat colour. Attribute, not variable: the same reason as data-nav.
+  root.setAttribute("data-theme", theme.preset);
+  // The phone's browser chrome tints to the page's background — index.html
+  // ships midnight's, this keeps it in step with whatever the admin picked.
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.colors.bg);
 
   branding = theme.branding ?? DEFAULT_BRANDING;
   // The base title for the pre-auth pages (no Shell mounted). Shell's own

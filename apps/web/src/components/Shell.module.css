@@ -1,4 +1,4 @@
-.shell { max-width: 1180px; margin: 0 auto; padding: 1rem; }
+.shell { max-width: 1240px; margin: 0 auto; padding: 0 1.25rem 3rem; }
 
 /* Offscreen until keyboard focus: above the drawer (its scrim is 105) so the
    link stays reachable even while the drawer is open. */
@@ -9,24 +9,81 @@
   z-index: 120;
   padding: 0.4rem 0.9rem;
   background: var(--accent);
-  color: var(--bg);
-  border-radius: 4px;
+  color: var(--ink-on-accent);
+  border-radius: var(--radius);
 }
 .skipLink:focus { left: 0.5rem; top: 0.5rem; }
 
+/* ---- The ledger strip -----------------------------------------------------
+   The header is the top line of the books: the outfit's name at the left,
+   the player's balances in mono cells to the right, ruled off underneath by
+   the double rule an accountant draws under a heading — one hairline, one
+   brass line fading out. */
 .header {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.25rem;
   flex-wrap: wrap;
-  /* Anchors the account chip's dropdown panel. */
-  position: relative;
+  /* Sticky glass: the balances stay on screen however far a page scrolls,
+     over a blurred, translucent slab of the page behind. The negative
+     margins run the slab out to the shell's padding edges so nothing
+     scrolls past in a gap beside it. Also anchors the account dropdown. */
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: 0 -1.25rem;
+  padding: 0.9rem 1.25rem 0.8rem;
+  background: color-mix(in oklab, var(--bg) 76%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
   border-bottom: 1px solid var(--line);
-  padding-bottom: 0.75rem;
 }
-.brand { margin: 0; font-size: 1.15rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 40%, transparent) 35%, transparent 75%);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+.brand {
+  margin: 0;
+  font: 900 1.75rem/1 var(--font-display);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg);
+  text-shadow: 0 0 28px var(--accent-glow);
+}
+/* Gangster preset: chrome-plated, lit from behind by gold — the badge's
+   lettering at masthead size. `drop-shadow` rather than `text-shadow`
+   because the text is a clipped gradient with a transparent fill. */
+:global([data-theme="gangster"]) .brand {
+  color: transparent;
+  /* Two layers, both clipped to the glyphs: a narrow highlight that sweeps
+     across every few seconds, over the static chrome. Only the sweep's
+     position animates. */
+  background-image:
+    linear-gradient(100deg, transparent 42%, color-mix(in oklab, white 85%, transparent) 50%, transparent 58%),
+    var(--chrome);
+  background-size: 250% 100%, 100% 100%;
+  background-position: 200% 0, 0 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+  filter: drop-shadow(0 1px 0 color-mix(in oklab, black 80%, transparent)) drop-shadow(0 0 16px var(--accent-glow));
+  animation: sheen 7s linear infinite;
+}
+@keyframes sheen {
+  0%, 70% { background-position: 200% 0, 0 0; }
+  100% { background-position: -100% 0, 0 0; }
+}
+/* An uploaded header logo takes the glow, not the plating. */
+.brand img { filter: drop-shadow(0 0 12px var(--accent-glow)); }
 
 /* Phone-only: unhides at the media query below, where the full hud hides. */
+.hamburger::after { display: none; }
 .hamburger {
   display: none;
   flex-direction: column;
@@ -36,9 +93,10 @@
   width: 38px;
   height: 38px;
   padding: 0;
-  background: var(--panel);
+  background: var(--surface-sunk);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
+  box-shadow: none;
 }
 .hamburger span {
   display: block;
@@ -51,19 +109,30 @@
 /* The HUD in related pairs — money, combat, pools, progression — icons
    carrying the identity, dividers carrying the grouping. Centered, not
    baseline: glyphs and slim pool bars have no baseline to share. */
-.hud { display: flex; gap: 0.85rem; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.hud { display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: center; margin-left: auto; }
 .hudGroup {
   display: flex;
-  gap: 0.7rem;
+  gap: 0.8rem;
   flex-wrap: wrap;
   align-items: center;
-  padding-right: 0.85rem;
+  padding-right: 0.9rem;
   border-right: 1px solid var(--line);
 }
 .hud .hudGroup:last-child { border-right: 0; padding-right: 0; }
-.stat { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.9rem; }
-.stat svg { color: var(--muted); flex: none; }
-.statLabel { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font: 500 0.86rem/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.stat svg { color: var(--accent); flex: none; filter: drop-shadow(0 0 4px var(--accent-glow)); }
+.statLabel {
+  color: var(--muted);
+  font: 700 0.68rem/1 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
 /* Screen-reader-only label text for icon stats — the standard clip recipe. */
 .srOnly {
   position: absolute;
@@ -84,32 +153,46 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.3rem 0.65rem;
-  background: var(--panel);
+  padding: 0.42rem 0.75rem 0.38rem;
+  background: var(--surface-sunk);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--fg);
-  font-weight: 600;
-  font-size: 0.9rem;
+  font: 700 0.8rem/1 var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: none;
 }
-.accountDot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.accountChip::after { display: none; }
+.accountChip:hover:not(:disabled) { filter: none; border-color: var(--accent-lo); box-shadow: 0 0 12px var(--accent-soft); }
+.accountDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
 .accountMenu {
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
   z-index: 20;
   padding: 0.4rem;
-  background: var(--panel);
+  min-width: 10rem;
+  background: var(--surface-raised);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  animation: menuIn var(--dur-fast) var(--ease-out);
 }
+.accountMenu button { width: 100%; }
+@keyframes menuIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 /* Phone-condensed HUD: cash large, rank·location under it. */
 .miniHud { display: none; flex-direction: column; align-items: flex-end; line-height: 1.25; margin-left: auto; }
-.miniCash { font-weight: 600; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
-.miniSub { color: var(--muted); font-size: 0.75rem; }
+.miniCash { font: 500 1rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.miniSub { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.02em; }
 
 /* ---- Phone drawer ------------------------------------------------------- */
 
@@ -117,7 +200,8 @@
   position: fixed;
   inset: 0;
   z-index: 105;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in oklab, black 60%, transparent);
+  backdrop-filter: blur(2px);
 }
 .drawer {
   position: fixed;
@@ -130,12 +214,15 @@
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
   outline: none;
+  animation: drawerIn var(--dur) var(--ease-out);
 }
+@keyframes drawerIn { from { transform: translateX(-100%); } to { transform: none; } }
 .drawerHead {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.65rem;
   padding: 0.4rem 0.5rem 0.8rem;
   border-bottom: 1px solid var(--line);
   margin-bottom: 0.5rem;
@@ -144,32 +231,77 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--panel);
-  font-weight: 700;
+  width: 36px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--gold-gloss), var(--gold);
+  box-shadow: 0 0 14px var(--accent-glow);
+  color: var(--ink-on-accent);
+  font: 900 1.1rem/1 var(--font-display);
 }
 .drawerWho { display: flex; flex-direction: column; line-height: 1.3; }
+.drawerWho b { font: 800 1rem/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; }
 .drawerSub { color: var(--muted); font-size: 0.75rem; }
 .drawerLogout { width: 100%; margin-top: 0.75rem; }
 
+/* ---- The stamp ----------------------------------------------------------
+   Jail is the one state that overrides everything else on the page, so it
+   is stamped on rather than boxed in: a doubled oxblood border, a hair of
+   tilt, the wording in the display face. Fit to its text — a stamp does not
+   span the page. */
 .jailBanner {
-  margin: 0.75rem 0 0;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--danger);
-  border-radius: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 1.1rem 0 0;
+  padding: 0.5rem 1rem 0.42rem;
+  border: 2px solid var(--danger);
+  outline: 1px solid var(--danger);
+  outline-offset: 3px;
+  border-radius: 2px;
   color: var(--danger);
+  background: var(--danger-soft);
+  font: 800 0.95rem/1.2 var(--font-display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  transform: rotate(-0.6deg);
+  transform-origin: left center;
+  animation: stampPulse 2.6s ease-in-out infinite;
+}
+@keyframes stampPulse {
+  0%, 100% { box-shadow: 0 0 0 color-mix(in oklab, var(--danger) 0%, transparent); }
+  50% { box-shadow: 0 0 22px var(--danger-soft); }
 }
 
 /* Positioning for the NavMenu the shell hosts. In top-nav mode the component
    needs nothing from here — its own padding and border carry the bar. */
 .navSlot { }
-.body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 1fr); gap: 1.5rem; padding-top: 1.25rem; align-items: start; }
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(250px, 1fr);
+  gap: 1.5rem;
+  padding-top: 1.25rem;
+  align-items: start;
+}
 .content { display: grid; gap: 1.25rem; min-width: 0; }
 
+/* Page-load choreography: the page's sections rise into place one after
+   another, top to bottom, fast enough that a player clicking through pages
+   never waits on it. The banner (first child) leads. */
+.content > * { animation: rise var(--dur) var(--ease-out) both; }
+.content > :nth-child(2) { animation-delay: 40ms; }
+.content > :nth-child(3) { animation-delay: 80ms; }
+.content > :nth-child(4) { animation-delay: 120ms; }
+.content > :nth-child(5) { animation-delay: 160ms; }
+.content > :nth-child(n + 6) { animation-delay: 200ms; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (max-width: 860px) {
+  .shell { padding: 0 0.9rem 2rem; }
+  .header { margin: 0 -0.9rem; padding: 0.7rem 0.9rem 0.6rem; }
   .body { grid-template-columns: 1fr; }
   /* The bar hides; its drawer copy takes over, and the header trades the full
      HUD and the account chip for the hamburger and the condensed stats. */
@@ -178,6 +310,7 @@
   .hud { display: none; }
   .account { display: none; }
   .miniHud { display: flex; }
+  .brand { font-size: 1.4rem; }
 }
 
 /* Sidebar mode — `data-nav="left"` is stamped on <html> by applyTheme from
@@ -204,6 +337,7 @@
   align-self: start;
   position: sticky;
   top: 1rem;
+  margin-top: 1.25rem;
 }
 :global([data-nav="left"]) .body { grid-area: body; }
 
@@ -213,8 +347,26 @@
   :global([data-nav="left"]) .navSlot { display: none; }
 }
 
-/* The page banner sits above the page's own content. No fixed height: an
-   unbound slot renders nothing at all and must not leave a gap. */
+/* The page banner sits above the page's own content, framed like a plate in
+   a case file: a hairline, and a fade into the page along its bottom edge so
+   whatever the operator uploaded settles into the dark rather than floating
+   on it. No fixed height: an unbound slot renders nothing at all and must
+   not leave a gap. */
 .pageBanner:not(:empty) {
-  margin-bottom: 1rem;
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  line-height: 0;
 }
+.pageBanner:not(:empty)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 55%, color-mix(in oklab, var(--bg) 70%, transparent));
+}
+.pageBanner img { border: 0; border-radius: 0; }

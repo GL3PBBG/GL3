@@ -85,7 +85,17 @@ export function NavMenu({
   // player closed what the route had opened.
   const [override, setOverride] = useState<string | null | undefined>(undefined);
   useEffect(() => { setOverride(undefined); }, [activeKey]);
-  const openId = override === undefined ? (activeCategory?.id ?? null) : override;
+  // "Follow the route" means different things per shape. In the accordion
+  // shapes the active group unfolds inline and hides nothing, so landing on a
+  // page with it open is orientation. In the bar shape the open group is a
+  // floating panel over the page's first section — opening it on every
+  // navigation left the player reading the menu instead of the page they
+  // just chose, and it covered the dossier tab of whatever they came for.
+  // The theme attribute is read, not subscribed: it is stamped before the
+  // first authed render, and any later change re-renders through the Shell.
+  const accordion = variant === "drawer"
+    || (typeof document !== "undefined" && document.documentElement.getAttribute("data-nav") === "left");
+  const openId = override === undefined ? (accordion ? activeCategory?.id ?? null : null) : override;
 
   // A dropdown loses its dismiss affordances when focus moves into the page,
   // so a pointerdown outside the nav closes it. In sidebar mode the same
@@ -155,6 +165,10 @@ export function NavMenu({
                     key={item.to}
                     to={linkFor(item)}
                     end={item.to === "/"}
+                    /* Route changes cross-fade through the View Transitions
+                       API where the browser has it (theme.css animates the
+                       root snapshots); elsewhere this is a plain navigation. */
+                    viewTransition
                     className={({ isActive }) =>
                       isActive ? `${styles.item} ${styles.itemActive}` : styles.item
                     }
