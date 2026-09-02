@@ -240,6 +240,8 @@ beforeAll(async () => {
   await db.update(playerStats).set({
     locationId,
     exp: 100_000n,
+      // Routed (gl3-profile) boot: the newbie gate reads level, not exp.
+      level: 100,
     cash: START_CASH,
     bank: START_BANK,
     points: 0n,

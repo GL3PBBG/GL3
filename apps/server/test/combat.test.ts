@@ -64,6 +64,9 @@ async function makeAttackable(...ids: string[]): Promise<string> {
     .set({
       locationId,
       exp: 100_000n,
+      // Both models cleared at once: exp for an unrouted boot's threshold,
+      // level for this (routed, gl3-profile) boot's.
+      level: 100,
       bullets: 1000n,
       health: 100,
       gangId: null,
@@ -332,9 +335,14 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     expect(res.json()).toMatchObject({ error: "same_gang" });
   });
 
+  // This file boots the default gl3 profile, which is ROUTED (progression
+  // claims exp), so the newbie gate here reads `level` against
+  // `combat.newbie_level_threshold` — `exp` is within-level on such a boot
+  // and resets on every level-up. The exp-threshold arm is proven in
+  // combat-newbie-exp-boot.test.ts under `{ profile: "v2" }`.
   it("409s when the TARGET is below the newbie threshold", async () => {
     await makeAttackable();
-    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, targetId));
+    await db.update(playerStats).set({ level: 0 }).where(eq(playerStats.playerId, targetId));
     const res = await attack(targetId);
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "protected" });
@@ -342,7 +350,26 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
 
   it("409s when the ATTACKER is below the newbie threshold — protection is mutual", async () => {
     await makeAttackable();
+    await db.update(playerStats).set({ level: 0 }).where(eq(playerStats.playerId, attackerId));
+    const res = await attack(targetId);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "protected" });
+  });
+
+  it("ignores within-level exp on a routed boot — a level-up resetting exp to 0 does not re-protect", async () => {
+    // The live bug: the gate compared `exp` against the exp threshold on a
+    // level game, where exp resets to 0 on every level-up, so every player
+    // was a permanent newbie and nobody could shoot anyone.
+    await makeAttackable();
+    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, targetId));
     await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, attackerId));
+    const res = await attack(targetId);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("does not let a high within-level exp clear protection for a level-0 player on a routed boot", async () => {
+    await makeAttackable();
+    await db.update(playerStats).set({ level: 0, exp: 100_000n }).where(eq(playerStats.playerId, targetId));
     const res = await attack(targetId);
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "protected" });
@@ -1141,7 +1168,7 @@ describe("GET /api/combat/targets", () => {
       .update(playerStats)
       .set({ gangId })
       .where(inArray(playerStats.playerId, [attackerId, mate.id]));
-    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, newbie.id));
+    await db.update(playerStats).set({ level: 0 }).where(eq(playerStats.playerId, newbie.id));
 
     const list = (await targets(attackerToken)).json<{ targets: Target[] }>().targets;
     const reasonOf = (id: string) => list.find((t) => t.playerId === id)?.reason;
@@ -1156,7 +1183,7 @@ describe("GET /api/combat/targets", () => {
     const attacker = await register();
     const victim = await register();
     await makeAttackable(attacker.id, victim.id);
-    await db.update(playerStats).set({ exp: 0n }).where(eq(playerStats.playerId, attacker.id));
+    await db.update(playerStats).set({ level: 0 }).where(eq(playerStats.playerId, attacker.id));
 
     const list = (await targets(attacker.token)).json<{ targets: Target[] }>().targets;
     expect(list.every((t) => t.reason === "newbie_self")).toBe(true);

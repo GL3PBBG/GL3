@@ -4,7 +4,14 @@ export interface CombatSettings {
   /** Ceiling on a dps-derived cooldown, so a tiny dps cannot lock a player out. */
   cooldownMaxSeconds: number;
   hospitalSeconds: number;
+  /** Unrouted boots: lifetime exp under this is a newbie. */
   newbieExpThreshold: bigint;
+  /**
+   * Routed boots: LEVEL under this is a newbie. `exp` is within-level there
+   * and resets to 0 on every level-up, so comparing it made every player a
+   * permanent newbie — the live bug this key replaces on such boots.
+   */
+  newbieLevelThreshold: number;
   defaultWeaponAccuracy: number;
   unarmed: {
     accuracy: number;
@@ -104,6 +111,7 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
     cooldownMaxSeconds: Math.max(1, num(get, "cooldown_max_seconds", 3600)),
     hospitalSeconds: Math.max(1, num(get, "hospital_seconds", 600)),
     newbieExpThreshold: big(get, "newbie_exp_threshold", 100n),
+    newbieLevelThreshold: num(get, "newbie_level_threshold", 5),
     defaultWeaponAccuracy: Math.min(100, num(get, "default_weapon_accuracy", 50)),
     unarmed: {
       accuracy: Math.min(100, num(get, "unarmed.accuracy", 25)),

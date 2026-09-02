@@ -1,5 +1,6 @@
 import {
-  coreActionCost, definePlugin, filterPoint, on, PluginError, type Pool, type PluginTx, route,
+  coreActionCost, definePlugin, filterPoint, on, type PageSchema, PluginError, type Pool, type PluginTx,
+  type ProgressionModel, route,
 } from "@gl3/plugin-sdk";
 import { and, desc, eq, gt, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -11,7 +12,7 @@ import { cooldownSecondsFor } from "./cooldown.js";
 import { ArmorEffectsSchema, ITEM_TYPE_ARMOR, ITEM_TYPE_WEAPON, MeleeEffectsSchema, WeaponEffectsSchema } from "./effects.js";
 import { COMBAT_MIGRATIONS } from "./migrations.js";
 import { resolveMeleeStrike, resolveShot, rollFor, rollMelee, type WeaponProfile } from "./resolve.js";
-import { combatLog, items, locations, playerItems, players, playerStats, ranks, weaponCondition } from "./schema.js";
+import { combatLog, items, locations, playerItems, players, playerStats, ranks, settings, weaponCondition } from "./schema.js";
 import { type CombatSettings, readCombatSettings } from "./settings.js";
 
 // Re-exported from the manifest module rather than through an `exports`
@@ -336,7 +337,7 @@ const attackRoute = route({
       }
       // Mutual: below the threshold you can neither be attacked NOR attack.
       // One-way protection would let a newbie farm with impunity.
-      if (attacker.exp < config.newbieExpThreshold || target.exp < config.newbieExpThreshold) {
+      if (isNewbie(attacker, config, ctx.progression) || isNewbie(target, config, ctx.progression)) {
         throw new PluginError("protected", 409);
       }
 
@@ -776,6 +777,23 @@ const logRoute = route({
  * Bounded at 50 and NOT paginated — the same deliberate limitation
  * GET /api/combat/log has, recorded here rather than discovered later.
  */
+/**
+ * The newbie gate, branched on the boot's progression model. On an unrouted
+ * boot `exp` is lifetime and the exp threshold is the measure. On a routed
+ * boot `exp` is WITHIN-level — it resets to 0 at every level-up — so the
+ * same comparison made every player a permanent newbie and nobody could
+ * shoot anyone; `level` is the figure that only ever grows there.
+ */
+function isNewbie(
+  row: { exp: bigint; level: number },
+  config: CombatSettings,
+  progression: ProgressionModel,
+): boolean {
+  return progression === "level"
+    ? row.level < config.newbieLevelThreshold
+    : row.exp < config.newbieExpThreshold;
+}
+
 const targetsRoute = route({
   method: "GET",
   path: "/api/combat/targets",
@@ -821,6 +839,7 @@ const targetsRoute = route({
           maxHealth: ranks.maxHealth,
           gangId: playerStats.gangId,
           exp: playerStats.exp,
+          level: playerStats.level,
           jailedUntil: playerStats.jailedUntil,
           hospitalUntil: playerStats.hospitalUntil,
         })
@@ -838,7 +857,7 @@ const targetsRoute = route({
       const now = Date.now();
       // The caller being under the threshold makes EVERY row illegal —
       // protection is mutual, so a newbie can neither be attacked nor attack.
-      const selfProtected = me.exp < config.newbieExpThreshold;
+      const selfProtected = isNewbie(me, config, ctx.progression);
 
       return {
         status: 200,
@@ -854,7 +873,7 @@ const targetsRoute = route({
               : row.jailedUntil && row.jailedUntil.getTime() > now ? "jailed"
               : me.gangId !== null && me.gangId === row.gangId ? "gang_mate"
               : selfProtected ? "newbie_self"
-              : row.exp < config.newbieExpThreshold ? "newbie_protected"
+              : isNewbie(row, config, ctx.progression) ? "newbie_protected"
               : null;
             return {
               playerId: row.playerId,
@@ -1037,11 +1056,189 @@ const gunsmithLink = on(itemActions, (ctx, value) => ({
     }))],
 }));
 
+// ---------------------------------------------------------------------------
+// Admin — the settings panel, detectives' shape. Reads and writes the settings
+// TABLE, not `ctx.settings`: the snapshot is boot-time, so the panel shows
+// what the next boot will read and an edit takes effect on restart (which the
+// panel says out loud). Keys are the bare names `readCombatSettings` reads,
+// stored prefixed `combat.<key>` exactly as the SDK's namespacing expects.
+// ---------------------------------------------------------------------------
+
+const ADMIN_SETTING_KEYS = [
+  "newbie_exp_threshold", "newbie_level_threshold", "cooldown_seconds", "cooldown_max_seconds",
+  "hospital_seconds", "default_weapon_accuracy", "unarmed.accuracy", "unarmed.damage_min",
+  "unarmed.damage_max", "unarmed.bullets_per_shot", "unarmed.dps", "condition.wear_per_shot",
+  "condition.decay_period_seconds", "condition.decay_per_period", "backfire.base_chance",
+  "backfire.wear_factor", "repair.cost_per_point", "repair.cost_multiplier",
+] as const;
+type AdminSettingKey = (typeof ADMIN_SETTING_KEYS)[number];
+
+const ADMIN_SETTING_LABELS: Record<AdminSettingKey, string> = {
+  "newbie_exp_threshold": "Newbie protection: lifetime exp below this is protected (exp boots)",
+  "newbie_level_threshold": "Newbie protection: level below this is protected (level boots)",
+  "cooldown_seconds": "Attack cooldown for a weapon declaring no dps (seconds)",
+  "cooldown_max_seconds": "Ceiling on a dps-derived cooldown (seconds)",
+  "hospital_seconds": "Hospital stay on a kill (seconds)",
+  "default_weapon_accuracy": "Accuracy for a weapon declaring none (0–100)",
+  "unarmed.accuracy": "Unarmed accuracy (0–100)",
+  "unarmed.damage_min": "Unarmed minimum damage",
+  "unarmed.damage_max": "Unarmed maximum damage",
+  "unarmed.bullets_per_shot": "Unarmed bullets per shot",
+  "unarmed.dps": "Unarmed dps (blank = flat cooldown)",
+  "condition.wear_per_shot": "Weapon wear per shot (condition points)",
+  "condition.decay_period_seconds": "Weapon decay period (seconds)",
+  "condition.decay_per_period": "Weapon decay per period (condition points)",
+  "backfire.base_chance": "Backfire base chance (0–100)",
+  "backfire.wear_factor": "Backfire wear factor",
+  "repair.cost_per_point": "Repair cost per condition point (no shop listing)",
+  "repair.cost_multiplier": "Full repair costs this many times the shop price",
+};
+
+/** Form fields (the admin form posts strings). The order is the form's. */
+const ADMIN_FIELDS: Record<AdminSettingKey, "number" | "money"> = {
+  "newbie_exp_threshold": "money",
+  "newbie_level_threshold": "number",
+  "cooldown_seconds": "number",
+  "cooldown_max_seconds": "number",
+  "hospital_seconds": "number",
+  "default_weapon_accuracy": "number",
+  "unarmed.accuracy": "number",
+  "unarmed.damage_min": "number",
+  "unarmed.damage_max": "number",
+  "unarmed.bullets_per_shot": "number",
+  "unarmed.dps": "number",
+  "condition.wear_per_shot": "number",
+  "condition.decay_period_seconds": "number",
+  "condition.decay_per_period": "number",
+  "backfire.base_chance": "number",
+  "backfire.wear_factor": "number",
+  "repair.cost_per_point": "money",
+  "repair.cost_multiplier": "number",
+};
+
+/**
+ * Every field is optional and blank-tolerant, because a blank means "use the
+ * default" to `readCombatSettings` (its `blank` guard) and the form always
+ * posts every field. A blank is stored as a DELETE, not an empty row, so the
+ * table never carries a value the reader would treat as absent anyway.
+ * Numeric fields are validated as the reader would floor them; the money
+ * fields as non-negative integers.
+ */
+const nonNegInt = z.string().trim().regex(/^\d+$/, "non-negative integer").or(z.literal(""));
+const nonNegNumber = z.string().trim().refine(
+  (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
+  "non-negative number",
+);
+const AdminSettingsBodySchema = z.object(
+  Object.fromEntries(
+    ADMIN_SETTING_KEYS.map((key) => [key, ADMIN_FIELDS[key] === "money" ? nonNegInt : nonNegNumber]),
+  ) as Record<AdminSettingKey, typeof nonNegInt | typeof nonNegNumber>,
+).strict();
+
+const adminSettingsListRoute = route({
+  method: "GET", path: "/api/admin/combat/settings", auth: "admin",
+  handler: async (ctx) => {
+    const rows = await ctx.transaction(async (tx) => tx.db.select().from(settings));
+    const stored = new Map(rows.map((r) => [r.key, r.value]));
+    const get = (key: string): string | null => stored.get(`combat.${key}`) ?? null;
+    // Effective values: what the reader resolves each raw value to, defaults
+    // included, so the table shows the number that will actually apply.
+    const effective = readCombatSettings(get);
+    const values: Record<AdminSettingKey, string> = {
+      "newbie_exp_threshold": effective.newbieExpThreshold.toString(),
+      "newbie_level_threshold": String(effective.newbieLevelThreshold),
+      "cooldown_seconds": String(effective.cooldownSeconds),
+      "cooldown_max_seconds": String(effective.cooldownMaxSeconds),
+      "hospital_seconds": String(effective.hospitalSeconds),
+      "default_weapon_accuracy": String(effective.defaultWeaponAccuracy),
+      "unarmed.accuracy": String(effective.unarmed.accuracy),
+      "unarmed.damage_min": String(effective.unarmed.damageMin),
+      "unarmed.damage_max": String(effective.unarmed.damageMax),
+      "unarmed.bullets_per_shot": String(effective.unarmed.bulletsPerShot),
+      "unarmed.dps": effective.unarmed.dps === undefined ? "" : String(effective.unarmed.dps),
+      "condition.wear_per_shot": String(effective.condition.wearPerShot),
+      "condition.decay_period_seconds": String(effective.condition.decayPeriodSeconds),
+      "condition.decay_per_period": String(effective.condition.decayPerPeriod),
+      "backfire.base_chance": String(effective.backfire.baseChance),
+      "backfire.wear_factor": String(effective.backfire.wearFactor),
+      "repair.cost_per_point": effective.repair.costPerPoint.toString(),
+      "repair.cost_multiplier": String(effective.repair.costMultiplier),
+    };
+    return {
+      status: 200,
+      body: {
+        rows: ADMIN_SETTING_KEYS.map((key) => ({
+          key, label: ADMIN_SETTING_LABELS[key], value: values[key], stored: get(key) ?? "",
+        })),
+        // Form prefill — field names equal these keys exactly.
+        values,
+      },
+    };
+  },
+});
+
+const adminSettingsWriteRoute = route({
+  method: "POST", path: "/api/admin/combat/settings", auth: "admin",
+  body: AdminSettingsBodySchema,
+  handler: async (ctx, { body }) => {
+    await ctx.transaction(async (tx) => {
+      for (const key of ADMIN_SETTING_KEYS) {
+        const value = body[key].trim();
+        const row = `combat.${key}`;
+        if (value === "") {
+          await tx.db.delete(settings).where(eq(settings.key, row));
+        } else {
+          await tx.db.insert(settings).values({ key: row, value })
+            .onConflictDoUpdate({ target: settings.key, set: { value } });
+        }
+      }
+    });
+    return { status: 204 };
+  },
+});
+
+const adminPage: PageSchema = {
+  id: "combat-admin",
+  path: "/admin/combat",
+  view: {
+    kind: "panel", title: "Combat",
+    children: [
+      { kind: "text", value: "Newbie protection is mutual — a protected player can neither be shot nor shoot. Which threshold applies depends on the boot: an exp game compares lifetime exp against the exp threshold; a level game (a progression plugin is loaded) compares level against the level threshold, because exp there resets on every level-up. Blank a field to fall back to its default. Edits take effect on the next server restart." },
+      { kind: "table", source: "GET /api/admin/combat/settings", columns: [
+        { key: "label", label: "Setting" },
+        { key: "value", label: "Effective value" },
+        { key: "stored", label: "Stored" },
+      ] },
+      { kind: "form", action: "POST /api/admin/combat/settings", submitLabel: "Update settings",
+        valuesSource: "GET /api/admin/combat/settings", fields: [
+        { name: "newbie_exp_threshold", label: "Newbie exp threshold", type: "money", when: { progression: "exp" } },
+        { name: "newbie_level_threshold", label: "Newbie level threshold", type: "number", when: { progression: "level" } },
+        { name: "cooldown_seconds", label: "Cooldown (seconds, no-dps weapons)", type: "number" },
+        { name: "cooldown_max_seconds", label: "Cooldown ceiling (seconds)", type: "number" },
+        { name: "hospital_seconds", label: "Hospital stay on kill (seconds)", type: "number" },
+        { name: "default_weapon_accuracy", label: "Default weapon accuracy", type: "number" },
+        { name: "unarmed.accuracy", label: "Unarmed accuracy", type: "number" },
+        { name: "unarmed.damage_min", label: "Unarmed min damage", type: "number" },
+        { name: "unarmed.damage_max", label: "Unarmed max damage", type: "number" },
+        { name: "unarmed.bullets_per_shot", label: "Unarmed bullets per shot", type: "number" },
+        { name: "unarmed.dps", label: "Unarmed dps (blank = flat)", type: "number" },
+        { name: "condition.wear_per_shot", label: "Wear per shot", type: "number" },
+        { name: "condition.decay_period_seconds", label: "Decay period (seconds)", type: "number" },
+        { name: "condition.decay_per_period", label: "Decay per period", type: "number" },
+        { name: "backfire.base_chance", label: "Backfire base chance", type: "number" },
+        { name: "backfire.wear_factor", label: "Backfire wear factor", type: "number" },
+        { name: "repair.cost_per_point", label: "Repair cost per point", type: "money" },
+        { name: "repair.cost_multiplier", label: "Repair cost multiplier", type: "number" },
+      ] },
+    ],
+  },
+};
+
 export default definePlugin({
   id: "combat",
   version: "1.0.0",
   apiVersion: 1,
-  basePaths: ["/api/combat"],
+  basePaths: ["/api/combat", "/api/admin/combat"],
   // Real import dependencies (see this package's package.json) —
   // enforced against the final boot set by plugins/validate.ts.
   requires: ["inventory", "detectives"],
@@ -1055,7 +1252,8 @@ export default definePlugin({
     view: { kind: "list", items: [] },
   }],
   migrations: COMBAT_MIGRATIONS,
-  routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute],
+  routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute, adminSettingsListRoute, adminSettingsWriteRoute],
+  adminPages: [adminPage],
   provides: [killResolved],
   filters: [gunsmithLink],
 });

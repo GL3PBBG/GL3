@@ -72,10 +72,10 @@ describe("melee combat + initiation energy (integration)", () => {
         VALUES (${weaponId}, ${"Rusty Knife"}, ${"weapon"}, ${effects}::jsonb)`);
       await db.update(playerStats).set({
         locationId: town, weaponItemId: weaponId,
-        strength: 100n, agility: 1000n, exp: 1000n, bullets: 5n,
+        strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n,
       }).where(eq(playerStats.playerId, attacker.playerId));
       await db.update(playerStats).set({
-        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n,
+        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
       }).where(eq(playerStats.playerId, victim.playerId));
 
       const first = await server.app.inject({
@@ -121,9 +121,9 @@ describe("melee combat + initiation energy (integration)", () => {
       const victim = await registerVerifiedPlayer(server, { remoteAddress: "10.19.1.4" });
       const town = crypto.randomUUID();
       await db.execute(sql`INSERT INTO locations (id, name) VALUES (${town}, ${"Tiredtown"})`);
-      await db.update(playerStats).set({ locationId: town, energy: 4, exp: 1000n })
+      await db.update(playerStats).set({ locationId: town, energy: 4, exp: 1000n, level: 100 })
         .where(eq(playerStats.playerId, attacker.playerId));
-      await db.update(playerStats).set({ locationId: town, exp: 1000n })
+      await db.update(playerStats).set({ locationId: town, exp: 1000n, level: 100 })
         .where(eq(playerStats.playerId, victim.playerId));
 
       const res = await server.app.inject({

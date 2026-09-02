@@ -116,7 +116,7 @@ beforeAll(async () => {
   await db.insert(playerItems).values(playerIds.map((id) => ({ playerId: id, itemId: weaponId, qty: 1 })));
   await db
     .update(playerStats)
-    .set({ weaponItemId: weaponId, exp: 1000n })
+    .set({ weaponItemId: weaponId, exp: 1000n, level: 100 })
     .where(inArray(playerStats.playerId, playerIds));
 });
 afterAll(async () => {

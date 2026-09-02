@@ -306,3 +306,21 @@ describe("ctx.transaction", () => {
     expect(await db.select({ id: outbox.id }).from(outbox)).toEqual([]);
   });
 });
+
+describe("ctx.progression", () => {
+  it("is \"exp\" when no plugin claims exp routing", () => {
+    expect(createPluginCtx(deps(), opts).progression).toBe("exp");
+  });
+
+  it("is \"level\" when a claimant is wired in", () => {
+    const ctx = createPluginCtx(deps(), { ...opts, expRouter: async () => undefined });
+    expect(ctx.progression).toBe("level");
+  });
+
+  it("takes an explicit value over the router-derived one", () => {
+    // Core's filter appliers deliberately pass no router (display-only) but
+    // still run on a routed boot; they hand the model in by name instead.
+    const ctx = createPluginCtx(deps(), { ...opts, progression: "level" });
+    expect(ctx.progression).toBe("level");
+  });
+});
