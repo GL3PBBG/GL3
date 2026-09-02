@@ -78,7 +78,10 @@ type SettledEducation = {
  * settle an elapsed course, so this is the one place the tick logic lives
  * rather than being duplicated across the two handlers.
  */
-async function settleAndRead(tx: PluginTx, playerId: string): Promise<SettledEducation> {
+async function settleAndRead(
+  tx: PluginTx, player: { id: string; username: string },
+): Promise<SettledEducation> {
+  const playerId = player.id;
   // The tick is the read: an elapsed course completes here, lazily — no
   // cron anywhere (the rounds-sweeper resolve-on-read shape).
   const completed = await claimCompletion(tx, playerId);
@@ -93,6 +96,16 @@ async function settleAndRead(tx: PluginTx, playerId: string): Promise<SettledEdu
       if (course.iqGain > 0) await tx.attributes.train(playerId, "iq", BigInt(course.iqGain));
       await tx.db.insert(done).values({ playerId, courseId: course.id });
       await tx.notify(playerId, `You completed ${course.name}.`);
+      // The tick runs inside a READ (`/api/education/board` is what the
+      // plugin page fetches), so no client action fires and the HUD's
+      // "Course: ... left" line would sit until a full reload. Silent — the
+      // notification is the visible record; this carries the invalidation.
+      await tx.events.publish({
+        name: "completed",
+        actorId: playerId, actorName: player.username,
+        audience: { kind: "player", playerId },
+        payload: { courseName: course.name },
+      });
       completedName = course.name;
     }
   }
@@ -134,7 +147,7 @@ const listRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      const data = await settleAndRead(tx, player.id);
+      const data = await settleAndRead(tx, player);
       return {
         status: 200,
         body: {
@@ -168,7 +181,7 @@ const boardRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      const data = await settleAndRead(tx, player.id);
+      const data = await settleAndRead(tx, player);
 
       const values: Record<string, string> = {};
       if (data.active !== null) {
@@ -395,6 +408,15 @@ const adminDeleteRoute = route({
   },
 });
 
+/** Silent, the jobs `wages` shape: `invalidates` is the point. */
+const completedEvent = {
+  name: "completed",
+  payload: z.object({ courseName: z.string() }),
+  describe: "{actorName} completed {courseName}",
+  invalidates: ["hudExtras", "me"],
+  silent: true,
+};
+
 /**
  * Education (C spec §4.4): one course at a time, money cost only, no
  * repeats, no cancel — MCCodes parity. Completion is FLAT stat grants
@@ -412,6 +434,7 @@ export default definePlugin({
     listRoute, boardRoute, startRoute,
     adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
   ],
+  events: [completedEvent],
   filters: [hudCourse],
   // The page renders at /plugins/<pageId>, out of reach of the Shell's
   // route→slot banner map, so the banner is this plugin's own singleton drawn

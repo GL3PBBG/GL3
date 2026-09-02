@@ -1,13 +1,18 @@
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import educationPlugin from "@gl3/plugin-education";
 import mccodesAttributes from "@gl3/plugin-mccodes-attributes";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import { playerStats } from "../src/db/schema/index.js";
+import { createSubscriber } from "../src/redis.js";
 import { testDb } from "./helpers/db.js";
+import { awaitOwnPluginEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
 afterAll(async () => { await conn.end(); });
 
@@ -26,7 +31,15 @@ describe("education plugin", () => {
         ${5}, ${0}, ${0}, ${0}, ${10})
     `);
   });
-  afterAll(async () => { if (server) await server.close(); });
+  beforeAll(async () => { await subscriber.subscribe(GAME_EVENTS_CHANNEL); });
+  afterAll(async () => { subscriber.disconnect(); if (server) await server.close(); });
+
+  it("declares the completed event silent and invalidating the HUD and me", () => {
+    const decl = educationPlugin.events.find((e) => e.name === "completed");
+    expect(decl).toBeDefined();
+    expect(decl?.silent).toBe(true);
+    expect(decl?.invalidates).toEqual(expect.arrayContaining(["hudExtras", "me"]));
+  });
 
   it("starts a course: pays, enrolls, refuses a second concurrent course", async () => {
     const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.14.1.1" });
@@ -76,10 +89,16 @@ describe("education plugin", () => {
       WHERE player_id = ${playerId}
     `);
 
+    // The tick is a READ the plugin page fetches with no action behind it,
+    // so only this event tells the HUD its "Course: ... left" line is gone.
+    const completed = awaitOwnPluginEvent(subscriber, playerId, "education", "completed");
     const res = await server.app.inject({ method: "GET", url: "/api/education", headers: auth });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.completedNow).toBe("Biology 101");
+    const done = await completed;
+    expect(done.audience).toEqual({ kind: "player", playerId });
+    expect(done.payload).toEqual({ courseName: "Biology 101" });
     expect(body.active).toBeNull();
     expect(body.courses.find((c: { id: string }) => c.id === courseId).status).toBe("done");
 

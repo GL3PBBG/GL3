@@ -57,15 +57,16 @@ async function employmentWithRank(tx: PluginTx, playerId: string) {
  * SEAM (exp routing diverts it to the level ladder automatically on a
  * progression boot — jobs never knows), and the rank's stat gains.
  */
-async function settleWages(tx: PluginTx, playerId: string): Promise<number> {
+async function settleWages(tx: PluginTx, player: { id: string; username: string }): Promise<number> {
+  const playerId = player.id;
   const row = await employmentWithRank(tx, playerId);
   if (row === null) return 0;
 
   const days = Math.floor((Date.now() - row.lastWageAt.getTime()) / DAY_MS);
   if (days <= 0) return 0;
 
-  if (row.pay > 0n) {
-    const total = row.pay * BigInt(days);
+  const total = row.pay * BigInt(days);
+  if (total > 0n) {
     await tx.economy.applyBalanceChange(
       { playerId, amount: total, kind: "cash", reason: "jobs.wage", refId: row.rankId },
     );
@@ -85,6 +86,18 @@ async function settleWages(tx: PluginTx, playerId: string): Promise<number> {
   await tx.db.update(employment)
     .set({ lastWageAt: new Date(row.lastWageAt.getTime() + days * DAY_MS) })
     .where(eq(employment.playerId, playerId));
+  // The settle runs inside a READ (`/api/jobs/board` is what the plugin page
+  // fetches), so no action fires on the client and nothing there invalidates
+  // the HUD's "Wages: N day(s) unclaimed" line or the cash stat — they sat
+  // stale until a full reload. This silent event is the invalidation carrier;
+  // the notification above stays the visible record. Outside the pay guard:
+  // a zero-pay rank still moves the stamp `hudWage` reads.
+  await tx.events.publish({
+    name: "wages",
+    actorId: playerId, actorName: player.username,
+    audience: { kind: "player", playerId },
+    payload: { days, total: total.toString(), rankName: row.rankName },
+  });
   return days;
 }
 
@@ -97,7 +110,7 @@ const mineRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      const daysSettled = await settleWages(tx, player.id);
+      const daysSettled = await settleWages(tx, player);
       const row = await employmentWithRank(tx, player.id);
       if (row === null) return { status: 200, body: { job: null, daysSettled } };
       const [job] = await tx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
@@ -162,7 +175,7 @@ const boardRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      await settleWages(tx, player.id);
+      await settleWages(tx, player);
       const employed = await employmentWithRank(tx, player.id);
 
       const rankRows = await tx.db.select({
@@ -256,7 +269,7 @@ const promoteRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      await settleWages(tx, player.id);
+      await settleWages(tx, player);
 
       const row = await employmentWithRank(tx, player.id);
       if (row === null) throw new PluginError("not_employed", 409);
@@ -293,7 +306,7 @@ const quitRoute = route({
 
     return ctx.transaction(async (tx) => {
       await tx.locks.player([player.id]);
-      await settleWages(tx, player.id); // a fair exit: owed days pay out
+      await settleWages(tx, player); // a fair exit: owed days pay out
       const deleted = await tx.db.delete(employment)
         .where(eq(employment.playerId, player.id))
         .returning({ playerId: employment.playerId });
@@ -557,6 +570,20 @@ const adminRankDeleteRoute = route({
  * lazily, whole days at a time, wherever employment is read or changed.
  * Interview/promotion are stat gates against the trained stats.
  */
+/**
+ * Silent (the casino table-tick shape): the payday notification is already
+ * the player-visible record, so a feed line would say it twice. What the
+ * event is FOR is `invalidates` — the HUD's `hudWage` entry and the Shell's
+ * cash stat (`me`) both read state this settle just changed.
+ */
+const wagesEvent = {
+  name: "wages",
+  payload: z.object({ days: z.number().int().positive(), total: z.string(), rankName: z.string() }),
+  describe: "{actorName} collected {days} day(s) of wages",
+  invalidates: ["hudExtras", "me"],
+  silent: true,
+};
+
 export default definePlugin({
   id: "jobs",
   version: "1.0.0",
@@ -569,6 +596,7 @@ export default definePlugin({
     adminJobsListRoute, adminJobCreateRoute, adminJobUpdateRoute, adminJobDeleteRoute,
     adminRanksListRoute, adminRankCreateRoute, adminRankUpdateRoute, adminRankDeleteRoute,
   ],
+  events: [wagesEvent],
   filters: [hudWage],
   // The page renders at /plugins/<pageId>, out of reach of the Shell's
   // route→slot banner map, so the banner is this plugin's own singleton drawn
