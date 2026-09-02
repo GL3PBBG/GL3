@@ -11,6 +11,7 @@ import { startWealthTaxLoop } from "./economy/tax.js";
 import { buildAvailablePlugins } from "./plugins/available.js";
 import { CORE_PLUGINS, bundledPlugins } from "./plugins/core-plugins.js";
 import { loadDynamicPlugins, type DynamicPlugin } from "./plugins/dynamic.js";
+import { collectExpRouters } from "./plugins/exp-routers.js";
 import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
 import { createStorageDriver } from "./assets/factory.js";
 import { sweepOrphanedCoreBindings, sweepUnreferencedAssets } from "./assets/sweep.js";
@@ -105,7 +106,7 @@ if (seeds.locations) await seedLocations(db);
 if (seeds.items) await seedItems(db);
 // Before loadSettings: the boot's own settings snapshot must see it.
 if (seeds.templeExchanges) await seedTempleExchanges(db);
-await rebuildLeaderboards(db, redis);
+await rebuildLeaderboards(db, redis, undefined, collectExpRouters(manifests) !== null);
 
 const loadedSettings = await loadSettings(db);
 

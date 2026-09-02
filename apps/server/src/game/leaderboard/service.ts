@@ -59,15 +59,19 @@ export async function topN(
  * `prefix`'s namespace regardless of what other namespaces on the same
  * Redis instance are doing concurrently.
  */
-export async function rebuildLeaderboards(db: Db, redis: Redis, prefix = DEFAULT_LEADERBOARD_PREFIX): Promise<void> {
-  const rows = await db.select({ playerId: playerStats.playerId, cash: playerStats.cash, bank: playerStats.bank, exp: playerStats.exp }).from(playerStats);
+export async function rebuildLeaderboards(
+  db: Db, redis: Redis, prefix = DEFAULT_LEADERBOARD_PREFIX, routed = false,
+): Promise<void> {
+  const rows = await db.select({
+    playerId: playerStats.playerId, cash: playerStats.cash, bank: playerStats.bank, exp: playerStats.exp, level: playerStats.level,
+  }).from(playerStats);
   if (rows.length === 0) return;
 
   const pipeline = redis.pipeline();
   for (const row of rows) {
     pipeline.zadd(key("cash", prefix), row.cash.toString(), row.playerId);
     pipeline.zadd(key("bank", prefix), row.bank.toString(), row.playerId);
-    pipeline.zadd(key("exp", prefix), row.exp.toString(), row.playerId);
+    pipeline.zadd(key("exp", prefix), expScore(row.level, row.exp, routed).toString(), row.playerId);
   }
   await pipeline.exec();
 }
