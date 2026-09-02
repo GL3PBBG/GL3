@@ -1,8 +1,10 @@
 import { coreMoneyFormat, type PluginManifest, type ViewNode } from "@gl3/plugin-sdk";
-import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema, type NavCategoryId } from "@gl3/shared";
+import { DEFAULT_MONEY_FORMAT, MoneyFormatSchema, type NavCategoryId, type ProgressionModel } from "@gl3/shared";
 import type { FastifyInstance } from "fastify";
 import { stampAssetBinderScope } from "./asset-slots.js";
 import type { CoreFilters } from "./core-filters.js";
+import { collectExpRouters } from "./exp-routers.js";
+import { pruneViewForProgression } from "./progression-view.js";
 
 export interface MenuItem {
   pageId: string; path: string; label: string; order: number;
@@ -22,6 +24,18 @@ export interface PluginsPayload {
   menu: MenuItem[]; pages: PagePayload[]; events: EventMeta[];
   /** Every installed plugin id, sorted — the client's feature detection. */
   installed: string[];
+  /**
+   * `"level"` when an `applyExp` claimant is loaded (`collectExpRouters`),
+   * `"exp"` otherwise — how the client derives the HUD's rank from
+   * `/api/auth/me`, which carries both `exp` and `level` but not which one
+   * the ladder reads. Boot-static like everything else here.
+   */
+  progression: ProgressionModel;
+}
+
+/** The progression model a set of manifests boots into — see `progression` above. */
+export function progressionModelOf(manifests: readonly PluginManifest[]): ProgressionModel {
+  return collectExpRouters(manifests) !== null ? "level" : "exp";
 }
 
 /** Which bundled set a boot loaded — see `plugins/core-plugins.ts`. */
@@ -54,16 +68,18 @@ export function buildPluginsPayload(
   const menu: MenuItem[] = [];
   const pages: PagePayload[] = [];
   const events: EventMeta[] = [];
+  const progression = progressionModelOf(manifests);
 
   for (const manifest of manifests) {
     for (const page of manifest.pages) {
       // Stamped, not copied: a `slotImage` on a player page needs the declaring
       // plugin's id to know which scope's art to ask for, and the author never
       // writes it. (`assetBinder` is admin-only and stamped in admin/routes.ts,
-      // but the same pass covers both.)
+      // but the same pass covers both.) Pruned for this boot's progression
+      // model in the same pass — see progression-view.ts.
       pages.push({
         pluginId: manifest.id, id: page.id, path: page.path,
-        view: stampAssetBinderScope(page.view, manifest.id),
+        view: pruneViewForProgression(stampAssetBinderScope(page.view, manifest.id), progression),
       });
       if (page.menu !== undefined) {
         menu.push({
@@ -104,7 +120,7 @@ export function buildPluginsPayload(
   // depending on the config's plugin order.
   menu.sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
   const installed = manifests.map((m) => m.id).sort();
-  return { menu, pages, events, installed };
+  return { menu, pages, events, installed, progression };
 }
 
 export function registerPluginsEndpoint(app: FastifyInstance, payload: PluginsPayload, coreFilters: CoreFilters): void {

@@ -5,6 +5,7 @@ import {
   MoneySchema,
   NAV_CATEGORIES,
   VIEW_ACTION_RE,
+  ViewWhenSchema,
 } from "@gl3/shared";
 import { z } from "zod";
 
@@ -133,6 +134,7 @@ const leafOptions = [
                * when the sibling fields share names with the row's keys.
                */
               prefillForm: z.boolean().optional(),
+              when: ViewWhenSchema.optional(),
             })
             .strict(),
           z
@@ -144,6 +146,7 @@ const leafOptions = [
               // where one typo is a 400.
               type: z.literal("hidden"),
               value: z.string(),
+              when: ViewWhenSchema.optional(),
             })
             .strict(),
           z
@@ -154,6 +157,14 @@ const leafOptions = [
               // as `<input type="number">`, whose default `step` of 1 makes
               // the browser reject 1.5 before it is ever submitted.
               type: z.enum(["text", "number", "decimal", "money", "password"]),
+              /**
+               * Progression-model gate, shared by every field branch and by
+               * table columns: the server prunes the non-matching ones at
+               * boot and strips the key (a page is static data, but which
+               * model a boot runs is boot-static too). `ViewWhenSchema` in
+               * @gl3/shared is the one definition.
+               */
+              when: ViewWhenSchema.optional(),
             })
             .strict(),
         ]),
@@ -185,6 +196,8 @@ const leafOptions = [
           // to `sm`, which is right for a dense table and too small for a page
           // whose whole point is the picture (the garage) — hence the choice.
           imageSize: z.enum(["sm", "md", "lg"]).optional(),
+          // Progression-model gate — see the form field note above.
+          when: ViewWhenSchema.optional(),
         }).strict(),
       ).min(1),
       // Per-row mutations (delete, mostly). Every `:token` in the action's

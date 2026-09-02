@@ -45,3 +45,34 @@ export function progressToNextRank(exp: string, ranks: readonly RankDto[]): Rank
   const scaled = ((have - floor) * 10_000n) / span;
   return { current, next, pct: Number(scaled) / 100 };
 }
+
+/**
+ * Where a player sits on the ladder on a ROUTED boot — one where a plugin
+ * claimed exp application and `exp` is within-level exp that says nothing
+ * about rank. There, rank is ordinal: level N holds the Nth rung in
+ * `expRequired` order, clamped to the top (`syncRankToLevel`'s
+ * `min(level, count) - 1`), and level 0 holds nothing. `pct` is 0 or 100:
+ * the client does not know the claimant's exp curve, so it cannot say how
+ * far into the level the player is.
+ */
+export function rankForLevel(level: number, ranks: readonly RankDto[]): RankProgress {
+  const ladder = [...ranks].sort((a, b) => (BigInt(a.expRequired) < BigInt(b.expRequired) ? -1 : 1));
+  if (ladder.length === 0) return { current: null, next: null, pct: 100 };
+  if (level <= 0) return { current: null, next: ladder[0] ?? null, pct: 0 };
+  const position = Math.min(level, ladder.length) - 1;
+  const next = ladder[position + 1] ?? null;
+  return { current: ladder[position] ?? null, next, pct: next === null ? 100 : 0 };
+}
+
+/**
+ * The one entry point the HUD and the ranks page share: picks the derivation
+ * by the boot's progression model (`/api/plugins`' `progression`). Absent
+ * means an older server that never said, which only ever ran exp thresholds.
+ */
+export function rankProgress(
+  model: "exp" | "level" | undefined,
+  me: { exp: string; level: number },
+  ranks: readonly RankDto[],
+): RankProgress {
+  return model === "level" ? rankForLevel(me.level, ranks) : progressToNextRank(me.exp, ranks);
+}

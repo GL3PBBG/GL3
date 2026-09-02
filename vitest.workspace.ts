@@ -236,6 +236,7 @@ export default defineWorkspace([
       root: "./apps/server",
       include: [
         "test/combat-resolve.test.ts",
+        "test/progression-view.test.ts",
         "test/combat-condition.test.ts",
         "test/combat-cooldown.test.ts",
         "test/combat-settings.test.ts",

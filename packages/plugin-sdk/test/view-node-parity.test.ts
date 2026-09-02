@@ -83,6 +83,29 @@ describe("view node vocabulary parity", () => {
     expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
   });
 
+  // `when` is pruned server-side at boot (progression-view.ts) and should never
+  // reach the wire — but the wire copy accepts it anyway, so a view that DID
+  // leak past the pruner shows an extra column rather than blanking the
+  // whole payload (the all-or-nothing parse this file exists to guard).
+  it("accepts a column and field `when` in both the SDK and on the wire", () => {
+    const table = {
+      kind: "table", source: "GET /api/admin/example/rows",
+      columns: [{ key: "expRequired", label: "Exp required", when: { progression: "exp" } }],
+    };
+    const form = {
+      kind: "form", action: "POST /api/admin/example", submitLabel: "Save",
+      fields: [
+        { name: "a", label: "A", type: "money", when: { progression: "level" } },
+        { name: "b", label: "B", type: "select", optionsSource: "GET /api/admin/example/rows", valueKey: "id", labelKey: "name", when: { progression: "exp" } },
+        { name: "c", type: "hidden", value: "x", when: { progression: "exp" } },
+      ],
+    };
+    for (const node of [table, form]) {
+      expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+      expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+    }
+  });
+
   it("accepts `panel.layout` in both the SDK and on the wire", () => {
     const node = {
       kind: "panel",

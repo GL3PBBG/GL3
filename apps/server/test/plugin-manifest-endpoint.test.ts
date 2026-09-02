@@ -182,9 +182,47 @@ describe("GET /api/plugins", () => {
         // this asserts the no-subscriber default that chain resolves to when
         // nothing overrides it.
         moneyFormat: DEFAULT_MONEY_FORMAT,
+        // No `applyExp` claimant in a framework boot: exp thresholds.
+        progression: "exp",
       });
     } finally {
       await close();
     }
+  });
+});
+
+describe("progression on the payload", () => {
+  const routed = definePlugin({
+    id: "router", version: "1.0.0", basePaths: ["/api/router"],
+    applyExp: async () => {},
+  });
+  const conditional = definePlugin({
+    id: "cond", version: "1.0.0", basePaths: ["/api/cond"],
+    pages: [{ id: "cond.index", path: "/cond", view: {
+      kind: "table", source: "GET /api/cond/rows",
+      columns: [
+        { key: "name", label: "Name" },
+        { key: "expRequired", label: "Exp required", when: { progression: "exp" } },
+        { key: "levelRequired", label: "Level", when: { progression: "level" } },
+      ],
+    } }],
+  });
+
+  it("is \"exp\" with no claimant and \"level\" with one", () => {
+    expect(buildPluginsPayload([alpha], "framework").progression).toBe("exp");
+    expect(buildPluginsPayload([alpha, routed], "framework").progression).toBe("level");
+  });
+
+  it("prunes `when`-gated columns to the boot's model and strips the key", () => {
+    const exp = buildPluginsPayload([conditional], "framework").pages[0]?.view;
+    expect(exp).toEqual({
+      kind: "table", source: "GET /api/cond/rows",
+      columns: [{ key: "name", label: "Name" }, { key: "expRequired", label: "Exp required" }],
+    });
+    const level = buildPluginsPayload([conditional, routed], "framework").pages[0]?.view;
+    expect(level).toEqual({
+      kind: "table", source: "GET /api/cond/rows",
+      columns: [{ key: "name", label: "Name" }, { key: "levelRequired", label: "Level" }],
+    });
   });
 });

@@ -12,7 +12,7 @@ import { formatDuration } from "../lib/errors.js";
 import { FormatProvider } from "../lib/formatContext.js";
 import { unreadCount } from "../lib/mail.js";
 import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.js";
-import { progressToNextRank } from "../lib/ranks.js";
+import { rankProgress } from "../lib/ranks.js";
 import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
 import { EventToasts } from "./EventToasts.js";
@@ -275,8 +275,11 @@ export function Shell(): JSX.Element {
   usePageTitle(categories);
 
   // /api/auth/me carries neither rank nor location; both are derived from the
-  // list endpoints, which is why the HUD depends on three queries.
-  const rank = me.data ? progressToNextRank(me.data.exp, ranks.data?.ranks ?? []) : null;
+  // list endpoints, which is why the HUD depends on three queries. Which
+  // derivation — exp thresholds, or level as an ordinal rung — is the
+  // plugins payload's `progression`: on a routed boot `exp` is within-level
+  // exp and reading thresholds off it showed the bottom rank to everyone.
+  const rank = me.data ? rankProgress(plugins.data?.progression, me.data, ranks.data?.ranks ?? []) : null;
   const here = locations.data?.locations.find((location) => location.current);
 
   // Neither endpoint reports a count, so both lists are counted here. They are

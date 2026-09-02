@@ -48,9 +48,14 @@ const adminRanksListRoute = route({
     return {
       status: 200,
       body: {
-        rows: rows.map((r) => ({
+        rows: rows.map((r, i) => ({
           id: r.id, name: r.name,
           expRequired: r.expRequired.toString(),
+          // The rung a routed boot's `syncRankToLevel` maps level onto:
+          // ordinal in expRequired order, same as the player list route.
+          // Shown by the level-model column below; a string like every
+          // other cell.
+          levelRequired: String(i + 1),
           cashReward: r.cashReward.toString(),
           bulletReward: String(r.bulletReward),
           maxHealth: String(r.maxHealth),
@@ -187,18 +192,26 @@ const adminRanksPage: PageSchema = {
   view: {
     kind: "panel", title: "Ranks",
     children: [
+      // `when`: on an exp boot the ladder is exp thresholds, on a routed
+      // (level) boot the SAME `exp_required` column is only the ladder's sort
+      // key — level N is the Nth rung — so the number stays editable (it is
+      // how an admin places a rung) but is labelled for what it does there,
+      // beside the level it yields. The server keeps one set per boot.
       { kind: "table", source: "GET /api/admin/ranks/list", columns: [
         { key: "name", label: "Name" },
-        { key: "expRequired", label: "Exp required" },
+        { key: "levelRequired", label: "Level", when: { progression: "level" } },
+        { key: "expRequired", label: "Exp required", when: { progression: "exp" } },
+        { key: "expRequired", label: "Ladder order", when: { progression: "level" } },
         { key: "cashReward", label: "Cash reward" },
         { key: "bulletReward", label: "Bullets" },
         { key: "maxHealth", label: "Max health" },
       ], rowActions: [
-        { label: "Delete", action: "DELETE /api/admin/ranks/:id", confirm: "Delete this rank? Holders re-rank on their next exp change." },
+        { label: "Delete", action: "DELETE /api/admin/ranks/:id", confirm: "Delete this rank? Holders re-rank on their next exp gain." },
       ] },
       { kind: "form", action: "POST /api/admin/ranks", submitLabel: "Add rank", fields: [
         { name: "name", label: "Name", type: "text" },
-        { name: "expRequired", label: "Exp required", type: "money" },
+        { name: "expRequired", label: "Exp required", type: "money", when: { progression: "exp" } },
+        { name: "expRequired", label: "Ladder order (sort key)", type: "money", when: { progression: "level" } },
         { name: "cashReward", label: "Cash reward", type: "money" },
         { name: "bulletReward", label: "Bullet reward", type: "number" },
         { name: "maxHealth", label: "Max health", type: "number" },
@@ -206,7 +219,8 @@ const adminRanksPage: PageSchema = {
       { kind: "form", action: "POST /api/admin/ranks/update", submitLabel: "Update rank", fields: [
         { name: "id", label: "Rank", type: "select", optionsSource: "GET /api/admin/ranks/list", valueKey: "id", labelKey: "name" },
         { name: "name", label: "Name", type: "text" },
-        { name: "expRequired", label: "Exp required", type: "money" },
+        { name: "expRequired", label: "Exp required", type: "money", when: { progression: "exp" } },
+        { name: "expRequired", label: "Ladder order (sort key)", type: "money", when: { progression: "level" } },
         { name: "cashReward", label: "Cash reward", type: "money" },
         { name: "bulletReward", label: "Bullet reward", type: "number" },
         { name: "maxHealth", label: "Max health", type: "number" },
