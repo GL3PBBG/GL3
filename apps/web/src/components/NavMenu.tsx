@@ -165,6 +165,10 @@ export function NavMenu({
                     key={item.to}
                     to={linkFor(item)}
                     end={item.to === "/"}
+                    /* Route changes cross-fade through the View Transitions
+                       API where the browser has it (theme.css animates the
+                       root snapshots); elsewhere this is a plain navigation. */
+                    viewTransition
                     className={({ isActive }) =>
                       isActive ? `${styles.item} ${styles.itemActive}` : styles.item
                     }

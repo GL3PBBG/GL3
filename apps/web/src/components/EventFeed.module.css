@@ -57,8 +57,9 @@
 }
 .item:first-child { border-top: 0; }
 @keyframes tick {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translateY(-4px); background: var(--accent-soft); }
+  40% { background: var(--accent-soft); }
+  to { opacity: 1; transform: none; background: transparent; }
 }
 .time {
   font: 500 0.74rem/1.6 var(--font-mono);

@@ -24,9 +24,18 @@
   align-items: center;
   gap: 1.25rem;
   flex-wrap: wrap;
-  /* Anchors the account chip's dropdown panel. */
-  position: relative;
-  padding: 0.9rem 0 0.8rem;
+  /* Sticky glass: the balances stay on screen however far a page scrolls,
+     over a blurred, translucent slab of the page behind. The negative
+     margins run the slab out to the shell's padding edges so nothing
+     scrolls past in a gap beside it. Also anchors the account dropdown. */
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: 0 -1.25rem;
+  padding: 0.9rem 1.25rem 0.8rem;
+  background: color-mix(in oklab, var(--bg) 76%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
   border-bottom: 1px solid var(--line);
 }
 .header::after {
@@ -52,11 +61,23 @@
    because the text is a clipped gradient with a transparent fill. */
 :global([data-theme="gangster"]) .brand {
   color: transparent;
-  background: var(--chrome);
+  /* Two layers, both clipped to the glyphs: a narrow highlight that sweeps
+     across every few seconds, over the static chrome. Only the sweep's
+     position animates. */
+  background-image:
+    linear-gradient(100deg, transparent 42%, color-mix(in oklab, white 85%, transparent) 50%, transparent 58%),
+    var(--chrome);
+  background-size: 250% 100%, 100% 100%;
+  background-position: 200% 0, 0 0;
   -webkit-background-clip: text;
   background-clip: text;
   text-shadow: none;
   filter: drop-shadow(0 1px 0 color-mix(in oklab, black 80%, transparent)) drop-shadow(0 0 16px var(--accent-glow));
+  animation: sheen 7s linear infinite;
+}
+@keyframes sheen {
+  0%, 70% { background-position: 200% 0, 0 0; }
+  100% { background-position: -100% 0, 0 0; }
 }
 /* An uploaded header logo takes the glow, not the plating. */
 .brand img { filter: drop-shadow(0 0 12px var(--accent-glow)); }
@@ -245,6 +266,11 @@
   font-variant-numeric: tabular-nums;
   transform: rotate(-0.6deg);
   transform-origin: left center;
+  animation: stampPulse 2.6s ease-in-out infinite;
+}
+@keyframes stampPulse {
+  0%, 100% { box-shadow: 0 0 0 color-mix(in oklab, var(--danger) 0%, transparent); }
+  50% { box-shadow: 0 0 22px var(--danger-soft); }
 }
 
 /* Positioning for the NavMenu the shell hosts. In top-nav mode the component
@@ -275,6 +301,7 @@
 
 @media (max-width: 860px) {
   .shell { padding: 0 0.9rem 2rem; }
+  .header { margin: 0 -0.9rem; padding: 0.7rem 0.9rem 0.6rem; }
   .body { grid-template-columns: 1fr; }
   /* The bar hides; its drawer copy takes over, and the header trades the full
      HUD and the account chip for the hamburger and the condensed stats. */

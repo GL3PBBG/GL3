@@ -19,8 +19,28 @@
     0 0 0 3px var(--accent-rim),
     0 14px 36px color-mix(in oklab, black 45%, transparent);
   min-width: 0;
+  /* A stacking context of its own, so the spotlight below (z-index -1) sits
+     above the panel's background and under everything in it. */
+  isolation: isolate;
 }
 .panel:has(> .panelTitle) { margin-top: 1.55rem; }
+/* The spotlight: a soft gold light centred on the pointer (`--mx`/`--my`,
+   written by Panel in ui.tsx), fading in on hover. Pointer devices only — a
+   thumb has no hover, and the last touch would leave a stray glow. */
+@media (hover: hover) {
+  .panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--accent-soft), transparent 70%);
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease-out);
+    pointer-events: none;
+  }
+  .panel:hover::before { opacity: 1; }
+}
 .panelTitle {
   position: absolute;
   left: -1px;
@@ -74,7 +94,26 @@
   background: var(--surface-raised);
 }
 
-.money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+.money { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; display: inline-block; }
+/* A figure that just changed: lit gold for a beat, then back. */
+.tick { animation: tick 700ms var(--ease-out) 1; }
+@keyframes tick {
+  0% { color: var(--accent-hi); text-shadow: 0 0 14px var(--accent-glow); transform: translateY(-1px); }
+  100% { color: inherit; text-shadow: none; transform: none; }
+}
+/* Loading: a shimmering skeleton bar ahead of the words, so a fetch in
+   flight reads as motion rather than a stalled page. */
+.loading { display: flex; align-items: center; gap: 0.6rem; }
+.loading::before {
+  content: "";
+  width: 3.5rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--line) 0%, var(--line-strong) 50%, var(--line) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .muted { color: var(--muted); }
 .error {
   margin: 0.6rem 0 0;

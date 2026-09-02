@@ -29,4 +29,15 @@
   border-radius: inherit;
   box-shadow: 0 0 8px var(--accent-glow);
   transition: width var(--dur) var(--ease-out);
+  overflow: hidden;
 }
+/* A light passing along the fill every few seconds: the gauge is live. */
+.meterFill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in oklab, white 45%, transparent) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: sweep 4s ease-in-out infinite;
+}
+@keyframes sweep { 0%, 60% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
