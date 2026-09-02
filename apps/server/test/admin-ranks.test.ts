@@ -43,6 +43,21 @@ describe("ranks admin", () => {
     });
   });
 
+  it("lists the ordinal level beside the exp threshold, in ladder order", async () => {
+    const low = uuidv7(); const high = uuidv7();
+    await db.insert(ranks).values([
+      { id: high, name: "Boss", expRequired: 1000n, cashReward: 0n, bulletReward: 0, maxHealth: 100 },
+      { id: low, name: "Nobody", expRequired: 0n, cashReward: 0n, bulletReward: 0, maxHealth: 100 },
+    ]);
+    const list = await app.inject({ method: "GET", url: "/api/admin/ranks/list", headers: auth() });
+    const rows = list.json().rows as { id: string; levelRequired: string }[];
+    // Strings, like every other cell: the table renderer never sees a number
+    // (and never a null).
+    expect(rows.find((r) => r.id === low)?.levelRequired).toBe(String(rows.findIndex((r) => r.id === low) + 1));
+    expect(rows.find((r) => r.id === high)?.levelRequired).toBe(String(rows.findIndex((r) => r.id === high) + 1));
+    expect(rows.findIndex((r) => r.id === low)).toBeLessThan(rows.findIndex((r) => r.id === high));
+  });
+
   it("updates a rank and persists the change", async () => {
     const rankId = uuidv7();
     await db.insert(ranks).values({

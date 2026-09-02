@@ -1,6 +1,6 @@
-import { useMe, useRanks } from "../api/queries.js";
+import { useMe, usePlugins, useRanks } from "../api/queries.js";
 import { formatAmount } from "../lib/money.js";
-import { progressToNextRank } from "../lib/ranks.js";
+import { rankProgress } from "../lib/ranks.js";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
@@ -8,30 +8,47 @@ import { GameImage } from "../components/GameImage.js";
 export function Ranks(): JSX.Element {
   const me = useMe();
   const ranks = useRanks();
+  const plugins = usePlugins();
 
-  if (ranks.isLoading || !me.data) return <Loading what="ranks" />;
+  // `plugins` too: without it the page would flash the exp derivation on a
+  // level boot until the manifest arrives (the HUD tolerates that; a page
+  // whose whole content is the gate should not).
+  if (ranks.isLoading || plugins.isLoading || !me.data) return <Loading what="ranks" />;
 
   const rows = ranks.data?.ranks ?? [];
   const moneyRanks = ranks.data?.moneyRanks ?? [];
-  const progress = progressToNextRank(me.data.exp, rows);
+  // Same switch as the HUD (`rankProgress`): on a routed boot the ladder is
+  // climbed by level, one rung per level, and `exp` is within-level exp that
+  // means nothing against the thresholds — so the exp bar goes away there
+  // rather than showing progress towards a number that isn't the gate.
+  const level = plugins.data?.progression === "level";
+  const progress = rankProgress(plugins.data?.progression, me.data, rows);
 
   return (
     <Panel title="Ranks">
-      <p className={styles.meta}>
-        <Amount value={me.data.exp} /> exp
-        {progress.next === null
-          ? " — nothing left to climb."
-          : ` — ${formatAmount(
-              (BigInt(progress.next.expRequired) - BigInt(me.data.exp)).toString(),
-            )} to ${progress.next.name}.`}
-      </p>
-      <div className={styles.bar}>
-        <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
-      </div>
+      {level ? (
+        <p className={styles.meta}>
+          Level {me.data.level}
+          {progress.next === null
+            ? " — nothing left to climb."
+            : ` — ${progress.next.name} at level ${me.data.level + 1}.`}
+        </p>
+      ) : (
+        <>
+          <p className={styles.meta}>
+            <Amount value={me.data.exp} /> exp
+            {progress.next === null
+              ? " — nothing left to climb."
+              : ` — ${formatAmount(
+                  (BigInt(progress.next.expRequired) - BigInt(me.data.exp)).toString(),
+                )} to ${progress.next.name}.`}
+          </p>
+          <div className={styles.bar}>
+            <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
+          </div>
+        </>
+      )}
 
-      <p className={styles.meta}>
-        Which gate applies depends on this install&rsquo;s progression model.
-      </p>
       <ul className={styles.rows}>
         {rows.map((rank) => (
           <li
@@ -43,8 +60,10 @@ export function Ranks(): JSX.Element {
               <strong>{rank.name}</strong>
               {rank.current ? <span className={styles.meta}> · you</span> : null}
               <div className={styles.meta}>
-                {rank.levelRequired !== undefined ? <>Level {rank.levelRequired} · </> : null}
-                <Amount value={rank.expRequired} /> exp · reward <Money value={rank.cashReward} /> +{" "}
+                {level && rank.levelRequired !== undefined
+                  ? <>Level {rank.levelRequired}</>
+                  : <><Amount value={rank.expRequired} /> exp</>}
+                {" "}· reward <Money value={rank.cashReward} /> +{" "}
                 {rank.bulletReward} bullets · {rank.maxHealth} hp
               </div>
             </div>

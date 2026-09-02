@@ -2,6 +2,24 @@ import { z } from "zod";
 import { MoneyFormatSchema, MoneySchema } from "../primitives.js";
 
 /**
+ * Which model a boot turns exp into rank with. `"exp"` is GL3-native:
+ * `ranks.exp_required` thresholds. `"level"` is a routed boot — a plugin
+ * claimed exp application (`applyExp`), and rank is the ladder rung the
+ * player's LEVEL maps onto ordinally (`syncRankToLevel`). Boot-static, like
+ * `installed`.
+ */
+export const ProgressionModelSchema = z.enum(["exp", "level"]);
+export type ProgressionModel = z.infer<typeof ProgressionModelSchema>;
+
+/**
+ * A column or form field gated to one progression model. The server prunes
+ * the non-matching ones at boot and strips the key (progression-view.ts), so
+ * it should never reach the wire — accepted here anyway so a leak degrades
+ * to an extra column instead of failing the strict all-or-nothing parse.
+ */
+export const ViewWhenSchema = z.object({ progression: ProgressionModelSchema }).strict();
+
+/**
  * DTO schemas for the `GET /api/plugins` response. The shapes mirror what the
  * server serializes (apps/server/src/plugins/manifest-endpoint.ts) and the SDK's
  * `ViewNode` (packages/plugin-sdk/src/pages.ts), but @gl3/shared is the base
@@ -187,6 +205,7 @@ const leafOptions = [
           // bespoke page. Only keys the optionsSource rows actually carry are
           // seeded; a field the row lacks keeps whatever it had.
           prefillForm: z.boolean().optional(),
+          when: ViewWhenSchema.optional(),
         }).strict(),
         z.object({
           name: z.string(),
@@ -194,11 +213,13 @@ const leafOptions = [
           // route requires.
           type: z.literal("hidden"),
           value: z.string(),
+          when: ViewWhenSchema.optional(),
         }).strict(),
         z.object({
           name: z.string(),
           label: z.string(),
           type: z.enum(["text", "number", "decimal", "money", "password"]),
+          when: ViewWhenSchema.optional(),
         }).strict(),
       ]),
     ),
@@ -224,6 +245,8 @@ const leafOptions = [
           render: z.enum(["image", "countdown"]).optional(),
           /** Thumbnail size for `render: "image"`. Defaults to `sm`. */
           imageSize: z.enum(["sm", "md", "lg"]).optional(),
+          /** Model gate, pruned server-side — see `ViewWhenSchema`. */
+          when: ViewWhenSchema.optional(),
         }).strict(),
       ).min(1),
       /**
@@ -414,6 +437,8 @@ export const PluginsPayloadSchema = z.object({
   installed: z.array(z.string()),
   /** Resolved from the `core.moneyFormat` filter point per request, not at boot. */
   moneyFormat: MoneyFormatSchema,
+  /** Optional only for an older server: absent reads as `"exp"`. */
+  progression: ProgressionModelSchema.optional(),
 }).strict();
 
 export type PluginsPayload = z.infer<typeof PluginsPayloadSchema>;

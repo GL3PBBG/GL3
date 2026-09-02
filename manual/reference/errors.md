@@ -68,6 +68,7 @@ report is all just "no report").
 | `house_cannot_cover` | 409 | casino | The house owner's cash cannot cover the maximum possible payout for the wager (or the table's total exposure) |
 | `house_not_found` | 404 | houses | The named house does not exist |
 | `in_hospital` | 423 | gym | The caller is in hospital and cannot train (jail only halves gains; hospital blocks outright) |
+| `in_super_max` | 409 | core | The caller is in super max (V2's solitary state, entered by failing an escape attempt) and cannot attempt another escape until that extended sentence itself expires. |
 | `insufficient_<var>` | 409 | crimes | The crime prices a cost in an attribute pool (brave, energy, ...) that the caller cannot pay; the code names the pool, e.g. insufficient_brave |
 | `insufficient_bullets` | 409 | combat | The caller holds fewer bullets than the weapon needs per shot |
 | `insufficient_cash` | 400 | gangs | The caller does not have enough cash on hand to deposit that amount |
@@ -79,6 +80,7 @@ report is all just "no report").
 | `insufficient_stock` | 409 | bullets, inventory | bullets: The town's bullet stock is less than the requested quantity (`available` in details); inventory: The shop has fewer units in stock than the quantity requested |
 | `invalid_action` | 400 | casino | The action body fails the game's own action schema |
 | `invalid_body` | 400 | core | The request body failed validation — it must name a valid target player id. |
+| `invalid_bullet_range` | 400 | crimes | Admin update would leave maxBullets below minBullets, checked as a pair against the stored row so a one-sided edit cannot invert the range |
 | `invalid_code` | 400 | core | The email verification code is wrong, expired, or already used. |
 | `invalid_color` | 400 | core | A theme color override is not a valid hex color string (blank means no override). |
 | `invalid_combat_mode` | 400 | travel | Admin supplied a combat mode other than 'open' or 'underground' |
@@ -175,6 +177,7 @@ report is all just "no report").
 | `table_full` | 409 | casino | The table already has the maximum number of seats |
 | `target_elsewhere` | 409 | combat | Target is not in the caller's town |
 | `target_hospitalised` | 409 | combat | Target is in hospital |
+| `target_in_super_max` | 409 | core | The target inmate is in super max (V2's solitary state, entered by failing an escape attempt) and cannot be bailed or busted until that extended sentence expires. |
 | `target_jailed` | 409 | combat | Target is in jail |
 | `target_not_found` | 400 / 404 | bounties, detectives, oc | bounties: No player exists with that username; detectives: No player exists with that username (400, not 404 — hire-input problems are pinned to 400); oc: No player with that username exists to invite |
 | `tier_not_found` | 404 | theft | No theft tier with the given id exists |

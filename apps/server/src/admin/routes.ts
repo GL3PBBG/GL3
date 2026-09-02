@@ -17,6 +17,8 @@ import {
   dischargeCostPerSecond, dischargeWealthCapMultiplier, dischargeWealthPercent,
 } from "../game/hospital/settings.js";
 import { collectAssetSlots, CORE_SCOPE, stampAssetBinderScope } from "../plugins/asset-slots.js";
+import { progressionModelOf } from "../plugins/manifest-endpoint.js";
+import { pruneViewForProgression } from "../plugins/progression-view.js";
 import type { PagePayload } from "../plugins/manifest-endpoint.js";
 import { loadGrants } from "../plugins/routes.js";
 import { ipClusterRows, suspectRows } from "./anti-bot.js";
@@ -138,6 +140,7 @@ export function registerAdminRoutes(
     const playerId = request.playerId;
     if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
     const grants = await loadGrants(db, playerId);
+    const progression = progressionModelOf(manifests);
     // Field-by-field copy, never a spread of the manifest page: the client
     // parses this with `AdminSectionsResponseSchema`, whose page schema is
     // `.strict()` and requires `pluginId` — which a `PageSchema` does not
@@ -153,8 +156,12 @@ export function registerAdminRoutes(
           // The view is rewritten, not copied: `stampAssetBinderScope` fills
           // each upload widget's `scope` with this plugin's id so the widget
           // can only ever bind this plugin's own art.
+          // Then pruned to this boot's progression model, the same pass
+          // `buildPluginsPayload` gives player pages — the ranks admin table
+          // is the case in hand: an exp column on an exp boot, a level one
+          // on a routed boot.
           pluginId: manifest.id, id: p.id, path: p.path,
-          view: stampAssetBinderScope(p.view, manifest.id),
+          view: pruneViewForProgression(stampAssetBinderScope(p.view, manifest.id), progression),
         })),
       });
     }

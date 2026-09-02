@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RankDto } from "@gl3/shared";
-import { progressToNextRank } from "../src/lib/ranks.js";
+import { progressToNextRank, rankForLevel, rankProgress } from "../src/lib/ranks.js";
 
 function rank(name: string, expRequired: string): RankDto {
   return {
@@ -61,5 +61,40 @@ describe("progressToNextRank", () => {
     // one exp short of the next rank as 100% of the way there.
     const huge = [rank("A", "0"), rank("B", "9007199254740993")];
     expect(progressToNextRank("9007199254740992", huge).pct).toBe(99.99);
+  });
+});
+
+// A routed boot (an `applyExp` claimant, e.g. progression) maps LEVEL onto
+// the ladder ordinally — position `min(level, count) - 1` in expRequired
+// order, the same rule `syncRankToLevel` stamps `rank_id` with. Within-level
+// exp says nothing about rank there, which is what the header got wrong.
+describe("rankForLevel", () => {
+  it("returns no rank at all when the ladder is empty or the level is 0", () => {
+    expect(rankForLevel(3, [])).toEqual({ current: null, next: null, pct: 100 });
+    expect(rankForLevel(0, LADDER)).toEqual({ current: null, next: LADDER[1], pct: 0 });
+  });
+
+  it("maps level N onto the Nth rung in expRequired order, ignoring exp", () => {
+    const one = rankForLevel(1, LADDER);
+    expect(one.current?.name).toBe("Nobody");
+    expect(one.next?.name).toBe("Thug");
+    expect(one.pct).toBe(0);
+    expect(rankForLevel(2, LADDER).current?.name).toBe("Thug");
+  });
+
+  it("clamps a level past the top of the ladder onto the last rung", () => {
+    expect(rankForLevel(40, LADDER)).toEqual({ current: LADDER[2], next: null, pct: 100 });
+  });
+});
+
+describe("rankProgress", () => {
+  it("derives from exp thresholds on an exp boot and from level on a level boot", () => {
+    // Level 3 with only 150 exp: the exp model says Thug, the level model says Boss.
+    expect(rankProgress("exp", { exp: "150", level: 3 }, LADDER).current?.name).toBe("Thug");
+    expect(rankProgress("level", { exp: "150", level: 3 }, LADDER).current?.name).toBe("Boss");
+  });
+
+  it("treats an absent model (an older server) as exp", () => {
+    expect(rankProgress(undefined, { exp: "150", level: 3 }, LADDER).current?.name).toBe("Thug");
   });
 });
