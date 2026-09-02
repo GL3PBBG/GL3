@@ -43,6 +43,9 @@ export function Crimes(): JSX.Element {
 
   return (
     <Panel title="Crimes">
+      <p className={styles.note}>
+        Crime success rate is based on different formulas and changes with your progression.
+      </p>
       {jailed ? <p className={styles.note}>You can't commit crimes from jail.</p> : null}
       <ul className={styles.crimeList}>
         {crimes.data?.crimes.map((crime) => (
@@ -50,6 +53,7 @@ export function Crimes(): JSX.Element {
             <GameImage url={crime.imageUrl} alt={crime.name} size="md" />
             <div className={styles.crimeGrow}>
               <strong>{crime.name}</strong>
+              {crime.description ? <div className={styles.meta}>{crime.description}</div> : null}
               <div className={styles.meta}>
                 {crime.chance === null ? "chance by stats" : `${crime.chance}%`} ·{" "}
                 <Money value={crime.minPayout} />–<Money value={crime.maxPayout} />{" "}

@@ -509,6 +509,17 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
         .set({ crimeExp: sql`${playerStats.crimeExp} + ${crime.crimeExpReward}` })
         .where(eq(playerStats.playerId, playerId));
     }
+    // The bullet reward (V2 crimes.inc.php:128: `US_bullets + mt_rand(C_bullets,
+    // C_maxBullets)`). Rolled above since the first crime slice and reported
+    // in crime.resolved, but never credited until now — ranks' promotion
+    // reward (economy/ranks.ts) is the same plain-column write. Bullets are
+    // not a ledgered balance (rule 3 covers cash/bank/points), so no
+    // transactions row; idempotency is the plugin_job_runs claim above.
+    if (bullets > 0n) {
+      await tx.db.update(playerStats)
+        .set({ bullets: sql`${playerStats.bullets} + ${bullets}` })
+        .where(eq(playerStats.playerId, playerId));
+    }
     if (jailed) await tx.jail.sendToJail(playerId, crime.jailSeconds);
 
     // In-tx read for effectiveJailedUntil (spec §4.4) — same connection sees
@@ -572,6 +583,10 @@ const AdminMoney = z.string().regex(/^\d+$/, "nonnegative integer string");
 const AdminFormula = z.string().max(500).nullable();
 const CrimeUpdateSchema = z.object({
   id: z.string().uuid(),
+  name: z.string().min(1).max(80).optional(),
+  description: z.string().max(500).optional(),
+  minBullets: z.coerce.number().int().nonnegative().optional(),
+  maxBullets: z.coerce.number().int().nonnegative().optional(),
   cooldownSeconds: z.coerce.number().int().nonnegative(),
   minPayout: AdminMoney,
   maxPayout: AdminMoney,
@@ -588,11 +603,13 @@ const CrimeUpdateSchema = z.object({
 });
 
 /**
- * Create carries four columns update does not: `name` and `description` are
- * NOT NULL with no sensible edit path once set, and `minBullets`/`maxBullets`
- * gate the crime's cost. `sort` is deliberately absent — the handler derives
- * it, since asking an admin for a manual ordering integer is how two crimes
- * end up sharing one.
+ * Create requires what update treats as optional: `name`, `description` and
+ * the `minBullets`/`maxBullets` success reward are NOT NULL on the row, so a
+ * create must supply them, while an update that omits them leaves them
+ * alone (the crimeExpReward shape). V2's admin edits every column
+ * (crimes.admin.php:112). `sort` is deliberately absent from both — the
+ * handler derives it, since asking an admin for a manual ordering integer is
+ * how two crimes end up sharing one.
  */
 const CrimeCreateSchema = z.object({
   name: z.string().min(1).max(80),
@@ -646,7 +663,10 @@ const adminCrimesListRoute = route({
       body: {
         rows: rows.map((c) => ({
           id: c.id, name: c.name,
+          description: c.description,
           cooldownSeconds: String(c.cooldownSeconds),
+          minBullets: String(c.minBullets),
+          maxBullets: String(c.maxBullets),
           minPayout: c.minPayout.toString(),
           maxPayout: c.maxPayout.toString(),
           expReward: c.expReward.toString(),
@@ -705,11 +725,28 @@ const adminCrimesUpdateRoute = route({
   handler: async (ctx, { body }) => {
     const formula = validatedFormula(body.successFormula);
     const updated = await ctx.transaction(async (tx) => {
+      // The bullet range is checked as a pair against the STORED row, not the
+      // body alone: a one-sided edit (raise minBullets, omit maxBullets) can
+      // invert a range the create refine would have refused.
+      if (body.minBullets !== undefined || body.maxBullets !== undefined) {
+        const [current] = await tx.db.select({ minBullets: crimes.minBullets, maxBullets: crimes.maxBullets })
+          .from(crimes).where(eq(crimes.id, body.id));
+        if (current === undefined) return false;
+        const min = body.minBullets ?? current.minBullets;
+        const max = body.maxBullets ?? current.maxBullets;
+        if (max < min) {
+          throw new PluginError("invalid_bullet_range", 400, { message: "maxBullets must be >= minBullets" });
+        }
+      }
       // Absent keys stay untouched (drizzle omits undefined from SET) — an
       // update that omits successFormula leaves the formula alone; sending
       // null clears it back to the skill-chance path.
       const result = await tx.db.update(crimes)
         .set({
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.minBullets !== undefined ? { minBullets: body.minBullets } : {}),
+          ...(body.maxBullets !== undefined ? { maxBullets: body.maxBullets } : {}),
           cooldownSeconds: body.cooldownSeconds,
           minPayout: BigInt(body.minPayout),
           maxPayout: BigInt(body.maxPayout),
@@ -761,6 +798,8 @@ const adminCrimesPage: PageSchema = {
         { key: "cooldownSeconds", label: "Cooldown (s)" },
         { key: "minPayout", label: "Min payout" },
         { key: "maxPayout", label: "Max payout" },
+        { key: "minBullets", label: "Min bullets" },
+        { key: "maxBullets", label: "Max bullets" },
         { key: "expReward", label: "Exp" },
         { key: "braveCost", label: "Brave" },
         // Blank reads as "skill chance" exactly like the edit field below —
@@ -792,9 +831,13 @@ const adminCrimesPage: PageSchema = {
         // selected row of the SAME list the dropdown loads its options from —
         // the admin edits what is there instead of retyping the whole crime.
         { name: "id", label: "Crime", type: "select", optionsSource: "GET /api/admin/crimes/list", valueKey: "id", labelKey: "name", prefillForm: true },
+        { name: "name", label: "Name", type: "text" },
+        { name: "description", label: "Description", type: "text" },
         { name: "cooldownSeconds", label: "Cooldown seconds", type: "number" },
         { name: "minPayout", label: "Min payout", type: "money" },
         { name: "maxPayout", label: "Max payout", type: "money" },
+        { name: "minBullets", label: "Min bullets", type: "number" },
+        { name: "maxBullets", label: "Max bullets", type: "number" },
         { name: "expReward", label: "Exp reward", type: "money" },
         { name: "crimeExpReward", label: "Crime exp reward", type: "money" },
         { name: "braveCost", label: "Brave cost (0 = free)", type: "number" },

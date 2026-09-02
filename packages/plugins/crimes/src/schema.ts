@@ -62,6 +62,7 @@ export const playerStats = pgTable("player_stats", {
   // migrator-design §2.2): the five tokens substitute from this row.
   level: integer("level").notNull(),
   crimeExp: bigint("crime_exp", { mode: "bigint" }).notNull(),
+  bullets: bigint("bullets", { mode: "bigint" }).notNull(),
   exp: bigint("exp", { mode: "bigint" }).notNull(),
   will: integer("will").notNull(),
   iq: bigint("iq", { mode: "bigint" }).notNull(),

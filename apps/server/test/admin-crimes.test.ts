@@ -107,6 +107,82 @@ describe("crimes admin", () => {
     expect(row?.jailSeconds).toBe(45);
   });
 
+  it("lists description and the bullet range so the update form can prefill them", async () => {
+    const crimeId = uuidv7();
+    await db.insert(crimes).values({
+      id: crimeId, name: "Armoured Van", description: "Take the van.",
+      cooldownSeconds: 300, minPayout: 2000n, maxPayout: 9000n,
+      minBullets: 1, maxBullets: 5, expReward: 40n,
+      minLevel: 0, sort: 30, jailChancePercent: 40, jailSeconds: 120,
+    });
+    const list = await app.inject({ method: "GET", url: "/api/admin/crimes/list", headers: auth() });
+    const row = list.json().rows.find((r: { id: string }) => r.id === crimeId);
+    expect(row).toMatchObject({ description: "Take the van.", minBullets: "1", maxBullets: "5" });
+    const { TableRowsResponseSchema } = await import("@gl3/shared");
+    expect(() => TableRowsResponseSchema.parse(list.json())).not.toThrow();
+  });
+
+  it("updates name, description and the bullet range", async () => {
+    // V2's admin edits every column (crimes.admin.php:112); the port's
+    // update route had left these four out with a comment calling the
+    // bullet range "the crime's cost" — it is the success reward.
+    const crimeId = uuidv7();
+    await db.insert(crimes).values({
+      id: crimeId, name: "Pickpocket", description: "Lift a wallet.",
+      cooldownSeconds: 30, minPayout: 50n, maxPayout: 250n,
+      minBullets: 0, maxBullets: 0, expReward: 5n,
+      minLevel: 0, sort: 10, jailChancePercent: 0, jailSeconds: 0,
+    });
+    const base = {
+      id: crimeId, cooldownSeconds: 30, minPayout: "50", maxPayout: "250",
+      expReward: "5", jailChancePercent: 0, jailSeconds: 0,
+    };
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+      payload: { ...base, name: "Purse Snatch", description: "Grab and run.", minBullets: 1, maxBullets: 3 },
+    });
+    expect(res.statusCode).toBe(204);
+    let [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+    expect(row).toMatchObject({ name: "Purse Snatch", description: "Grab and run.", minBullets: 1, maxBullets: 3 });
+
+    // Absent leaves them alone (the crimeExpReward shape).
+    const untouched = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(), payload: base,
+    });
+    expect(untouched.statusCode).toBe(204);
+    [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+    expect(row).toMatchObject({ name: "Purse Snatch", description: "Grab and run.", minBullets: 1, maxBullets: 3 });
+
+    // An inverted range is refused at update just as it is at create.
+    const inverted = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+      payload: { ...base, minBullets: 5, maxBullets: 2 },
+    });
+    expect(inverted.statusCode).toBe(400);
+    // A one-sided change is checked against the stored other side: raising
+    // minBullets above the current maxBullets is the same inverted range.
+    const oneSided = await app.inject({
+      method: "POST", url: "/api/admin/crimes/update", headers: auth(),
+      payload: { ...base, minBullets: 9 },
+    });
+    expect(oneSided.statusCode).toBe(400);
+    [row] = await db.select().from(crimes).where(eq(crimes.id, crimeId));
+    expect(row).toMatchObject({ minBullets: 1, maxBullets: 3 });
+  });
+
+  it("serves bullet-range and name/description fields on the update form", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth() });
+    const section = res.json().sections.find((s: { pluginId: string }) => s.pluginId === "crimes");
+    const page = section.pages.find((p: { id: string }) => p.id === "crimes-admin");
+    const form = page.view.children.find(
+      (c: { kind: string; action?: string }) => c.kind === "form" && c.action === "POST /api/admin/crimes/update",
+    );
+    const names = form.fields.map((f: { name: string }) => f.name);
+    expect(names).toEqual(expect.arrayContaining(["name", "description", "minBullets", "maxBullets"]));
+    const table = page.view.children.find((c: { kind: string }) => c.kind === "table");
+    expect(table.columns.map((c: { key: string }) => c.key)).toContain("minBullets");
+  });
+
   it("lists a crime's brave cost as a string cell", async () => {
     const crimeId = uuidv7();
     await db.insert(crimes).values({
