@@ -2,17 +2,19 @@
    The one page a stranger sees. The name of the outfit, huge, in the display
    face; under it a membership card of a form. The brass rule between them is
    the same double rule the ledger header draws inside. */
+/* A glass card over the bloom: translucent, blurred, gold-rimmed. */
 .form {
   max-width: 340px;
   margin: 12vh auto;
   display: grid;
   gap: 0.65rem;
   padding: 1.5rem 1.5rem 1.35rem;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
   border-top: 2px solid var(--accent);
   border-radius: 0 0 var(--radius) var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow-lift);
+  background: color-mix(in oklab, var(--panel) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--accent-rim), 0 0 40px var(--accent-soft), var(--shadow-lift);
 }
 .form > a { justify-self: center; font-size: 0.88rem; }
 .form p[role="status"] { margin: 0; color: var(--success); font-size: 0.9rem; }
@@ -43,6 +45,14 @@
   color: var(--fg);
   text-shadow: 0 0 40px var(--accent-glow);
 }
+:global([data-theme="gangster"]) .landingBrand {
+  color: transparent;
+  background: var(--chrome);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+  filter: drop-shadow(0 2px 0 color-mix(in oklab, black 85%, transparent)) drop-shadow(0 0 28px var(--accent-glow));
+}
 /* The double rule under the name: a hairline across, a short brass line
    centred beneath it. */
 .landingBrand::before, .landingBrand::after {
@@ -53,12 +63,21 @@
 }
 .landingBrand::before { left: 15%; right: 15%; background: var(--line-strong); }
 .landingBrand::after { left: 42%; right: 42%; bottom: -4px; background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
-/* A bound logo renders hero-sized here, overriding BrandMark's in-form cap. */
-.landingBrand img { max-height: 200px; max-width: 100%; }
+/* A bound logo renders hero-sized here, overriding BrandMark's in-form cap,
+   lit by the same gold and drifting a few pixels — the one ambient motion on
+   the front door. */
+.landingBrand img {
+  max-height: 260px;
+  max-width: 100%;
+  filter: drop-shadow(0 0 28px var(--accent-glow)) drop-shadow(0 12px 24px color-mix(in oklab, black 70%, transparent));
+  animation: hover 6s ease-in-out infinite;
+}
+@keyframes hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .toggle {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--line);
   box-shadow: none;
 }
+.toggle::after { display: none; }
 .toggle:hover:not(:disabled) { filter: none; color: var(--fg); border-color: var(--line-strong); }

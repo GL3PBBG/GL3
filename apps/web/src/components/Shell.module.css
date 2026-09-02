@@ -37,17 +37,32 @@
   bottom: -4px;
   height: 1px;
   background: linear-gradient(90deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 40%, transparent) 35%, transparent 75%);
+  box-shadow: 0 0 10px var(--accent-glow);
 }
 .brand {
   margin: 0;
-  font: 900 1.7rem/1 var(--font-display);
+  font: 900 1.75rem/1 var(--font-display);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg);
   text-shadow: 0 0 28px var(--accent-glow);
 }
+/* Gangster preset: chrome-plated, lit from behind by gold — the badge's
+   lettering at masthead size. `drop-shadow` rather than `text-shadow`
+   because the text is a clipped gradient with a transparent fill. */
+:global([data-theme="gangster"]) .brand {
+  color: transparent;
+  background: var(--chrome);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+  filter: drop-shadow(0 1px 0 color-mix(in oklab, black 80%, transparent)) drop-shadow(0 0 16px var(--accent-glow));
+}
+/* An uploaded header logo takes the glow, not the plating. */
+.brand img { filter: drop-shadow(0 0 12px var(--accent-glow)); }
 
 /* Phone-only: unhides at the media query below, where the full hud hides. */
+.hamburger::after { display: none; }
 .hamburger {
   display: none;
   flex-direction: column;
@@ -90,7 +105,7 @@
   font: 500 0.86rem/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.stat svg { color: color-mix(in oklab, var(--accent) 65%, var(--muted)); flex: none; }
+.stat svg { color: var(--accent); flex: none; filter: drop-shadow(0 0 4px var(--accent-glow)); }
 .statLabel {
   color: var(--muted);
   font: 700 0.68rem/1 var(--font-display);
@@ -127,7 +142,8 @@
   text-transform: uppercase;
   box-shadow: none;
 }
-.accountChip:hover:not(:disabled) { filter: none; border-color: var(--line-strong); }
+.accountChip::after { display: none; }
+.accountChip:hover:not(:disabled) { filter: none; border-color: var(--accent-lo); box-shadow: 0 0 12px var(--accent-soft); }
 .accountDot {
   width: 7px;
   height: 7px;
@@ -197,7 +213,8 @@
   width: 36px;
   height: 36px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-lo));
+  background: var(--gold-gloss), var(--gold);
+  box-shadow: 0 0 14px var(--accent-glow);
   color: var(--ink-on-accent);
   font: 900 1.1rem/1 var(--font-display);
 }

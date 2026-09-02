@@ -22,6 +22,16 @@ export const THEME_PRESETS: Record<string, ThemeColors> = {
     bg: "#0d1310", fg: "#e2eae4", accent: "#3fae72", success: "#6fcf97",
     danger: "#d2564f", muted: "#87988d", panel: "#131b16", line: "#24312a",
   },
+  /**
+   * The badge palette: true black, chrome-silver type, saturated gold. The
+   * web skin keys its plating and atmosphere off this preset's name
+   * (`[data-theme="gangster"]`, see apps/web/src/lib/applyTheme.ts) — the
+   * other presets get the same structure in flat colour.
+   */
+  gangster: {
+    bg: "#070707", fg: "#e8e8e8", accent: "#f2b322", success: "#6fcf7f",
+    danger: "#e0483a", muted: "#8c8c8c", panel: "#121212", line: "#2a2a2a",
+  },
 };
 
 export const DEFAULT_PRESET = "midnight";

@@ -16,7 +16,7 @@
 }
 .rows > .row:first-child { border-top: 0; }
 .row:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
-.rowCurrent { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.rowCurrent { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent), inset 14px 0 18px -14px var(--accent-glow); }
 .rowLead { display: flex; align-items: center; gap: 0.75rem; }
 .rowLead > img, .rowLead > span:first-child { flex-shrink: 0; }
 /* Middle cell of an image · text · button row: absorb the free space so the
@@ -33,6 +33,15 @@
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   margin: 0;
+}
+/* Gangster preset: the figure itself is gold plate — the badge's ".LAND"
+   treatment — and the words beside it stay plain type. */
+:global([data-theme="gangster"]) .big > span:first-child {
+  color: transparent;
+  background: var(--gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 1px 0 color-mix(in oklab, black 70%, transparent)) drop-shadow(0 0 14px var(--accent-soft));
 }
 .big .meta, .big > span:not(:first-child) { font-family: var(--font-body); letter-spacing: 0; }
 
@@ -73,7 +82,8 @@
 }
 .barFill {
   height: 100%;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 45%, var(--accent-lo));
+  background: var(--gold-gloss), var(--gold);
+  box-shadow: 0 0 10px var(--accent-glow);
   transition: width var(--dur) var(--ease-out);
 }
 
@@ -84,14 +94,15 @@
 .editor .tabs { margin-bottom: 0; }
 .editorTools { display: flex; gap: 0.25rem; margin-left: auto; }
 .editorTools button { min-width: 2rem; }
-.tabActive { background: var(--accent); color: var(--ink-on-accent); border-color: var(--accent-lo); }
+.tabActive { background: var(--gold-gloss), var(--gold); color: var(--ink-on-accent); border-color: var(--accent-lo); box-shadow: var(--shadow-press), 0 0 12px var(--accent-soft); }
 .tabIdle {
   background: var(--surface-sunk);
   color: var(--muted);
   border: 1px solid var(--line);
   box-shadow: none;
 }
-.tabIdle:hover:not(:disabled) { filter: none; color: var(--fg); border-color: var(--line-strong); }
+.tabIdle::after, .chip::after { display: none; }
+.tabIdle:hover:not(:disabled) { filter: none; color: var(--fg); border-color: var(--line-strong); box-shadow: none; }
 
 .table { width: 100%; border-collapse: collapse; }
 .table th {

@@ -38,10 +38,16 @@
   cursor: pointer;
   transition: color var(--dur-fast), background-color var(--dur-fast), border-color var(--dur-fast);
 }
-.catBtn:hover:not(:disabled) { filter: none; color: var(--fg); }
+.catBtn::after { display: none; }
+.catBtn:hover:not(:disabled) { filter: none; color: var(--fg); box-shadow: none; }
 .catBtn:active:not(:disabled) { transform: none; box-shadow: none; }
 .open .catBtn { background: var(--accent-soft); color: var(--fg); }
-.catActive { color: var(--accent); border-bottom-color: var(--accent); }
+.catActive {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  text-shadow: 0 0 12px var(--accent-glow);
+  box-shadow: 0 6px 14px -8px var(--accent-glow);
+}
 .open .catActive, .catActive:hover:not(:disabled) { color: var(--accent); }
 .icon { width: 14px; height: 14px; color: currentColor; opacity: 0.8; flex: none; }
 .chev { width: 11px; height: 11px; color: currentColor; opacity: 0.6; flex: none; transition: transform var(--dur-fast); }
@@ -52,7 +58,8 @@
 .catBadge, .itemBadge {
   padding: 0.1rem 0.4rem 0;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--gold-gloss), var(--gold);
+  box-shadow: 0 0 8px var(--accent-glow);
   color: var(--ink-on-accent);
   font: 600 0.68rem/1.3 var(--font-mono);
   letter-spacing: 0;
@@ -97,7 +104,7 @@
   transition: background-color var(--dur-fast), color var(--dur-fast);
 }
 .item:hover { background: var(--accent-soft); color: var(--fg); }
-.itemActive { background: var(--accent-soft); color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+.itemActive { background: var(--accent-soft); color: var(--accent); box-shadow: inset 2px 0 0 var(--accent), inset 12px 0 16px -12px var(--accent-glow); }
 
 /* Text for screen readers only — the badges show a bare number; this names it. */
 .srOnly {

@@ -25,7 +25,8 @@
   position: absolute;
   inset: 0;
   width: 0%;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 45%, var(--accent-lo));
+  background: var(--gold-gloss), var(--gold);
   border-radius: inherit;
+  box-shadow: 0 0 8px var(--accent-glow);
   transition: width var(--dur) var(--ease-out);
 }
