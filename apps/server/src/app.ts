@@ -99,7 +99,6 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   }
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
-  registerRoundsRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db, assetDriver);
   registerWsRoutes(app, deps.redis, requireAuth);
@@ -162,9 +161,16 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // `collectExpRouters` over the SAME manifest list `registerPluginRoutes`
   // above and its per-request ctx (`plugins/routes.ts`) already read — not a
   // second source of truth, just a second call over one shared list.
+  const routed = collectExpRouters(loaded.manifests) !== null;
   registerLeaderboardRoutes(
     app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), deps.redis, loadedSettings, requireAuth,
-    leaderboardPrefix, collectExpRouters(loaded.manifests) !== null,
+    leaderboardPrefix, routed,
+  );
+  // Same reason as registerLeaderboardRoutes above, and moved down here for
+  // the same `loaded.manifests` dependency — round standings' `mode` field
+  // needs the same flag.
+  registerRoundsRoutes(
+    app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, routed,
   );
 
   // Only for plugins buildApp loaded itself: a caller-supplied `deps.plugins`

@@ -41,6 +41,7 @@ export function registerRoundsRoutes(
   app: FastifyInstance, db: Db, deliver: OutboxDelivery,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  routed = false,
 ): void {
   app.get("/api/rounds", { preHandler: requireAuth }, async (_request, reply) => {
     // First, so visiting the Rounds page is one of the things that can trigger
@@ -80,8 +81,12 @@ export function registerRoundsRoutes(
 
     const finalized = round.finalizedAt !== null;
     const entries = await roundStandings(db, round.id, query.data.kind, BOARD_SIZE, finalized);
+    // Same rule as the leaderboard route: "level" only for the exp kind on a
+    // routed boot, cash/bank never carry it.
+    const mode = query.data.kind === "exp" && routed ? "level" as const : undefined;
     return reply.send({
       roundId: round.id, roundName: round.name, kind: query.data.kind, finalized, entries,
+      ...(mode !== undefined ? { mode } : {}),
     });
   });
 }

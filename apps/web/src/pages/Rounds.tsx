@@ -3,6 +3,8 @@ import type { LeaderboardKind, RoundDto } from "@gl3/shared";
 import { useMe, useRoundStandings, useRounds } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PlayerLink } from "../components/PlayerLink.js";
+import { useMoneyFormat } from "../lib/formatContext.js";
+import { formatBoardScore } from "../lib/level-score-display.js";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [
@@ -58,13 +60,19 @@ export function hallOfFameOrder(rounds: readonly RoundDto[]): RoundDto[] {
   });
 }
 
-function ScoreCell({ kind, value }: { kind: LeaderboardKind; value: string }): JSX.Element {
+function ScoreCell(
+  { kind, mode, value, format }:
+  { kind: LeaderboardKind; mode: "exp" | "level" | undefined; value: string; format: ReturnType<typeof useMoneyFormat> },
+): JSX.Element {
+  if (mode === "level") return <>{formatBoardScore(kind, mode, value, format)}</>;
   return kind === "exp" ? <Amount value={value} /> : <Money value={value} />;
 }
 
 function StandingsTable({ roundId, kind }: { roundId: string; kind: LeaderboardKind }): JSX.Element {
   const standings = useRoundStandings(roundId, kind);
   const me = useMe();
+  const moneyFormat = useMoneyFormat();
+  const mode = standings.data?.mode;
 
   if (standings.isLoading) return <Loading what="the board" />;
   return (
@@ -75,7 +83,7 @@ function StandingsTable({ roundId, kind }: { roundId: string; kind: LeaderboardK
           <tr>
             <th>#</th>
             <th>Player</th>
-            <th>{kind === "exp" ? "Exp" : "Amount"}</th>
+            <th>{mode === "level" ? "Level" : kind === "exp" ? "Exp" : "Amount"}</th>
           </tr>
         </thead>
         <tbody>
@@ -86,7 +94,7 @@ function StandingsTable({ roundId, kind }: { roundId: string; kind: LeaderboardK
             >
               <td>{entry.rank}</td>
               <td><PlayerLink playerId={entry.playerId} username={entry.username} /></td>
-              <td><ScoreCell kind={kind} value={entry.score} /></td>
+              <td><ScoreCell kind={kind} mode={mode} value={entry.score} format={moneyFormat} /></td>
             </tr>
           ))}
         </tbody>

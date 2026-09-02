@@ -26,5 +26,11 @@ export const RoundStandingsResponseSchema = z.object({
   /** true once finalized_at is set: the board is frozen and will never move again. */
   finalized: z.boolean(),
   entries: z.array(LeaderboardEntrySchema),
+  /** Same meaning as `LeaderboardResponse.mode` — "level" for the exp kind on
+   *  a routed boot, absent otherwise. Round deltas are not composite-encoded
+   *  themselves (they're differences of `player_stats.exp`, which becomes
+   *  within-level exp on a routed boot), so this flag exists to give the
+   *  rounds page the same decoded display, not to claim the delta is exact. */
+  mode: z.enum(["exp", "level"]).optional(),
 });
 export type RoundStandingsResponse = z.infer<typeof RoundStandingsResponseSchema>;

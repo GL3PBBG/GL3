@@ -29,6 +29,9 @@ export function Ranks(): JSX.Element {
         <div className={styles.barFill} style={{ width: `${progress.pct}%` }} />
       </div>
 
+      <p className={styles.meta}>
+        Which gate applies depends on this install&rsquo;s progression model.
+      </p>
       <ul className={styles.rows}>
         {rows.map((rank) => (
           <li
@@ -40,6 +43,7 @@ export function Ranks(): JSX.Element {
               <strong>{rank.name}</strong>
               {rank.current ? <span className={styles.meta}> · you</span> : null}
               <div className={styles.meta}>
+                {rank.levelRequired !== undefined ? <>Level {rank.levelRequired} · </> : null}
                 <Amount value={rank.expRequired} /> exp · reward <Money value={rank.cashReward} /> +{" "}
                 {rank.bulletReward} bullets · {rank.maxHealth} hp
               </div>

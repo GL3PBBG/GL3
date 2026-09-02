@@ -11,6 +11,11 @@ export const RankDtoSchema = z.object({
   current: z.boolean(),
   /** Absent when no badge is bound — see `InventoryItemSchema.imageUrl`. */
   imageUrl: z.string().optional(),
+  /** Ordinal position (1-based) in the ladder, ordered by `expRequired`
+   *  ascending — the level a routed boot's `syncRankToLevel` promotes into.
+   *  Always present (the route computes it from the row's list index), kept
+   *  optional here only so an older server's response still parses. */
+  levelRequired: z.number().int().positive().optional(),
 });
 export type RankDto = z.infer<typeof RankDtoSchema>;
 
