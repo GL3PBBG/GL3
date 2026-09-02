@@ -14,6 +14,7 @@ import { buildNav, labelForPath, navKeyFor, type NavCategory } from "../lib/nav.
 import { progressToNextRank } from "../lib/ranks.js";
 import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
+import { EventToasts } from "./EventToasts.js";
 import { Meter } from "./Meter.js";
 import { HudIcon } from "./HudIcon.js";
 import { NavMenu } from "./NavMenu.js";
@@ -446,6 +447,7 @@ export function Shell(): JSX.Element {
           </main>
           <EventFeed />
         </div>
+        <EventToasts />
       </div>
     </FormatProvider>
   );
