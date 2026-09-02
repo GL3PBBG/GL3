@@ -19,6 +19,9 @@
    text left-aligns beside the image (space-between would centre it). */
 .crimeGrow { flex: 1; min-width: 0; }
 .meta { color: var(--muted); font-size: 0.88rem; margin-top: 0.1rem; }
+/* An informational aside — the success-rate line. Muted, not the danger
+   callout below, which is reserved for a refusal (jailed). */
+.hint { margin: 0 0 0.85rem; color: var(--muted); font-size: 0.88rem; }
 .note {
   margin: 0 0 0.85rem;
   padding: 0.45rem 0.75rem;

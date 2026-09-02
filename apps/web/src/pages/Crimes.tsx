@@ -43,7 +43,7 @@ export function Crimes(): JSX.Element {
 
   return (
     <Panel title="Crimes">
-      <p className={styles.note}>
+      <p className={styles.hint}>
         Crime success rate is based on different formulas and changes with your progression.
       </p>
       {jailed ? <p className={styles.note}>You can't commit crimes from jail.</p> : null}
