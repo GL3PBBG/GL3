@@ -39,6 +39,17 @@ deliberately diverges.
 It is a standalone page rather than a Diátaxis section on purpose - it is neither tutorial,
 guide, reference nor ADR, and folding it into one of the four would break the rule below.
 
+## System architecture
+
+<a href="/architecture.html" target="_self"><strong>GL3 system architecture</strong></a> - an explorable map of
+the running system: the React client, the one Fastify process that hosts the API, the WS
+gateway, the plugin loader and the BullMQ workers, and the PostgreSQL, Redis and asset
+storage behind it, plus the `gl3-migrate` path in from a legacy MySQL database. Four guided
+views walk the request path, the plugin surface, the outbox-driven job and event flow, and
+the legacy import.
+
+Like the comparison above it is a standalone page rather than a Diátaxis section.
+
 ## About this documentation
 
 This documentation follows the [Diátaxis](https://diataxis.fr/) framework: each page is
