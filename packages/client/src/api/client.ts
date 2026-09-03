@@ -1,22 +1,16 @@
-import { ApiError, type ApiErrorDetail } from "@gl3/client";
+import { ApiError, type ApiErrorDetail } from "./apiError.js";
+import { clientConfig } from "../config.js";
 
 export { ApiError, type ApiErrorDetail };
-
-const TOKEN_KEY = "gl3.token";
-
-export const tokenStore = {
-  get: (): string | null => localStorage.getItem(TOKEN_KEY),
-  set: (token: string): void => localStorage.setItem(TOKEN_KEY, token),
-  clear: (): void => localStorage.removeItem(TOKEN_KEY),
-};
 
 function asCount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = tokenStore.get();
-  const response = await fetch(path, {
+  const config = clientConfig();
+  const token = config.tokenStore.get();
+  const response = await fetch(`${config.baseUrl}${path}`, {
     ...init,
     headers: {
       // Only declare a JSON body when we're actually sending one — the
@@ -41,20 +35,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     // no client-side state that tracks verification (MeResponseSchema carries
     // no such field — see docs), so the redirect lives here, at the one place
     // every request already passes through, rather than duplicated per query.
-    // Guarded to skip when already on /verify: without it, a gated player's
-    // own useGameEvents on that page (POST /api/ws/ticket, not gate-exempt)
-    // would 403 into a self-redirect to the same URL — a full document
-    // reload that fires the same request again on load, forever.
-    if (response.status === 403 && code === "email_unverified" && window.location.pathname !== "/verify") {
-      window.location.assign("/verify");
-    }
+    // The host decides what "gated" means (which URL, whether to guard against
+    // a self-redirect loop) via onGate — see apps/web/src/lib/clientBoot.ts.
+    if (response.status === 403 && code === "email_unverified") clientConfig().onGate("email_unverified");
     // Same shape as the verify gate: a moderator-flagged account 409s every
-    // mutating request until the /challenge check is answered. Guarded the
-    // same way against a self-redirect loop from the challenge page's own
-    // POSTs (wrong answers 400, never 409, so only the flag itself lands here).
-    if (response.status === 409 && code === "challenge_required" && window.location.pathname !== "/challenge") {
-      window.location.assign("/challenge");
-    }
+    // mutating request until the /challenge check is answered.
+    if (response.status === 409 && code === "challenge_required") clientConfig().onGate("challenge_required");
     throw new ApiError(response.status, code, {
       retryAfter: asCount(body["retryAfter"]) ?? fromHeader,
       remainingSeconds: asCount(body["remainingSeconds"]) ?? fromHeader,

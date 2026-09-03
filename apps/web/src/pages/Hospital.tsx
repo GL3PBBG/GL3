@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
-import { useCheckin, useDischarge, useDischargePlayer, useHospital, useMe, useWard } from "../api/queries.js";
-import { useSentenceCountdown, formatDuration, canAfford } from "@gl3/client";
+import { useSentenceCountdown, formatDuration, canAfford, useCheckin, useDischarge, useDischargePlayer, useHospital, useMe, useWard } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";

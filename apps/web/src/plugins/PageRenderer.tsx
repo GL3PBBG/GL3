@@ -1,12 +1,11 @@
 import { Fragment, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, api } from "../api/client.js";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
 import { HudIcon, poolIconFor } from "../components/HudIcon.js";
 import { Meter } from "../components/Meter.js";
-import { togglePending, formatRemaining, type FormField, type RenderInstruction } from "@gl3/client";
+import { togglePending, formatRemaining, type FormField, type RenderInstruction, ApiError, api } from "@gl3/client";
 import styles from "../pages/pages.module.css";
 
 // The 56-card SVG deck behind `Hand` is ~155 kB gzipped — over half the app's

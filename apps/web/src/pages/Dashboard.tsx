@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
-import { useDashboardWidgets, useJail, useLocations, useMe, usePlugins, useRanks } from "../api/queries.js";
-import { useSentenceCountdown, formatAmount, formatDuration, rankProgress, renderNode } from "@gl3/client";
+import { useSentenceCountdown, formatAmount, formatDuration, rankProgress, renderNode, useDashboardWidgets, useJail, useLocations, useMe, usePlugins, useRanks } from "@gl3/client";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import styles from "./pages.module.css";

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api/client.js";
+import { api } from "@gl3/client";
 import styles from "./ui.module.css";
 
 export type GameImageSize = "sm" | "md" | "lg" | "banner";

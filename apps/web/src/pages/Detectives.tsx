@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DetectiveSearchRow } from "@gl3/shared";
-import { useDetectives, useHireDetectives, useProfile, useRemoveDetectiveSearch } from "../api/queries.js";
+import { useDetectives, useHireDetectives, useProfile, useRemoveDetectiveSearch } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import styles from "./pages.module.css";

@@ -1,5 +1,6 @@
 export * from "./config.js";
 export * from "./api/apiError.js";
+export * from "./api/client.js";
 export * from "./api/keys.js";
 export * from "./lib/money.js";
 export * from "./lib/countdown.js";
@@ -21,3 +22,6 @@ export * from "./plugins/describe.js";
 export * from "./plugins/pending.js";
 export * from "./plugins/invalidation.js";
 export * from "./plugins/render.js";
+export * from "./queries/index.js";
+export * from "./ws/useGameEvents.js";
+export * from "./ws/invalidation.js";

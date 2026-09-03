@@ -1,11 +1,7 @@
 import type { ReactNode } from "react";
 import type { AdminEconomyDay } from "@gl3/shared";
-import { useAdminEconomyOverview } from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
-import {
-  formatMoney, barPath, barPathDown, layoutSignedBars, moneyFractions, signedFractions,
-  sparklinePath, sparklinePoints, supplySeries,
-} from "@gl3/client";
+import { formatMoney, barPath, barPathDown, layoutSignedBars, moneyFractions, signedFractions, sparklinePath, sparklinePoints, supplySeries, useAdminEconomyOverview } from "@gl3/client";
 import { useMoneyFormat } from "../lib/formatContext.js";
 import styles from "./AdminEconomy.module.css";
 

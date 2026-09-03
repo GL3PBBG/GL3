@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GameEventSchema, type GameEvent } from "@gl3/shared";
-import { keys } from "@gl3/client";
+import { keys } from "../src/api/keys.js";
 import { invalidationKeys } from "../src/ws/invalidation.js";
 
 const VIEWER = "00000000-0000-7000-8000-000000000002";

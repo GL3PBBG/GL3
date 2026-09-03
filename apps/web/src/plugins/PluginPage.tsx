@@ -1,7 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { keys, renderNode } from "@gl3/client";
-import { usePlugins } from "../api/queries.js";
+import { keys, renderNode, usePlugins } from "@gl3/client";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import { PageRenderer } from "./PageRenderer.js";
 import { PAGE_OVERRIDES } from "./overrides.js";

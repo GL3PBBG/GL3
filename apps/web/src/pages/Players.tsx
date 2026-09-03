@@ -1,9 +1,8 @@
 import { useState } from "react";
 import type { OnlineEntry, PlayerSearchEntry } from "@gl3/shared";
-import { useOnline, usePlayerSearch } from "../api/queries.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
-import { useDebouncedValue } from "@gl3/client";
+import { useDebouncedValue, useOnline, usePlayerSearch } from "@gl3/client";
 import styles from "./pages.module.css";
 
 /** The server refuses anything shorter, so the query is held back to match. */

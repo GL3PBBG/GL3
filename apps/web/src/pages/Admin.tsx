@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { keys, renderNode } from "@gl3/client";
-import { useAdminSections } from "../api/queries.js";
+import { keys, renderNode, useAdminSections } from "@gl3/client";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import { PAGE_OVERRIDES } from "../plugins/overrides.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";

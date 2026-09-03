@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ProfileDto, UpdateProfileRequest } from "@gl3/shared";
-import { useMe, useProfile, useUpdateProfile } from "../api/queries.js";
+import { useMe, useProfile, useUpdateProfile } from "@gl3/client";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { ProfileCard } from "../components/ProfileCard.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";

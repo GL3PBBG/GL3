@@ -1,5 +1,5 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { useMe } from "./api/queries.js";
+import { useMe, useGameEvents } from "@gl3/client";
 import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
 import { Admin } from "./pages/Admin.js";
@@ -27,7 +27,6 @@ import { Stats } from "./pages/Stats.js";
 import { Verify } from "./pages/Verify.js";
 import { Challenge } from "./pages/Challenge.js";
 import { PluginPage } from "./plugins/PluginPage.js";
-import { useGameEvents } from "./ws/useGameEvents.js";
 
 export function App(): JSX.Element {
   const me = useMe();

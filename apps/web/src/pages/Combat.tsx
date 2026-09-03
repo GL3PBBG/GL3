@@ -1,10 +1,6 @@
 import { Link } from "react-router-dom";
 import type { AttackResponse, TargetReason, WeaponConditionDto } from "@gl3/shared";
-import {
-  useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe,
-  useRepairWeapon, useWeaponCondition,
-} from "../api/queries.js";
-import { formatMoney } from "@gl3/client";
+import { formatMoney, useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe, useRepairWeapon, useWeaponCondition } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";

@@ -1,5 +1,4 @@
-import { useMe, usePlugins, useRanks } from "../api/queries.js";
-import { formatAmount, rankProgress } from "@gl3/client";
+import { formatAmount, rankProgress, useMe, usePlugins, useRanks } from "@gl3/client";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";

@@ -4,9 +4,16 @@ import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PageRenderer } from "../src/plugins/PageRenderer.js";
-import { type RenderInstruction } from "@gl3/client";
+import { configureClient, resetClientConfigForTests, type RenderInstruction } from "@gl3/client";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetClientConfigForTests(); });
+beforeEach(() => {
+  configureClient({
+    baseUrl: "", wsUrl: "ws://test/ws",
+    tokenStore: { get: () => null, set: () => {}, clear: () => {} },
+    onGate: () => {},
+  });
+});
 
 const formInst = (valuesSource: string | null): RenderInstruction[] => [{
   kind: "form", action: "POST /api/admin/x/settings", submitLabel: "Save",

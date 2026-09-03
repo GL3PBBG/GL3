@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useReset } from "../api/queries.js";
+import { useReset } from "@gl3/client";
 import { ErrorText } from "../components/ui.js";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";

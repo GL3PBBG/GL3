@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { ShopItem } from "@gl3/shared";
-import { useBuyItem, useMe, useShop } from "../api/queries.js";
-import { describeError, numericEffect, weaponStatLine, canAfford, multiplyMoney } from "@gl3/client";
+import { describeError, numericEffect, weaponStatLine, canAfford, multiplyMoney, useBuyItem, useMe, useShop } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";

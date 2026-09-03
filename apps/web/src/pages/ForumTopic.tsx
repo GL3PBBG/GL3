@@ -1,10 +1,6 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError } from "../api/client.js";
-import {
-  useCreatePost, useDeletePost, useDeleteTopic, useForumTopic, useLockTopic, useMe, useSetTopicType,
-} from "../api/queries.js";
-import { useCountdowns } from "@gl3/client";
+import { useCountdowns, ApiError, useCreatePost, useDeletePost, useDeleteTopic, useForumTopic, useLockTopic, useMe, useSetTopicType } from "@gl3/client";
 import { Markdown } from "../components/Markdown.js";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";

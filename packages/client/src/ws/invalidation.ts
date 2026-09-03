@@ -1,5 +1,6 @@
 import type { EventMeta, GameEvent } from "@gl3/shared";
-import { keys, pluginInvalidationKeys } from "@gl3/client";
+import { keys } from "../api/keys.js";
+import { pluginInvalidationKeys } from "../plugins/invalidation.js";
 
 /**
  * Which cached queries a live event makes stale.

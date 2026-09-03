@@ -2,11 +2,19 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configureClient, resetClientConfigForTests } from "@gl3/client";
 import { Meter } from "../src/components/Meter.js";
 import { KeyValueSourceBlock, MeterSourceBlock } from "../src/plugins/PageRenderer.js";
 
-afterEach(cleanup);
-beforeEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); resetClientConfigForTests(); });
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  configureClient({
+    baseUrl: "", wsUrl: "ws://test/ws",
+    tokenStore: { get: () => null, set: () => {}, clear: () => {} },
+    onGate: () => {},
+  });
+});
 
 function stubFetch(status: number, body: unknown): ReturnType<typeof vi.fn> {
   const mock = vi.fn(async () =>
