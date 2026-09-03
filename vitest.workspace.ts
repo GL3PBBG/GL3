@@ -259,6 +259,7 @@ export default defineWorkspace([
         "test/plugin-dynamic.test.ts",
         "test/plugin-validate.test.ts",
         "test/plugin-point-names.test.ts",
+        "test/push-message.test.ts",
         "test/error-catalog.test.ts",
         "test/rng.test.ts",
         "test/wealth-fee.test.ts",
