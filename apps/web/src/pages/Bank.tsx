@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useBank, useMe } from "../api/queries.js";
-import { canAfford } from "../lib/money.js";
+import { canAfford } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 

@@ -1,6 +1,5 @@
 import { useMe, usePlugins, useRanks } from "../api/queries.js";
-import { formatAmount } from "../lib/money.js";
-import { rankProgress } from "../lib/ranks.js";
+import { formatAmount, rankProgress } from "@gl3/client";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";

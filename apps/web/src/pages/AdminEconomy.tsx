@@ -3,10 +3,9 @@ import type { AdminEconomyDay } from "@gl3/shared";
 import { useAdminEconomyOverview } from "../api/queries.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import {
-  barPath, barPathDown, layoutSignedBars, moneyFractions, signedFractions,
+  formatMoney, barPath, barPathDown, layoutSignedBars, moneyFractions, signedFractions,
   sparklinePath, sparklinePoints, supplySeries,
-} from "../lib/chart.js";
-import { formatMoney } from "../lib/money.js";
+} from "@gl3/client";
 import { useMoneyFormat } from "../lib/formatContext.js";
 import styles from "./AdminEconomy.module.css";
 

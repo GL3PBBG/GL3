@@ -3,8 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ServerFrameSchema, type PluginsPayload } from "@gl3/shared";
 import { z } from "zod";
 import { api } from "../api/client.js";
-import { keys } from "../api/keys.js";
-import { recordEvent } from "../store/events.js";
+import { keys, recordEvent } from "@gl3/client";
 import { invalidationKeys } from "./invalidation.js";
 
 const TicketResponseSchema = z.object({ ticket: z.string() });

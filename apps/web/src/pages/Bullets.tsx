@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useBulletShop, useBuyBullets, useJail, useMe } from "../api/queries.js";
-import { canAfford, multiplyMoney } from "../lib/money.js";
+import { canAfford, multiplyMoney } from "@gl3/client";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { PropertyPanel } from "../components/PropertyPanel.js";
 import styles from "./pages.module.css";

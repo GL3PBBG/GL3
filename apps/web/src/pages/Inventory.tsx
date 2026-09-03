@@ -2,7 +2,7 @@ import type { InventoryItem } from "@gl3/shared";
 import { Link } from "react-router-dom";
 import { useInventory, useEquip, useHospital, useUseItem } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
-import { numericEffect, stringEffect, weaponStatLine } from "../lib/effects.js";
+import { numericEffect, stringEffect, weaponStatLine } from "@gl3/client";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
 

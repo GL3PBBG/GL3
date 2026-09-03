@@ -6,9 +6,7 @@ import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { GameImage, SlotImage } from "../components/GameImage.js";
 import { HudIcon, poolIconFor } from "../components/HudIcon.js";
 import { Meter } from "../components/Meter.js";
-import { togglePending } from "./pending.js";
-import type { FormField, RenderInstruction } from "./render.js";
-import { formatRemaining } from "../lib/countdown.js";
+import { togglePending, formatRemaining, type FormField, type RenderInstruction } from "@gl3/client";
 import styles from "../pages/pages.module.css";
 
 // The 56-card SVG deck behind `Hand` is ~155 kB gzipped — over half the app's

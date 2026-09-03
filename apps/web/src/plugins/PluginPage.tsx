@@ -1,11 +1,10 @@
 import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { keys } from "../api/keys.js";
+import { keys, renderNode } from "@gl3/client";
 import { usePlugins } from "../api/queries.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 import { PageRenderer } from "./PageRenderer.js";
 import { PAGE_OVERRIDES } from "./overrides.js";
-import { renderNode } from "./render.js";
 
 /**
  * The route element for any plugin page. Looks up the page by id in the

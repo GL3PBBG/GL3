@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PageRenderer } from "../src/plugins/PageRenderer.js";
-import type { RenderInstruction } from "../src/plugins/render.js";
+import { type RenderInstruction } from "@gl3/client";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 beforeEach(() => { vi.unstubAllGlobals(); });

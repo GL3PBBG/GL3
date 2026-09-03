@@ -1,12 +1,8 @@
 import { Link } from "react-router-dom";
 import { useDashboardWidgets, useJail, useLocations, useMe, usePlugins, useRanks } from "../api/queries.js";
-import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
-import { formatAmount } from "../lib/money.js";
-import { formatDuration } from "../lib/errors.js";
-import { rankProgress } from "../lib/ranks.js";
+import { useSentenceCountdown, formatAmount, formatDuration, rankProgress, renderNode } from "@gl3/client";
 import { Amount, Loading, Money, Panel } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
-import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 
 export function Dashboard(): JSX.Element {

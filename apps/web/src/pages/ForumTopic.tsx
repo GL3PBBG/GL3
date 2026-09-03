@@ -4,7 +4,7 @@ import { ApiError } from "../api/client.js";
 import {
   useCreatePost, useDeletePost, useDeleteTopic, useForumTopic, useLockTopic, useMe, useSetTopicType,
 } from "../api/queries.js";
-import { useCountdowns } from "../hooks/useCountdowns.js";
+import { useCountdowns } from "@gl3/client";
 import { Markdown } from "../components/Markdown.js";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";

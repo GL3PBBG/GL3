@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { ApiError } from "../api/client.js";
-import { refusalCooldownSeconds } from "../lib/errors.js";
+import { refusalCooldownSeconds, useCountdowns } from "@gl3/client";
 import { useCommitCrime, useCrimes, useJail } from "../api/queries.js";
-import { useCountdowns } from "../hooks/useCountdowns.js";
 import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./Crimes.module.css";
 import { GameImage } from "../components/GameImage.js";

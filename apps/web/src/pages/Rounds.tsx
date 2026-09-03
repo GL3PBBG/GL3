@@ -4,7 +4,7 @@ import { useMe, useRoundStandings, useRounds } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { useMoneyFormat } from "../lib/formatContext.js";
-import { formatBoardScore } from "../lib/level-score-display.js";
+import { formatBoardScore } from "@gl3/client";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [

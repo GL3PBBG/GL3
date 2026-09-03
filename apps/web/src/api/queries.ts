@@ -78,7 +78,7 @@ import {
   type WeaponConditionDto,
 } from "@gl3/shared";
 import { api, tokenStore } from "./client.js";
-import { keys } from "./keys.js";
+import { keys } from "@gl3/client";
 
 /**
  * The server's sentence sweeper ends jail and hospital sentences on a ~2s tick

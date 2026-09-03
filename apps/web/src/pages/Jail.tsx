@@ -1,8 +1,6 @@
 import { Link } from "react-router-dom";
 import { useBail, useBust, useCellBlock, useEscape, useJail, useMe } from "../api/queries.js";
-import { useSentenceCountdown } from "../hooks/useSentenceCountdown.js";
-import { formatDuration } from "../lib/errors.js";
-import { canAfford } from "../lib/money.js";
+import { useSentenceCountdown, formatDuration, canAfford } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { SlotImage, useSlotImage } from "../components/GameImage.js";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";

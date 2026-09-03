@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { GameEvent } from "@gl3/shared";
 import { usePlugins } from "../api/queries.js";
-import { describeEvent, eventTone, type EventTone } from "../lib/eventCopy.js";
-import { useEvents } from "../store/events.js";
+import { describeEvent, eventTone, type EventTone, useEvents } from "@gl3/client";
 import styles from "./EventToasts.module.css";
 
 const TOAST_MS = 5000;

@@ -5,13 +5,10 @@ import {
   useCasino, useCasinoAct, useCasinoTable, useJail, useLeaveCasino, useMe, usePlayCasino,
   useSitCasino, useTableAct, useTableBet,
 } from "../api/queries.js";
-import { canAfford } from "../lib/money.js";
-import { secondsLeft } from "../lib/countdown.js";
-import { describeError } from "../lib/errors.js";
+import { canAfford, secondsLeft, describeError, renderNode } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { PropertyPanel } from "../components/PropertyPanel.js";
-import { renderNode } from "../plugins/render.js";
 import styles from "./pages.module.css";
 import type {
   CasinoGame, CasinoRemoteTables, CasinoSessionView, CasinoStepResponse,

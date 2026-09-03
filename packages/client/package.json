@@ -10,5 +10,5 @@
   "scripts": { "build": "tsc --build", "prepack": "tsc --build" },
   "dependencies": { "@gl3/shared": "^1.0.7", "zod": "^3.23.8" },
   "peerDependencies": { "react": "^18.3.0 || ^19.0.0", "@tanstack/react-query": "^5.0.0" },
-  "devDependencies": { "@tanstack/react-query": "^5.62.2", "@types/react": "^18.3.12", "react": "^18.3.1" }
+  "devDependencies": { "@tanstack/react-query": "^5.62.2", "@testing-library/react": "^16.3.2", "@types/react": "^18.3.12", "jsdom": "^29.1.1", "react": "^18.3.1", "react-dom": "^18.3.1" }
 }
