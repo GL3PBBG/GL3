@@ -48,7 +48,12 @@ storage behind it, plus the `gl3-migrate` path in from a legacy MySQL database. 
 views walk the request path, the plugin surface, the outbox-driven job and event flow, and
 the legacy import.
 
-Like the comparison above it is a standalone page rather than a Diátaxis section.
+<a href="/crime-commit-sequence.html" target="_self"><strong>Crime commit request lifecycle</strong></a> - a
+sequence diagram of one player action end to end: lookup and pricing before the `SET NX EX`
+cooldown claim, the outbox row that becomes the BullMQ job, the worker's single transaction
+with its idempotency claim first, and the `game:events` push back through the WS gateway.
+
+Like the comparison above, both are standalone pages rather than Diátaxis sections.
 
 ## About this documentation
 
