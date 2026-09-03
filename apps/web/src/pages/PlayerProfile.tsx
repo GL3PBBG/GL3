@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useProfile } from "../api/queries.js";
+import { useProfile } from "@gl3/client";
 import { ProfileCard } from "../components/ProfileCard.js";
 import { ErrorText, Loading, Panel } from "../components/ui.js";
 

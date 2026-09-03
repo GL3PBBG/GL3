@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../src/api/client.js";
+import { ApiError } from "../src/api/apiError.js";
 import { describeError, formatDuration, refusalCooldownSeconds } from "../src/lib/errors.js";
 
 describe("formatDuration", () => {

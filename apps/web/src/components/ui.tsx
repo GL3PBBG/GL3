@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { formatAmount, formatMoney } from "../lib/money.js";
-import { describeError } from "../lib/errors.js";
+import { formatAmount, formatMoney, describeError } from "@gl3/client";
 import { useMoneyFormat } from "../lib/formatContext.js";
 import styles from "./ui.module.css";
 

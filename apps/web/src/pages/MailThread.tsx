@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useMailThread, useMarkMailRead, useMe, useSendMail } from "../api/queries.js";
-import { counterpartName } from "../lib/mail.js";
+import { counterpartName, useMailThread, useMarkMailRead, useMe, useSendMail } from "@gl3/client";
 import { Markdown } from "../components/Markdown.js";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";

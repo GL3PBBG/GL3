@@ -5,6 +5,7 @@ import { z } from "zod";
 import { api } from "../api/client.js";
 import { keys } from "../api/keys.js";
 import { recordEvent } from "../store/events.js";
+import { clientConfig } from "../config.js";
 import { invalidationKeys } from "./invalidation.js";
 
 const TicketResponseSchema = z.object({ ticket: z.string() });
@@ -54,8 +55,8 @@ export function useGameEvents(playerId: string | undefined): void {
       }
       if (cancelled) return;
 
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${protocol}://${window.location.host}/ws?ticket=${ticket}`);
+      const url = `${clientConfig().wsUrl}?ticket=${encodeURIComponent(ticket)}`;
+      const ws = new WebSocket(url);
       socket = ws;
 
       ws.addEventListener("message", (message) => {

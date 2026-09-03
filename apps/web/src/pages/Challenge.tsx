@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAnswerChallenge, useChallengeQuestion, useLogout } from "../api/queries.js";
+import { useAnswerChallenge, useChallengeQuestion, useLogout } from "@gl3/client";
 import { ErrorText } from "../components/ui.js";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";

@@ -12,8 +12,8 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setSettled(value); }, ms);
-    return () => { window.clearTimeout(timer); };
+    const timer = setTimeout(() => { setSettled(value); }, ms);
+    return () => { clearTimeout(timer); };
   }, [value, ms]);
 
   return settled;

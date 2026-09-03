@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { categoryBadge, linkFor, type NavCategory } from "../lib/nav.js";
+import { categoryBadge, linkFor, type NavCategory } from "@gl3/client";
 import styles from "./NavMenu.module.css";
 
 /**
