@@ -1117,18 +1117,23 @@ const ADMIN_FIELDS: Record<AdminSettingKey, "number" | "money"> = {
 };
 
 /**
- * Every field is optional and blank-tolerant, because a blank means "use the
- * default" to `readCombatSettings` (its `blank` guard) and the form always
- * posts every field. A blank is stored as a DELETE, not an empty row, so the
- * table never carries a value the reader would treat as absent anyway.
+ * Every field is optional and blank-tolerant. A blank means "use the default"
+ * to `readCombatSettings` (its `blank` guard) and is stored as a DELETE, not
+ * an empty row, so the table never carries a value the reader would treat as
+ * absent anyway. An ABSENT key is left untouched: the form posts every field
+ * it renders, but the two newbie thresholds are gated by
+ * `when: { progression }` and the server prunes the other model's field
+ * before the view reaches the wire, so on a routed boot no client can ever
+ * send `newbie_exp_threshold` (and on an exp boot never
+ * `newbie_level_threshold`). Requiring it 400'd every save of the panel.
  * Numeric fields are validated as the reader would floor them; the money
  * fields as non-negative integers.
  */
-const nonNegInt = z.string().trim().regex(/^\d+$/, "non-negative integer").or(z.literal(""));
+const nonNegInt = z.string().trim().regex(/^\d+$/, "non-negative integer").or(z.literal("")).optional();
 const nonNegNumber = z.string().trim().refine(
   (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
   "non-negative number",
-);
+).optional();
 const AdminSettingsBodySchema = z.object(
   Object.fromEntries(
     ADMIN_SETTING_KEYS.map((key) => [key, ADMIN_FIELDS[key] === "money" ? nonNegInt : nonNegNumber]),
@@ -1183,7 +1188,11 @@ const adminSettingsWriteRoute = route({
   handler: async (ctx, { body }) => {
     await ctx.transaction(async (tx) => {
       for (const key of ADMIN_SETTING_KEYS) {
-        const value = body[key].trim();
+        const raw = body[key];
+        // Not on this boot's form (pruned by progression model): leave the
+        // stored row as it is — it is dormant here, not the form's to erase.
+        if (raw === undefined) continue;
+        const value = raw.trim();
         const row = `combat.${key}`;
         if (value === "") {
           await tx.db.delete(settings).where(eq(settings.key, row));
