@@ -96,6 +96,23 @@ const EnvSchema = z.object({
   EMAIL_FROM: z.string().email().default("noreply@gl3.dev"),
   /** Web origin used to build links in outbound mail (verify, reset). */
   APP_BASE_URL: z.string().url().default("http://localhost:5173"),
+
+  /**
+   * Starts the push bus subscriber. Off means the two /api/push/devices
+   * routes still work and rows still accumulate — a deployment registers
+   * devices before it starts sending, and rolling back is this one variable.
+   *
+   * An explicit enum rather than `z.coerce.boolean()`: coercion makes every
+   * non-empty string truthy, so `PUSH_ENABLED=false` would ENABLE it. A typo
+   * fails at boot instead of quietly picking a side.
+   */
+  PUSH_ENABLED: z.enum(["true", "false", "1", "0"]).default("false"),
+  /**
+   * Bearer for Expo's send endpoint. Optional: Expo accepts unauthenticated
+   * requests for a project's own tokens, and an access token only raises the
+   * rate limit. The header is omitted entirely when unset. Blank means unset.
+   */
+  EXPO_ACCESS_TOKEN: z.string().optional(),
 }).superRefine((env, ctx) => {
   // Selecting `s3` with a field missing must fail HERE, at boot, rather than on
   // the first upload an admin attempts — which would be days later, in
@@ -131,6 +148,12 @@ export interface MailConfig {
   appBaseUrl: string;
 }
 
+export interface PushConfig {
+  /** Whether this process runs the bus subscriber; the routes are always on. */
+  enabled: boolean;
+  expoAccessToken: string | null;
+}
+
 export interface Config {
   databaseUrl: string;
   redisUrl: string;
@@ -152,6 +175,7 @@ export interface Config {
   outboxIntervalMs: number;
   assets: AssetConfig;
   mail: MailConfig;
+  push: PushConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
@@ -193,6 +217,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       apiKey: parsed.RESEND_API_KEY ?? null,
       from: parsed.EMAIL_FROM,
       appBaseUrl: parsed.APP_BASE_URL.replace(/\/+$/, ""),
+    },
+    push: {
+      enabled: parsed.PUSH_ENABLED === "true" || parsed.PUSH_ENABLED === "1",
+      expoAccessToken: parsed.EXPO_ACCESS_TOKEN?.trim() ? parsed.EXPO_ACCESS_TOKEN.trim() : null,
     },
   };
 }
