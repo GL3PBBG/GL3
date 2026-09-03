@@ -1,0 +1,14 @@
+{
+  "name": "@gl3/client",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "src"],
+  "publishConfig": { "registry": "https://npm.gl3.dev", "access": "public" },
+  "scripts": { "build": "tsc --build", "prepack": "tsc --build" },
+  "dependencies": { "@gl3/shared": "^1.0.7", "zod": "^3.23.8" },
+  "peerDependencies": { "react": "^18.3.0 || ^19.0.0", "@tanstack/react-query": "^5.0.0" },
+  "devDependencies": { "@tanstack/react-query": "^5.62.2", "@types/react": "^18.3.12", "react": "^18.3.1" }
+}

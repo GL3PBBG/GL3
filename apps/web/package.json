@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@gl3/client": "*",
     "@gl3/shared": "*",
     "@letele/playing-cards": "^0.1.0",
     "@tanstack/react-query": "^5.62.2",
