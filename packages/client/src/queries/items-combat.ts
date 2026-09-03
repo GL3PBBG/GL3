@@ -110,10 +110,23 @@ export function useBuyItem() {
   });
 }
 
+/**
+ * "Here now" is polled, like `useOnline`, because the fact that would refresh
+ * it is never pushed to the people it matters to: `player.travelled` goes to
+ * the traveller alone (its audience is deliberately private — fare and route
+ * are theirs), so a player who leaves town is never announced to the town
+ * they left. Without this a bystander's row lingers until the tab refocuses,
+ * and a shot at it 409s target_elsewhere after the cooldown is already
+ * claimed. Combat's own events (attacked/killed/hospitalised) still
+ * invalidate the list immediately; the poll covers only departures.
+ */
+export const COMBAT_TARGETS_POLL_MS = 30_000;
+
 export function useCombatTargets() {
   return useQuery<CombatTargetListResponse>({
     queryKey: keys.combatTargets(),
     queryFn: async () => CombatTargetListResponseSchema.parse(await api("/api/combat/targets")),
+    refetchInterval: COMBAT_TARGETS_POLL_MS,
   });
 }
 

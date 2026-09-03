@@ -41,10 +41,10 @@ describe("combat melee-slot precedence (B0)", () => {
       const knife = await insertItem({ power: 10 }, "Slot 2 Knife");
       await db.update(playerStats).set({
         locationId: town, weaponItemId: gun, weaponMeleeItemId: knife,
-        strength: 100n, agility: 1000n, exp: 1000n, bullets: 5n, energy: 12,
+        strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n, energy: 12,
       }).where(eq(playerStats.playerId, attacker.playerId));
       await db.update(playerStats).set({
-        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n,
+        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
       }).where(eq(playerStats.playerId, victim.playerId));
 
       const res = await server.app.inject({
@@ -83,10 +83,10 @@ describe("combat melee-slot precedence (B0)", () => {
       const knife = await insertItem({ power: 10 }, "Offhand Knife");
       await db.update(playerStats).set({
         locationId: town, weaponMeleeItemId: knife,
-        strength: 100n, agility: 1000n, exp: 1000n, bullets: 5n,
+        strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n,
       }).where(eq(playerStats.playerId, attacker.playerId));
       await db.update(playerStats).set({
-        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n,
+        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
       }).where(eq(playerStats.playerId, victim.playerId));
 
       const res = await server.app.inject({
@@ -136,10 +136,10 @@ describe("combat melee-slot precedence (B0)", () => {
         { backfireChance: 0, accuracy: 100, damageMin: 99, damageMax: 99 }, "Smuggled Pistol");
       await db.update(playerStats).set({
         locationId: town, weaponMeleeItemId: smuggled,
-        strength: 100n, agility: 1000n, exp: 1000n, bullets: 5n,
+        strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n,
       }).where(eq(playerStats.playerId, attacker.playerId));
       await db.update(playerStats).set({
-        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n,
+        locationId: town, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
       }).where(eq(playerStats.playerId, victim.playerId));
 
       const res = await server.app.inject({

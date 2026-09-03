@@ -25,6 +25,7 @@ describe("readCombatSettings", () => {
       cooldownMaxSeconds: 3600,
       hospitalSeconds: 600,
       newbieExpThreshold: 100n,
+      newbieLevelThreshold: 5,
       defaultWeaponAccuracy: 50,
       // `dps` absent, not zero: a weapon (or fist) that declares no rate of
       // fire keeps the flat cooldown. See combat-cooldown.test.ts.
@@ -41,6 +42,7 @@ describe("readCombatSettings", () => {
       "cooldown_seconds": "90",
       "hospital_seconds": "300",
       "newbie_exp_threshold": "250",
+      "newbie_level_threshold": "3",
       "default_weapon_accuracy": "70",
       "unarmed.accuracy": "40",
       "unarmed.damage_min": "2",
@@ -55,6 +57,7 @@ describe("readCombatSettings", () => {
       cooldownMaxSeconds: 600,
       hospitalSeconds: 300,
       newbieExpThreshold: 250n,
+      newbieLevelThreshold: 3,
       defaultWeaponAccuracy: 70,
       unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3, dps: 2 },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },

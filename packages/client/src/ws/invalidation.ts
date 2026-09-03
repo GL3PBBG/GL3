@@ -40,8 +40,9 @@ export function invalidationKeys(
       return [keys.hospital(), keys.me()];
     case "player.travelled":
       // Stock is per-location and the shop query is not keyed by location, so
-      // without this a traveller keeps seeing the city they left.
-      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop()];
+      // without this a traveller keeps seeing the city they left. Combat's
+      // "Here now" roster is the same shape: per-town rows under a global key.
+      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets()];
     case "bank.transacted":
       return [keys.me()];
     case "bullets.purchased":

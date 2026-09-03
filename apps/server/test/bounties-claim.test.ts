@@ -46,6 +46,8 @@ async function makeAttackable(): Promise<string> {
     .set({
       locationId,
       exp: 100_000n,
+      // Routed (gl3-profile) boot: the newbie gate reads level, not exp.
+      level: 100,
       bullets: 1000n,
       health: 100,
       gangId: null,

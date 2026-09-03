@@ -70,3 +70,6 @@ export {
   type PlayerAttributes,
   type PoolSettlement,
 } from "./attributes.js";
+// The progression model `ctx.progression` reports; re-exported so a plugin
+// branching on it need not depend on @gl3/shared itself.
+export type { ProgressionModel } from "@gl3/shared";

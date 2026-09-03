@@ -1,4 +1,4 @@
-import type { GameEvent } from "@gl3/shared";
+import type { GameEvent, ProgressionModel } from "@gl3/shared";
 import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { AttributePoolDecl, PlayerAttributes, Pool, TrainedAttr } from "./attributes.js";
@@ -320,6 +320,17 @@ export interface PluginCtx {
    * validation-gap risk).
    */
   readonly installedPluginIds: ReadonlySet<string>;
+  /**
+   * Which model this boot turns exp into rank with — `"exp"` (GL3-native
+   * `ranks.exp_required` thresholds; `player_stats.exp` is lifetime) or
+   * `"level"` (a plugin claimed exp routing; `player_stats.exp` is
+   * WITHIN-level and resets on every level-up, `player_stats.level` is the
+   * figure that grows). Boot-static, like `installedPluginIds`. Any plugin
+   * gating on "how far along is this player" must branch on it: an exp
+   * comparison on a routed boot re-arms at every level-up (combat's newbie
+   * gate shipped exactly that — everyone was a permanent newbie).
+   */
+  readonly progression: ProgressionModel;
   /**
    * Every image slot declared by any installed plugin, plus core's own, from
    * the loader's registry. `scope` is the declaring plugin's id (or `"core"`)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SENTENCE_SAFETY_POLL_MS, TABLE_POLL_MS, hospitalRefetchInterval, jailRefetchInterval } from "@gl3/client";
+import {
+  COMBAT_TARGETS_POLL_MS, SENTENCE_SAFETY_POLL_MS, TABLE_POLL_MS, hospitalRefetchInterval, jailRefetchInterval,
+} from "@gl3/client";
 
 describe("sentence safety polling", () => {
   it("polls slowly while jailed", () => {
@@ -42,5 +44,17 @@ describe("the casino table poll", () => {
     // from, so this interval caps how long a lapsed turn can sit
     // un-auto-stood.
     expect(TABLE_POLL_MS).toBe(15_000);
+  });
+});
+
+describe("the combat targets poll", () => {
+  it("exists, because nothing pushes a bystander's departure", () => {
+    // `player.travelled` is published to the traveller alone (its audience is
+    // private, as core's was), so a player who leaves town is never announced
+    // to the people they left behind. Without a poll, "Here now" keeps listing
+    // them until the tab refocuses — and a shot at a stale row 409s
+    // target_elsewhere AFTER the cooldown is claimed. Same shape and cadence
+    // as `useOnline`, for the same reason.
+    expect(COMBAT_TARGETS_POLL_MS).toBe(30_000);
   });
 });

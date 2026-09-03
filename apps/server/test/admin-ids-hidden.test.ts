@@ -67,8 +67,8 @@ describe("admin tables never display an id column", () => {
     // plus roles/rounds/players hand-written here) + 3 from the MCCodes
     // family (houses' `houses-admin`, education's `education-admin`, jobs'
     // `jobs-admin` — gym, temple, mccodes-attributes and progression
-    // declare none) = 18.
-    expect(sections.length).toBe(18);
+    // declare none) = 18, + combat's `combat-admin` (settings panel) = 19.
+    expect(sections.length).toBe(19);
   });
 
   for (const section of sections) {

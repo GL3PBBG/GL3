@@ -11,7 +11,7 @@ import {
   runFilterChain,
   settlePool,
 } from "@gl3/plugin-sdk";
-import { GameEventSchema, type GameEvent, type LeaderboardKind } from "@gl3/shared";
+import { GameEventSchema, type GameEvent, type LeaderboardKind, type ProgressionModel } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import { and, eq, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
@@ -71,6 +71,12 @@ export interface PluginCtxOptions {
   attributePools: ReadonlyMap<Pool, AttributePoolDecl>;
   /** The single exp-routing claimant, or null (collectExpRouters). */
   expRouter: ExpApplier | null;
+  /**
+   * Explicit progression model. Defaults to whatever `expRouter` implies;
+   * the one caller that must set it is core-filters, whose ctxs carry no
+   * router (display-only) but still run on a routed boot.
+   */
+  progression?: ProgressionModel;
   installedPluginIds: ReadonlySet<string>;
   /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
   assetSlots: ReadonlyMap<string, AssetSlot>;
@@ -656,6 +662,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       list: () => [...options.attributePools.values()],
     },
     installedPluginIds: options.installedPluginIds,
+    progression: options.progression ?? (options.expRouter ? "level" : "exp"),
     assetSlots: {
       get: (scope, slot) => options.assetSlots.get(slotKey(scope, slot)) ?? null,
       list: () => [...options.assetSlots.values()],

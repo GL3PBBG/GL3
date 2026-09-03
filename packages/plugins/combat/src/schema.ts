@@ -28,6 +28,8 @@ export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   cash: bigint("cash", { mode: "bigint" }).notNull(),
   exp: bigint("exp", { mode: "bigint" }).notNull(),
+  /** Read by the newbie gate on a routed boot, where `exp` is within-level. */
+  level: integer("level").notNull(),
   bullets: bigint("bullets", { mode: "bigint" }).notNull(),
   health: integer("health").notNull(),
   /** Per-player cap override (core migration 0017); NULL = the rank's cap. */
@@ -113,6 +115,16 @@ export const playerItems = pgTable("player_items", {
 });
 
 /** Core-owned; only the mode column combat reads. */
+/**
+ * Core-owned key/value config. The admin panel reads and writes the TABLE
+ * rather than `ctx.settings` — the snapshot is boot-time, so the panel must
+ * show what the next boot will read (detectives' panel is the same shape).
+ */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export const locations = pgTable("locations", {
   id: uuid("id").primaryKey(),
   combatMode: text("combat_mode").notNull(),
