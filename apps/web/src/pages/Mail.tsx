@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useMail, useSendMail } from "../api/queries.js";
-import { groupThreads } from "../lib/mail.js";
+import { groupThreads, useMail, useSendMail } from "@gl3/client";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";

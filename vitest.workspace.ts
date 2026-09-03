@@ -18,6 +18,7 @@ const srcAliases = {
   resolve: {
     alias: {
       "@gl3/shared": fileURLToPath(new URL("./packages/shared/src/index.ts", import.meta.url)),
+      "@gl3/client": fileURLToPath(new URL("./packages/client/src/index.ts", import.meta.url)),
       "@gl3/plugin-sdk": fileURLToPath(
         new URL("./packages/plugin-sdk/src/index.ts", import.meta.url),
       ),
@@ -184,6 +185,10 @@ export default defineWorkspace([
       include: ["test/**/*.test.ts"],
     },
     ...srcAliases,
+  },
+  {
+    test: { name: "@gl3/client", root: "./packages/client", include: ["test/**/*.test.ts"], environment: "node" },
+    resolve: { alias: srcAliases.resolve.alias },
   },
   {
     test: {

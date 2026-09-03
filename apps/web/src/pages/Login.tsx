@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useAuth } from "../api/queries.js";
+import { useAuth } from "@gl3/client";
 import { ErrorText } from "../components/ui.js";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";

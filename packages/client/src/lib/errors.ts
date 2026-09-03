@@ -1,4 +1,4 @@
-import { ApiError } from "../api/client.js";
+import { ApiError } from "../api/apiError.js";
 
 /**
  * Player-facing copy for the server's snake_case error codes.

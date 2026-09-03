@@ -1,6 +1,4 @@
-import { usePlugins } from "../api/queries.js";
-import { describeEvent, isSilentEvent } from "../lib/eventCopy.js";
-import { useEvents } from "../store/events.js";
+import { describeEvent, isSilentEvent, useEvents, usePlugins } from "@gl3/client";
 import styles from "./EventFeed.module.css";
 
 export function EventFeed(): JSX.Element {

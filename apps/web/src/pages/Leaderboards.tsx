@@ -1,10 +1,9 @@
 import { useState } from "react";
 import type { LeaderboardKind } from "@gl3/shared";
-import { useLeaderboard, useMe } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { useMoneyFormat } from "../lib/formatContext.js";
-import { formatBoardScore } from "../lib/level-score-display.js";
+import { formatBoardScore, useLeaderboard, useMe } from "@gl3/client";
 import styles from "./pages.module.css";
 
 const KINDS: ReadonlyArray<readonly [LeaderboardKind, string]> = [

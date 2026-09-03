@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { DEFAULT_MONEY_FORMAT, type MoneyFormat } from "@gl3/shared";
-import { usePlugins } from "../api/queries.js";
+import { usePlugins } from "@gl3/client";
 
 /**
  * The active `MoneyFormat`, sourced from `GET /api/plugins`' `moneyFormat`

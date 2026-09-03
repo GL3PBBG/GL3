@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/shared" },
+    { "path": "./packages/client" },
     { "path": "./packages/plugin-sdk" },
     { "path": "./packages/plugins/ranks" },
     { "path": "./packages/plugins/notifications" },

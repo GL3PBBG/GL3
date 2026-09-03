@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useBounties, useMe, usePlaceBounty, useProfile } from "../api/queries.js";
+import { useBounties, useMe, usePlaceBounty, useProfile } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";

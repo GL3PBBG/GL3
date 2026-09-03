@@ -1,4 +1,4 @@
-import { useNews } from "../api/queries.js";
+import { useNews } from "@gl3/client";
 import { Markdown } from "../components/Markdown.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";

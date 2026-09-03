@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useCreateTopic, useForumTopics, useForums } from "../api/queries.js";
+import { useCreateTopic, useForumTopics, useForums } from "@gl3/client";
 import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";

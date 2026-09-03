@@ -4,10 +4,17 @@ import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PageRenderer } from "../src/plugins/PageRenderer.js";
-import type { RenderInstruction } from "../src/plugins/render.js";
+import { configureClient, resetClientConfigForTests, type RenderInstruction } from "@gl3/client";
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
-beforeEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); resetClientConfigForTests(); });
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  configureClient({
+    baseUrl: "", wsUrl: "ws://test/ws",
+    tokenStore: { get: () => null, set: () => {}, clear: () => {} },
+    onGate: () => {},
+  });
+});
 
 const tableInst = (): RenderInstruction[] => [{
   kind: "table", source: "GET /api/fixer/status",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatCountdown, hallOfFameOrder } from "../src/pages/Rounds.js";
-import { keys } from "../src/api/keys.js";
+import { keys } from "@gl3/client";
 import type { RoundDto } from "@gl3/shared";
 
 describe("formatCountdown", () => {

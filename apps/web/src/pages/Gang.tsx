@@ -3,13 +3,7 @@ import {
   GangPermissionSchema,
   type CreateGangRequest, type GangDto, type GangMemberDto, type GangPermission,
 } from "@gl3/shared";
-import {
-  useAcceptInvite, useCreateGang, useDeclineInvite, useGang, useGangBank, useGangInvites,
-  useGangLogs, useGangMembers, useGrantPermission, useInvitePlayer, useKickMember,
-  useLeaveGang, useMe, useProfile, useRevokePermission, useTransferBoss,
-} from "../api/queries.js";
-import { canGrant, canInvite, canKick, canTransfer, canWithdraw, memberOf } from "../lib/gang.js";
-import { canAfford } from "../lib/money.js";
+import { canGrant, canInvite, canKick, canTransfer, canWithdraw, memberOf, canAfford, useAcceptInvite, useCreateGang, useDeclineInvite, useGang, useGangBank, useGangInvites, useGangLogs, useGangMembers, useGrantPermission, useInvitePlayer, useKickMember, useLeaveGang, useMe, useProfile, useRevokePermission, useTransferBoss } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";

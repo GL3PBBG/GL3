@@ -1,8 +1,5 @@
 import { useState } from "react";
-import {
-  useOc, useCreateHeist, useInvite, useAccept, useDecline,
-  useLeave, useCancel, useExecute, useMe,
-} from "../api/queries.js";
+import { useOc, useCreateHeist, useInvite, useAccept, useDecline, useLeave, useCancel, useExecute, useMe } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import styles from "./pages.module.css";
 import { SlotImage } from "../components/GameImage.js";

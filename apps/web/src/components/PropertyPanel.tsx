@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  useMe, useProperties, useBuyProperty,
-  useSetLever, useTransferProperty, useDropProperty, useResetProperty,
-} from "../api/queries.js";
+import { useMe, useProperties, useBuyProperty, useSetLever, useTransferProperty, useDropProperty, useResetProperty } from "@gl3/client";
 import { ErrorText, Money } from "./ui.js";
 import styles from "../pages/pages.module.css";
 import type { PropertyRow } from "@gl3/shared";

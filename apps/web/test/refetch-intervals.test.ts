@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  COMBAT_TARGETS_POLL_MS, SENTENCE_SAFETY_POLL_MS, TABLE_POLL_MS, hospitalRefetchInterval,
-  jailRefetchInterval,
-} from "../src/api/queries.js";
+  COMBAT_TARGETS_POLL_MS, SENTENCE_SAFETY_POLL_MS, TABLE_POLL_MS, hospitalRefetchInterval, jailRefetchInterval,
+} from "@gl3/client";
 
 describe("sentence safety polling", () => {
   it("polls slowly while jailed", () => {

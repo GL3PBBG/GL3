@@ -1,4 +1,4 @@
-import { useMarkNotificationRead, useNotifications } from "../api/queries.js";
+import { useMarkNotificationRead, useNotifications } from "@gl3/client";
 import { ErrorText, Loading, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 

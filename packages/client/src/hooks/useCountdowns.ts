@@ -33,12 +33,12 @@ export function useCountdowns() {
   const hasDeadlines = Object.keys(deadlines).length > 0;
   useEffect(() => {
     if (!hasDeadlines) return;
-    const tick = window.setInterval(() => {
+    const tick = setInterval(() => {
       const current = Date.now();
       setNow(current);
       setDeadlines((prev) => pruneExpired(prev, current));
     }, 1000);
-    return () => window.clearInterval(tick);
+    return () => clearInterval(tick);
   }, [hasDeadlines]);
 
   const remaining = useMemo(() => {

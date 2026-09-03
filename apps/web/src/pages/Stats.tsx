@@ -1,11 +1,7 @@
 import type { ReactNode } from "react";
 import type { GameStatsResponse, PropertyRow } from "@gl3/shared";
-import { useMe, usePlugins, useProperties, useRanks, useStats } from "../api/queries.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
-import { rankProgress } from "../lib/ranks.js";
-import {
-  barPath, countFractions, indexOfMax, layoutBars, moneyFractions,
-} from "../lib/chart.js";
+import { rankProgress, barPath, countFractions, indexOfMax, layoutBars, moneyFractions, useMe, usePlugins, useProperties, useRanks, useStats } from "@gl3/client";
 import styles from "./Stats.module.css";
 
 /**

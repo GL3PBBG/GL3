@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { useForgot } from "../api/queries.js";
+import { useForgot } from "@gl3/client";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
 

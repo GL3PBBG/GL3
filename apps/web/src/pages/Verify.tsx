@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useLogout, useResendVerify, useVerify } from "../api/queries.js";
+import { useLogout, useResendVerify, useVerify } from "@gl3/client";
 import { ErrorText } from "../components/ui.js";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
