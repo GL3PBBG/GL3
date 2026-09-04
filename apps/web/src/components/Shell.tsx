@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSentenceCountdown, secondsLeft, facilityArrival, type FacilityState, formatDuration, unreadCount, buildNav, labelForPath, navKeyFor, type NavCategory, rankProgress, useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges, useNotifications, usePlugins, useRanks } from "@gl3/client";
 import { FormatProvider } from "../lib/formatContext.js";
+import { bannerSlotFor } from "../lib/pageBanners.js";
 import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
 import { EventToasts } from "./EventToasts.js";
@@ -74,62 +75,13 @@ function CountdownValue({ to }: { to: string }): JSX.Element {
 }
 
 
-/**
- * Which singleton art slot each route's banner comes from.
- *
- * One map here rather than a `<SlotImage>` inside each of nineteen page
- * components: a banner is chrome, it belongs to the layout, and every page
- * would otherwise have to remember to draw one — which is exactly how the
- * `location` and `rank` slots ended up bindable with nothing rendering them.
- *
- * A route with no entry simply has no banner. So does one whose slot has no
- * art bound: `SlotImage` renders null rather than a placeholder, because empty
- * space at the top of a page is better than a hatched grey box on every page of
- * a fresh install.
- */
-const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
-  "/plugins/crimes.index": { slot: "page-crimes", alt: "Crimes" },
-  // Jail draws its own banner rather than living in this map: it is the one
-  // state-dependent slot, switching to `page-supermax` while the caller sits
-  // in super max — see Jail.tsx.
-  "/plugins/hospital": { slot: "page-hospital", alt: "Hospital" },
-  "/bank": { slot: "page-bank", alt: "Bank" },
-  "/plugins/casino.index": { slot: "page-casino", alt: "Casino" },
-  "/plugins/combat.index": { slot: "page-combat", alt: "Combat" },
-  "/plugins/bounties.index": { slot: "page-bounties", alt: "Bounties" },
-  "/plugins/detectives.index": { slot: "page-detectives", alt: "Detectives" },
-  "/plugins/oc.index": { slot: "page-oc", alt: "Organized crime" },
-  "/plugins/gangs.index": { slot: "page-gang", alt: "Gang" },
-  "/mail": { slot: "page-mail", alt: "Mail" },
-  "/news": { slot: "page-news", alt: "News" },
-  "/shop": { slot: "page-shop", alt: "Shop" },
-  "/plugins/bullets.index": { slot: "page-bullets", alt: "Bullet shop" },
-  "/plugins/travel.index": { slot: "page-travel", alt: "Travel" },
-  "/ranks": { slot: "page-ranks", alt: "Ranks" },
-  "/leaderboards": { slot: "page-leaderboards", alt: "Leaderboards" },
-  "/inventory": { slot: "page-inventory", alt: "Inventory" },
-  "/rounds": { slot: "page-rounds", alt: "Rounds" },
-  "/stats": { slot: "page-stats", alt: "Stats" },
-  "/forum": { slot: "page-forum", alt: "Forum" },
-  "/players": { slot: "page-players", alt: "Players" },
-  // The page's old address renders the same component — same banner.
-  "/online": { slot: "page-players", alt: "Players" },
-  "/profile": { slot: "page-profile", alt: "Profile" },
-  "/notifications": { slot: "page-notifications", alt: "Notifications" },
-  "/": { slot: "page-dashboard", alt: "Dashboard" },
-  // Manifest-declared gameplay pages are keyed by their /plugins/<pageId>
-  // nav path (navKeyFor's second segment), same as /theft and /garage would
-  // be — the days of a first-segment-only map ended when these pages stopped
-  // being hardcoded core routes.
-};
-
 function PageBanner(): JSX.Element | null {
   const { pathname } = useLocation();
-  // Exact match on the first path segment, so `/mail/:threadId` shares the mail
-  // banner and an unknown route quietly gets none.
-  const key = `/${pathname.split("/")[1] ?? ""}`;
-  const banner = PAGE_BANNERS[key];
-  if (banner === undefined) return null;
+  // Exact pathname first — required for /plugins/<pageId> routes, which all
+  // share a first segment of "/plugins" — then a first-segment fallback, so
+  // `/mail/:threadId` still shares the mail list's banner. See pageBanners.ts.
+  const banner = bannerSlotFor(pathname);
+  if (banner === null) return null;
   return (
     <div className={styles.pageBanner}>
       {/* Not zoomable: the banner already renders at natural size up to the

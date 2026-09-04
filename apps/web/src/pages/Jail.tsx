@@ -40,10 +40,10 @@ export function Jail(): JSX.Element {
   return (
     <>
       {/* The one state-dependent banner: which slot renders depends on whether
-          the caller is currently super-maxed, so this can't live in Shell's
-          static route→slot map — see the PAGE_BANNERS comment there. Falls
-          back to page-jail when super-maxed but no super-max art is bound
-          (spec §3.6), rather than showing no banner at all. */}
+          the caller is currently super-maxed, so this can't live in the static
+          route→slot map in lib/pageBanners.ts. Falls back to page-jail when
+          super-maxed but no super-max art is bound (spec §3.6), rather than
+          showing no banner at all. */}
       <SlotImage
         scope="core"
         slot={showSupermaxBanner ? "page-supermax" : "page-jail"}
