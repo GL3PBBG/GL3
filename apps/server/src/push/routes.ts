@@ -29,6 +29,10 @@ export function registerPushRoutes(
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
 
     await registerDevice(db, playerId, parsed.data.expoToken, parsed.data.platform);
+    request.log.info(
+      { playerId, platform: parsed.data.platform, tokenPrefix: parsed.data.expoToken.slice(0, 20) },
+      "push device registered",
+    );
     return reply.send({ registered: true });
   });
 

@@ -40,6 +40,13 @@ export interface PushSubscriberDeps {
   fetchImpl?: typeof fetch;
   now?: () => number;
   onError?: (error: unknown) => void;
+  /**
+   * Structural, not `pino.Logger`, so Fastify's `app.log` fits with no
+   * dependency on pino's types — the only shape this file needs is one
+   * `info` call per handled event, for a deployment with shell + log access
+   * but no database to diagnose push from.
+   */
+  log?: { info(obj: Record<string, unknown>, msg: string): void };
 }
 
 export interface PushSubscriberHandle { close(): Promise<void> }
@@ -71,24 +78,32 @@ async function handleEvent(event: GameEvent, deps: PushSubscriberDeps, now: () =
   const recipients = await recipientsOf(deps.db, event);
   if (recipients.length === 0) return;
 
+  let unmapped = 0;
+  let online = 0;
+  let alreadyClaimed = 0;
+  let noDevice = 0;
+
   const messages: ExpoPushMessage[] = [];
   for (const playerId of recipients) {
     // Build first: an unmapped or self-suppressed event must not burn a claim.
     const content = pushMessageFor(event, playerId);
-    if (content === null) continue;
+    if (content === null) { unmapped += 1; continue; }
 
     // Then presence: an online player's skipped push must not consume the
     // idempotency slot a later legitimate redelivery would need.
-    if (await isRecentlyPresent(deps.redis, playerId, now())) continue;
+    if (await isRecentlyPresent(deps.redis, playerId, now())) { online += 1; continue; }
 
     // Then the claim. The NX OUTCOME is the decision (rule 2) — never a read
     // followed by a write. "OK" means this process won the right to send.
     const claimed = await deps.redis.set(
       `push:sent:${event.id}:${playerId}`, "1", "EX", CLAIM_TTL_SECONDS, "NX",
     );
-    if (claimed !== "OK") continue;
+    if (claimed !== "OK") { alreadyClaimed += 1; continue; }
 
-    for (const device of await enabledDevicesForPlayer(deps.db, playerId)) {
+    const devices = await enabledDevicesForPlayer(deps.db, playerId);
+    if (devices.length === 0) { noDevice += 1; continue; }
+
+    for (const device of devices) {
       messages.push({
         to: device.expoToken,
         title: content.title,
@@ -99,6 +114,14 @@ async function handleEvent(event: GameEvent, deps: PushSubscriberDeps, now: () =
       });
     }
   }
+
+  // One line per handled event — the log-only diagnosability contract. A
+  // global-audience event never reaches here (recipients.length === 0 above
+  // returns first), so the feed stays silent for those by construction.
+  deps.log?.info(
+    { eventType: event.type, eventId: event.id, recipients: recipients.length, unmapped, online, alreadyClaimed, noDevice, sent: messages.length },
+    "push event handled",
+  );
 
   if (messages.length === 0) return;
   await sendExpoPush(messages, {

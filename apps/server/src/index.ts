@@ -157,8 +157,15 @@ if (config.push.enabled) {
     redis,
     subscriber: createSubscriber(config.redisUrl),
     accessToken: config.push.expoAccessToken,
+    log: app.log,
     onError: (error) => { app.log.error({ err: error }, "push dispatch failed"); },
   });
+  app.log.info(
+    { expoAccessToken: Boolean(config.push.expoAccessToken) },
+    "push notifications enabled — subscriber started",
+  );
+} else {
+  app.log.info("push notifications disabled (PUSH_ENABLED is not true)");
 }
 
 // Deliberately here and NOT in buildApp: every integration test builds its

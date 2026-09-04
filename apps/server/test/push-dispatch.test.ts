@@ -18,6 +18,12 @@ const redis = createRedis(config.redisUrl);
 let handle: PushSubscriberHandle;
 let subscriber: Redis;
 let captured: ExpoPushMessage[] = [];
+/**
+ * Same cross-talk problem as `captured`: `game:events` is global across
+ * concurrently running test files, so every assertion below filters by an
+ * `eventId` this file itself minted rather than by position or count.
+ */
+let capturedLogs: Array<{ obj: Record<string, unknown>; msg: string }> = [];
 
 /**
  * `game:events` is a single global channel shared by every test file running
@@ -66,6 +72,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
 beforeEach(async () => {
   await resetDb(db);
   captured = [];
+  capturedLogs = [];
   if (handle === undefined) {
     subscriber = createSubscriber(config.redisUrl);
     handle = await startPushSubscriber({
@@ -73,6 +80,7 @@ beforeEach(async () => {
       redis,
       subscriber,
       accessToken: null,
+      log: { info: (obj, msg) => { capturedLogs.push({ obj, msg }); } },
       fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
         const batch = JSON.parse(String(init?.body)) as ExpoPushMessage[];
         captured.push(...batch);
@@ -184,5 +192,70 @@ describe("push dispatch", () => {
 
   it("subscribes to the same channel the gateway does", () => {
     expect(GAME_EVENTS_CHANNEL).toBe("game:events");
+  });
+
+  describe("per-event outcome log", () => {
+    it("logs online:1, sent:0 when the only recipient is suppressed by presence", async () => {
+      const token = tokenFor("log-online");
+      const playerId = await makePlayerWithDevice(token);
+      await redis.zadd(PRESENCE_KEY, Date.now(), playerId);
+
+      const event = notificationFor(playerId, "you are looking at this");
+      await publishEvent(redis, event);
+
+      await waitFor(() => capturedLogs.some((l) => l.obj.eventId === event.id));
+      const entry = capturedLogs.find((l) => l.obj.eventId === event.id)!;
+      expect(entry.msg).toBe("push event handled");
+      expect(entry.obj).toMatchObject({
+        eventType: "notification.created",
+        recipients: 1, unmapped: 0, online: 1, alreadyClaimed: 0, noDevice: 0, sent: 0,
+      });
+
+      await redis.zrem(PRESENCE_KEY, playerId);
+    });
+
+    it("logs sent:1 for an offline recipient with a registered device", async () => {
+      const token = tokenFor("log-sent");
+      const playerId = await makePlayerWithDevice(token);
+
+      const event = notificationFor(playerId, "logged sent");
+      await publishEvent(redis, event);
+
+      await waitFor(() => capturedLogs.some((l) => l.obj.eventId === event.id));
+      const entry = capturedLogs.find((l) => l.obj.eventId === event.id)!;
+      expect(entry.obj).toMatchObject({
+        recipients: 1, unmapped: 0, online: 0, alreadyClaimed: 0, noDevice: 0, sent: 1,
+      });
+    });
+
+    it("logs noDevice:1 for a recipient with no registered device", async () => {
+      const playerId = uuidv7();
+      await db.insert(players).values({ id: playerId, username: `push_${playerId.slice(-8)}` });
+      await db.insert(playerStats).values({ playerId });
+
+      const event = notificationFor(playerId, "no device");
+      await publishEvent(redis, event);
+
+      await waitFor(() => capturedLogs.some((l) => l.obj.eventId === event.id));
+      const entry = capturedLogs.find((l) => l.obj.eventId === event.id)!;
+      expect(entry.obj).toMatchObject({
+        recipients: 1, unmapped: 0, online: 0, alreadyClaimed: 0, noDevice: 1, sent: 0,
+      });
+    });
+
+    it("logs nothing for a global-audience event", async () => {
+      const token = tokenFor("log-global");
+      const sentinel = tokenFor("log-global-sentinel");
+      const playerId = await makePlayerWithDevice(token);
+      const sentinelId = await makePlayerWithDevice(sentinel);
+
+      const globalEvent = { ...notificationFor(playerId, "broadcast"), audience: { kind: "global" as const } };
+      await publishEvent(redis, globalEvent);
+      const sentinelEvent = notificationFor(sentinelId, "sentinel");
+      await publishEvent(redis, sentinelEvent);
+
+      await waitFor(() => capturedLogs.some((l) => l.obj.eventId === sentinelEvent.id));
+      expect(capturedLogs.some((l) => l.obj.eventId === globalEvent.id)).toBe(false);
+    });
   });
 });

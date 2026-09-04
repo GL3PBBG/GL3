@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { pushDevices } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -90,6 +90,25 @@ describe("POST /api/push/devices", () => {
       payload: { expoToken: TOKEN_A, platform: "android" },
     });
     expect(response.statusCode).toBe(401);
+  });
+
+  it("logs a device registration with a token prefix, never the full token", async () => {
+    // Under NODE_ENV=test, Fastify's logger is `abstract-logging` with
+    // `logger.child = () => logger` (apps/server/src/app.ts:57), so
+    // `app.log` IS `request.log` for the life of this boot — spying on
+    // `app.log.info` observes the route's own log call.
+    const infoSpy = vi.spyOn(app.log, "info");
+    const player = await registerVerifiedPlayer(server);
+
+    await registerDevice(TOKEN_A, player.token);
+
+    const call = infoSpy.mock.calls.find(([, msg]) => msg === "push device registered");
+    expect(call).toBeDefined();
+    const [obj] = call!;
+    expect(obj).toMatchObject({ playerId: player.playerId, platform: "android", tokenPrefix: TOKEN_A.slice(0, 20) });
+    expect(JSON.stringify(obj)).not.toContain(TOKEN_A);
+
+    infoSpy.mockRestore();
   });
 
   it("403s email_unverified — device registration is not on GATE_EXEMPT", async () => {
