@@ -97,7 +97,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     // The thunk, not `loaded.manifests` itself — same reason as the auth
     // routes above: `loaded` is assigned after this registration runs.
     registerJailRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, () => loaded!.manifests);
-    registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
+    registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth, () => loaded!.coreFilters);
   }
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
   // Core, not a plugin: no plugin owns device registration, and these must

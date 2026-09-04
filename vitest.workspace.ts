@@ -511,6 +511,7 @@ export default defineWorkspace([
         "test/theft-routes.test.ts",
         "test/theft-tiers.test.ts",
         "test/travel-bullet-price.test.ts",
+        "test/territory-hooks.test.ts",
         "test/travel-fare-filter.test.ts",
         "test/travel-lock-order.test.ts",
         "test/travel.test.ts",

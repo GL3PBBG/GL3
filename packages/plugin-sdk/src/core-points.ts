@@ -53,3 +53,30 @@ export const coreMoneyFormat = filterPoint<MoneyFormat>("core.moneyFormat", "col
  * mispriced economy rather than a visible failure. A throw must abort.
  */
 export const coreActionCost = filterPoint<ActionCost>("core.actionCost", "propagate");
+
+/**
+ * How long a hospital stay should be, as a DISCOUNT a subscriber may grant.
+ * The sentencing code (core's check-in, combat's kill and backfire paths)
+ * seeds `{ entries: [{ playerId, discountBp: 0 }] }`, applies the chain,
+ * clamps each figure to [0, 10000] and shortens the stay by that many basis
+ * points. A discount rather than a duration, deliberately: the seconds are
+ * computed inside the sentencing transaction from state a subscriber cannot
+ * see, and a subscriber that could set an absolute figure could also
+ * lengthen one. Batched like `travel.fares` so a caller sentencing two
+ * people (combat's backfire + kill) prices both in one chain. "collect" —
+ * a throwing subscriber costs its own discount, never the sentence.
+ */
+export interface HospitalStayQuote { readonly playerId: string; readonly discountBp: number }
+export interface HospitalStayBatch { readonly entries: readonly HospitalStayQuote[] }
+export const coreHospitalStay = filterPoint<HospitalStayBatch>("core.hospitalStay", "collect");
+
+/** Clamp a subscriber-supplied basis-point discount to what an applier honours. */
+export function clampDiscountBp(bp: number): number {
+  if (!Number.isFinite(bp)) return 0;
+  return Math.max(0, Math.min(10_000, Math.floor(bp)));
+}
+
+/** Read the quoted discount for one player out of an applied batch. */
+export function hospitalDiscountFor(batch: HospitalStayBatch, playerId: string): number {
+  return clampDiscountBp(batch.entries.find((e) => e.playerId === playerId)?.discountBp ?? 0);
+}

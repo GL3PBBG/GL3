@@ -1,6 +1,6 @@
 import {
-  coreMenuBadges, coreProfileView, definePlugin, InsufficientFundsError, on, PluginError, route,
-  type PageSchema, type PluginCtx,
+  clampDiscountBp, coreMenuBadges, coreProfileView, definePlugin, filterPoint, InsufficientFundsError, on,
+  PluginError, route, type PageSchema, type PluginCtx,
 } from "@gl3/plugin-sdk";
 import { and, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
@@ -83,6 +83,23 @@ function wealthScaledFee(
   return raised > capped ? capped : raised;
 }
 
+/**
+ * What a detective costs THIS hirer, as a discount a subscriber may grant on
+ * the wealth-scaled unit price. Seeded `{ playerId, discountBp: 0 }` by the
+ * hire route and the listing (so the preview matches the charge), applied
+ * to the unit cost so `cost × detectives × hours` stays exact. Territory's
+ * numbers racket is the first subscriber. "collect": a throwing subscriber
+ * costs its own discount, never the hire.
+ */
+export interface HireQuote { readonly playerId: string; readonly discountBp: number }
+export const hireQuote = filterPoint<HireQuote>("detectives.hireQuote", "collect");
+
+function discountedUnit(unit: bigint, discountBp: number): bigint {
+  const bp = clampDiscountBp(discountBp);
+  if (bp === 0 || unit <= 0n) return unit;
+  return unit - (unit * BigInt(bp)) / 10_000n;
+}
+
 const HireBodySchema = z.object({
   targetUsername: z.string().min(1).max(30),
   detectives: z.number().int().min(1).max(5),
@@ -105,6 +122,7 @@ const hireRoute = route({
     const expireSeconds = readSeconds(ctx.settings, "expire", DEFAULT_EXPIRE_SECONDS);
     const wealthPercent = readWealthPercent(ctx.settings);
     const wealthCapMultiplier = readWealthCapMultiplier(ctx.settings);
+    const quote = await ctx.filters.apply(hireQuote, { playerId: player.id, discountBp: 0 });
 
     const result = await ctx.transaction(async (tx) => {
       // Plain SELECT, no lock: the username -> id mapping is immutable.
@@ -127,9 +145,9 @@ const hireRoute = route({
         .select({ cash: playerStats.cash, bank: playerStats.bank })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
-      const unitCost = wealthScaledFee(
+      const unitCost = discountedUnit(wealthScaledFee(
         flatUnit, (hirer?.cash ?? 0n) + (hirer?.bank ?? 0n), wealthPercent, wealthCapMultiplier,
-      );
+      ), quote.discountBp);
       const cost = unitCost * BigInt(body.detectives) * BigInt(body.hours);
 
       // No pair lock, deliberately (spec §2 Locks): this debit locks only the
@@ -187,9 +205,10 @@ const listRoute = route({
     // recomputes in-transaction — so the two can drift by one concurrent
     // money move, never more.
     const previewWealth = player.cash + player.bank;
-    const unitCost = wealthScaledFee(
+    const quote = await ctx.filters.apply(hireQuote, { playerId: player.id, discountBp: 0 });
+    const unitCost = discountedUnit(wealthScaledFee(
       flatUnit, previewWealth, readWealthPercent(ctx.settings), readWealthCapMultiplier(ctx.settings),
-    );
+    ), quote.discountBp);
 
     return ctx.transaction(async (tx) => {
       // Live tracking is this un-cached join (spec §2): the target's CURRENT
@@ -461,5 +480,6 @@ export default definePlugin({
   routes: [hireRoute, listRoute, removeRoute, adminSettingsListRoute, adminSettingsWriteRoute],
   adminPages: [adminPage],
   jobs: { resolve: resolveJob },
+  provides: [hireQuote],
   filters: [profileExtras, menuBadge],
 });

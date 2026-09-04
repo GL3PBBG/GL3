@@ -1,7 +1,25 @@
 import {
-  coreActionCost, coreDashboard, definePlugin, on, PluginError, route,
+  coreActionCost, coreDashboard, definePlugin, filterPoint, on, PluginError, route,
   type PageSchema, type PluginCtx, type Pool, type RankUpResult,
 } from "@gl3/plugin-sdk";
+
+/**
+ * Extra percentage points on a failed crime's jail chance, for THIS player
+ * on THIS crime. The commit route seeds `{ playerId, crimeId, extraPercent: 0 }`
+ * and applies the chain before the cooldown is claimed; the figure travels
+ * through the job data as `jailBonus` (a job's `ctx.filters` sees only its
+ * own plugin's subscriptions — the same reason `costs` travels), clamped to
+ * [0, 100] and added to the crime's own `jail_chance_percent`, capped at 100.
+ * Territory's heat is the first subscriber. "collect": a throwing subscriber
+ * adds nothing, and the crime's own odds stand.
+ */
+export interface JailOdds { readonly playerId: string; readonly crimeId: string; readonly extraPercent: number }
+export const jailOdds = filterPoint<JailOdds>("crimes.jailOdds", "collect");
+
+function readJailBonus(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.floor(value)));
+}
 import { benefits as membershipBenefits, isMember } from "@gl3/plugin-membership";
 import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
@@ -242,6 +260,10 @@ const commitRoute = route({
       resolvedCost.costs.brave = crime.braveCost;
     }
     const priced = pricedEntries(resolvedCost.costs);
+    // Resolved here, alongside the cost, for the same reason: the job cannot
+    // see a sibling plugin's subscription.
+    const odds = await ctx.filters.apply(jailOdds, { playerId: player.id, crimeId, extraPercent: 0 });
+    const jailBonus = readJailBonus(odds.extraPercent);
 
     if (priced.length > 0) {
       // tx.attributes.read SETTLES (lazily regenerates and writes back), so
@@ -291,7 +313,7 @@ const commitRoute = route({
       // covering the failure branch.
       const jobId = await ctx.transaction((tx) =>
         tx.jobs.enqueue("commit", {
-          playerId: player.id, crimeId, costs: Object.fromEntries(priced),
+          playerId: player.id, crimeId, costs: Object.fromEntries(priced), jailBonus,
         }));
       return { status: 202, body: { jobId, accepted: true } };
     } catch (error) {
@@ -315,6 +337,7 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
   const playerId = String(data["playerId"]);
   const crimeId = String(data["crimeId"]);
   const priced = pricedEntries(readCosts(data["costs"]));
+  const jailBonus = readJailBonus(data["jailBonus"]);
   const rng = ctx.job?.rng;
   if (rng === undefined) throw new Error("commit job ran without a seeded rng");
 
@@ -415,8 +438,12 @@ async function commitJob(ctx: PluginCtx, data: Record<string, unknown>): Promise
     const payout = success ? rng.bigint(crime.minPayout, crime.maxPayout) : 0n;
     const bullets = success ? BigInt(rng.int(crime.minBullets, crime.maxBullets + 1)) : 0n;
     const exp = success ? crime.expReward : 0n;
-    const jailRoll = !success && crime.jailChancePercent > 0 ? rng.int(0, 100) : 100;
-    const jailed = jailRoll < crime.jailChancePercent;
+    // The crime's own odds plus whatever the route's jailOdds chain added
+    // (heat, first). A bonus of 0 — every boot without a subscriber — draws
+    // exactly what it always drew, so seeded replays are unchanged.
+    const jailChance = Math.min(100, crime.jailChancePercent + jailBonus);
+    const jailRoll = !success && jailChance > 0 ? rng.int(0, 100) : 100;
+    const jailed = jailRoll < jailChance;
 
     // V2's progression-by-use, read from source (crimes.inc, method_commit):
     // the attempt's outcome adds to this crime's learned chance —
@@ -874,6 +901,7 @@ export default definePlugin({
   routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
+  provides: [jailOdds],
   filters: [declareBenefit, dashboardWidget],
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly

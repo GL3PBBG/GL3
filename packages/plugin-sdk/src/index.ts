@@ -19,6 +19,11 @@ export {
   coreMenuBadges,
   coreMoneyFormat,
   coreActionCost,
+  coreHospitalStay,
+  clampDiscountBp,
+  hospitalDiscountFor,
+  type HospitalStayQuote,
+  type HospitalStayBatch,
 } from "./core-points.js";
 export type {
   CoreEventInput,

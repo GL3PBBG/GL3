@@ -14,7 +14,7 @@ import { ACCEPTED_MIMES, hashBytes, identifyImage, type ImageMime } from "./imag
  */
 export type DbOrTx = Db | Tx;
 
-export const DEFAULT_MAX_BYTES = 524_288;
+export const DEFAULT_MAX_BYTES = 2_097_152;
 export const DEFAULT_MAX_DIMENSION = 2048;
 
 export type AssetErrorCode =

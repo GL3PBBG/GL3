@@ -1,6 +1,6 @@
 import {
-  coreActionCost, definePlugin, filterPoint, on, type PageSchema, PluginError, type Pool, type PluginTx,
-  type ProgressionModel, route,
+  clampDiscountBp, coreActionCost, coreHospitalStay, definePlugin, filterPoint, hospitalDiscountFor, on,
+  type PageSchema, PluginError, type Pool, type PluginCtx, type PluginTx, type ProgressionModel, route,
 } from "@gl3/plugin-sdk";
 import { and, desc, eq, gt, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -36,6 +36,31 @@ export type { CombatSettings } from "./settings.js";
  */
 export interface KillResolved { killerId: string; victimId: string }
 export const killResolved = filterPoint<KillResolved>("combat.killResolved", "propagate");
+
+/**
+ * Who in an UNDERGROUND town is visible without a detective report. The
+ * attack gate and the targets list seed `{ locationId, exposed: [] }` and a
+ * subscriber appends player ids that are fair game there — territory adds
+ * every member of a gang whose heat in that town is over its threshold:
+ * holding turf makes you visible. Ids not standing in `locationId` are
+ * harmless (the list query is already town-scoped; the attack gate has
+ * already refused `target_elsewhere`). "collect": a throwing subscriber
+ * exposes nobody, which is the town's own rule.
+ */
+export interface ExposureQuote { readonly locationId: string; readonly exposed: readonly string[] }
+export const exposure = filterPoint<ExposureQuote>("combat.exposure", "collect");
+
+/**
+ * A hospital stay after `core.hospitalStay` has had its say — the discount a
+ * subscriber quotes (territory's speakeasy perk), clamped, floored, never
+ * below one second. Applied in-transaction on the two paths that sentence
+ * someone, not per shot: a chain per hospitalisation, not per trigger pull.
+ */
+async function hospitalStayFor(ctx: PluginCtx, playerId: string, baseSeconds: number): Promise<number> {
+  const quoted = await ctx.filters.apply(coreHospitalStay, { entries: [{ playerId, discountBp: 0 }] });
+  const bp = clampDiscountBp(hospitalDiscountFor(quoted, playerId));
+  return Math.max(1, Math.floor((baseSeconds * (10_000 - bp)) / 10_000));
+}
 
 /**
  * How long one attacker→target engagement lasts for alert purposes. Events
@@ -353,7 +378,13 @@ const attackRoute = route({
       if (town?.combatMode === "underground") {
         const reported = await activeReportTargetIds(tx, player.id, new Date());
         if (!reported.has(params.targetId)) {
-          throw new PluginError("no_detective_report", 409);
+          // Second chance: the target may be EXPOSED (combat.exposure) —
+          // applied only when the report set already said no, so a boot with
+          // no subscriber pays nothing here.
+          const quoted = await ctx.filters.apply(exposure, { locationId: attacker.locationId, exposed: [] });
+          if (!quoted.exposed.includes(params.targetId)) {
+            throw new PluginError("no_detective_report", 409);
+          }
         }
       }
 
@@ -497,7 +528,7 @@ const attackRoute = route({
         // the victim. Sets health = 0 alongside the deadline, so the UPDATE
         // above is redundant on this path; left alone, as the kill path does.
         if (hospitalised) {
-          await tx.hospital.sendToHospital(player.id, config.hospitalSeconds);
+          await tx.hospital.sendToHospital(player.id, await hospitalStayFor(ctx, player.id, config.hospitalSeconds));
         }
 
         // The log answers "who shot at me", and someone did.
@@ -595,7 +626,9 @@ const attackRoute = route({
         // Sets health = 0 alongside the deadline, so the health UPDATE above
         // is redundant on this path — both write 0. Left alone; a conditional
         // there would be a second branch for no gain.
-        await tx.hospital.sendToHospital(params.targetId, config.hospitalSeconds);
+        await tx.hospital.sendToHospital(
+          params.targetId, await hospitalStayFor(ctx, params.targetId, config.hospitalSeconds),
+        );
       }
 
       await tx.db.insert(combatLog).values({
@@ -825,8 +858,13 @@ const targetsRoute = route({
       let reportedIds: string[] | null = null;
       if (mode === "underground") {
         const reported = await activeReportTargetIds(tx, player.id, new Date());
-        if (reported.size === 0) return { status: 200, body: { mode, targets: [] } };
-        reportedIds = [...reported];
+        // Plus whoever the town exposes on its own (combat.exposure) — the
+        // union is the visible set, and it goes into the SQL predicate
+        // below for the same pre-LIMIT reason the report set does.
+        const quoted = await ctx.filters.apply(exposure, { locationId: me.locationId, exposed: [] });
+        const visible = new Set([...reported, ...quoted.exposed]);
+        if (visible.size === 0) return { status: 200, body: { mode, targets: [] } };
+        reportedIds = [...visible];
       }
 
       const rows = await tx.db
@@ -1263,6 +1301,6 @@ export default definePlugin({
   migrations: COMBAT_MIGRATIONS,
   routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute, adminSettingsListRoute, adminSettingsWriteRoute],
   adminPages: [adminPage],
-  provides: [killResolved],
+  provides: [killResolved, exposure],
   filters: [gunsmithLink],
 });
