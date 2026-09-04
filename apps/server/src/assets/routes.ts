@@ -86,7 +86,7 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
    * scope-specific permission below. The sweeper collects anything uploaded and
    * never bound.
    */
-  app.post("/api/admin/assets", { preHandler: [app.requireAuth] }, async (request, reply) => {
+  app.post("/api/admin/assets", { preHandler: [app.requireAuth], bodyLimit: 2 * 1024 * 1024 }, async (request, reply) => {
     const playerId = request.playerId;
     if (playerId === undefined) return reply.code(401).send({ error: "unauthorized" });
     const grants = await loadGrants(deps.db, playerId);
