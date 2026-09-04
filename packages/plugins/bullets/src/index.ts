@@ -1,5 +1,5 @@
 import {
-  definePlugin, InsufficientFundsError, PluginError, route,
+  definePlugin, filterPoint, InsufficientFundsError, PluginError, route,
   type PageSchema,
 } from "@gl3/plugin-sdk";
 import { ownerAt, payOwner } from "@gl3/plugin-properties";
@@ -9,8 +9,22 @@ import { locations, playerStats, settings } from "./schema.js";
 import { readBulletSettings } from "./settings.js";
 import { restockIfDue } from "./restock.js";
 import { capLever } from "./lever-cap.js";
-import { effectiveCost } from "./pricing.js";
+import { discountedCost, effectiveCost } from "./pricing.js";
 import { quoteBulletPrices } from "./travel-quote.js";
+
+/**
+ * What one bullet costs THIS buyer, as a discount a subscriber may grant on
+ * top of the franchise/admin price. Seeded `{ playerId, discountBp: 0 }` by
+ * the shop read and the buy route — before their transactions open, so a
+ * subscriber's own read never runs under the location lock — and applied
+ * to the in-transaction effective cost through `discountedCost`, which
+ * clamps. The franchise owner's half follows the discounted figure: the
+ * perk is paid for by the house, not by the buyer twice. Territory's docks
+ * are the first subscriber. "collect": a throwing subscriber costs its own
+ * discount, never the sale.
+ */
+export interface BulletPriceQuote { readonly playerId: string; readonly discountBp: number }
+export const priceQuote = filterPoint<BulletPriceQuote>("bullets.priceQuote", "collect");
 
 /**
  * Ported from `apps/server/src/game/bullets/routes.ts` and `service.ts`:
@@ -234,6 +248,7 @@ const shopRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
     const config = readBulletSettings((key) => ctx.settings.get(key));
+    const quote = await ctx.filters.apply(priceQuote, { playerId: player.id, discountBp: 0 });
 
     return ctx.transaction(async (tx) => {
       // First, and before any location row is read: it locks every location
@@ -252,7 +267,9 @@ const shopRoute = route({
       if (!location) throw new PluginError("no_location", 409);
 
       const franchise = await ownerAt(tx, "bullets", locationId);
-      const unitCost = effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost);
+      const unitCost = discountedCost(
+        effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost), quote.discountBp,
+      );
 
       return {
         status: 200,
@@ -291,6 +308,9 @@ const buyRoute = route({
     if (config.maxBuy !== null && quantity > config.maxBuy) {
       throw new PluginError("quantity_above_max", 400, { maxBuy: config.maxBuy });
     }
+    // Quoted BEFORE the transaction: the location lock below must not be
+    // held while a subscriber runs its own read.
+    const quote = await ctx.filters.apply(priceQuote, { playerId: player.id, discountBp: 0 });
 
     return ctx.transaction(async (tx) => {
       // (1) Unlocked read, preserved verbatim from core (`service.ts:32`). A
@@ -334,7 +354,9 @@ const buyRoute = route({
       // `max_cost` clamps here as well as rejecting at lever-set time: the cap
       // can be lowered after an owner has already set a higher lever, and the
       // figure charged has to follow the cap, not the stale lever.
-      const unitCost = effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost);
+      const unitCost = discountedCost(
+        effectiveCost(franchise?.lever ?? null, location.bulletCost, config.maxCost), quote.discountBp,
+      );
       const cost = unitCost * BigInt(quantity);
 
       // RULE 6, player↔player half: buyer and owner go through ONE sorted
@@ -440,6 +462,7 @@ export default definePlugin({
   // side clamps too (`effectiveCost`), because the cap can be lowered after a
   // lever was already accepted.
   filters: [capLever, quoteBulletPrices],
+  provides: [priceQuote],
   // The building on the properties board — art per property TYPE, not per
   // town's copy of it.
   providesAssets: [{ slot: "property", label: "Bullet factory building", singleton: true }],

@@ -13,3 +13,15 @@ export function effectiveCost(lever: bigint | null, locationCost: bigint, maxCos
   const base = lever ?? locationCost;
   return maxCost !== null && base > maxCost ? maxCost : base;
 }
+
+/**
+ * A `bullets.priceQuote` discount applied to the effective cost: floor
+ * division, so the buyer is never charged less than the advertised rate
+ * would leave, and a clamped bp so a subscriber can lower a price but never
+ * gouge or credit.
+ */
+export function discountedCost(unitCost: bigint, discountBp: number): bigint {
+  const bp = Number.isFinite(discountBp) ? Math.max(0, Math.min(10_000, Math.floor(discountBp))) : 0;
+  if (bp === 0 || unitCost <= 0n) return unitCost;
+  return unitCost - (unitCost * BigInt(bp)) / 10_000n;
+}

@@ -7,7 +7,9 @@ import type { Db } from "../../db/client.js";
 import { players, playerStats } from "../../db/schema/index.js";
 import { applyBalanceChange, InsufficientFundsError, lockPlayersForUpdate } from "../../economy/ledger.js";
 import { wealthScaledFee } from "../../economy/wealth-fee.js";
+import { coreHospitalStay, hospitalDiscountFor } from "@gl3/plugin-sdk";
 import { insertNotification } from "../notifications/service.js";
+import type { CoreFilters } from "../../plugins/core-filters.js";
 import { listSentencedAtLocation } from "../roster.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "./status.js";
 import {
@@ -22,6 +24,9 @@ export function registerHospitalRoutes(
   deliver: OutboxDelivery,
   settings: Record<string, string>,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,
+  // A thunk, like the jail routes' manifests: these routes register before
+  // the plugins load, and `core.hospitalStay` needs the loaded chain.
+  coreFilters: () => CoreFilters,
 ): void {
   app.get("/api/hospital", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId;
@@ -165,12 +170,18 @@ export function registerHospitalRoutes(
       const missing = maxHealth - health;
       if (missing <= 0) return { kind: "healthy" as const };
 
-      const seconds = missing * checkinSecondsPerHp(settings);
+      const baseSeconds = missing * checkinSecondsPerHp(settings);
       // Defensive: `checkinSecondsPerHp` already rejects a zero setting, but a
       // zero here must never reach `sendToHospital` regardless — that is the
       // exact "admit then settle back to full" hole the `not_injured` 409
       // above exists to prevent.
-      if (seconds <= 0) return { kind: "healthy" as const };
+      if (baseSeconds <= 0) return { kind: "healthy" as const };
+      // `core.hospitalStay`: a subscriber (territory's speakeasy) may shorten
+      // the stay. Same in-transaction application combat's paths use; the
+      // floor keeps a 100% discount from turning a stay into a no-op.
+      const quoted = await coreFilters().apply(coreHospitalStay, null, { entries: [{ playerId, discountBp: 0 }] });
+      const bp = hospitalDiscountFor(quoted, playerId);
+      const seconds = Math.max(1, Math.floor((baseSeconds * (10_000 - bp)) / 10_000));
       const until = await sendToHospital(tx, playerId, seconds);
       return {
         kind: "admitted" as const, until, seconds, maxHealth,
