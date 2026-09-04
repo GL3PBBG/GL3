@@ -19,6 +19,7 @@ import { loadPlugins } from "./plugins/loader.js";
 import { loadSettings } from "./settings/load.js";
 import { createRedis, createSubscriber } from "./redis.js";
 import { attachGateway } from "./ws/gateway.js";
+import { startPushSubscriber } from "./push/subscriber.js";
 
 /**
  * The explicit id→manifest map for OPTIONAL plugins (spec: Boot sequence
@@ -141,6 +142,24 @@ const app = await buildApp(config, { db, redis, plugins: loadedPlugins, assetDri
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
 await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins });
+
+// Deliberately here and NOT in buildApp, for the sentence sweeper's and the
+// outbox dispatcher's reason: every integration test builds its server
+// through buildApp/bootTestServer, and a background subscriber firing HTTP
+// requests at Expo under those tests would race a whole class of them. Its
+// own dedicated subscriber client — a subscribed Redis client runs no other
+// commands, so the gateway's cannot be shared. Every profile: push is not
+// gangster-game-specific, and a framework boot's mail and notifications are
+// exactly as worth pushing.
+if (config.push.enabled) {
+  await startPushSubscriber({
+    db,
+    redis,
+    subscriber: createSubscriber(config.redisUrl),
+    accessToken: config.push.expoAccessToken,
+    onError: (error) => { app.log.error({ err: error }, "push dispatch failed"); },
+  });
+}
 
 // Deliberately here and NOT in buildApp: every integration test builds its
 // server through buildApp/bootTestServer, and a background process quietly

@@ -29,6 +29,7 @@ export * from "./dto/forum.js";
 export * from "./dto/profile.js";
 export * from "./dto/plugins.js";
 export * from "./dto/properties.js";
+export * from "./dto/push.js";
 export * from "./dto/rank.js";
 export * from "./dto/rounds.js";
 export * from "./dto/search.js";

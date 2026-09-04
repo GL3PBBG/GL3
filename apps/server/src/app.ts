@@ -17,6 +17,7 @@ import { registerLeaderboardRoutes } from "./game/leaderboard/routes.js";
 import { DEFAULT_LEADERBOARD_PREFIX } from "./game/leaderboard/service.js";
 import { registerProfileRoutes } from "./game/profile/routes.js";
 import { registerPresenceRoutes } from "./presence/routes.js";
+import { registerPushRoutes } from "./push/routes.js";
 import { registerRoundsRoutes } from "./game/rounds/routes.js";
 import { registerStatsRoutes } from "./stats/routes.js";
 import { collectAssetSlots } from "./plugins/asset-slots.js";
@@ -99,6 +100,11 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     registerHospitalRoutes(app, deps.db, createOutboxDelivery(deps.db, { redis: deps.redis }), loadedSettings, requireAuth);
   }
   registerPresenceRoutes(app, deps.db, deps.redis, requireAuth);
+  // Core, not a plugin: no plugin owns device registration, and these must
+  // exist on every profile including `framework`. Rows accumulate whether or
+  // not `PUSH_ENABLED` starts the subscriber — a deployment registers devices
+  // before it starts sending.
+  registerPushRoutes(app, deps.db, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db, assetDriver);
   registerWsRoutes(app, deps.redis, requireAuth);

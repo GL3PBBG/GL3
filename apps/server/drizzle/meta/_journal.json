@@ -162,6 +162,13 @@
       "when": 1788136800000,
       "tag": "0022_ip_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788393600000,
+      "tag": "0023_push_devices",
+      "breakpoints": true
     }
   ]
 }

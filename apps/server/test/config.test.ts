@@ -46,4 +46,26 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...base, SWEEP_INTERVAL_MS: "0" }).sweepIntervalMs).toBe(0);
     expect(loadConfig({ ...base, SWEEP_INTERVAL_MS: "500" }).sweepIntervalMs).toBe(500);
   });
+
+  it("leaves push off by default and reads no Expo token", () => {
+    expect(loadConfig(valid).push).toEqual({ enabled: false, expoAccessToken: null });
+  });
+
+  it("enables push on true or 1 and carries the Expo access token", () => {
+    expect(loadConfig({ ...valid, PUSH_ENABLED: "true" }).push.enabled).toBe(true);
+    expect(loadConfig({ ...valid, PUSH_ENABLED: "1" }).push.enabled).toBe(true);
+    expect(loadConfig({ ...valid, PUSH_ENABLED: "false" }).push.enabled).toBe(false);
+    expect(loadConfig({ ...valid, PUSH_ENABLED: "0" }).push.enabled).toBe(false);
+    expect(loadConfig({ ...valid, EXPO_ACCESS_TOKEN: "expo_abc" }).push.expoAccessToken).toBe("expo_abc");
+    // Blank means unset, not "send an empty bearer".
+    expect(loadConfig({ ...valid, EXPO_ACCESS_TOKEN: "  " }).push.expoAccessToken).toBeNull();
+  });
+
+  it("rejects a PUSH_ENABLED value that is neither on nor off, rather than guessing", () => {
+    expect(() => loadConfig({ ...valid, PUSH_ENABLED: "yes" })).toThrow();
+  });
+
+  it("accepts PUSH_ENABLED with no access token — that is a valid configuration", () => {
+    expect(() => loadConfig({ ...valid, PUSH_ENABLED: "true" })).not.toThrow();
+  });
 });

@@ -161,8 +161,13 @@ describe("core schema", () => {
     // slot exactly — the melee-only second weapon slot (spec
     // 2026-08-26-mccodes-migrator-design §2.1). Totals move 37->38 and
     // set-null 13->14, restated here in the same commit, never loosened.
-    expect(totalForeignKeys).toBe(38);
-    expect(byRule["c"]).toBe(24); // ON DELETE CASCADE
+    // 0023_push_devices adds ONE cascade FK: push_devices.player_id ->
+    // players(id). A deleted player's registered devices have no meaning —
+    // and leaving them would point a live Expo token at a dead account.
+    // Totals move 38->39 and cascade 24->25; set-null is untouched at 14.
+    // Restated here in the same commit, never loosened.
+    expect(totalForeignKeys).toBe(39);
+    expect(byRule["c"]).toBe(25); // ON DELETE CASCADE
     expect(byRule["n"]).toBe(14); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
@@ -215,7 +220,15 @@ describe("core schema", () => {
     // scan (a Redis outage can back up thousands of backoff-stamped rows, and
     // the scan must not seq-scan them). The outbox table's own primary key is
     // excluded by this query's NOT EXISTS clause like every other.
-    expect(Number(count)).toBe(31);
+    // 0023_push_devices adds TWO, not the one a first reading suggests:
+    // push_devices_expo_token_key (the unique index the registration upsert
+    // uses as its ON CONFLICT target — a token identifies an app
+    // INSTALLATION, not a person, so it must be unique game-wide or a shared
+    // handset rings with the previous owner's mail) and
+    // push_devices_player_idx. The second is load-bearing: the subscriber's
+    // only query is "enabled devices for player X", run once per pushed
+    // event, and the player-row cascade delete scans the same column.
+    expect(Number(count)).toBe(33);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'player_stats_exp_idx'
