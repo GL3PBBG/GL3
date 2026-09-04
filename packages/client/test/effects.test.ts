@@ -94,6 +94,12 @@ describe("weaponStatLine", () => {
     expect(weaponStatLine({ damageMin: 0, damageMax: 0 })).toBe("0–0 damage");
   });
 
+  it("describes a melee-model weapon by its power rather than calling it unusable", () => {
+    // `power` IS the melee marker (combat's loadWeapon reads it the same
+    // way); such an item has no damage range and no shots-to-kill.
+    expect(weaponStatLine({ power: 12 })).toBe("power 12 · melee");
+  });
+
   it("returns null for a weapon whose damage range is unusable", () => {
     // Each page renders its own fallback for this — "unusable" on /inventory,
     // nothing at all on /shop — so the helper reports the fact, not the copy.

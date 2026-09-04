@@ -144,7 +144,33 @@ describe("GET /api/combat/weapon", () => {
     const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
     expect(dto).toEqual({
       itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
+      firearm: null, melee: null,
     });
+  });
+
+  it("describes slot 1 as a firearm block: name, damage range, bullets per shot", async () => {
+    const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
+    expect(dto.firearm).toEqual({
+      itemId: weaponId, name: `w-${weaponId.slice(-8)}`, damageMin: 1, damageMax: 5, bulletsPerShot: 1,
+    });
+    expect(dto.melee).toBeNull();
+  });
+
+  it("describes the melee slot with its power, the player's strength and an honest estimate", async () => {
+    const knifeId = uuidv7();
+    await db.insert(items).values({ id: knifeId, name: "Estimate Knife", itemType: "weapon", effects: { power: 12 } });
+    await db.update(playerStats).set({ weaponMeleeItemId: knifeId, strength: 40n })
+      .where(eq(playerStats.playerId, player));
+
+    const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
+    // floor(power × strength ÷ (guard 1 / 1.5)) = 12 × 40 × 1.5 = 720 — the
+    // unguarded, unarmored, uncritted figure; real damage divides by the
+    // target's guard, which this route cannot know.
+    expect(dto.melee).toEqual({
+      itemId: knifeId, name: "Estimate Knife", power: 12, strength: "40", estimate: "720",
+    });
+    // Slot 1 is untouched by the melee slot.
+    expect(dto.firearm?.itemId).toBe(weaponId);
   });
 });
 

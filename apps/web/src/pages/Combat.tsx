@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { AttackResponse, TargetReason, WeaponConditionDto } from "@gl3/shared";
+import type { AttackResponse, TargetReason, WeaponChoice, WeaponConditionDto } from "@gl3/shared";
 import { formatMoney, useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe, useRepairWeapon, useWeaponCondition } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
@@ -19,16 +19,32 @@ const REASONS: Record<TargetReason, string> = {
   newbie_self: "You're still under newbie protection",
 };
 
+/** "Shot with Glock" / "Struck with Bat" / "Punched" — which model resolved, by name. */
+function weaponVerb(data: AttackResponse): string {
+  if (data.weapon === "fists") return "Punched";
+  const verb = data.weapon === "melee" ? "Struck" : "Shot";
+  return data.weaponName === null ? verb : `${verb} with ${data.weaponName}`;
+}
+
 function AttackResult({ data }: { data: AttackResponse }): JSX.Element {
   if (data.backfire) {
     return <span className={styles.bad}>Your weapon backfired for {data.selfDamage} damage!</span>;
   }
-  if (!data.hit) return <span>Missed.</span>;
+  if (!data.hit) return <span>{weaponVerb(data)} — missed.</span>;
+  // The raw figure the weapon rolled is damage + what armor ate; showing both
+  // is what makes a weapon comparable across targets rather than a yes/no.
+  const raw = data.damage + data.armorAbsorbed;
   return (
     <span>
-      {data.crit ? <span className={styles.bad}>Critical!</span> : null}
-      {" "}{data.damage} damage
-      {data.armorAbsorbed > 0 ? <span className={styles.muted}> ({data.armorAbsorbed} absorbed)</span> : null}
+      {weaponVerb(data)} for{" "}
+      {data.crit ? <span className={styles.bad}>a critical </span> : null}
+      {data.damage} damage
+      {data.armorAbsorbed > 0
+        ? <span className={styles.muted}> ({raw} rolled, armor ate {data.armorAbsorbed})</span>
+        : null}
+      {data.bulletsSpent > 0
+        ? <span className={styles.muted}> · {data.bulletsSpent} {data.bulletsSpent === 1 ? "bullet" : "bullets"}</span>
+        : null}
       {data.targetKilled ? (
         <span className={styles.ok}> — killed, took <Money value={String(data.payout)} /></span>
       ) : (
@@ -38,15 +54,29 @@ function AttackResult({ data }: { data: AttackResponse }): JSX.Element {
   );
 }
 
-/** Weapon name, condition bar, backfire odds, and a repair action. */
+/**
+ * Both slots. Slot 1 keeps its condition bar, backfire odds and repair; the
+ * melee slot shows its power, the strength it multiplies and the estimate
+ * the server labels a ceiling (real damage divides by the target's guard).
+ */
 function WeaponPanel({ weapon }: { weapon: WeaponConditionDto }): JSX.Element {
   const repair = useRepairWeapon();
   const itemId = weapon.itemId;
+  const gun = weapon.firearm;
+  const melee = weapon.melee;
 
   return (
     <div>
-      <h3 className={styles.meta}>Weapon</h3>
-      <p className={styles.meta}>{weapon.name ?? "Unarmed"}</p>
+      <h3 className={styles.meta}>Weapons</h3>
+      <p className={styles.meta}>
+        Firearm: {weapon.name ?? "none"}
+        {gun !== null ? (
+          <span className={styles.muted}>
+            {" · "}{gun.damageMin}–{gun.damageMax} damage
+            {gun.bulletsPerShot > 1 ? ` · ${gun.bulletsPerShot} bullets/shot` : ""}
+          </span>
+        ) : null}
+      </p>
       {itemId !== null ? (
         <>
           <div className={styles.bar}>
@@ -67,7 +97,53 @@ function WeaponPanel({ weapon }: { weapon: WeaponConditionDto }): JSX.Element {
           ) : null}
         </>
       ) : null}
+      <p className={styles.meta}>
+        Melee: {melee === null ? "none" : melee.name}
+        {melee !== null ? (
+          <span className={styles.muted}>
+            {" · "}power {melee.power} × strength <Amount value={melee.strength} />
+            {" → up to "}<Amount value={melee.estimate} /> vs an unguarded target
+          </span>
+        ) : null}
+      </p>
+      {itemId === null && melee === null ? <p className={styles.meta}>Unarmed — you fight with your fists.</p> : null}
     </div>
+  );
+}
+
+/**
+ * One button per armed slot when both are armed, so a player who trained
+ * for the bat is never forced through a lousy gun. A single armed slot needs
+ * no choice — the server's precedence fires it — and fists need none either.
+ */
+function AttackButtons({ weapon, targetId, disabled, fire }: {
+  weapon: WeaponConditionDto | undefined;
+  targetId: string;
+  disabled: boolean;
+  fire: (input: { targetId: string; weapon?: WeaponChoice }) => void;
+}): JSX.Element {
+  const slot1Armed = weapon?.itemId != null;
+  const hasMelee = weapon?.melee != null;
+  // A melee item still in slot 1 (equipped before the slot gate) has no
+  // firearm block; "Attack" rather than "Shoot" keeps the label honest.
+  const slot1Label = weapon?.firearm != null ? "Shoot" : "Attack";
+  if (slot1Armed && hasMelee) {
+    return (
+      <>
+        <button type="button" disabled={disabled} onClick={() => fire({ targetId, weapon: "firearm" })}>
+          {slot1Label}
+        </button>
+        <button type="button" disabled={disabled} onClick={() => fire({ targetId, weapon: "melee" })}>
+          Strike
+        </button>
+      </>
+    );
+  }
+  const label = slot1Armed ? slot1Label : hasMelee ? "Strike" : "Punch";
+  return (
+    <button type="button" disabled={disabled} onClick={() => fire({ targetId })}>
+      {label}
+    </button>
   );
 }
 
@@ -132,13 +208,12 @@ export function Combat(): JSX.Element {
                     <Amount value={String(target.maxHealth)} />
                   </span>
                   {target.attackable ? (
-                    <button
-                      type="button"
+                    <AttackButtons
+                      weapon={weapon.data}
+                      targetId={target.playerId}
                       disabled={blocked || attack.isPending}
-                      onClick={() => attack.mutate(target.playerId)}
-                    >
-                      Shoot
-                    </button>
+                      fire={(input) => attack.mutate(input)}
+                    />
                   ) : (
                     <span className={styles.muted}>
                       {" — "}{target.reason ? REASONS[target.reason] : "Can't be shot"}

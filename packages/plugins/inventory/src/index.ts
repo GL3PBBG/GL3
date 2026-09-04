@@ -211,16 +211,21 @@ const equipRoute = route({
         if (owned.itemType !== expectedType) throw new PluginError("wrong_slot", 400);
 
         if (slot === "weapon") {
-          // A melee item in slot 1 is legal (C6's arm fires it); anything
-          // malformed is unusable rather than a 500: the jsonb is an
-          // external boundary.
-          const melee = MeleeEffectsSchema.safeParse(owned.effects);
-          if (!melee.success) {
-            const parsed = WeaponEffectsSchema.safeParse(owned.effects);
-            if (!parsed.success) throw new PluginError("wrong_slot", 400);
-            if (BigInt(parsed.data.minRankExp) > stats.exp) {
-              throw new PluginError("rank_too_low", 409);
-            }
+          // Firearms only — the gate is symmetric with the melee slot's.
+          // Slot 1 accepted melee items while it was the only slot (C6
+          // shipped before B0's melee slot); now each slot names its model,
+          // which is what lets the combat page offer a per-attack choice.
+          // Combat still fires a melee item already sitting here (rows
+          // equipped before this gate), so nothing migrated or historical
+          // breaks; only new equips are refused. Anything malformed is
+          // unusable rather than a 500: the jsonb is an external boundary.
+          if (MeleeEffectsSchema.safeParse(owned.effects).success) {
+            throw new PluginError("wrong_slot", 400);
+          }
+          const parsed = WeaponEffectsSchema.safeParse(owned.effects);
+          if (!parsed.success) throw new PluginError("wrong_slot", 400);
+          if (BigInt(parsed.data.minRankExp) > stats.exp) {
+            throw new PluginError("rank_too_low", 409);
           }
         } else if (slot === "weapon-melee") {
           // The gate itself: melee models only. A firearm here is refused —

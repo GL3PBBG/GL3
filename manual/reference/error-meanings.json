@@ -52,6 +52,7 @@
  "combat:insufficient_funds": "Caller's cash cannot cover the repair cost",
  "combat:jailed": "The caller is in jail (re-checked under the lock; same 423 the loader gate sends)",
  "combat:no_detective_report": "The town is underground and the caller holds no live detective report on the target",
+ "combat:no_melee_weapon": "The attack asked for the melee slot (weapon: \"melee\") and it is empty — no silent fallback to slot 1's gun",
  "combat:no_such_target": "Target player does not exist",
  "combat:protected": "Newbie protection: either party is below the exp threshold (mutual — below it you can neither attack nor be attacked)",
  "combat:same_gang": "Target is in the caller's gang",

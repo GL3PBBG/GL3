@@ -45,6 +45,11 @@ export function stringEffect(effects: unknown, field: string): string | null {
  * nothing at all on /shop.
  */
 export function weaponStatLine(effects: unknown): string | null {
+  // `power` IS the melee marker, the same test combat's loadWeapon applies:
+  // such an item has no damage range, spends no bullets and never wears, so
+  // none of the firearm clauses below apply to it.
+  const power = numericEffect(effects, "power");
+  if (power !== null) return `power ${power} · melee`;
   const min = numericEffect(effects, "damageMin");
   const max = numericEffect(effects, "damageMax");
   if (min === null || max === null) return null;

@@ -41,6 +41,7 @@ const MESSAGES: Record<string, string> = {
   in_super_max: "Super max. Nobody attempts anything from super max.",
   insufficient_brave: "You're not feeling brave enough — it comes back over time.",
   insufficient_bullets: "You don't have enough bullets.",
+  no_melee_weapon: "You have no melee weapon equipped.",
   insufficient_cash: "You don't have enough cash on hand.",
   insufficient_energy: "You're out of energy — it comes back over time.",
   insufficient_funds: "You don't have enough money.",

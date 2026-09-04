@@ -8,6 +8,11 @@ export interface WeaponProfile {
   model?: "firearm" | "melee";
   /** Melee only: flat weapon power from the item's effects. */
   power?: number;
+  /**
+   * The item's name, for the attack response only. Absent on fists and on
+   * every hand-built literal; nothing in the arithmetic reads it.
+   */
+  name?: string;
   accuracy: number;
   damageMin: number;
   damageMax: number;

@@ -295,19 +295,22 @@ describe("PUT /api/inventory/equip — the melee slot (B0)", () => {
     expect(res.json()).toEqual({ weaponItemId: pistol, weaponMeleeItemId: null, armorItemId: null });
   });
 
-  it("still accepts a melee item in slot 1 (C6's arm) and a melee item in the melee slot together", async () => {
+  it("400s a melee item in slot 1 — the gate is symmetric, firearms only there", async () => {
+    // Slot 1 used to accept melee (C6 shipped before the melee slot existed).
+    // With a dedicated slot the firearm slot is firearms-only, so the combat
+    // page can name each slot's model and offer a per-attack choice.
     const bat = await seedItem("weapon", { power: 12 });
-    const knife = await seedItem("weapon", { power: 10 });
     await grant(playerId, bat, 1);
-    await grant(playerId, knife, 1);
 
     const res = await app.inject({
       method: "PUT", url: "/api/inventory/equip",
       headers: { authorization: `Bearer ${token}` },
-      payload: { weaponItemId: bat, weaponMeleeItemId: knife },
+      payload: { weaponItemId: bat },
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ weaponItemId: bat, weaponMeleeItemId: knife, armorItemId: null });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "wrong_slot" });
+    const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+    expect(row?.weaponItemId).toBeNull();
   });
 });
 

@@ -58,6 +58,8 @@ describe("combat melee-slot precedence (B0)", () => {
       expect(res.json().hit).toBe(true);
       expect(res.json().damage).toBe(10);
       expect(res.json().bulletsSpent).toBe(1);
+      expect(res.json().weapon).toBe("firearm");
+      expect(res.json().weaponName).toBe("Slot 1 Pistol");
       const [v] = await db.select().from(playerStats).where(eq(playerStats.playerId, victim.playerId));
       expect(v?.health).toBe(490);
 
@@ -95,6 +97,8 @@ describe("combat melee-slot precedence (B0)", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().bulletsSpent).toBe(0); // melee never spends ammunition
+      expect(res.json().weapon).toBe("melee");
+      expect(res.json().weaponName).toBe("Offhand Knife");
       if (res.json().hit) {
         // Base 10 × 100 / (50/1.5) floors to 29 before the ±20% swing, so
         // 23–36 uncritted; the d40 crit table can multiply up to ×4.1. The
@@ -147,6 +151,8 @@ describe("combat melee-slot precedence (B0)", () => {
         headers: { authorization: `Bearer ${attacker.token}` },
       });
       expect(res.statusCode).toBe(200);
+      expect(res.json().weapon).toBe("fists");
+      expect(res.json().weaponName).toBeNull();
       if (res.json().hit) {
         // Unarmed damage, never the smuggled 99.
         expect(res.json().damage).toBeLessThan(99);
@@ -156,6 +162,116 @@ describe("combat melee-slot precedence (B0)", () => {
         WHERE attacker_id = ${attacker.playerId} ORDER BY created_at DESC LIMIT 1`,
       )) as unknown as { weapon_item_id: string | null }[];
       expect(log[0]?.weapon_item_id).toBeNull();
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The per-attack choice: an optional `weapon` body field overrides the
+ * precedence above. Absent keeps it byte-identical (the three cases above
+ * send no body at all). `melee` needs the melee slot armed; `firearm` is
+ * slot 1 whatever it holds — fists when empty, exactly like today.
+ */
+describe("POST /api/combat/attack — the weapon choice", () => {
+  async function armBoth(ip1: string, ip2: string, town: string) {
+    await db.execute(sql`INSERT INTO settings (key, value) VALUES ('combat.cooldown_seconds', '1') ON CONFLICT (key) DO NOTHING`);
+    const server = await bootTestServer({ plugins: [mccodesAttributes] });
+    const attacker = await registerVerifiedPlayer(server, { remoteAddress: ip1 });
+    const victim = await registerVerifiedPlayer(server, { remoteAddress: ip2 });
+    const townId = crypto.randomUUID();
+    await db.execute(sql`INSERT INTO locations (id, name) VALUES (${townId}, ${town})`);
+    const gun = await insertItem(
+      { backfireChance: 0, accuracy: 100, damageMin: 10, damageMax: 10 }, "Choice Pistol");
+    const knife = await insertItem({ power: 10 }, "Choice Knife");
+    await db.update(playerStats).set({
+      locationId: townId, weaponItemId: gun, weaponMeleeItemId: knife,
+      strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n, energy: 12,
+    }).where(eq(playerStats.playerId, attacker.playerId));
+    await db.update(playerStats).set({
+      locationId: townId, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
+    }).where(eq(playerStats.playerId, victim.playerId));
+    return { server, attacker, victim, gun, knife };
+  }
+
+  it("both armed + weapon=melee: the melee slot fires, the gun stays holstered", async () => {
+    const { server, attacker, victim, knife } = await armBoth("10.21.2.1", "10.21.2.2", "Choicetown");
+    try {
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+        payload: { weapon: "melee" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().weapon).toBe("melee");
+      expect(res.json().weaponName).toBe("Choice Knife");
+      expect(res.json().bulletsSpent).toBe(0);
+      const [after] = await db.select().from(playerStats).where(eq(playerStats.playerId, attacker.playerId));
+      expect(after?.bullets).toBe(5n);
+      const log = (await db.execute(sql`
+        SELECT weapon_item_id FROM p_combat_log
+        WHERE attacker_id = ${attacker.playerId} ORDER BY created_at DESC LIMIT 1`,
+      )) as unknown as { weapon_item_id: string }[];
+      expect(log[0]?.weapon_item_id).toBe(knife);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("both armed + weapon=firearm: the gun fires — the same numbers as no choice at all", async () => {
+    const { server, attacker, victim, gun } = await armBoth("10.21.2.3", "10.21.2.4", "Gunchoice");
+    try {
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+        payload: { weapon: "firearm" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().weapon).toBe("firearm");
+      expect(res.json().damage).toBe(10);
+      expect(res.json().bulletsSpent).toBe(1);
+      const log = (await db.execute(sql`
+        SELECT weapon_item_id FROM p_combat_log
+        WHERE attacker_id = ${attacker.playerId} ORDER BY created_at DESC LIMIT 1`,
+      )) as unknown as { weapon_item_id: string }[];
+      expect(log[0]?.weapon_item_id).toBe(gun);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("weapon=melee with an empty melee slot 409s no_melee_weapon and fires nothing", async () => {
+    const { server, attacker, victim } = await armBoth("10.21.2.5", "10.21.2.6", "Nomelee");
+    try {
+      await db.update(playerStats).set({ weaponMeleeItemId: null })
+        .where(eq(playerStats.playerId, attacker.playerId));
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+        payload: { weapon: "melee" },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: "no_melee_weapon" });
+      const [v] = await db.select().from(playerStats).where(eq(playerStats.playerId, victim.playerId));
+      expect(v?.health).toBe(500);
+      const [after] = await db.select().from(playerStats).where(eq(playerStats.playerId, attacker.playerId));
+      expect(after?.bullets).toBe(5n);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("400s an unknown weapon choice before the cooldown or any lock", async () => {
+    const { server, attacker, victim } = await armBoth("10.21.2.7", "10.21.2.8", "Badchoice");
+    try {
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+        payload: { weapon: "bazooka" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: "invalid_request" });
     } finally {
       await server.close();
     }

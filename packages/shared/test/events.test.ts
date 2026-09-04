@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GameEventSchema, MoneySchema, ServerFrameSchema } from "../src/index.js";
-import { AttackResponseSchema, WeaponConditionDtoSchema } from "../src/dto/combat.js";
+import { AttackRequestSchema, AttackResponseSchema, WeaponConditionDtoSchema } from "../src/dto/combat.js";
 import { ProfileDtoSchema } from "../src/dto/profile.js";
 import { RankListResponseSchema } from "../src/dto/rank.js";
 
@@ -207,8 +207,30 @@ describe("backfire and condition contracts", () => {
   it("parses a weapon condition dto with no weapon equipped", () => {
     const dto = WeaponConditionDtoSchema.parse({
       itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
+      firearm: null, melee: null,
     });
     expect(dto.itemId).toBeNull();
+    expect(dto.melee).toBeNull();
+  });
+
+  it("parses a weapon condition dto with a melee slot armed and slot 1 empty", () => {
+    const dto = WeaponConditionDtoSchema.parse({
+      itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
+      firearm: null,
+      melee: { itemId: "018f0000-0000-7000-8000-00000000000a", name: "Bat", power: 12, strength: "40", estimate: "720" },
+    });
+    expect(dto.melee?.estimate).toBe("720");
+  });
+
+  it("parses an attack response naming the weapon that fired", () => {
+    const dto = AttackResponseSchema.parse({
+      hit: true, crit: false, damage: 10, armorAbsorbed: 0, targetHealth: 90, targetKilled: false,
+      payout: "0", bulletsSpent: 0, backfire: false, selfDamage: 0, attackerHealth: 100,
+      weapon: "melee", weaponName: "Bat",
+    });
+    expect(dto.weapon).toBe("melee");
+    expect(AttackRequestSchema.parse({ weapon: "firearm" }).weapon).toBe("firearm");
+    expect(AttackRequestSchema.safeParse({ weapon: "bazooka" }).success).toBe(false);
   });
 
   it("carries a nullable money rank label on a profile", () => {

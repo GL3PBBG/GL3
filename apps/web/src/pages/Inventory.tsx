@@ -31,6 +31,11 @@ function ItemActions({ item }: { item: InventoryItem }): JSX.Element | null {
   );
 }
 
+/** `power` IS the melee marker — the same test combat and the equip gate apply. */
+function isMeleeItem(item: InventoryItem): boolean {
+  return numericEffect(item.effects, "power") !== null;
+}
+
 /** True for the built-in heal effect, which is every item with no `kind`. */
 function isHealItem(item: InventoryItem): boolean {
   const kind = stringEffect(item.effects, "kind");
@@ -164,25 +169,27 @@ export function Inventory(): JSX.Element {
                     {item.name} ×<Amount value={String(item.qty)} /> <ItemStats item={item} />
                   </span>
                   <ItemActions item={item} />
-                  {/* Melee-model items (a bare {power} in the effects) get a
-                      second destination: the melee slot, which accepts only
-                      those (B0). Firearms keep the single Equip. */}
-                  {typeof item.effects === "object" && item.effects !== null && "power" in item.effects ? (
+                  {/* Melee-model items (a bare {power} in the effects) go to
+                      the melee slot and only there; firearms go to slot 1
+                      and only there. The server refuses either crossing
+                      with wrong_slot, so the page offers one destination. */}
+                  {isMeleeItem(item) ? (
                     <button
                       type="button"
                       disabled={equip.isPending || item.itemId === equipped.weaponMeleeItemId}
                       onClick={() => equip.mutate({ weaponMeleeItemId: item.itemId })}
                     >
-                      {item.itemId === equipped.weaponMeleeItemId ? "In melee slot" : "To melee slot"}
+                      {item.itemId === equipped.weaponMeleeItemId ? "Equipped (melee)" : "Equip melee"}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={equip.isPending || item.itemId === equipped.weaponItemId}
-                    onClick={() => equip.mutate({ weaponItemId: item.itemId })}
-                  >
-                    {item.itemId === equipped.weaponItemId ? "Equipped" : "Equip"}
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={equip.isPending || item.itemId === equipped.weaponItemId}
+                      onClick={() => equip.mutate({ weaponItemId: item.itemId })}
+                    >
+                      {item.itemId === equipped.weaponItemId ? "Equipped" : "Equip"}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

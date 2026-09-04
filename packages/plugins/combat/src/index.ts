@@ -176,7 +176,7 @@ async function loadWeapon(
   if (weaponItemId === null) return unarmed;
 
   const [row] = await tx.db
-    .select({ effects: items.effects, itemType: items.itemType })
+    .select({ effects: items.effects, itemType: items.itemType, name: items.name })
     .from(items)
     .where(eq(items.id, weaponItemId));
   if (!row || row.itemType !== ITEM_TYPE_WEAPON) return unarmed;
@@ -194,6 +194,7 @@ async function loadWeapon(
       backfireChance: 0,
       model: "melee" as const,
       power: melee.data.power,
+      name: row.name,
     };
   }
 
@@ -207,6 +208,7 @@ async function loadWeapon(
   // it, and `||` would silently upgrade it to the default.
   return {
     ...parsed.data,
+    name: row.name,
     accuracy: parsed.data.accuracy ?? config.defaultWeaponAccuracy,
     backfireChance: backfireChanceFor(
       parsed.data.backfireChance ?? config.backfire.baseChance,
@@ -284,16 +286,30 @@ async function cooldownForAttacker(
   return cooldownSecondsFor(profile, config);
 }
 
+/**
+ * The per-attack weapon choice. `firearm` is slot 1 whatever it holds —
+ * fists when empty, exactly as an absent field resolves an empty slot 1 —
+ * and `melee` is the melee slot, refused (`no_melee_weapon`) when it is
+ * empty rather than silently falling back to slot 1: a player who chose to
+ * strike must never be surprised by a gunshot and a bullet bill. Absent
+ * keeps the B0 precedence below byte-identical. The whole body is optional
+ * because every pre-existing caller sends none.
+ */
+const WeaponChoiceSchema = z.enum(["firearm", "melee"]);
+const AttackBodySchema = z.object({ weapon: WeaponChoiceSchema.optional() }).optional();
+
 const attackRoute = route({
   method: "POST",
   path: "/api/combat/attack/:targetId",
   accessInJail: false,
   accessInHospital: false,
   params: z.object({ targetId: z.string().uuid() }),
-  handler: async (ctx, { params }) => {
+  body: AttackBodySchema,
+  handler: async (ctx, { params, body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
     if (params.targetId === player.id) throw new PluginError("self_attack", 400);
+    const choice = body?.weapon ?? null;
 
     const config = readCombatSettings((key) => ctx.settings.get(key));
 
@@ -436,16 +452,39 @@ const attackRoute = route({
       // (their melee slot is forever NULL). The equip route gates this slot
       // to melee models; a hand-edited non-melee row is an external boundary
       // and means "unarmed", never a firearm firing from the melee slot.
+      //
+      // An explicit choice overrides that precedence: `melee` fires the
+      // melee slot even beside a loaded gun (409 when the slot is empty —
+      // the melee-slot equip gate means an armed slot always parses as
+      // melee, so a non-parsing row there is the same external-boundary
+      // case as above and reads as empty); `firearm` is slot 1, fists
+      // included. The 409 is thrown inside the transaction like every other
+      // refusal here, so the cooldown stays burned.
       let weapon = slot1;
-      if (attacker.weaponItemId === null && attacker.weaponMeleeItemId !== null) {
+      let meleeFired = false;
+      if (choice === "melee") {
+        const offhand = attacker.weaponMeleeItemId === null
+          ? null
+          : await loadWeapon(tx, attacker.weaponMeleeItemId, config, PRISTINE);
+        if (offhand === null || offhand.model !== "melee") throw new PluginError("no_melee_weapon", 409);
+        weapon = offhand;
+        meleeFired = true;
+      } else if (choice === null && attacker.weaponItemId === null && attacker.weaponMeleeItemId !== null) {
         const offhand = await loadWeapon(tx, attacker.weaponMeleeItemId, config, PRISTINE);
-        if (offhand.model === "melee") weapon = offhand;
+        if (offhand.model === "melee") { weapon = offhand; meleeFired = true; }
       }
-      // Which item the log rows credit: slot 1 when armed, else the melee
-      // slot when it actually fired, else fists.
-      const weaponUsedItemId = attacker.weaponItemId !== null
-        ? attacker.weaponItemId
-        : weapon.model === "melee" ? attacker.weaponMeleeItemId : null;
+      // Which item the log rows credit: the melee slot when it fired, else
+      // slot 1 when armed, else fists.
+      const weaponUsedItemId = meleeFired
+        ? attacker.weaponMeleeItemId
+        : attacker.weaponItemId;
+      // What the response names. A melee item still sitting in slot 1 (a
+      // row equipped before the slot-1 gate refused them) reports "melee":
+      // the model is what resolved, and that is what the player is told.
+      const weaponUsed: "firearm" | "melee" | "fists" = weaponUsedItemId === null
+        ? "fists"
+        : weapon.model === "melee" ? "melee" : "firearm";
+      const weaponName = weaponUsedItemId === null ? null : weapon.name ?? null;
 
       if (attacker.bullets < BigInt(weapon.bulletsPerShot)) {
         throw new PluginError("insufficient_bullets", 409);
@@ -497,7 +536,7 @@ const attackRoute = route({
       // decay models rust from disuse and use decay models firing; a player
       // who shoots constantly accrues only the latter, one who never shoots
       // only the former. Both reach zero and neither double-counts.
-      if (attacker.weaponItemId !== null && weapon.model !== "melee") {
+      if (attacker.weaponItemId !== null && !meleeFired && weapon.model !== "melee") {
         const nextCondition = Math.max(0, currentCondition - config.condition.wearPerShot);
         await tx.db
           .insert(weaponCondition)
@@ -574,6 +613,7 @@ const attackRoute = route({
             targetHealth: target.health, targetKilled: false,
             payout: "0", bulletsSpent: outcome.bulletsSpent,
             backfire: true, selfDamage: outcome.selfDamage, attackerHealth,
+            weapon: weaponUsed, weaponName,
           },
         };
       }
@@ -716,6 +756,8 @@ const attackRoute = route({
           backfire: false,
           selfDamage: 0,
           attackerHealth: attacker.health,
+          weapon: weaponUsed,
+          weaponName,
         },
       };
     });
@@ -952,16 +994,23 @@ const weaponRoute = route({
 
     return ctx.transaction(async (tx) => {
       const [stats] = await tx.db
-        .select({ weaponItemId: playerStats.weaponItemId, locationId: playerStats.locationId })
+        .select({
+          weaponItemId: playerStats.weaponItemId,
+          weaponMeleeItemId: playerStats.weaponMeleeItemId,
+          strength: playerStats.strength,
+          locationId: playerStats.locationId,
+        })
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       const itemId = stats?.weaponItemId ?? null;
+      const melee = await describeMeleeSlot(tx, stats?.weaponMeleeItemId ?? null, stats?.strength ?? 0n);
       if (itemId === null) {
         return {
           status: 200,
           body: {
             itemId: null, name: null, condition: PRISTINE,
             backfireChance: 0, repairCost: "0",
+            firearm: null, melee,
           },
         };
       }
@@ -979,6 +1028,16 @@ const weaponRoute = route({
         : 0;
 
       const price = await itemPriceAt(tx, itemId, stats?.locationId ?? null);
+      // The firearm block only when slot 1 parses as one. A melee item still
+      // in slot 1 (equipped before the gate) keeps the legacy top-level
+      // fields — name and a pristine bar — and no block of its own.
+      const firearm = parsed?.success === true && item !== undefined
+        ? {
+          itemId, name: item.name,
+          damageMin: parsed.data.damageMin, damageMax: parsed.data.damageMax,
+          bulletsPerShot: parsed.data.bulletsPerShot,
+        }
+        : null;
       return {
         status: 200,
         body: {
@@ -989,11 +1048,50 @@ const weaponRoute = route({
           repairCost: repairCostFor(
             price, PRISTINE - condition, config.repair.costMultiplier, config.repair.costPerPoint,
           ).toString(),
+          firearm,
+          melee,
         },
       };
     });
   },
 });
+
+/**
+ * The melee slot for the combat page: the weapon, the stat it multiplies
+ * and one honest figure. `estimate` is `resolveMeleeStrike`'s raw damage
+ * against guard 1, no armor, no swing and no crit —
+ * `floor(power × strength ÷ (1 / 1.5))` — the ceiling a strike reaches on
+ * an unguarded target. Real damage divides by the target's guard, which a
+ * self-describing read cannot know, so the page labels it as such rather
+ * than pretending it is a range. Bigint throughout: `strength` is a trained
+ * bigint column, and the wire form is the decimal string every bigint uses.
+ *
+ * `null` for an empty slot and for a row that no longer parses as melee —
+ * the equip gate refuses those, so only a hand-edited row lands here, and
+ * combat treats it as empty (fists) too.
+ */
+async function describeMeleeSlot(
+  tx: PluginTx,
+  meleeItemId: string | null,
+  strength: bigint,
+): Promise<{ itemId: string; name: string; power: number; strength: string; estimate: string } | null> {
+  if (meleeItemId === null) return null;
+  const [row] = await tx.db
+    .select({ name: items.name, itemType: items.itemType, effects: items.effects })
+    .from(items)
+    .where(eq(items.id, meleeItemId));
+  if (!row || row.itemType !== ITEM_TYPE_WEAPON) return null;
+  const parsed = MeleeEffectsSchema.safeParse(row.effects);
+  if (!parsed.success) return null;
+  const estimate = (BigInt(parsed.data.power) * strength * 3n) / 2n;
+  return {
+    itemId: meleeItemId,
+    name: row.name,
+    power: parsed.data.power,
+    strength: strength.toString(),
+    estimate: estimate.toString(),
+  };
+}
 
 /**
  * The gunsmith. A full 0→100 repair costs `repair.cost_multiplier` × the

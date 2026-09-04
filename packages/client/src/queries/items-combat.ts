@@ -43,6 +43,7 @@ import {
   type ShopListResponse,
   type UseItemResponse,
   type WardListResponse,
+  type WeaponChoice,
   type WeaponConditionDto,
 } from "@gl3/shared";
 import { api } from "../api/client.js";
@@ -67,6 +68,9 @@ export function useEquip() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.inventory() });
+      // The combat page's weapon panel describes both slots; an equip is
+      // the one thing besides a shot that changes what it should say.
+      void queryClient.invalidateQueries({ queryKey: keys.weaponCondition() });
     },
   });
 }
@@ -137,11 +141,23 @@ export function useCombatLog() {
   });
 }
 
+/** A target, and optionally which slot to fire — see `AttackRequestSchema`. */
+export interface AttackInput {
+  targetId: string;
+  weapon?: WeaponChoice;
+}
+
 export function useAttack() {
   const queryClient = useQueryClient();
-  return useMutation<AttackResponse, Error, string>({
-    mutationFn: async (targetId) =>
-      AttackResponseSchema.parse(await api(`/api/combat/attack/${targetId}`, { method: "POST" })),
+  return useMutation<AttackResponse, Error, AttackInput>({
+    // The body is sent only when a weapon was chosen: a bodyless POST is
+    // what every caller sent before the choice existed, and the server's
+    // precedence answers it byte-identically.
+    mutationFn: async ({ targetId, weapon }) =>
+      AttackResponseSchema.parse(await api(`/api/combat/attack/${targetId}`, {
+        method: "POST",
+        ...(weapon === undefined ? {} : { body: JSON.stringify({ weapon }) }),
+      })),
     onSuccess: () => {
       // Bullets and (on a kill) cash moved; the target's health and the log
       // both changed. A kill also hospitalises the target, which the WS
