@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useSentenceCountdown, secondsLeft, facilityArrival, type FacilityState, formatDuration, unreadCount, buildNav, labelForPath, navKeyFor, type NavCategory, rankProgress, useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges, useNotifications, usePlugins, useRanks } from "@gl3/client";
+import { useSentenceCountdown, secondsLeft, facilityArrival, type FacilityState, formatDuration, unreadCount, buildNav, labelForPath, navKeyFor, type NavCategory, rankProgress, useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges, useNotifications, usePlugins, useRanks, bannerSlotFor } from "@gl3/client";
 import { FormatProvider } from "../lib/formatContext.js";
-import { bannerSlotFor } from "../lib/pageBanners.js";
 import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
 import { EventToasts } from "./EventToasts.js";

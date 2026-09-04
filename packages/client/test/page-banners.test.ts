@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bannerSlotFor } from "../src/lib/pageBanners.js";
+import { bannerSlotFor } from "../src/pageBanners.js";
 
 describe("bannerSlotFor", () => {
   it("matches a full /plugins/<pageId> route exactly", () => {

@@ -11,7 +11,12 @@
  * space at the top of a page is better than a hatched grey box on every page of
  * a fresh install.
  */
-export const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
+export interface BannerSlot {
+  slot: string;
+  alt: string;
+}
+
+export const PAGE_BANNERS: Record<string, BannerSlot> = {
   "/plugins/crimes.index": { slot: "page-crimes", alt: "Crimes" },
   // Jail draws its own banner rather than living in this map: it is the one
   // state-dependent slot, switching to `page-supermax` while the caller sits
@@ -52,7 +57,7 @@ export const PAGE_BANNERS: Record<string, { slot: string; alt: string }> = {
  * detail route like `/mail/:threadId` still shares its list page's banner.
  * A route matching neither is a route with no banner, not an error.
  */
-export function bannerSlotFor(pathname: string): { slot: string; alt: string } | null {
+export function bannerSlotFor(pathname: string): BannerSlot | null {
   const exact = PAGE_BANNERS[pathname];
   if (exact !== undefined) return exact;
   const firstSegment = `/${pathname.split("/")[1] ?? ""}`;

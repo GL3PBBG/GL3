@@ -14,6 +14,7 @@ export * from "./lib/level-score-display.js";
 export * from "./lib/chart.js";
 export * from "./lib/nav.js";
 export * from "./lib/facilityRedirect.js";
+export * from "./pageBanners.js";
 export * from "./hooks/useCountdowns.js";
 export * from "./hooks/useDebouncedValue.js";
 export * from "./hooks/useSentenceCountdown.js";
