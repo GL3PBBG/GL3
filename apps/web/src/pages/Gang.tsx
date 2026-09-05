@@ -206,7 +206,11 @@ function Summary({
       {gang.description === "" ? null : <Markdown text={gang.description} />}
       {gang.info === "" ? null : <Markdown text={gang.info} />}
       <p className={styles.big}><Money value={gang.bank} /></p>
-      <p className={styles.meta}><Money value={gang.cash} /> on hand.</p>
+      {/* Gang cash is V2's G_money: migrated, never written by any GL3 route.
+          Hide it until something feeds it — a permanent $0 reads as a bug. */}
+      {BigInt(gang.cash) === 0n ? null : (
+        <p className={styles.meta}><Money value={gang.cash} /> on hand.</p>
+      )}
 
       <div className={styles.actions}>
         <button
