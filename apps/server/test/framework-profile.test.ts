@@ -80,19 +80,19 @@ describe("bootSeedsFor", () => {
     const v2 = bootSeedsFor(bundledPlugins("v2", []).map((m) => m.id), "v2");
     expect(v2).toEqual({
       crimes: true, ranks: true, locations: true, items: true,
-      family: false, templeExchanges: false,
+      family: false, templeExchanges: false, unarmedMelee: false,
     });
 
     const framework = bootSeedsFor(bundledPlugins("framework", []).map((m) => m.id), "framework");
     expect(framework).toEqual({
       crimes: false, ranks: true, locations: false, items: true,
-      family: false, templeExchanges: false,
+      family: false, templeExchanges: false, unarmedMelee: false,
     });
 
     const gl3 = bootSeedsFor(bundledPlugins("gl3", []).map((m) => m.id), "gl3");
     expect(gl3).toEqual({
       crimes: true, ranks: true, locations: true, items: true,
-      family: true, templeExchanges: true,
+      family: true, templeExchanges: true, unarmedMelee: true,
     });
   });
 
