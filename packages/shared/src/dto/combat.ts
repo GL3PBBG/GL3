@@ -112,6 +112,13 @@ export const MeleeSlotDtoSchema = z.object({
 });
 export type MeleeSlotDto = z.infer<typeof MeleeSlotDtoSchema>;
 
+export const FistsDtoSchema = z.object({
+  power: z.number().int().positive(),
+  strength: z.string().regex(/^\d+$/),
+  estimate: z.string().regex(/^\d+$/),
+});
+export type FistsDto = z.infer<typeof FistsDtoSchema>;
+
 /**
  * The equipped weapon's wear, for the combat page. Every field is nullable or
  * zero when nothing is equipped: fists have no condition and never backfire.
@@ -130,6 +137,12 @@ export const WeaponConditionDtoSchema = z.object({
   firearm: FirearmSlotDtoSchema.nullable(),
   /** The melee slot, or null when empty. */
   melee: MeleeSlotDtoSchema.nullable(),
+  /**
+   * Bare hands under the melee unarmed model (`combat.unarmed.model`), the
+   * same arithmetic as the melee slot's estimate; null under the firearm
+   * model. Present whether or not a slot is armed: it describes the fallback.
+   */
+  fists: FistsDtoSchema.nullable(),
 });
 export type WeaponConditionDto = z.infer<typeof WeaponConditionDtoSchema>;
 

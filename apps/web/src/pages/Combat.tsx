@@ -106,7 +106,18 @@ function WeaponPanel({ weapon }: { weapon: WeaponConditionDto }): JSX.Element {
           </span>
         ) : null}
       </p>
-      {itemId === null && melee === null ? <p className={styles.meta}>Unarmed — you fight with your fists.</p> : null}
+      {itemId === null && melee === null ? (
+        <p className={styles.meta}>
+          Unarmed — you fight with your fists
+          {weapon.fists !== null ? (
+            <span className={styles.muted}>
+              {" · "}power {weapon.fists.power} × strength <Amount value={weapon.fists.strength} />
+              {" → up to "}<Amount value={weapon.fists.estimate} /> vs an unguarded target
+            </span>
+          ) : null}
+          .
+        </p>
+      ) : null}
     </div>
   );
 }

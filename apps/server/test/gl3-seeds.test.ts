@@ -6,7 +6,7 @@ import jobsPlugin from "@gl3/plugin-jobs";
 import mccodesAttributesPlugin from "@gl3/plugin-mccodes-attributes";
 import { parseSuccessFormula } from "@gl3/plugin-crimes";
 import { crimes, settings } from "../src/db/schema/index.js";
-import { bootSeedsFor, seedCrimes, seedFamilyContent, seedTempleExchanges } from "../src/db/seed.js";
+import { bootSeedsFor, seedCrimes, seedFamilyContent, seedTempleExchanges, seedUnarmedMelee } from "../src/db/seed.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { testDb } from "./helpers/db.js";
 
@@ -95,5 +95,26 @@ describe("gl3 seed pack (gl3-hybrid spec §3)", () => {
     expect(bootSeedsFor([], "gl3").templeExchanges).toBe(false);
     expect(bootSeedsFor(["houses"], "gl3").family).toBe(true);
     expect(bootSeedsFor(["crimes"], "gl3").family).toBe(false);
+  });
+
+  it("bootSeedsFor gates melee fists on the gl3 profile AND the combat plugin", () => {
+    // gl3 only: mccodes stays the spec'd firearm-model fists (what MCCodes
+    // did unarmed is unverified, so the faithful port is left alone), and
+    // v2 never had strength to swing.
+    expect(bootSeedsFor(["combat"], "gl3").unarmedMelee).toBe(true);
+    expect(bootSeedsFor(["combat"], "mccodes").unarmedMelee).toBe(false);
+    expect(bootSeedsFor(["combat"], "v2").unarmedMelee).toBe(false);
+    expect(bootSeedsFor([], "gl3").unarmedMelee).toBe(false);
+  });
+
+  it("seedUnarmedMelee writes melee once and never clobbers an admin edit", async () => {
+    await db.delete(settings).where(eq(settings.key, "combat.unarmed.model"));
+    await seedUnarmedMelee(db);
+    const [row] = await db.select().from(settings).where(eq(settings.key, "combat.unarmed.model"));
+    expect(row?.value).toBe("melee");
+    await db.update(settings).set({ value: "firearm" }).where(eq(settings.key, "combat.unarmed.model"));
+    await seedUnarmedMelee(db); // a reboot must not undo the operator
+    const [edited] = await db.select().from(settings).where(eq(settings.key, "combat.unarmed.model"));
+    expect(edited?.value).toBe("firearm");
   });
 });

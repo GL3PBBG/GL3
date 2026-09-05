@@ -2,7 +2,7 @@ import type { PluginManifest } from "@gl3/plugin-sdk";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, seedRanks, seedTempleExchanges } from "./db/seed.js";
+import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, seedRanks, seedTempleExchanges, seedUnarmedMelee } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
@@ -107,6 +107,7 @@ if (seeds.locations) await seedLocations(db);
 if (seeds.items) await seedItems(db);
 // Before loadSettings: the boot's own settings snapshot must see it.
 if (seeds.templeExchanges) await seedTempleExchanges(db);
+if (seeds.unarmedMelee) await seedUnarmedMelee(db);
 await rebuildLeaderboards(db, redis, undefined, collectExpRouters(manifests) !== null);
 
 const loadedSettings = await loadSettings(db);

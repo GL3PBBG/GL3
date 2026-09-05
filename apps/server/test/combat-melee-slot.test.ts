@@ -169,6 +169,78 @@ describe("combat melee-slot precedence (B0)", () => {
 });
 
 /**
+ * Fists as a melee model: `combat.unarmed.model = melee` makes an empty
+ * pair of slots resolve through the stat-driven arm with
+ * `combat.unarmed.power`, spending no bullets. The default model stays
+ * firearm — `combat.test.ts`'s unarmed cases are the byte-identical proof.
+ */
+describe("fists under combat.unarmed.model = melee", () => {
+  async function bootMeleeFists(ip1: string, ip2: string, town: string) {
+    await db.execute(sql`INSERT INTO settings (key, value) VALUES
+      ('combat.cooldown_seconds', '1'), ('combat.unarmed.model', 'melee'), ('combat.unarmed.power', '2')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+    const server = await bootTestServer({ plugins: [mccodesAttributes] });
+    const attacker = await registerVerifiedPlayer(server, { remoteAddress: ip1 });
+    const victim = await registerVerifiedPlayer(server, { remoteAddress: ip2 });
+    const townId = crypto.randomUUID();
+    await db.execute(sql`INSERT INTO locations (id, name) VALUES (${townId}, ${town})`);
+    await db.update(playerStats).set({
+      locationId: townId, weaponItemId: null, weaponMeleeItemId: null,
+      strength: 100n, agility: 1000n, exp: 1000n, level: 100, bullets: 5n, energy: 12,
+    }).where(eq(playerStats.playerId, attacker.playerId));
+    await db.update(playerStats).set({
+      locationId: townId, guard: 50n, agility: 50n, health: 500, exp: 1000n, level: 100,
+    }).where(eq(playerStats.playerId, victim.playerId));
+    return { server, attacker, victim };
+  }
+
+  it("resolves fists by the stats, spends no bullets, credits no item", async () => {
+    const { server, attacker, victim } = await bootMeleeFists("10.21.3.1", "10.21.3.2", "Fistmelee");
+    try {
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().weapon).toBe("fists");
+      expect(res.json().weaponName).toBeNull();
+      expect(res.json().bulletsSpent).toBe(0);
+      if (res.json().hit) {
+        // power 2 × 100 / (50/1.5) = 6 before the ±20% swing (4–7), the d40
+        // crit up to ×4.1 — never the firearm model's flat 1–5 with a bullet.
+        expect(res.json().damage).toBeGreaterThanOrEqual(1);
+        expect(res.json().damage).toBeLessThanOrEqual(29);
+      }
+      const [after] = await db.select().from(playerStats).where(eq(playerStats.playerId, attacker.playerId));
+      expect(after?.bullets).toBe(5n);
+      const log = (await db.execute(sql`
+        SELECT weapon_item_id FROM p_combat_log
+        WHERE attacker_id = ${attacker.playerId} ORDER BY created_at DESC LIMIT 1`,
+      )) as unknown as { weapon_item_id: string | null }[];
+      expect(log[0]?.weapon_item_id).toBeNull();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("weapon=firearm with both slots empty is still fists, melee-resolved, no bullet", async () => {
+    const { server, attacker, victim } = await bootMeleeFists("10.21.3.3", "10.21.3.4", "Fistchoice");
+    try {
+      const res = await server.app.inject({
+        method: "POST", url: `/api/combat/attack/${victim.playerId}`,
+        headers: { authorization: `Bearer ${attacker.token}` },
+        payload: { weapon: "firearm" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().weapon).toBe("fists");
+      expect(res.json().bulletsSpent).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
  * The per-attack choice: an optional `weapon` body field overrides the
  * precedence above. Absent keeps it byte-identical (the three cases above
  * send no body at all). `melee` needs the melee slot armed; `firearm` is

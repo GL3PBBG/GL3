@@ -144,8 +144,19 @@ describe("GET /api/combat/weapon", () => {
     const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
     expect(dto).toEqual({
       itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
-      firearm: null, melee: null,
+      firearm: null, melee: null, fists: null,
     });
+  });
+
+  it("describes fists under the melee model: power, strength, the unguarded ceiling", async () => {
+    await db.insert(settings).values({ key: "combat.unarmed.power", value: "2" });
+    await setSetting("combat.unarmed.model", "melee"); // reboots: settings snapshot at boot
+    await db.update(playerStats).set({ weaponItemId: null, strength: 40n })
+      .where(eq(playerStats.playerId, player));
+    const dto = WeaponConditionDtoSchema.parse((await get(token, "/api/combat/weapon")).json());
+    // 2 × 40 × 1.5 = 120, the same arithmetic as the melee slot's estimate.
+    expect(dto.fists).toEqual({ power: 2, strength: "40", estimate: "120" });
+    expect(dto.firearm).toBeNull();
   });
 
   it("describes slot 1 as a firearm block: name, damage range, bullets per shot", async () => {

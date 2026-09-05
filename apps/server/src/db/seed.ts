@@ -18,7 +18,7 @@ type SeedProfile = "gl3" | "v2" | "mccodes" | "framework";
  */
 export function bootSeedsFor(loadedPluginIds: Iterable<string>, profile: SeedProfile): {
   crimes: boolean; ranks: true; locations: boolean; items: boolean;
-  family: boolean; templeExchanges: boolean;
+  family: boolean; templeExchanges: boolean; unarmedMelee: boolean;
 } {
   const ids = loadedPluginIds instanceof Set ? loadedPluginIds : new Set(loadedPluginIds);
   return {
@@ -28,6 +28,10 @@ export function bootSeedsFor(loadedPluginIds: Iterable<string>, profile: SeedPro
     items: ids.has("inventory"),
     family: ids.has("houses") || ids.has("education") || ids.has("jobs"),
     templeExchanges: profile === "gl3" && ids.has("temple"),
+    // gl3 only, like the temple: mccodes keeps the spec'd firearm-model
+    // fists (what MCCodes did unarmed is unverified, so the faithful port is
+    // left alone) and v2 has no strength to swing.
+    unarmedMelee: profile === "gl3" && ids.has("combat"),
   };
 }
 
@@ -69,6 +73,17 @@ export async function seedCrimes(db: Db, profile: SeedProfile): Promise<void> {
  */
 export async function seedTempleExchanges(db: Db): Promise<void> {
   await db.insert(settings).values({ key: "temple.exchanges", value: "refill" })
+    .onConflictDoNothing({ target: settings.key });
+}
+
+/**
+ * gl3's fists: `combat.unarmed.model = melee`, so bare hands scale with the
+ * gym like a knife does and spend no bullets. onConflictDoNothing for the
+ * same reason as the temple — an admin who flips it back to firearm must
+ * not be undone by the next reboot.
+ */
+export async function seedUnarmedMelee(db: Db): Promise<void> {
+  await db.insert(settings).values({ key: "combat.unarmed.model", value: "melee" })
     .onConflictDoNothing({ target: settings.key });
 }
 

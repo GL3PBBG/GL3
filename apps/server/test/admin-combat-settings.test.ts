@@ -113,4 +113,19 @@ describe("admin combat settings form on the default (level) boot", () => {
     const res = await post(await clientBody({ cooldown_seconds: "-5" }));
     expect(res.statusCode).toBe(400);
   });
+
+  it("stores the unarmed model from its select and refuses anything outside the enum", async () => {
+    const ok = await post(await clientBody({ "unarmed.model": "melee", "unarmed.power": "3" }));
+    expect(ok.statusCode, ok.body).toBe(204);
+    expect(await stored("unarmed.model")).toBe("melee");
+    expect(await stored("unarmed.power")).toBe("3");
+    const bad = await post(await clientBody({ "unarmed.model": "bazooka" }));
+    expect(bad.statusCode).toBe(400);
+    // The select's options come from the admin route the form names.
+    const options = await app.inject({
+      method: "GET", url: "/api/admin/combat/unarmed-models", headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(options.statusCode).toBe(200);
+    expect(options.json().map((o: { id: string }) => o.id)).toEqual(["firearm", "melee"]);
+  });
 });

@@ -29,11 +29,25 @@ describe("readCombatSettings", () => {
       defaultWeaponAccuracy: 50,
       // `dps` absent, not zero: a weapon (or fist) that declares no rate of
       // fire keeps the flat cooldown. See combat-cooldown.test.ts.
-      unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1, dps: undefined },
+      unarmed: { accuracy: 25, damageMin: 1, damageMax: 5, bulletsPerShot: 1, dps: undefined, model: "firearm", power: 1 },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
       repair: { costPerPoint: 1000n, costMultiplier: 3 },
     });
+  });
+
+  it("reads the unarmed model and power; anything but 'melee' is the firearm model", () => {
+    // The default is firearm so every install predating the setting is
+    // byte-identical; only an explicit "melee" flips fists to the stat-driven
+    // arm. A typo must not silently change every unarmed shot in the game.
+    const melee = readCombatSettings((k) => ({ "unarmed.model": "melee", "unarmed.power": "3" })[k] ?? null);
+    expect(melee.unarmed.model).toBe("melee");
+    expect(melee.unarmed.power).toBe(3);
+    expect(readCombatSettings((k) => (k === "unarmed.model" ? "MELEE" : null)).unarmed.model).toBe("firearm");
+    expect(readCombatSettings((k) => (k === "unarmed.model" ? "bazooka" : null)).unarmed.model).toBe("firearm");
+    // Power floors at 1: resolveMeleeStrike multiplies by it, and a zero
+    // would make every unarmed strike the minimum-1 floor.
+    expect(readCombatSettings((k) => (k === "unarmed.power" ? "0" : null)).unarmed.power).toBe(1);
   });
 
   it("takes every key from the database when all are set", () => {
@@ -50,6 +64,8 @@ describe("readCombatSettings", () => {
       "unarmed.bullets_per_shot": "3",
       "cooldown_max_seconds": "600",
       "unarmed.dps": "2",
+      "unarmed.model": "melee",
+      "unarmed.power": "4",
     }));
 
     expect(settings).toEqual({
@@ -59,7 +75,7 @@ describe("readCombatSettings", () => {
       newbieExpThreshold: 250n,
       newbieLevelThreshold: 3,
       defaultWeaponAccuracy: 70,
-      unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3, dps: 2 },
+      unarmed: { accuracy: 40, damageMin: 2, damageMax: 8, bulletsPerShot: 3, dps: 2, model: "melee", power: 4 },
       condition: { wearPerShot: 1, decayPeriodSeconds: 86_400, decayPerPeriod: 1 },
       backfire: { baseChance: 2, wearFactor: 3 },
       repair: { costPerPoint: 1000n, costMultiplier: 5 },

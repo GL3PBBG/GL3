@@ -173,13 +173,24 @@ async function loadWeapon(
     // Fists have no condition row and never backfire.
     backfireChance: 0,
   };
-  if (weaponItemId === null) return unarmed;
+  // Fists as a melee model (`combat.unarmed.model = melee`, seeded on gl3):
+  // the stat-driven arm with `unarmed.power`, no bullets, no wear, no
+  // backfire — a trained player's bare hands scale like a knife would.
+  // No name: the response reports "fists" by `weaponUsedItemId === null`.
+  const fists: WeaponProfile = config.unarmed.model === "melee"
+    ? {
+      accuracy: 100, damageMin: 0, damageMax: 0, bulletsPerShot: 0,
+      critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+      backfireChance: 0, model: "melee", power: config.unarmed.power,
+    }
+    : unarmed;
+  if (weaponItemId === null) return fists;
 
   const [row] = await tx.db
     .select({ effects: items.effects, itemType: items.itemType, name: items.name })
     .from(items)
     .where(eq(items.id, weaponItemId));
-  if (!row || row.itemType !== ITEM_TYPE_WEAPON) return unarmed;
+  if (!row || row.itemType !== ITEM_TYPE_WEAPON) return fists;
 
   // Melee first (C6): `power` in the effects IS the melee marker — those
   // items have no damage range for the firearm schema to require. A melee
@@ -201,7 +212,7 @@ async function loadWeapon(
   const parsed = WeaponEffectsSchema.safeParse(row.effects);
   // A malformed weapon falls back to unarmed rather than 500ing: the jsonb is
   // an external boundary.
-  if (!parsed.success) return unarmed;
+  if (!parsed.success) return fists;
 
   // The one field a migrated V2 item never carries — `itemEffects` has no
   // accuracy column. `??`, not `||`: a weapon that states `accuracy: 0` means
@@ -264,7 +275,9 @@ async function cooldownForAttacker(
   const unarmed = {
     damageMin: config.unarmed.damageMin,
     damageMax: config.unarmed.damageMax,
-    dps: config.unarmed.dps,
+    // Melee-model fists have no damage range or dps to pace by — flat
+    // cooldown, exactly like a melee weapon below.
+    dps: config.unarmed.model === "melee" ? undefined : config.unarmed.dps,
   };
 
   const profile = await ctx.transaction(async (tx) => {
@@ -1003,14 +1016,16 @@ const weaponRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       const itemId = stats?.weaponItemId ?? null;
-      const melee = await describeMeleeSlot(tx, stats?.weaponMeleeItemId ?? null, stats?.strength ?? 0n);
+      const strength = stats?.strength ?? 0n;
+      const melee = await describeMeleeSlot(tx, stats?.weaponMeleeItemId ?? null, strength);
+      const fists = describeFists(config, strength);
       if (itemId === null) {
         return {
           status: 200,
           body: {
             itemId: null, name: null, condition: PRISTINE,
             backfireChance: 0, repairCost: "0",
-            firearm: null, melee,
+            firearm: null, melee, fists,
           },
         };
       }
@@ -1050,11 +1065,27 @@ const weaponRoute = route({
           ).toString(),
           firearm,
           melee,
+          fists,
         },
       };
     });
   },
 });
+
+/**
+ * What bare hands would do under the melee model — `describeMeleeSlot`'s
+ * arithmetic with `unarmed.power` — or null under the firearm model, where
+ * fists are the settings profile and the page has nothing stat-driven to
+ * say. Present whether or not a slot is armed: it describes the fallback.
+ */
+function describeFists(
+  config: CombatSettings,
+  strength: bigint,
+): { power: number; strength: string; estimate: string } | null {
+  if (config.unarmed.model !== "melee") return null;
+  const estimate = (BigInt(config.unarmed.power) * strength * 3n) / 2n;
+  return { power: config.unarmed.power, strength: strength.toString(), estimate: estimate.toString() };
+}
 
 /**
  * The melee slot for the combat page: the weapon, the stat it multiplies
@@ -1203,7 +1234,8 @@ const gunsmithLink = on(itemActions, (ctx, value) => ({
 const ADMIN_SETTING_KEYS = [
   "newbie_exp_threshold", "newbie_level_threshold", "cooldown_seconds", "cooldown_max_seconds",
   "hospital_seconds", "default_weapon_accuracy", "unarmed.accuracy", "unarmed.damage_min",
-  "unarmed.damage_max", "unarmed.bullets_per_shot", "unarmed.dps", "condition.wear_per_shot",
+  "unarmed.damage_max", "unarmed.bullets_per_shot", "unarmed.dps", "unarmed.model", "unarmed.power",
+  "condition.wear_per_shot",
   "condition.decay_period_seconds", "condition.decay_per_period", "backfire.base_chance",
   "backfire.wear_factor", "repair.cost_per_point", "repair.cost_multiplier",
 ] as const;
@@ -1221,6 +1253,8 @@ const ADMIN_SETTING_LABELS: Record<AdminSettingKey, string> = {
   "unarmed.damage_max": "Unarmed maximum damage",
   "unarmed.bullets_per_shot": "Unarmed bullets per shot",
   "unarmed.dps": "Unarmed dps (blank = flat cooldown)",
+  "unarmed.model": "Unarmed model: firearm (the settings above) or melee (power × strength, no bullets)",
+  "unarmed.power": "Unarmed power (melee model only)",
   "condition.wear_per_shot": "Weapon wear per shot (condition points)",
   "condition.decay_period_seconds": "Weapon decay period (seconds)",
   "condition.decay_per_period": "Weapon decay per period (condition points)",
@@ -1231,7 +1265,7 @@ const ADMIN_SETTING_LABELS: Record<AdminSettingKey, string> = {
 };
 
 /** Form fields (the admin form posts strings). The order is the form's. */
-const ADMIN_FIELDS: Record<AdminSettingKey, "number" | "money"> = {
+const ADMIN_FIELDS: Record<AdminSettingKey, "number" | "money" | "select"> = {
   "newbie_exp_threshold": "money",
   "newbie_level_threshold": "number",
   "cooldown_seconds": "number",
@@ -1243,6 +1277,8 @@ const ADMIN_FIELDS: Record<AdminSettingKey, "number" | "money"> = {
   "unarmed.damage_max": "number",
   "unarmed.bullets_per_shot": "number",
   "unarmed.dps": "number",
+  "unarmed.model": "select",
+  "unarmed.power": "number",
   "condition.wear_per_shot": "number",
   "condition.decay_period_seconds": "number",
   "condition.decay_per_period": "number",
@@ -1270,11 +1306,30 @@ const nonNegNumber = z.string().trim().refine(
   (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
   "non-negative number",
 ).optional();
+/**
+ * The one select on the form. Its options are the reader's own vocabulary,
+ * served by `adminUnarmedModelsRoute` below — the declared-form renderer
+ * takes options only from a GET the manifest names, so the enum has to be
+ * a route even with two static rows. A blank still means "default".
+ */
+const UNARMED_MODELS = [
+  { id: "firearm", name: "Firearm — accuracy and damage range from the settings above" },
+  { id: "melee", name: "Melee — power × strength, no bullets (the gl3 default)" },
+] as const;
+const unarmedModel = z.enum(["firearm", "melee"]).or(z.literal("")).optional();
 const AdminSettingsBodySchema = z.object(
   Object.fromEntries(
-    ADMIN_SETTING_KEYS.map((key) => [key, ADMIN_FIELDS[key] === "money" ? nonNegInt : nonNegNumber]),
-  ) as Record<AdminSettingKey, typeof nonNegInt | typeof nonNegNumber>,
+    ADMIN_SETTING_KEYS.map((key) => [
+      key,
+      ADMIN_FIELDS[key] === "money" ? nonNegInt : ADMIN_FIELDS[key] === "select" ? unarmedModel : nonNegNumber,
+    ]),
+  ) as Record<AdminSettingKey, typeof nonNegInt | typeof nonNegNumber | typeof unarmedModel>,
 ).strict();
+
+const adminUnarmedModelsRoute = route({
+  method: "GET", path: "/api/admin/combat/unarmed-models", auth: "admin",
+  handler: async () => ({ status: 200, body: UNARMED_MODELS }),
+});
 
 const adminSettingsListRoute = route({
   method: "GET", path: "/api/admin/combat/settings", auth: "admin",
@@ -1297,6 +1352,8 @@ const adminSettingsListRoute = route({
       "unarmed.damage_max": String(effective.unarmed.damageMax),
       "unarmed.bullets_per_shot": String(effective.unarmed.bulletsPerShot),
       "unarmed.dps": effective.unarmed.dps === undefined ? "" : String(effective.unarmed.dps),
+      "unarmed.model": effective.unarmed.model,
+      "unarmed.power": String(effective.unarmed.power),
       "condition.wear_per_shot": String(effective.condition.wearPerShot),
       "condition.decay_period_seconds": String(effective.condition.decayPeriodSeconds),
       "condition.decay_per_period": String(effective.condition.decayPerPeriod),
@@ -1367,6 +1424,9 @@ const adminPage: PageSchema = {
         { name: "unarmed.damage_max", label: "Unarmed max damage", type: "number" },
         { name: "unarmed.bullets_per_shot", label: "Unarmed bullets per shot", type: "number" },
         { name: "unarmed.dps", label: "Unarmed dps (blank = flat)", type: "number" },
+        { name: "unarmed.model", label: "Unarmed model", type: "select",
+          optionsSource: "GET /api/admin/combat/unarmed-models", valueKey: "id", labelKey: "name", allowEmpty: true },
+        { name: "unarmed.power", label: "Unarmed power (melee model)", type: "number" },
         { name: "condition.wear_per_shot", label: "Wear per shot", type: "number" },
         { name: "condition.decay_period_seconds", label: "Decay period (seconds)", type: "number" },
         { name: "condition.decay_per_period", label: "Decay per period", type: "number" },
@@ -1397,7 +1457,7 @@ export default definePlugin({
     view: { kind: "list", items: [] },
   }],
   migrations: COMBAT_MIGRATIONS,
-  routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute, adminSettingsListRoute, adminSettingsWriteRoute],
+  routes: [attackRoute, logRoute, targetsRoute, weaponRoute, repairRoute, adminSettingsListRoute, adminSettingsWriteRoute, adminUnarmedModelsRoute],
   adminPages: [adminPage],
   provides: [killResolved, exposure],
   filters: [gunsmithLink],

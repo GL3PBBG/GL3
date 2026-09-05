@@ -20,6 +20,17 @@ export interface CombatSettings {
     bulletsPerShot: number;
     /** Absent by default: fists keep the flat cooldown until an admin sets one. */
     dps?: number | undefined;
+    /**
+     * Which arm fists resolve through. `firearm` (the default, so every
+     * install predating the key is byte-identical) is the accuracy/damage-
+     * range profile above; `melee` routes an unarmed attack through
+     * `resolveMeleeStrike` with `power`, spending no bullets and ignoring
+     * `accuracy`/`damage_*`/`bullets_per_shot`/`dps` entirely. The gl3
+     * profile seeds `melee` (`db/seed.ts`).
+     */
+    model: "firearm" | "melee";
+    /** Melee model only: the flat power a bare fist swings with. Floored at 1. */
+    power: number;
   };
   condition: {
     wearPerShot: number;
@@ -127,6 +138,10 @@ export function readCombatSettings(get: (key: string) => string | null): CombatS
       damageMax: Math.max(damageMin, num(get, "unarmed.damage_max", 5)),
       bulletsPerShot: Math.max(1, num(get, "unarmed.bullets_per_shot", 1)),
       dps: rate(get, "unarmed.dps"),
+      // Exact match only: a typo must fall back to the firearm model rather
+      // than silently rewriting every unarmed shot in the game.
+      model: get("unarmed.model") === "melee" ? "melee" : "firearm",
+      power: Math.max(1, num(get, "unarmed.power", 1)),
     },
     condition: {
       wearPerShot: num(get, "condition.wear_per_shot", 1),

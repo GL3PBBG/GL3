@@ -207,16 +207,24 @@ describe("backfire and condition contracts", () => {
   it("parses a weapon condition dto with no weapon equipped", () => {
     const dto = WeaponConditionDtoSchema.parse({
       itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
-      firearm: null, melee: null,
+      firearm: null, melee: null, fists: null,
     });
     expect(dto.itemId).toBeNull();
     expect(dto.melee).toBeNull();
   });
 
+  it("parses fists described as a melee model", () => {
+    const dto = WeaponConditionDtoSchema.parse({
+      itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
+      firearm: null, melee: null, fists: { power: 1, strength: "40", estimate: "60" },
+    });
+    expect(dto.fists?.estimate).toBe("60");
+  });
+
   it("parses a weapon condition dto with a melee slot armed and slot 1 empty", () => {
     const dto = WeaponConditionDtoSchema.parse({
       itemId: null, name: null, condition: 100, backfireChance: 0, repairCost: "0",
-      firearm: null,
+      firearm: null, fists: null,
       melee: { itemId: "018f0000-0000-7000-8000-00000000000a", name: "Bat", power: 12, strength: "40", estimate: "720" },
     });
     expect(dto.melee?.estimate).toBe("720");
