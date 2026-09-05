@@ -13,7 +13,7 @@ export const gymPage: PageSchema = {
       { kind: "form", action: "POST /api/gym/train", submitLabel: "Train", fields: [
         { name: "stat", label: "Stat", type: "select",
           optionsSource: "GET /api/gym/stats", valueKey: "id", labelKey: "name" },
-        { name: "reps", label: "Reps", type: "number" },
+        { name: "reps", label: "Reps", type: "number", min: 1, max: 1000 },
       ] },
       { kind: "keyValueSource", source: "GET /api/gym", entries: [
         { label: "Strength", key: "strength" },

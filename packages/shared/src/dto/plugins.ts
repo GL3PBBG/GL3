@@ -219,6 +219,10 @@ const leafOptions = [
           name: z.string(),
           label: z.string(),
           type: z.enum(["text", "number", "decimal", "money", "password"]),
+          // Inclusive input bounds for number/decimal (advisory; the route
+          // still validates).
+          min: z.number().optional(),
+          max: z.number().optional(),
           when: ViewWhenSchema.optional(),
         }).strict(),
       ]),

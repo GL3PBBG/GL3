@@ -586,6 +586,8 @@ function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSig
                 // the browser reject a fractional value on submit. `decimal`
                 // is the same widget with that restriction lifted.
                 {...(field.type === "decimal" ? { step: "any" } : {})}
+                {...(field.min !== undefined ? { min: field.min } : {})}
+                {...(field.max !== undefined ? { max: field.max } : {})}
                 value={formValues[key] ?? ""}
                 onChange={(event) => {
                   const { value } = event.target;

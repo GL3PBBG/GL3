@@ -83,6 +83,31 @@ describe("FormBlock prefill", () => {
   });
 });
 
+describe("FormBlock numeric bounds", () => {
+  it("passes a number field's min/max through to the input", () => {
+    stubFetch(() => ({}));
+    mount([{
+      kind: "form", action: "POST /api/gym/train", submitLabel: "Train", valuesSource: null,
+      fields: [{ name: "reps", label: "Reps", type: "number", min: 1, max: 1000 }],
+    }]);
+    const input = screen.getByLabelText("Reps") as HTMLInputElement;
+    expect(input.type).toBe("number");
+    expect(input.min).toBe("1");
+    expect(input.max).toBe("1000");
+  });
+
+  it("leaves min/max unset on a number field that declares none", () => {
+    stubFetch(() => ({}));
+    mount([{
+      kind: "form", action: "POST /api/x", submitLabel: "Go", valuesSource: null,
+      fields: [{ name: "delta", label: "Delta", type: "number" }],
+    }]);
+    const input = screen.getByLabelText("Delta") as HTMLInputElement;
+    expect(input.min).toBe("");
+    expect(input.max).toBe("");
+  });
+});
+
 describe("action success notifies the host", () => {
   // The Shell's chrome (pool bars, cash) reads app-level queries this
   // signal lets the host invalidate.

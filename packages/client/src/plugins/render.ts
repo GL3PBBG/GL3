@@ -11,7 +11,7 @@
  * submits and no label — it draws nothing.
  */
 export type FormField =
-  | { name: string; label: string; type: "text" | "number" | "decimal" | "money" | "password" }
+  | { name: string; label: string; type: "text" | "number" | "decimal" | "money" | "password"; min?: number; max?: number }
   | { name: string; type: "hidden"; value: string }
   | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean; prefillForm: boolean };
 
@@ -159,10 +159,16 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
           prefillForm: f.prefillForm === true,
         };
       }
+      const bounds: { min?: number; max?: number } = {};
+      // Kept optional (never `undefined`-valued keys): an absent bound is
+      // "no attribute", and the renderer spreads only what is present.
+      if (isRecord(f) && typeof f.min === "number") bounds.min = f.min;
+      if (isRecord(f) && typeof f.max === "number") bounds.max = f.max;
       return {
         name,
         label,
         type: isRecord(f) && isFieldType(f.type) ? f.type : ("text" as const),
+        ...bounds,
       };
     });
     return [{

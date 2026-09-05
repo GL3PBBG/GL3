@@ -5,7 +5,7 @@ import { players, playerStats, ranks } from "../src/db/schema/index.js";
 import { checkHospital, maxHealthFor, sendToHospital, settleHospital } from "../src/game/hospital/status.js";
 import { testDb } from "./helpers/db.js";
 
-async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: { rankMaxHealth?: number }) {
+async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: { rankMaxHealth?: number; healthMax?: number }) {
   const id = uuidv7();
   // uuidv7's first 8 hex chars are pure timestamp bits (unchanged for ~65s),
   // so slicing from the front collides across the inserts this file makes in
@@ -18,7 +18,7 @@ async function makePlayer(db: Awaited<ReturnType<typeof testDb>>["db"], opts?: {
       id: rankId, name: `r-${rankId.slice(-8)}`, expRequired: 0n, maxHealth: opts.rankMaxHealth,
     });
   }
-  await db.insert(playerStats).values({ playerId: id, health: 100, rankId });
+  await db.insert(playerStats).values({ playerId: id, health: 100, rankId, healthMax: opts?.healthMax ?? null });
   return id;
 }
 
@@ -81,5 +81,16 @@ describe("hospital status", () => {
     const { db } = await testDb();
     const id = await makePlayer(db, { rankMaxHealth: 175 });
     expect(await db.transaction((tx) => maxHealthFor(tx, id))).toBe(175);
+  });
+
+  // The 0017 per-player override (progression's levelled cap, an MCCodes
+  // import's maxhp) outranks the rank row — the same resolution
+  // `/api/auth/me` and the settle path already use. Before this test the
+  // hospital's own routes healed to the rank cap (150 at the top seeded
+  // rank) while the HUD showed the override.
+  it("maxHealthFor prefers player_stats.health_max over the rank cap", async () => {
+    const { db } = await testDb();
+    const id = await makePlayer(db, { rankMaxHealth: 150, healthMax: 220 });
+    expect(await db.transaction((tx) => maxHealthFor(tx, id))).toBe(220);
   });
 });

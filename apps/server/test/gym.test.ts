@@ -63,6 +63,25 @@ describe("gym plugin", () => {
     }
   });
 
+  it("refuses a negative rep count with invalid_reps, moving nothing", async () => {
+    const server = await bootTestServer({ plugins: [mccodesAttributes, gymPlugin] });
+    try {
+      const { token, playerId } = await registerVerifiedPlayer(server, { remoteAddress: "10.11.1.5" });
+      const auth = { authorization: `Bearer ${token}` };
+      const res = await server.app.inject({
+        method: "POST", url: "/api/gym/train", headers: auth,
+        payload: { stat: "strength", reps: "-5" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_reps");
+      const [row] = await db.select().from(playerStats).where(eq(playerStats.playerId, playerId));
+      expect(row?.energy).toBe(12);
+      expect(row?.strength).toBe(0n);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("refuses a session the energy pool cannot cover, moving nothing", async () => {
     const server = await bootTestServer({ plugins: [mccodesAttributes, gymPlugin] });
     try {

@@ -158,6 +158,14 @@ const leafOptions = [
               // the browser reject 1.5 before it is ever submitted.
               type: z.enum(["text", "number", "decimal", "money", "password"]),
               /**
+               * Inclusive bounds for `number`/`decimal`, passed straight to
+               * the input's min/max so the browser refuses an out-of-range
+               * value before submit. Advisory only — the route still checks;
+               * a hand-built request never sees the form.
+               */
+              min: z.number().optional(),
+              max: z.number().optional(),
+              /**
                * Progression-model gate, shared by every field branch and by
                * table columns: the server prunes the non-matching ones at
                * boot and strips the key (a page is static data, but which

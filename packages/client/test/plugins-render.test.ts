@@ -165,6 +165,27 @@ describe("renderNode", () => {
     }]);
   });
 
+  // `min`/`max` reach the input as browser-side bounds (the gym's rep count
+  // is the live case: a negative count must be refused before submit).
+  // They stay optional here — an absent bound must not become `undefined`
+  // keys, which `toEqual` would otherwise let slide.
+  it("carries a number field's min/max through and omits them when absent", () => {
+    const out = renderNode({
+      kind: "form", action: "POST /api/gym/train", submitLabel: "Train",
+      fields: [
+        { name: "reps", label: "Reps", type: "number" as const, min: 1, max: 1000 },
+        { name: "delta", label: "Delta", type: "number" as const },
+      ],
+    }, {});
+    expect(out).toStrictEqual<RenderInstruction[]>([{
+      kind: "form", action: "POST /api/gym/train", submitLabel: "Train", valuesSource: null,
+      fields: [
+        { name: "reps", label: "Reps", type: "number", min: 1, max: 1000 },
+        { name: "delta", label: "Delta", type: "number" },
+      ],
+    }]);
+  });
+
   it("carries a form's valuesSource through, normalised to null when absent", () => {
     const out = renderNode({
       kind: "form", action: "POST /api/x", submitLabel: "Go",

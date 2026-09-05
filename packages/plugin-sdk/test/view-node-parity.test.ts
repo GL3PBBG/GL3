@@ -151,6 +151,20 @@ describe("view node vocabulary parity", () => {
     expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
   });
 
+  // Numeric bounds on a number/decimal field: the renderer passes them to
+  // the input as min/max so a negative rep count is refused before submit.
+  // Property-level parity again — both leaves are `.strict()`.
+  it("accepts `min`/`max` on a number field in both the SDK and on the wire", () => {
+    const node = {
+      kind: "form",
+      action: "POST /api/gym/train",
+      submitLabel: "Train",
+      fields: [{ name: "reps", label: "Reps", type: "number", min: 1, max: 1000 }],
+    };
+    expect(ViewNodeSchema.safeParse(node).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse(node).success).toBe(true);
+  });
+
   // First reject-parity case: prefill fetches on mount, so a mutating verb
   // must fail in BOTH copies — a drift where one accepts POST would let a
   // page mutate on render on whichever side is looser.

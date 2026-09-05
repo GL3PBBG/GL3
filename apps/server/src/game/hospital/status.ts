@@ -35,13 +35,20 @@ export async function checkHospital(db: Db, playerId: string): Promise<HospitalS
   return statusFrom(row?.hospitalUntil ?? null);
 }
 
-/** The player's rank cap, or 100 when `rank_id` is null. */
+/**
+ * The player's live health cap, resolved exactly as `/api/auth/me` and
+ * combat do: the 0017 per-player override (`player_stats.health_max`, set by
+ * the progression plugin or an MCCodes import) when present, else the rank's
+ * `max_health`, else 100 when `rank_id` is null. Before the override was
+ * consulted here, every hospital route healed to the RANK cap — 150 at the
+ * top seeded rank — while the HUD showed the levelled figure.
+ */
 export async function maxHealthFor(tx: Tx, playerId: string): Promise<number> {
-  const [row] = await tx.select({ maxHealth: ranks.maxHealth })
+  const [row] = await tx.select({ override: playerStats.healthMax, rankMaxHealth: ranks.maxHealth })
     .from(playerStats)
     .leftJoin(ranks, eq(ranks.id, playerStats.rankId))
     .where(eq(playerStats.playerId, playerId));
-  return row?.maxHealth ?? DEFAULT_MAX_HEALTH;
+  return row?.override ?? row?.rankMaxHealth ?? DEFAULT_MAX_HEALTH;
 }
 
 /**
@@ -106,7 +113,8 @@ async function settleHospitalTx(
   if (row.hospitalUntil === null) return { status: FREE, discharged: false };
 
   // The discharge restore fills to the LIVE cap: the progression-owned
-  // health_max when set, the rank cap otherwise.
+  // health_max when set, the rank cap otherwise. `maxHealthFor` resolves the
+  // same way; the row already in hand just saves it a query.
   const maxHealth = row.healthMax ?? await maxHealthFor(tx, playerId);
   const cleared = await tx.update(playerStats)
     .set({ hospitalUntil: null, health: maxHealth })

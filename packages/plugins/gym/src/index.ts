@@ -60,10 +60,14 @@ export function trainSession(
 // submits every field as a string (PageRenderer builds
 // Record<string,string>), so a numeric schema rejects the route's own
 // declared form. Temple's PointsSchema is the same convention. Bounds
-// checked after parse; coercion is explicit, not zod-magic.
+// checked after parse; coercion is explicit, not zod-magic. A leading
+// minus parses so a negative count reaches the handler's own bound check
+// and answers `invalid_reps` rather than the loader's generic
+// `invalid_request` — the page's input carries min/max too, but only the
+// route is authoritative.
 const TrainBodySchema = z.object({
   stat: z.enum(TRAINABLE),
-  reps: z.string().regex(/^\d+$/, "must be a nonnegative integer string"),
+  reps: z.string().regex(/^-?\d+$/, "must be an integer string"),
 }).strict();
 
 /** The gym page's data feed — the meter and the four trained stats,
