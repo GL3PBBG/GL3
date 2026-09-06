@@ -32,7 +32,7 @@ export function connectTestDb(): TestDb {
 /** Drops every `p___ID___*` table, recreates the core subset, replays MIGRATIONS. */
 export async function resetDb(db: TestDb): Promise<void> {
   const owned = await db.execute<{ tablename: string }>(
-    sql`select tablename from pg_tables where schemaname = 'public' and tablename like ${"p___ID___%"}`,
+    sql`select tablename from pg_tables where schemaname = 'public' and starts_with(tablename, ${"p___ID___"})`,
   );
   for (const row of owned) await db.execute(sql.raw(`DROP TABLE IF EXISTS "${row.tablename}" CASCADE`));
   for (const stmt of CORE_SUBSET) await db.execute(sql.raw(stmt));
