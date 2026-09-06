@@ -1,0 +1,12 @@
+{
+  "name": "@gl3/create-plugin",
+  "version": "0.1.0",
+  "description": "Scaffold an empty standalone GL3 plugin package (@gl3-plugins/<id>)",
+  "type": "module",
+  "bin": { "create-plugin": "./bin/create-plugin.js" },
+  "files": ["bin", "dist", "templates"],
+  "publishConfig": { "registry": "https://npm.gl3.dev", "access": "public" },
+  "scripts": { "build": "tsc --build", "prepack": "tsc --build" },
+  "engines": { "node": ">=20" },
+  "devDependencies": {}
+}
