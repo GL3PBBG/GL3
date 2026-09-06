@@ -24,10 +24,8 @@ describe("render", () => {
     expect(byPath.has("_gitignore")).toBe(false);
   });
 
-  it("emits only paths from GENERATED_FILES, sorted", () => {
-    const paths = files.map((f) => f.path);
-    expect(paths).toEqual([...paths].sort());
-    for (const p of paths) expect(GENERATED_FILES).toContain(p);
+  it("emits exactly GENERATED_FILES, sorted", () => {
+    expect(files.map((f) => f.path)).toEqual([...GENERATED_FILES]);
   });
 
   it("leaves no token behind", () => {
