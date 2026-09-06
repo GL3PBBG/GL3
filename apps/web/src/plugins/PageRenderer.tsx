@@ -929,7 +929,7 @@ export function PageRenderer({ instructions, onActionSuccess }: {
       case "propertyPanel":
         // The same component the bullets and casino pages embed; it reads
         // the town's property rows itself and shows Buy or the owner tools.
-        return <PropertyPanel key={index} pluginId={inst.pluginId} />;
+        return <PropertyPanel key={index} pluginId={inst.pluginId} {...(inst.show === null ? {} : { show: inst.show })} />;
       case "assetBinder":
         return (
           <AssetBinderBlock

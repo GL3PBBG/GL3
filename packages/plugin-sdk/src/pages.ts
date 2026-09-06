@@ -252,11 +252,20 @@ const leafOptions = [
    * (`cc7978f`), which left a manifest-declared page with no way to sell the
    * franchise it declares; this node is that way. `pluginId` must be a
    * property type some plugin in the boot declares (`validatePlugins`).
+   *
+   * `show` narrows the panel to one side. A plugin whose owner tools live on
+   * an owner-only page (a nav entry hidden per player through
+   * `MenuBadge.hidden`) puts `show: "buy"` on its public page and
+   * `show: "owned"` on the owner's: the public page then never draws the
+   * lever, Transfer or Drop, and the owner's page draws nothing at all for
+   * anyone who is not the owner. Absent, both sides show — the pre-1.0.8
+   * behaviour.
    */
   z
     .object({
       kind: z.literal("propertyPanel"),
       pluginId: z.string().min(1),
+      show: z.enum(["buy", "owned"]).optional(),
     })
     .strict(),
   // The admin upload widget: pick an entity, choose a file, and the renderer

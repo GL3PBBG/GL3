@@ -33,7 +33,7 @@ export type RenderInstruction =
     }
   | { kind: "form"; action: string; submitLabel: string; valuesSource: string | null; fields: FormField[] }
   | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
-  | { kind: "propertyPanel"; pluginId: string }
+  | { kind: "propertyPanel"; pluginId: string; show: "buy" | "owned" | null }
   | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
   | { kind: "assetBinder"; scope: string; slot: string; entitySource: string | null; entityLabelKey: string | null }
   | {
@@ -202,7 +202,11 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
     }];
   }
   if (isNode(node, "propertyPanel")) {
-    return [{ kind: "propertyPanel", pluginId: String(node.pluginId) }];
+    return [{
+      kind: "propertyPanel",
+      pluginId: String(node.pluginId),
+      show: node.show === "buy" || node.show === "owned" ? node.show : null,
+    }];
   }
   if (isNode(node, "slotImage")) {
     return [{

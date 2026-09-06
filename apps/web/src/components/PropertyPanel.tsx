@@ -11,19 +11,39 @@ export function rowsFor(rows: readonly PropertyRow[], pluginId: string): Propert
   return rows.filter((row) => row.pluginId === pluginId);
 }
 
+/**
+ * Which side of the panel a page wants. `"buy"` keeps the owner tools off a
+ * public page (the row still shows, with its owner); `"owned"` keeps the
+ * panel off the screen entirely for anyone but the owner. Undefined shows
+ * whichever side the viewer is on.
+ */
+export type PanelShow = "buy" | "owned";
+
+export type RowAction =
+  | { kind: "buy"; price: string }
+  | { kind: "owned"; lever: string; profit: string; leverLabel: string }
+  | { kind: "none" };
+
 export function rowAction(
   row: PropertyRow,
   viewerUsername: string | undefined,
-):
-  | { kind: "buy"; price: string }
-  | { kind: "owned"; lever: string; profit: string; leverLabel: string }
-  | { kind: "none" } {
-  if (viewerUsername !== undefined && row.ownerName === viewerUsername) {
-    return { kind: "owned", lever: row.lever, profit: row.profit, leverLabel: row.leverLabel };
-  }
-  // "" price means the row's type is not installed — nothing to buy.
-  if (row.ownerName === "—" && row.price !== "") return { kind: "buy", price: row.price };
-  return { kind: "none" };
+  show?: PanelShow,
+): RowAction {
+  const action = ((): RowAction => {
+    if (viewerUsername !== undefined && row.ownerName === viewerUsername) {
+      return { kind: "owned", lever: row.lever, profit: row.profit, leverLabel: row.leverLabel };
+    }
+    // "" price means the row's type is not installed — nothing to buy.
+    if (row.ownerName === "—" && row.price !== "") return { kind: "buy", price: row.price };
+    return { kind: "none" };
+  })();
+  return show === undefined || action.kind === show || action.kind === "none" ? action : { kind: "none" };
+}
+
+/** The rows a page draws: under `show: "owned"` only the viewer's own. */
+export function visibleRows(rows: readonly PropertyRow[], viewerUsername: string | undefined, show?: PanelShow): PropertyRow[] {
+  if (show !== "owned") return [...rows];
+  return rows.filter((row) => rowAction(row, viewerUsername, show).kind === "owned");
 }
 
 /** Mirrors the server's `NonNegativeIntegerString`: digits only. */
@@ -199,21 +219,22 @@ function BuyControl({ row }: { row: PropertyRow }): JSX.Element {
  * page — the replacement for the retired /properties tab. Shows the owner,
  * offers Buy when nobody owns it, and the full owner tools when the viewer
  * does. Renders nothing when the town has no row of this type: the surrounding
- * page already says where the player is.
+ * page already says where the player is. `show` narrows the panel to one
+ * side — see `PanelShow`.
  */
-export function PropertyPanel({ pluginId }: { pluginId: string }): JSX.Element | null {
+export function PropertyPanel({ pluginId, show }: { pluginId: string; show?: PanelShow }): JSX.Element | null {
   const properties = useProperties();
   const me = useMe();
 
   // Silent while loading or on error: this is a side panel, and the page it
   // sits on has its own loading and error surfaces for its own data.
-  const rows = rowsFor(properties.data?.rows ?? [], pluginId);
+  const rows = visibleRows(rowsFor(properties.data?.rows ?? [], pluginId), me.data?.username, show);
   if (rows.length === 0) return null;
 
   return (
     <ul className={styles.rows}>
       {rows.map((row) => {
-        const action = rowAction(row, me.data?.username);
+        const action = rowAction(row, me.data?.username, show);
         return (
           <li key={row.id} className={styles.row}>
             <GameImage url={row.imageUrl} alt={row.typeName} size="md" />

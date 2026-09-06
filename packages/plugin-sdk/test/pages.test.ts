@@ -97,6 +97,15 @@ describe("PageSchemaSchema", () => {
     expect(() => PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel", title: "x" }))).toThrow();
   });
 
+  it("accepts a propertyPanel narrowed to one side, and refuses any other side", () => {
+    const withPanel = (node: Record<string, unknown>): unknown =>
+      ({ id: "p", path: "/p", view: { kind: "panel", title: "x", children: [node] } });
+    for (const show of ["buy", "owned"]) {
+      expect(PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel", show })).view).toBeDefined();
+    }
+    expect(() => PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel", show: "both" }))).toThrow();
+  });
+
   it("rejects a node kind outside the v1 vocabulary", () => {
     const bad = {
       ...page,

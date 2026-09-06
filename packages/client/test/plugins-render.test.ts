@@ -267,9 +267,14 @@ describe("renderNode", () => {
       ]);
   });
 
-  it("maps a propertyPanel to its type id", () => {
+  it("maps a propertyPanel to its type id, with the side it asks for", () => {
     expect(renderNode({ kind: "propertyPanel", pluginId: "brothel" }, {}))
-      .toEqual<RenderInstruction[]>([{ kind: "propertyPanel", pluginId: "brothel" }]);
+      .toEqual<RenderInstruction[]>([{ kind: "propertyPanel", pluginId: "brothel", show: null }]);
+    expect(renderNode({ kind: "propertyPanel", pluginId: "brothel", show: "owned" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "propertyPanel", pluginId: "brothel", show: "owned" }]);
+    // An unknown side from a stale schema falls back to both, never to a crash.
+    expect(renderNode({ kind: "propertyPanel", pluginId: "brothel", show: "both" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "propertyPanel", pluginId: "brothel", show: null }]);
   });
 
   it("maps a singleton assetBinder, whose entity fields are absent", () => {

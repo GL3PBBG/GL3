@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropRefundOf, rowAction, rowsFor } from "../src/components/PropertyPanel.js";
+import { dropRefundOf, rowAction, rowsFor, visibleRows } from "../src/components/PropertyPanel.js";
 
 const base = {
   id: "p1", locationId: "l1", locationName: "Brooklyn", pluginId: "bullets",
@@ -34,6 +34,33 @@ describe("rowAction", () => {
 
   it("offers nothing on someone else's row", () => {
     expect(rowAction({ ...base, ownerName: "sonny" }, "vito")).toEqual({ kind: "none" });
+  });
+
+  it("under show: \"buy\" the owner's own row offers nothing — the tools live on the owner's page", () => {
+    const mine = { ...base, ownerName: "vito", lever: "500", profit: "-20" };
+    expect(rowAction(mine, "vito", "buy")).toEqual({ kind: "none" });
+    expect(rowAction(base, "vito", "buy")).toEqual({ kind: "buy", price: "100000000" });
+  });
+
+  it("under show: \"owned\" an unowned row offers no Buy", () => {
+    expect(rowAction(base, "vito", "owned")).toEqual({ kind: "none" });
+    expect(rowAction({ ...base, ownerName: "vito", lever: "500", profit: "-20" }, "vito", "owned").kind).toBe("owned");
+  });
+});
+
+describe("visibleRows", () => {
+  const mine = { ...base, id: "p2", ownerName: "vito", lever: "500", profit: "-20" };
+  const theirs = { ...base, id: "p3", ownerName: "sonny" };
+
+  it("draws every row unless narrowed to the owner's side", () => {
+    expect(visibleRows([base, mine, theirs], "vito").map((r) => r.id)).toEqual(["p1", "p2", "p3"]);
+    expect(visibleRows([base, mine, theirs], "vito", "buy").map((r) => r.id)).toEqual(["p1", "p2", "p3"]);
+  });
+
+  it("under show: \"owned\" draws only the viewer's own rows — nothing for a visitor", () => {
+    expect(visibleRows([base, mine, theirs], "vito", "owned").map((r) => r.id)).toEqual(["p2"]);
+    expect(visibleRows([base, mine, theirs], "sonny", "owned").map((r) => r.id)).toEqual(["p3"]);
+    expect(visibleRows([base, theirs], "vito", "owned")).toEqual([]);
   });
 });
 

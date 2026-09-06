@@ -285,6 +285,7 @@ const leafOptions = [
     .object({
       kind: z.literal("propertyPanel"),
       pluginId: z.string().min(1),
+      show: z.enum(["buy", "owned"]).optional(),
     })
     .strict(),
   z
