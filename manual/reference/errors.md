@@ -122,6 +122,7 @@ report is all just "no report").
 | `no_email` | 409 | core | The account has no email address on file, so a verification code cannot be sent. |
 | `no_house_to_sell` | 409 | houses | The caller owns no house above the baseline 100-will lodging, so there is nothing to sell |
 | `no_location` | 409 | bullets, casino, inventory, oc, properties, theft | bullets: The caller has no valid current town (not located anywhere, or the location/stats row vanished mid-request); casino: The caller is not in any town; inventory: The caller is not standing in any town, so there is no local shop to buy from; oc: The caller is not standing in any town, so the heist has nowhere to be staged; properties: Caller has no player record/current location, so no town-scoped purchase is possible; theft: Caller is not standing in any town, so there is nowhere to park a stolen car |
+| `no_melee_weapon` | 409 | combat | The attack asked for the melee slot (weapon: "melee") and it is empty — no silent fallback to slot 1's gun |
 | `no_promotion` | 409 | jobs | No higher-paying rank in the caller's job has requirements the caller currently meets |
 | `no_session` | 404 | casino | The caller has no casino session at all (or the row is gone) |
 | `no_such_game` | 404 | casino | That game id is not in the registry (game plugin not installed or not registered) |
