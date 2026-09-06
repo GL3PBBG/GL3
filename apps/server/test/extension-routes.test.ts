@@ -16,6 +16,9 @@ const contributorPlugin = definePlugin({
     on(coreMenuBadges, async (ctx, value) => [
       ...value,
       { path: `/extras-contributor/${ctx.player!.id}`, count: 1 },
+      // The per-player presence channel: a hidden badge must survive
+      // validateEach unchanged, flag and all.
+      { path: "/plugins/extras-contributor.index", count: 0, hidden: true },
     ]),
     on(coreDashboard, async (ctx, value) => [
       ...value,
@@ -45,7 +48,10 @@ describe("hud extras, menu badges and dashboard widget routes", () => {
       });
       expect(badgesRes.statusCode).toBe(200);
       const badges = MenuBadgesResponseSchema.parse(badgesRes.json());
-      expect(badges.badges).toEqual([{ path: `/extras-contributor/${playerId}`, count: 1 }]);
+      expect(badges.badges).toEqual([
+        { path: `/extras-contributor/${playerId}`, count: 1 },
+        { path: "/plugins/extras-contributor.index", count: 0, hidden: true },
+      ]);
 
       const widgetsRes = await app.inject({
         method: "GET", url: "/api/dashboard/widgets", headers: { authorization: `Bearer ${token}` },

@@ -23,6 +23,13 @@ import { filterPoint } from "./filters.js";
  * - **Links are the action verb.** A `ProfileExtra`/`ItemAction` of kind
  *   `"link"` should read as an imperative ("Hire detective", "Place bounty",
  *   "Repair"), not a noun phrase — it is the thing clicking it does.
+ * - **`MenuBadge.hidden: true` removes the item from the caller's nav** — the
+ *   per-player presence channel, since the plugins payload is boot-static. A
+ *   subscriber reads `ctx.player` (level) or its own tables (the caller's
+ *   town) and answers `{ path, count: 0, hidden: true }` for a page the
+ *   caller should not see; the page stays routable and its routes must still
+ *   refuse on their own. The client re-asks on `player.travelled`,
+ *   `player.levelUp` and `player.rankedUp`.
  * - **`MenuBadge.path` follows the badge-path convention** documented on
  *   `coreMenuBadges` below: the literal, unencoded nav path, matched by exact
  *   string equality on the client.

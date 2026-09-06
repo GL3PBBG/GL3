@@ -42,18 +42,22 @@ export function invalidationKeys(
       // Stock is per-location and the shop query is not keyed by location, so
       // without this a traveller keeps seeing the city they left. Combat's
       // "Here now" roster is the same shape: per-town rows under a global key.
-      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets()];
+      // menuBadges: a plugin can hide its nav entry by town (MenuBadge.hidden),
+      // so the traveller's menu must be re-asked on arrival.
+      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges()];
     case "bank.transacted":
       return [keys.me()];
     case "bullets.purchased":
       // Stock is per-location and shown in the shop, so the list is stale too.
       return [keys.me(), keys.locations(), keys.bulletShop()];
     case "player.rankedUp":
-      return [keys.me(), keys.ranks()];
+      return [keys.me(), keys.ranks(), keys.menuBadges()];
     case "player.levelUp":
       // Exp, pools and max hp all moved — ranks stay deliberately absent:
-      // a levelUp boot never touches the rank ladder.
-      return [keys.me()];
+      // a levelUp boot never touches the rank ladder. menuBadges: a plugin can
+      // hide its nav entry below a level (MenuBadge.hidden), so a level-up is
+      // when a hidden page may appear.
+      return [keys.me(), keys.menuBadges()];
     case "player.attacked":
       // Bullets moved and the target's health did, so the list a player is
       // looking at is stale; the log gains a row for both parties. Hospital is

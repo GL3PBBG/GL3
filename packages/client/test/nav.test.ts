@@ -1,13 +1,32 @@
 import { NAV_CATEGORIES } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
 import {
-  buildNav, categoryBadge, categoryForPath, labelForPath, linkFor, navKeyFor,
+  buildNav, categoryBadge, categoryForPath, labelForPath, linkFor, navKeyFor, visibleLinks,
   PLUGIN_CATEGORY, type PluginMenuEntry,
 } from "../src/lib/nav.js";
 
 function entry(pageId: string, label: string, order: number, category?: string): PluginMenuEntry {
   return { pageId, path: `/plugins/${pageId}`, label, order, ...(category === undefined ? {} : { category }) };
 }
+
+describe("visibleLinks", () => {
+  it("drops exactly the entries a hidden badge names, by the raw /plugins/<pageId> path", () => {
+    const links = [entry("brothel.index", "Brothel", 45, "town"), entry("fixer.index", "The Fixer", 46, "crimes")];
+    const kept = visibleLinks(links, [
+      { path: "/plugins/brothel.index", hidden: true },
+      { path: "/plugins/fixer.index" }, // a count badge: shown
+      { path: "/mail", hidden: true }, // core paths are not plugin links; ignored here
+    ]);
+    expect(kept.map((l) => l.pageId)).toEqual(["fixer.index"]);
+  });
+
+  it("is a no-op with no hidden badge, and hides through buildNav so an emptied category vanishes", () => {
+    const links = [entry("brothel.index", "Brothel", 45, "actions")];
+    expect(visibleLinks(links, [])).toEqual(links);
+    const nav = buildNav(visibleLinks(links, [{ path: "/plugins/brothel.index", hidden: true }]), { admin: false });
+    expect(nav.some((c) => c.id === "actions")).toBe(false);
+  });
+});
 
 describe("navKeyFor", () => {
   it("keys core routes on the first segment", () => {

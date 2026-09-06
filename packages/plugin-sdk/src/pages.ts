@@ -245,6 +245,20 @@ const leafOptions = [
       size: z.enum(["sm", "md", "lg"]).optional(),
     })
     .strict(),
+  /**
+   * The town's property row for one declared type — Buy when the state holds
+   * it, the owner tools (lever, transfer, drop, reset) when it is the
+   * viewer's. The property board page was retired for per-page panels
+   * (`cc7978f`), which left a manifest-declared page with no way to sell the
+   * franchise it declares; this node is that way. `pluginId` must be a
+   * property type some plugin in the boot declares (`validatePlugins`).
+   */
+  z
+    .object({
+      kind: z.literal("propertyPanel"),
+      pluginId: z.string().min(1),
+    })
+    .strict(),
   // The admin upload widget: pick an entity, choose a file, and the renderer
   // does the two-step POST /api/admin/assets then PUT /api/admin/assets/bind.
   //

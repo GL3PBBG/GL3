@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useSentenceCountdown, secondsLeft, facilityArrival, type FacilityState, formatDuration, unreadCount, buildNav, labelForPath, navKeyFor, type NavCategory, rankProgress, useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges, useNotifications, usePlugins, useRanks, bannerSlotFor } from "@gl3/client";
+import { useSentenceCountdown, secondsLeft, facilityArrival, type FacilityState, formatDuration, unreadCount, buildNav, visibleLinks, labelForPath, navKeyFor, type NavCategory, rankProgress, useHospital, useHudExtras, useJail, useLocations, useLogout, useMail, useMe, useMenuBadges, useNotifications, usePlugins, useRanks, bannerSlotFor } from "@gl3/client";
 import { FormatProvider } from "../lib/formatContext.js";
 import { BrandMark, useBranding } from "./BrandMark.js";
 import { EventFeed } from "./EventFeed.js";
@@ -207,7 +207,10 @@ export function Shell(): JSX.Element {
   // has to be honoured. Sorted on a copy — the array belongs to the query cache
   // — and tie-broken on pageId so two entries sharing an order stay put across
   // refetches instead of swapping places.
-  const pluginLinks = [...(plugins.data?.menu ?? [])]
+  // `visibleLinks` first: a `hidden` badge (MenuBadge.hidden) removes a plugin
+  // page from THIS player's nav — the plugins payload itself is boot-static,
+  // so the per-request badge channel is where per-player presence lives.
+  const pluginLinks = visibleLinks([...(plugins.data?.menu ?? [])], menuBadges.data?.badges ?? [])
     .sort((a, b) => a.order - b.order || a.pageId.localeCompare(b.pageId));
 
   const admin = (me.data?.grants.length ?? 0) > 0;

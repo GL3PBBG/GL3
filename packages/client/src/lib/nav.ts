@@ -137,6 +137,22 @@ export interface PluginMenuEntry {
  * "More" in their declared order. The Admin link is dropped entirely for
  * players without grants — the route would 403 for them anyway.
  */
+/**
+ * Drops the plugin menu entries a `hidden` badge names. The badge path
+ * convention is the raw `/plugins/<pageId>` — the same literal buildNav
+ * writes as `to` — so a subscriber that can already badge a page can hide it
+ * with the same string. Applied BEFORE buildNav so a category left empty
+ * vanishes with its last entry, exactly as if the plugin were not loaded.
+ */
+export function visibleLinks(
+  pluginLinks: readonly PluginMenuEntry[],
+  badges: readonly { path: string; hidden?: boolean | undefined }[],
+): PluginMenuEntry[] {
+  const hidden = new Set(badges.filter((b) => b.hidden === true).map((b) => b.path));
+  if (hidden.size === 0) return [...pluginLinks];
+  return pluginLinks.filter((entry) => !hidden.has(`/plugins/${entry.pageId}`));
+}
+
 export function buildNav(
   pluginLinks: readonly PluginMenuEntry[],
   options: { admin: boolean; pluginCategory?: Readonly<Record<string, string>> },

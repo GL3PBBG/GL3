@@ -89,6 +89,14 @@ describe("PageSchemaSchema", () => {
     expect(PageSchemaSchema.parse(everyKind)).toEqual(everyKind);
   });
 
+  it("accepts a propertyPanel naming a property type, and nothing more on it", () => {
+    const withPanel = (node: Record<string, unknown>): unknown =>
+      ({ id: "p", path: "/p", view: { kind: "panel", title: "x", children: [node] } });
+    expect(PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel" })).view).toBeDefined();
+    expect(() => PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "" }))).toThrow();
+    expect(() => PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel", title: "x" }))).toThrow();
+  });
+
   it("rejects a node kind outside the v1 vocabulary", () => {
     const bad = {
       ...page,

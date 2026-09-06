@@ -42,6 +42,15 @@ export type HudEntry = z.infer<typeof HudEntrySchema>;
  */
 export const MenuBadgeSchema = z.object({
   path: z.string().startsWith("/"), count: z.number().int().nonnegative(),
+  /**
+   * `true` removes the nav item at `path` from this player's menu for as long
+   * as the badge is served. The plugins payload is boot-static and cached for
+   * the life of the process, so this per-request channel is the only place a
+   * plugin can make a page's presence depend on the player — their level, the
+   * town they are standing in — without a core change per rule. Absent means
+   * shown, so every subscriber written before the field is unaffected.
+   */
+  hidden: z.boolean().optional(),
 }).strict();
 export type MenuBadge = z.infer<typeof MenuBadgeSchema>;
 
