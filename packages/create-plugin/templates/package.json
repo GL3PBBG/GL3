@@ -1,0 +1,21 @@
+{
+  "name": "@gl3-plugins/__ID__",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "gl3": { "plugin": true },
+  "publishConfig": { "registry": "https://npm.gl3.dev" },
+  "scripts": { "build": "tsc --build", "prepack": "tsc --build", "test": "vitest run", "typecheck": "tsc --build --force" },
+  "dependencies": { "drizzle-orm": "^0.45.2", "zod": "^3.23.8" },
+  "peerDependencies": { "@gl3/plugin-sdk": "__SDK_RANGE__" },
+  "devDependencies": {
+    "@gl3/plugin-sdk": "__SDK_RANGE__",
+    "@types/node": "^22.5.0",
+    "postgres": "^3.4.4",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
