@@ -37,7 +37,7 @@ describe("mccodes dialect — B3 (content, progression, gangs)", () => {
     const run = await runOnce();
     try {
       const rows = await run.db.select().from(items);
-      expect(rows).toHaveLength(4);
+      expect(rows).toHaveLength(7);
 
       const knife = rows.find((r) => r.name === "Rusty Knife")!;
       expect(knife.itemType).toBe("weapon");
@@ -48,11 +48,29 @@ describe("mccodes dialect — B3 (content, progression, gangs)", () => {
       expect(vest.itemType).toBe("armor");
       expect(vest.effects).toEqual({ armor: 25 });
 
-      // The PHP-serialized generic effect unserializes verbatim.
+      // The PHP-serialized generic effect maps onto GL3's pools def, the
+      // percent kept as the "N%" figure the def resolves at use time — and
+      // the MCCodes "Weapon" type gives way to consumable, since the effects
+      // are the model and the use route gates on the type.
       const vial = rows.find((r) => r.name === "Vial of Will")!;
-      expect(vial.effects).toEqual({
-        inc_type: "percent", stat: "will", dir: "pos", inc_amount: 25,
+      expect(vial.itemType).toBe("consumable");
+      expect(vial.effects).toEqual({ kind: "pools", pools: { will: "25%" } });
+
+      // effect2 is read too; a neg dir is a signed cost.
+      const draught = rows.find((r) => r.name === "Battle Draught")!;
+      expect(draught.effects).toEqual({ kind: "pools", pools: { brave: 3, energy: -4 } });
+
+      const dressing = rows.find((r) => r.name === "Field Dressing")!;
+      expect(dressing.effects).toEqual({ heal: "50%" });
+
+      // No GL3 def for money: parked verbatim under a registered-looking
+      // kind, so a use fails unknown_effect rather than wrong_slot.
+      const cash = rows.find((r) => r.name === "Bag of Cash")!;
+      expect(cash.effects).toEqual({
+        kind: "mccodes",
+        mccodes: [{ inc_type: "figure", stat: "money", dir: "pos", inc_amount: 500 }],
       });
+      expect(run.report.orphans.some((o) => o.table === "items" && o.v2Id === 7 && /mccodes/.test(o.reason))).toBe(true);
 
       // Shop listings: price from itmbuyprice, the infinite-stock sentinel.
       const stock = await run.db.select().from(shopStock);

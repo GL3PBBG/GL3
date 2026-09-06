@@ -4,6 +4,7 @@ import { getOrCreateV3Id, lookupV3Id } from "../id-map.js";
 import { bumpTable, recordAbsentTargetTable, recordOrphan, type MigrationReport } from "../report.js";
 import { shopStock, targetHas } from "../pg/plugin-tables.js";
 import type { Executor } from "../pg/types.js";
+import { mapMcItemEffects, type McEffectRecord } from "./mc-item-effects.js";
 
 /**
  * MCCodes `items`/`itemtypes`/`shops`/`shopitems` -> GL3 `items` +
@@ -12,10 +13,14 @@ import type { Executor } from "../pg/types.js";
  * Every MCCodes weapon is melee-model: flat `weapon` attack power, no
  * accuracy data — imported as the melee marker `{power}` (C6/B0 §2.1).
  * `armor` imports as `{armor}`. The generic effect engine's PHP-serialized
- * `{inc_type, stat, dir, inc_amount}` imports verbatim into the jsonb for a
- * future inventory effect def to consume (ConsumableEffectsSchema is
- * passthrough, so the row parses today). Prices live on the shop listing
- * and in meta; GL3's items table carries none.
+ * `{inc_type, stat, dir, inc_amount}` records (effect1..3) map through
+ * `mapMcItemEffects` onto GL3's `pools`/`heal` defs where they can, and park
+ * under `kind: "mccodes"` (reported) where they cannot. An item carrying
+ * such effects and no weapon/armor figure is stored as a CONSUMABLE
+ * whatever its MCCodes type name said — the type is what gates the use
+ * route, and a "Weapon"-typed vial with `weapon = 0` is usable nowhere
+ * else. Prices live on the shop listing and in meta; GL3's items table
+ * carries none.
  *
  * Shops: MCCodes has no stock model (infinite), but p_inventory_shop_stock
  * requires an integer — a near-exhaustible sentinel preserves behavior for
@@ -58,7 +63,8 @@ function unserializePhpAssoc(text: string): Record<string, string | number> | nu
 interface ItemRow {
   itmid: number; itmtype: number; itmname: string; itmdesc: string;
   itmbuyprice: number; itmsellprice: number;
-  effect1_on: number; effect1: string; weapon: number; armor: number;
+  effect1_on: number; effect1: string; effect2_on: number; effect2: string;
+  effect3_on: number; effect3: string; weapon: number; armor: number;
 }
 interface ItemTypeRow { itmtypeid: number; itmtypename: string; }
 interface ShopRow { shopID: number; shopLOCATION: number; }
@@ -82,7 +88,7 @@ export async function migrateMcItems(
 
   const [itemRows] = await pool.query<(ItemRow & mysql.RowDataPacket)[]>(
     "SELECT itmid, itmtype, itmname, itmdesc, itmbuyprice, itmsellprice, " +
-    "effect1_on, effect1, weapon, armor FROM items",
+    "effect1_on, effect1, effect2_on, effect2, effect3_on, effect3, weapon, armor FROM items",
   );
 
   for (const row of itemRows) {
@@ -90,25 +96,41 @@ export async function migrateMcItems(
     const { v3Id } = await getOrCreateV3Id(exec, "items", row.itmid);
 
     const rawType = typeNameById.get(row.itmtype) ?? String(row.itmtype);
-    const itemType = rawType.toLowerCase();
-    if (!KNOWN_TYPES.has(itemType)) {
-      recordOrphan(report, "items", row.itmid, `item type "${rawType}" has no GL3 equivalent; imported verbatim`);
-    }
+    let itemType = rawType.toLowerCase();
 
-    // The model marker: `weapon` is melee, `armor` is armor, effect1 is the
-    // generic engine. Precedence mirrors combat's loadWeapon (melee first).
+    // The model marker: `weapon` is melee, `armor` is armor, effect1..3 is
+    // the generic engine. Precedence mirrors combat's loadWeapon (melee first).
     let effects: Record<string, unknown> = {};
     if (row.weapon > 0) {
       effects = { power: row.weapon };
     } else if (row.armor > 0) {
       effects = { armor: row.armor };
-    } else if (row.effect1_on === 1 && row.effect1 !== "") {
-      const parsed = unserializePhpAssoc(row.effect1);
-      if (parsed === null) {
-        recordOrphan(report, "items", row.itmid, `effect1 does not unserialize: ${row.effect1.slice(0, 80)}`);
-      } else {
-        effects = parsed;
+    } else {
+      const records: McEffectRecord[] = [];
+      const slots = [
+        [row.effect1_on, row.effect1], [row.effect2_on, row.effect2], [row.effect3_on, row.effect3],
+      ] as const;
+      for (const [i, [on, text]] of slots.entries()) {
+        if (on !== 1 || text === "") continue;
+        const parsed = unserializePhpAssoc(text);
+        if (parsed === null) {
+          recordOrphan(report, "items", row.itmid, `effect${i + 1} does not unserialize: ${text.slice(0, 80)}`);
+          continue;
+        }
+        records.push(parsed);
       }
+      if (records.length > 0) {
+        const mapped = mapMcItemEffects(records);
+        effects = mapped.effects;
+        for (const note of mapped.notes) recordOrphan(report, "items", row.itmid, `parked under kind mccodes: ${note}`);
+        if (itemType !== "consumable") {
+          recordOrphan(report, "items", row.itmid, `typed "${rawType}" but carries use effects; stored as consumable`);
+          itemType = "consumable";
+        }
+      }
+    }
+    if (!KNOWN_TYPES.has(itemType)) {
+      recordOrphan(report, "items", row.itmid, `item type "${rawType}" has no GL3 equivalent; imported verbatim`);
     }
 
     const values = {

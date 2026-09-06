@@ -81,6 +81,19 @@ Documented divergences from a byte-identical port:
 
 - **Shop stock**: MCCodes shops are infinite; GL3's stock column is finite, so
   listings import with a 2,000,000,000 sentinel (admin-restockable).
+- **Item effects**: MCCodes' generic engine (`effect1..3`, each
+  `{stat, dir, inc_amount, inc_type}`) maps onto GL3's built-in item effect
+  defs where one exists — energy/will/brave onto `pools`, a positive hp onto
+  `heal` — with `inc_type = percent` carried as the `"N%"` figure both defs
+  resolve against the player's max at use time. An item carrying such
+  effects (and no weapon/armor figure) is stored as a consumable whatever its
+  MCCodes type name said. Anything GL3 has no def for (iq, strength, money, a
+  negative hp, a heal mixed with pool deltas, the same pool twice) is parked
+  verbatim under `{ kind: "mccodes", mccodes: [...] }` and reported, so a use
+  fails cleanly as `unknown_effect` until a def claims it. Two behavioural
+  divergences: GL3 refuses an unaffordable pool cost (409, item kept) where
+  MCCodes clamped the stat to 0 and consumed the item, and GL3 floors a
+  percent's magnitude at 1 where MCCodes' `round()` could reach 0.
 - **Both-armed players**: every MCCodes weapon is melee-model, and GL3 keeps
   one melee slot — a player with two equipped weapons keeps the primary, and
   the merge is reported per player (`equipMerges`).

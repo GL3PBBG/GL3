@@ -85,6 +85,19 @@ INSERT INTO items (itmid, itmtype, itmname, itmdesc, itmbuyprice, itmsellprice,
 (3, 2, 'Leather Vest', 'Better than nothing.', 800, 400, 1, 0, '', 0, '', 0, '', 0, 25),
 (4, 1, 'Vial of Will', 'Restores 25% will.', 2000, 1000, 1, 1,
   'a:4:{s:8:"inc_type";s:7:"percent";s:4:"stat";s:4:"will";s:3:"dir";s:3:"pos";s:10:"inc_amount";i:25;}',
+  0, '', 0, '', 0, 0),
+-- Two engine slots on one item, both pools; the second is a flat cost.
+(5, 1, 'Battle Draught', 'Brave up, energy down.', 1500, 750, 1, 1,
+  'a:4:{s:8:"inc_type";s:6:"figure";s:4:"stat";s:5:"brave";s:3:"dir";s:3:"pos";s:10:"inc_amount";i:3;}',
+  1, 'a:4:{s:8:"inc_type";s:6:"figure";s:4:"stat";s:6:"energy";s:3:"dir";s:3:"neg";s:10:"inc_amount";i:4;}',
+  0, '', 0, 0),
+-- A positive hp effect is GL3's heal.
+(6, 1, 'Field Dressing', 'Heals half.', 900, 450, 1, 1,
+  'a:4:{s:8:"inc_type";s:7:"percent";s:4:"stat";s:2:"hp";s:3:"dir";s:3:"pos";s:10:"inc_amount";i:50;}',
+  0, '', 0, '', 0, 0),
+-- A stat GL3 has no def for: parked verbatim under kind mccodes, reported.
+(7, 1, 'Bag of Cash', 'Free money.', 100, 50, 1, 1,
+  'a:4:{s:8:"inc_type";s:6:"figure";s:4:"stat";s:5:"money";s:3:"dir";s:3:"pos";s:10:"inc_amount";i:500;}',
   0, '', 0, '', 0, 0);
 INSERT INTO shops VALUES (1, 1, 'Corner Store', 'Everything a criminal needs.');
 INSERT INTO shopitems VALUES (1, 1, 1), (2, 1, 3);
