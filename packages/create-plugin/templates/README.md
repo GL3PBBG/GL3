@@ -7,8 +7,8 @@ is ready for the first route.
 ## Develop
 
 ```sh
-createdb gl3___ID___test        # on the NATIVE postgres, not a container
-TEST_DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3___ID___test npm test
+createdb gl3___ID_SNAKE___test        # on the NATIVE postgres, not a container
+TEST_DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3___ID_SNAKE___test npm test
 npm run typecheck
 ```
 
@@ -24,7 +24,7 @@ Read before the first route: the `writing-gl3-plugins` skill and GL3's
 
 - Every balance movement goes through `tx.economy.applyBalanceChange`.
 - Two players' money: one sorted `tx.locks.player([a, b])` before any write.
-- Own tables are `p___ID___*`; core tables are read-only mirrors in `src/schema.ts`.
+- Own tables are `p___ID_SNAKE___*`; core tables are read-only mirrors in `src/schema.ts`.
 - Everything you write must be **declared** in the manifest — an undeclared
   page or route simply does not exist.
 

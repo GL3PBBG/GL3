@@ -1,7 +1,7 @@
 /**
  * Drizzle tables.
  *
- * - Your own tables: `p___ID___*`, created by src/migrations.ts and declared
+ * - Your own tables: `p___ID_SNAKE___*`, created by src/migrations.ts and declared
  *   under `tables` on the manifest. Define them here with `pgTable`.
  * - Core tables you READ: declare a read-only mirror here with only the
  *   columns you use (e.g. `players.id`, `player_stats.location_id`). Never

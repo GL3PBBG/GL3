@@ -5,7 +5,8 @@
  *   statement; a `;`-joined pair silently applies only the first.
  * - `name` is unique forever. Applied names are recorded; renaming one
  *   re-applies it on the next boot.
- * - Every table is `p___ID___<name>`, declared in `tables` on the manifest.
+ * - Every table is `p___ID_SNAKE___<name>` (the engine turns `-` in the id
+ *   into `_`), declared in `tables` on the manifest.
  * - A foreign key is a lock (rule 6). An FK to `players` is safe; one to
  *   `locations` is not — bullets, theft, properties and casino FOR UPDATE it.
  */

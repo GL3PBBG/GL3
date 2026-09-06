@@ -1,6 +1,7 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { isValidPluginId, loadTemplates, render } from "./scaffold.js";
 import { resolveSdkRange } from "./sdk-version.js";
 import { dirIsUsable, gitInit, npmInstall, writeFiles } from "./write.js";
@@ -8,7 +9,7 @@ import { dirIsUsable, gitInit, npmInstall, writeFiles } from "./write.js";
 export const USAGE = `Usage: create-plugin <id> [dir] [--no-install] [--sdk <range>]
 
   <id>          plugin id: lowercase kebab-case, 2-32 chars (/^[a-z][a-z0-9-]*$/)
-                becomes @gl3-plugins/<id>, p_<id>_*, /api/<id>, /api/admin/<id>
+                becomes @gl3-plugins/<id>, p_<id with - as _>_*, /api/<id>, /api/admin/<id>
   [dir]         target directory (default: gl3-plugin-<id>); must be absent or empty
   --no-install  write files and git init, skip npm install
   --sdk <range> peerDependencies range for @gl3/plugin-sdk (default: read from npm.gl3.dev)
@@ -23,19 +24,32 @@ export interface CliOptions {
 
 export type ParsedArgs = { ok: true; opts: CliOptions } | { ok: false; message: string };
 
-export function parseCliArgs(argv: string[]): ParsedArgs {
-  let parsed;
+/**
+ * Runs `fn` and turns a throw into a returned `Error` instead — a typed
+ * alternative to an evolving `let` plus try/catch. `T` is inferred from the
+ * call inside `fn`, so wrapping `parseArgs(...)` here keeps its literal
+ * `options` inference (an explicit `ReturnType<typeof parseArgs>` would not:
+ * it resolves against `parseArgs`'s generic default, not this call site).
+ */
+function tryCatch<T>(fn: () => T): T | Error {
   try {
-    parsed = parseArgs({
+    return fn();
+  } catch (err) {
+    return err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+export function parseCliArgs(argv: string[]): ParsedArgs {
+  const parsed = tryCatch(() =>
+    parseArgs({
       args: argv,
       options: { install: { type: "boolean", default: true }, sdk: { type: "string" } },
       allowPositionals: true,
       allowNegative: true,
       strict: true,
-    });
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err) };
-  }
+    }),
+  );
+  if (parsed instanceof Error) return { ok: false, message: parsed.message };
   const [id, dir, ...rest] = parsed.positionals;
   if (id === undefined) return { ok: false, message: "missing <id>" };
   if (!isValidPluginId(id)) {
@@ -49,12 +63,14 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
 }
 
 function nextSteps(id: string, dir: string): string {
+  const shown = isAbsolute(dir) ? dir : `./${dir}`;
+  const dbName = `gl3_${id.replaceAll("-", "_")}_test`;
   return `
-Created @gl3-plugins/${id} in ./${dir}
+Created @gl3-plugins/${id} in ${shown}
 
-  cd ${dir}
-  createdb gl3_${id}_test                      # on the NATIVE postgres
-  TEST_DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3_${id}_test npm test
+  cd ${shown}
+  createdb ${dbName}                      # on the NATIVE postgres
+  TEST_DATABASE_URL=postgres://gl3:gl3@localhost:5432/${dbName} npm test
 
 Before publishing, boot the engine once against a spare database with
 PLUGIN_DIR + PLUGIN_PACKAGES=@gl3-plugins/${id} — see README.md.
@@ -70,11 +86,11 @@ export async function main(argv: string[]): Promise<number> {
   }
   const { id, dir, install, sdk } = parsed.opts;
   const target = resolve(process.cwd(), dir);
-  if (!dirIsUsable(target)) {
-    console.error(`create-plugin: ${dir} exists and is not an empty directory`);
-    return 1;
-  }
   try {
+    if (!dirIsUsable(target)) {
+      console.error(`create-plugin: ${dir} exists and is not an empty directory`);
+      return 1;
+    }
     const sdkRange = resolveSdkRange({ override: sdk, warn: (m) => console.error(m) });
     writeFiles(target, render(loadTemplates(), { id, sdkRange }));
     gitInit(target, (m) => console.error(m));
@@ -92,9 +108,18 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
+/** Both sides through `realpathSync` so a symlinked parent dir still matches; a throw (missing path) means "not the entry point". */
+function isRunAsEntryPoint(): boolean {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
+  } catch {
+    return false;
+  }
+}
+
 /** Run only when this module is the process entry point, not when `bin/create-plugin.js` imports it. */
-const isEntryPoint = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
-if (isEntryPoint) {
+if (isRunAsEntryPoint()) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   });

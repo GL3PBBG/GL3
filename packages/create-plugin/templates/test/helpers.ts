@@ -22,17 +22,18 @@ let client: postgres.Sql | null = null;
 
 export function connectTestDb(): TestDb {
   const url = process.env["TEST_DATABASE_URL"];
-  if (!url) throw new Error("TEST_DATABASE_URL is required (a throwaway db on the NATIVE postgres, e.g. gl3___ID___test)");
+  if (!url) throw new Error("TEST_DATABASE_URL is required (a throwaway db on the NATIVE postgres, e.g. gl3___ID_SNAKE___test)");
   // onnotice: CREATE TABLE IF NOT EXISTS emits a 42P07 notice per table per
   // reset; without this a real failure is buried under forty lines of them.
   client ??= postgres(url, { max: 5, types: { bigint: postgres.BigInt }, onnotice: () => {} });
   return drizzle(client);
 }
 
-/** Drops every `p___ID___*` table, recreates the core subset, replays MIGRATIONS. */
+/** Drops every `p___ID_SNAKE___*` table, recreates the core subset, replays MIGRATIONS. */
 export async function resetDb(db: TestDb): Promise<void> {
   const owned = await db.execute<{ tablename: string }>(
-    sql`select tablename from pg_tables where schemaname = 'public' and starts_with(tablename, ${"p___ID___"})`,
+    // starts_with() needs PostgreSQL 15+ (GL3 requires 16).
+    sql`select tablename from pg_tables where schemaname = 'public' and starts_with(tablename, ${"p___ID_SNAKE___"})`,
   );
   for (const row of owned) await db.execute(sql.raw(`DROP TABLE IF EXISTS "${row.tablename}" CASCADE`));
   for (const stmt of CORE_SUBSET) await db.execute(sql.raw(stmt));
@@ -85,6 +86,11 @@ export interface HarnessOptions {
  * deadlock against the engine. It CAN prove your route asked for the right
  * locks in the right order before it wrote anything — assert on `calls.locks`
  * and use `onLock` for the "before" half.
+ *
+ * Not modeled (calls throw `undefined is not a function`): `tx.jail`,
+ * `tx.hospital`, `tx.attributes`, `tx.gangs`, `tx.gangLog`,
+ * `economy.applyGangBalanceChange`/`addExp`/`applyExpAndRankUp` — add a
+ * recorder here when your route needs one.
  */
 export function makeHarness(db: TestDb, options: HarnessOptions = {}) {
   const settingsMap = options.settings ?? new Map<string, string>();
@@ -150,6 +156,8 @@ export function makeHarness(db: TestDb, options: HarnessOptions = {}) {
       filters: { apply: async <T,>(_p: unknown, v: T) => v },
       settings: { get: (key: string) => settingsMap.get(key) ?? null },
       propertyTypes: { get: () => null, list: () => [] },
+      attributePools: { get: () => null, list: () => [] },
+      progression: "exp",
       installedPluginIds: new Set(["__ID__"]),
       assetSlots: { get: () => null, list: () => [] },
       assets: { resolve: async () => new Map(), mine: async () => new Map(), singleton: async () => null },

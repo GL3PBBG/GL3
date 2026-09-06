@@ -51,7 +51,7 @@ const DOTFILE_RENAMES: Readonly<Record<string, string>> = {
   _gitignore: ".gitignore",
 };
 
-const TOKENS = ["__ID__", "__SDK_RANGE__"] as const;
+const TOKENS = ["__ID__", "__ID_SNAKE__", "__SDK_RANGE__"] as const;
 
 function walk(root: string, dir: string, out: TemplateFile[]): void {
   for (const name of readdirSync(dir)) {
@@ -78,6 +78,7 @@ function outputPath(templatePath: string): string {
 export function render(templates: readonly TemplateFile[], opts: RenderOptions): RenderedFile[] {
   const values: Record<(typeof TOKENS)[number], string> = {
     __ID__: opts.id,
+    __ID_SNAKE__: opts.id.replaceAll("-", "_"),
     __SDK_RANGE__: opts.sdkRange,
   };
   return templates

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import manifest from "../src/index.js";
 
+const TABLE_PREFIX = `p_${manifest.id.replaceAll("-", "_")}_`;
+
 describe("manifest", () => {
   it("is the __ID__ plugin on apiVersion 1", () => {
     expect(manifest.id).toBe("__ID__");
@@ -28,9 +30,9 @@ describe("manifest", () => {
     }
   });
 
-  it("every declared table is namespaced p___ID___", () => {
+  it("every declared table is namespaced under the engine's prefix (p_<id with - as _>_)", () => {
     for (const name of Object.values(manifest.tables)) {
-      expect(String(name).startsWith("p___ID___"), String(name)).toBe(true);
+      expect(String(name).startsWith(TABLE_PREFIX), String(name)).toBe(true);
     }
   });
 });

@@ -71,6 +71,13 @@ describe("create-plugin (spawned)", () => {
     expect(existsSync(join(cwd, "custom-dir/package.json"))).toBe(true);
   });
 
+  it("snake-cases a hyphenated id's db name in next steps", () => {
+    const res = run(["probe-two", "--no-install", "--sdk", "^1.0.0"], cwd);
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toContain("createdb gl3_probe_two_test");
+    expect(res.stdout).toContain("TEST_DATABASE_URL=postgres://gl3:gl3@localhost:5432/gl3_probe_two_test");
+  });
+
   it("runs main exactly once when invoked through the packaged bin", () => {
     execFileSync(join(REPO, "node_modules/.bin/tsc"), ["--build", "--force"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),

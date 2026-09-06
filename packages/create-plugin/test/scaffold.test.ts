@@ -65,4 +65,13 @@ describe("render", () => {
   it("is pure: same inputs, same output", () => {
     expect(render(templates, { id: "probe", sdkRange: "^9.9.9" })).toEqual(files);
   });
+
+  it("snake-cases a hyphenated id for table prefixes and db names", () => {
+    const hyphenFiles = render(templates, { id: "probe-two", sdkRange: "^9.9.9" });
+    const hyphenByPath = new Map(hyphenFiles.map((f) => [f.path, f.content]));
+    expect(hyphenByPath.get("README.md")).toContain("p_probe_two_");
+    expect(hyphenByPath.get("README.md")).toContain("gl3_probe_two_test");
+    expect(hyphenByPath.get("test/helpers.ts")).toContain("p_probe_two_");
+    for (const f of hyphenFiles) expect(f.content, f.path).not.toMatch(/probe-two_/);
+  });
 });
