@@ -12,6 +12,7 @@ import {
   ITEM_TYPE_CONSUMABLE,
   ITEM_TYPE_WEAPON,
   MeleeEffectsSchema,
+  PercentFigureSchema,
   readEffects,
   WeaponEffectsSchema,
 } from "./effects.js";
@@ -21,6 +22,7 @@ import {
   consumableKind,
   guardEffect,
   HEAL_EFFECT_KIND,
+  isPercentFigure,
   itemEffects,
   POOL_ORDER,
   POOLS_EFFECT_KIND,
@@ -506,8 +508,22 @@ function storedItemType(formType: string): string {
  * There is deliberately no generic `meta` editor: `meta` arrives from the M4
  * migrator and is a def's non-editable config half.
  */
+/**
+ * A form delta field: a flat integer or a percent-of-max, `"50%"` — the form
+ * posts strings either way (declared-form bodies are all strings), so a
+ * plain figure is coerced to a number here and a percent stays the string
+ * the def resolves at use time. `check` refuses the figures a def would
+ * refuse (`wrong_slot`) at authoring rather than on a player's first use.
+ */
+function figureField(check: (n: number) => boolean, message: string) {
+  return blankable(z.union([
+    PercentFigureSchema.refine((v) => check(Number.parseInt(v, 10)), message),
+    z.coerce.number().int().refine(check, message),
+  ]));
+}
+
 const ConsumableStatsShape = {
-  heal: blankable(z.coerce.number().int().positive()),
+  heal: figureField((n) => n > 0, "heal must be positive"),
   kind: blankable(z.string().min(1).max(40)),
   /**
    * The built-in `pools` def's config, one signed delta per pool — the one
@@ -517,9 +533,9 @@ const ConsumableStatsShape = {
    * config, so a stated 0 dies at authoring, not in a player's use attempt.
    * Blank means "no delta on this pool", per `blankable`.
    */
-  energy: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
-  will: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
-  brave: blankable(z.coerce.number().int().refine((v) => v !== 0, "zero is not a delta")),
+  energy: figureField((n) => n !== 0, "zero is not a delta"),
+  will: figureField((n) => n !== 0, "zero is not a delta"),
+  brave: figureField((n) => n !== 0, "zero is not a delta"),
 } as const;
 
 const ItemBodySchema = z.discriminatedUnion("itemType", [
@@ -610,7 +626,7 @@ function effectsFor(body: ItemStatsBody): unknown {
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
       case ITEM_TYPE_CONSUMABLE: {
-        const deltas: Partial<Record<(typeof POOL_ORDER)[number], number>> = {};
+        const deltas: Partial<Record<(typeof POOL_ORDER)[number], number | string>> = {};
         for (const pool of POOL_ORDER) {
           const value = body[pool];
           if (value !== undefined) deltas[pool] = value;
@@ -687,7 +703,10 @@ function poolDeltaCell(parsed: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const pool of POOL_ORDER) {
     const value = record[pool];
-    if (typeof value === "number") parts.push(`${pool} ${value > 0 ? "+" : ""}${value}`);
+    if (typeof value === "number" || isPercentFigure(value)) {
+      const negative = typeof value === "number" ? value < 0 : value.startsWith("-");
+      parts.push(`${pool} ${negative ? "" : "+"}${value}`);
+    }
   }
   return parts.length > 0 ? parts.join(", ") : "—";
 }
@@ -982,14 +1001,15 @@ const WEAPON_STAT_FORM_FIELDS = [
  * value an operator installing a def already knows.
  */
 const CONSUMABLE_STAT_FORM_FIELDS = [
-  { name: "heal", label: "Heal (blank for a non-heal effect)", type: "number" },
+  // Text, not number: a figure may be MCCodes' percent-of-max form, "50%".
+  { name: "heal", label: "Heal (25 or 50%; blank for a non-heal effect)", type: "text" },
   { name: "kind", label: "Effect kind (blank = heal, or pools when a delta is set)", type: "text" },
   // The built-in pools def's config. Any delta auto-selects the pools kind;
   // negative is a cost the player must afford, positive a grant clamped at
   // the pool's max.
-  { name: "energy", label: "Energy delta (negative = cost)", type: "number" },
-  { name: "will", label: "Will delta (negative = cost)", type: "number" },
-  { name: "brave", label: "Brave delta (negative = cost)", type: "number" },
+  { name: "energy", label: "Energy delta (25, -25 or 50%; negative = cost)", type: "text" },
+  { name: "will", label: "Will delta (25, -25 or 50%; negative = cost)", type: "text" },
+  { name: "brave", label: "Brave delta (25, -25 or 50%; negative = cost)", type: "text" },
 ] as const satisfies readonly { name: string; label: string; type: "number" | "text" }[];
 
 const adminPage: PageSchema = {
@@ -1116,6 +1136,7 @@ export {
   guardEffect,
   HEAL_EFFECT,
   HEAL_EFFECT_KIND,
+  isPercentFigure,
   itemEffects,
   MAX_CASH_PER_USE,
   MAX_EXP_PER_USE,
@@ -1124,6 +1145,7 @@ export {
   POOLS_EFFECT,
   POOLS_EFFECT_KIND,
   readConsumableUse,
+  resolveFigure,
   type BoundedOutcome,
   type ConsumableUse,
   type ItemEffectDef,

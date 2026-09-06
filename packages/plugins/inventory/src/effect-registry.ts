@@ -126,14 +126,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export const HEAL_EFFECT: ItemEffectDef = {
   kind: HEAL_EFFECT_KIND,
   label: "Heal",
-  apply(config) {
-    const heal = config["heal"];
-    if (typeof heal !== "number" || !Number.isInteger(heal) || heal <= 0) {
-      throw new PluginError("wrong_slot", 400);
-    }
+  apply(config, snapshot) {
+    const heal = resolveFigure(config["heal"], snapshot.maxHealth);
+    if (heal === null || heal <= 0) throw new PluginError("wrong_slot", 400);
     return { healthDelta: heal };
   },
 };
+
+/**
+ * MCCodes' `inc_type = percent`, spelled `"50%"`: a figure with a trailing `%`
+ * is a share of the stat's MAX rather than a flat amount, resolved here so
+ * the outcome the route bounds is still an integer delta. Signed like the
+ * flat form (`"-20%"` is a cost). Rounded half away from zero, floored at a
+ * magnitude of 1 so a stated percent always moves the stat — `1%` of a
+ * 5-point pool would otherwise be a no-op that still consumed the item.
+ *
+ * Answers `null` for anything that is neither a non-zero integer nor a
+ * well-formed non-zero percent; a caller turns that into `wrong_slot`.
+ */
+const PERCENT_PATTERN = /^-?\d+%$/;
+
+export function isPercentFigure(value: unknown): value is string {
+  return typeof value === "string" && PERCENT_PATTERN.test(value);
+}
+
+export function resolveFigure(value: unknown, max: number): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value !== 0 ? value : null;
+  }
+  if (!isPercentFigure(value)) return null;
+  const pct = Number.parseInt(value, 10);
+  if (pct === 0) return null;
+  const raw = (max * pct) / 100;
+  const magnitude = Math.max(1, Math.round(Math.abs(raw)));
+  return raw < 0 ? -magnitude : magnitude;
+}
 
 export const POOLS_EFFECT_KIND = "pools";
 
@@ -159,10 +186,12 @@ export const POOLS_EFFECT: ItemEffectDef = {
     for (const pool of POOL_ORDER) {
       const value = raw[pool];
       if (value === undefined) continue;
-      if (typeof value !== "number" || !Number.isInteger(value) || value === 0) {
-        throw new PluginError("wrong_slot", 400);
-      }
-      deltas[pool] = value;
+      // Resolved against the pool's max; an inactive pool (max 0) would make
+      // a percent resolve to ±1, so the shape check comes first and the
+      // pool_not_active refusal below still wins for it.
+      const resolved = resolveFigure(value, snapshot.pools[pool].max);
+      if (resolved === null) throw new PluginError("wrong_slot", 400);
+      deltas[pool] = resolved;
     }
     const named = POOL_ORDER.filter((pool) => deltas[pool] !== undefined);
     if (named.length === 0) throw new PluginError("wrong_slot", 400);

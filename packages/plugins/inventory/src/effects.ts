@@ -78,9 +78,19 @@ export const MeleeEffectsSchema = z.object({
  * existing item's only key — but optional now, because a non-heal consumable
  * has no heal figure. An absent `kind` means `heal`; see `consumableKind`.
  */
+/**
+ * A stat figure is a flat integer or MCCodes' percent-of-max form, `"50%"`
+ * (`inc_type = percent`), kept as the string it was authored as — the def
+ * resolves it against the player's max at use time (`resolveFigure`).
+ */
+export const PercentFigureSchema = z.string().regex(/^-?\d+%$/, "a percent is digits then %");
+
 export const ConsumableEffectsSchema = z.object({
   kind: z.string().min(1).optional(),
-  heal: z.number().int().positive().optional(),
+  heal: z.union([
+    z.number().int().positive(),
+    PercentFigureSchema.refine((v) => v[0] !== "-" && Number.parseInt(v, 10) > 0, "heal must be positive"),
+  ]).optional(),
 }).passthrough();
 
 export type WeaponEffects = z.infer<typeof WeaponEffectsSchema>;

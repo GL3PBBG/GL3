@@ -191,6 +191,54 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({ kind: "pools", pools: { energy: -4, brave: 3 } });
     });
 
+    // MCCodes' percent fill: a delta written `50%` is stored as-is and the
+    // def resolves it against the pool's max when the item is used.
+    it("stores a percent pool delta verbatim", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Half Tonic", itemType: "consumable", energy: "50%", brave: "-10%", will: "" },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toEqual({ kind: "pools", pools: { energy: "50%", brave: "-10%" } });
+    });
+
+    it("stores a percent heal verbatim", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Half Kit", itemType: "consumable", heal: "50%" },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toEqual({ heal: "50%" });
+    });
+
+    it("still stores a flat delta typed into the text field as a number", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Tonic", itemType: "consumable", heal: "", energy: "-4", brave: "3" },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toEqual({ kind: "pools", pools: { energy: -4, brave: 3 } });
+    });
+
+    it("rejects a zero, malformed or non-positive-heal percent", async () => {
+      for (const payload of [
+        { name: "P1", itemType: "consumable", energy: "0%" },
+        { name: "P2", itemType: "consumable", energy: "1.5%" },
+        { name: "P3", itemType: "consumable", energy: "50 %" },
+        { name: "P4", itemType: "consumable", energy: "half" },
+        { name: "P5", itemType: "consumable", heal: "0%" },
+        { name: "P6", itemType: "consumable", heal: "-20%" },
+      ]) {
+        const res = await app.inject({
+          method: "POST", url: "/api/admin/inventory/items", headers: auth(), payload,
+        });
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+      }
+    });
+
     it("creates a pools consumable when the kind is stated explicitly", async () => {
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items", headers: auth(),
@@ -352,6 +400,21 @@ describe("inventory admin", () => {
       expect(rows[0]).toMatchObject({
         itemType: "consumable", effect: "pools", heal: "—", pools: "energy -4, brave +3",
       });
+    });
+
+    it("lists percent figures with their sign and the % kept", async () => {
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Half Tonic", itemType: "consumable", energy: "50%", brave: "-10%" },
+      });
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Half Kit", itemType: "consumable", heal: "50%" },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
+      const rows = list.json().rows as Array<Record<string, string>>;
+      expect(rows.find((r) => r["name"] === "Half Tonic")).toMatchObject({ pools: "energy +50%, brave -10%" });
+      expect(rows.find((r) => r["name"] === "Half Kit")).toMatchObject({ heal: "50%" });
     });
 
     // Em dash, matching heal's own convention: the stat exists for the type

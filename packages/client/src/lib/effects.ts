@@ -20,6 +20,20 @@ export function numericEffect(effects: unknown, field: string): number | null {
  * registry. Absent and empty both read as `null` — the server treats both as
  * the built-in heal, so a page must not show either as a kind of its own.
  */
+/**
+ * A heal or pool FIGURE for display: a flat integer, or MCCodes' percent-of-
+ * max form `"50%"` (signed, `"-20%"`), which the server stores as authored
+ * and resolves against the player's max only at use time — so a page shows
+ * it as written rather than guessing the max. Anything else is `null`.
+ */
+export function figureEffect(effects: unknown, field: string): string | null {
+  if (typeof effects !== "object" || effects === null) return null;
+  const value = (effects as Record<string, unknown>)[field];
+  if (typeof value === "number") return Number.isNaN(value) ? null : String(value);
+  if (typeof value === "string" && /^-?\d+%$/.test(value)) return value;
+  return null;
+}
+
 export function stringEffect(effects: unknown, field: string): string | null {
   if (typeof effects !== "object" || effects === null) return null;
   const value = (effects as Record<string, unknown>)[field];

@@ -103,6 +103,60 @@ describe("the built-in heal def", () => {
   });
 });
 
+// MCCodes' `inc_type = percent`: a figure with a trailing `%` is a share of
+// the stat's MAX, not a flat amount. The def resolves it against the
+// snapshot so the outcome the route bounds is still an integer delta.
+describe("percent figures", () => {
+  it("heal resolves a percent against maxHealth", async () => {
+    const registry = await buildEffectRegistry(ctxWith([]));
+    const heal = registry.get(HEAL_EFFECT_KIND);
+    expect(heal?.apply({ heal: "50%" }, snapshot)).toEqual({ healthDelta: 50 });
+    expect(heal?.apply({ heal: "1%" }, { ...snapshot, maxHealth: 10 })).toEqual({ healthDelta: 1 });
+  });
+
+  it("heal refuses a zero, negative or malformed percent", async () => {
+    const registry = await buildEffectRegistry(ctxWith([]));
+    const heal = registry.get(HEAL_EFFECT_KIND);
+    for (const config of [{ heal: "0%" }, { heal: "-10%" }, { heal: "%" }, { heal: "10 %" }, { heal: "1.5%" }]) {
+      expect(() => heal?.apply(config, snapshot), JSON.stringify(config)).toThrow(
+        expect.objectContaining({ code: "wrong_slot" }),
+      );
+    }
+  });
+
+  it("pools resolves a signed percent against each pool's max, rounding", () => {
+    // energy max 12: 50% = 6; brave max 5: -50% = -2.5 → rounds away from zero to -3.
+    expect(POOLS_EFFECT.apply({ pools: { energy: "50%", brave: "-50%" } }, snapshot))
+      .toEqual({ poolDeltas: { energy: 6, brave: -3 } });
+  });
+
+  it("pools never rounds a percent to zero — a stated percent always moves the pool", () => {
+    // brave max 5: 1% is 0.05, which would round to a no-op.
+    expect(POOLS_EFFECT.apply({ pools: { brave: "1%" } }, snapshot)).toEqual({ poolDeltas: { brave: 1 } });
+    expect(POOLS_EFFECT.apply({ pools: { brave: "-1%" } }, snapshot)).toEqual({ poolDeltas: { brave: -1 } });
+  });
+
+  it("pools mixes flat and percent figures in one item", () => {
+    expect(POOLS_EFFECT.apply({ pools: { energy: -4, brave: "100%" } }, snapshot))
+      .toEqual({ poolDeltas: { energy: -4, brave: 5 } });
+  });
+
+  it("pools refuses a zero or malformed percent as wrong_slot", () => {
+    for (const value of ["0%", "%", "abc%", "10", "1.5%", ""]) {
+      expect(() => POOLS_EFFECT.apply({ pools: { energy: value } }, snapshot), value).toThrow(
+        expect.objectContaining({ code: "wrong_slot" }),
+      );
+    }
+  });
+
+  it("pools still answers already_full for a percent grant at a full pool", () => {
+    const full = { ...snapshot, pools: { ...snapshot.pools, brave: { value: 5, max: 5 } } };
+    expect(() => POOLS_EFFECT.apply({ pools: { brave: "50%" } }, full)).toThrow(
+      expect.objectContaining({ code: "already_full" }),
+    );
+  });
+});
+
 describe("guardEffect", () => {
   it("turns a def's own throw into a clean 400 rather than a 500", () => {
     try {

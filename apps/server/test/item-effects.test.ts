@@ -331,6 +331,33 @@ describe("the built-in pools def through the route", () => {
     expect((await poolsOf()).energy).toBe(10);
   });
 
+  it("resolves a percent delta against the pool's max at use time", async () => {
+    // energy max 12, brave max 5 (mccodes-attributes): +50% energy is 6, -20% brave is 1.
+    const tonic = await seedItem({ kind: "pools", pools: { energy: "50%", brave: "-20%" } });
+    await grant(tonic, 1);
+    await db.update(playerStats).set({ energy: 2, brave: 3 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(tonic);
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(UseItemResponseSchema.parse(res.json()).pools).toMatchObject({ energy: 8, brave: 2 });
+    expect(await poolsOf()).toEqual({ energy: 8, brave: 2 });
+  });
+
+  it("a percent heal restores a share of max health", async () => {
+    const kit = await seedItem({ heal: "25%" });
+    await grant(kit, 1);
+    await db.update(playerStats).set({ health: 40 })
+      .where(eq(playerStats.playerId, playerId));
+
+    const res = await use(kit);
+
+    expect(res.statusCode, res.body).toBe(200);
+    // Doc is rank 1, max health 100.
+    expect(UseItemResponseSchema.parse(res.json())).toMatchObject({ health: 65, healed: 25 });
+  });
+
   it("a heal item's response carries no pools field", async () => {
     const medkit = await seedItem({ heal: 30 });
     await grant(medkit, 1);

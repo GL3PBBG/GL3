@@ -1,7 +1,7 @@
 import type { InventoryItem } from "@gl3/shared";
 import { Link } from "react-router-dom";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
-import { numericEffect, stringEffect, weaponStatLine, useInventory, useEquip, useHospital, useUseItem } from "@gl3/client";
+import { figureEffect, numericEffect, stringEffect, weaponStatLine, useInventory, useEquip, useHospital, useUseItem } from "@gl3/client";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
 
@@ -62,7 +62,8 @@ function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
     if (kind !== null && kind !== HEAL_KIND) {
       return <span className={styles.muted}>{item.effectLabel ?? kind}</span>;
     }
-    const heal = numericEffect(item.effects, "heal");
+    // A figure, not a number: a percent heal ("50%") shows as written.
+    const heal = figureEffect(item.effects, "heal");
     if (heal === null) return <span className={styles.muted}>unusable</span>;
     return <span className={styles.muted}>heals {heal}</span>;
   }

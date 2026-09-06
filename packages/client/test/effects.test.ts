@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numericEffect, shotsToKill, stringEffect, weaponStatLine } from "../src/lib/effects.js";
+import { figureEffect, numericEffect, shotsToKill, stringEffect, weaponStatLine } from "../src/lib/effects.js";
 
 describe("numericEffect", () => {
   it("reads a numeric field out of an unknown effects blob", () => {
@@ -23,6 +23,28 @@ describe("numericEffect", () => {
 
   it("returns null for NaN", () => {
     expect(numericEffect({ armor: Number.NaN }, "armor")).toBeNull();
+  });
+});
+
+// A heal or pool figure is a flat integer OR MCCodes' percent-of-max form,
+// "50%" — the server stores the percent as the string it was authored as and
+// resolves it at use time, so a page shows it as written.
+describe("figureEffect", () => {
+  it("reads a flat integer figure as its display string", () => {
+    expect(figureEffect({ heal: 25 }, "heal")).toBe("25");
+  });
+
+  it("reads a percent figure verbatim", () => {
+    expect(figureEffect({ heal: "50%" }, "heal")).toBe("50%");
+    expect(figureEffect({ pools: { energy: "-20%" } }.pools, "energy")).toBe("-20%");
+  });
+
+  it("returns null for a missing, malformed or non-figure value", () => {
+    expect(figureEffect({ heal: "twenty" }, "heal")).toBeNull();
+    expect(figureEffect({ heal: "50 %" }, "heal")).toBeNull();
+    expect(figureEffect({ heal: Number.NaN }, "heal")).toBeNull();
+    expect(figureEffect({}, "heal")).toBeNull();
+    expect(figureEffect(null, "heal")).toBeNull();
   });
 });
 
