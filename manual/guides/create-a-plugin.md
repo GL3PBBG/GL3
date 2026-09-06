@@ -1,5 +1,10 @@
 # Create a plugin
 
+> **Building a standalone plugin (`@gl3-plugins/*`, installed from the
+> registry)?** Run `npx --registry=https://npm.gl3.dev @gl3/create-plugin <id>`
+> and skip this guide: it describes plugins that live *inside* this workspace,
+> and its registration sites do not apply to a package that ships on its own.
+
 > **Audience:** a contributor who has the server running and wants to add a gameplay
 > feature as a plugin under `packages/plugins/`.
 
