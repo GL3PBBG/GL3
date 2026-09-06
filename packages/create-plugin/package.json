@@ -7,6 +7,6 @@
   "files": ["bin", "dist", "templates"],
   "publishConfig": { "registry": "https://npm.gl3.dev", "access": "public" },
   "scripts": { "build": "tsc --build", "prepack": "tsc --build" },
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22.4" },
   "devDependencies": {}
 }
