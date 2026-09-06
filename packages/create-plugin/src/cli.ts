@@ -61,6 +61,7 @@ PLUGIN_DIR + PLUGIN_PACKAGES=@gl3-plugins/${id} — see README.md.
 `;
 }
 
+// exit codes: 0 ok · 1 bad args / unusable dir · 2 npm install failed after files were written · 3 unexpected failure after validation
 export async function main(argv: string[]): Promise<number> {
   const parsed = parseCliArgs(argv);
   if (!parsed.ok) {
@@ -70,18 +71,25 @@ export async function main(argv: string[]): Promise<number> {
   const { id, dir, install, sdk } = parsed.opts;
   const target = resolve(process.cwd(), dir);
   if (!dirIsUsable(target)) {
-    console.error(`create-plugin: ${dir} exists and is not empty`);
+    console.error(`create-plugin: ${dir} exists and is not an empty directory`);
     return 1;
   }
-  const sdkRange = resolveSdkRange({ override: sdk, warn: (m) => console.error(m) });
-  writeFiles(target, render(loadTemplates(), { id, sdkRange }));
-  gitInit(target, (m) => console.error(m));
-  if (install && !npmInstall(target)) {
-    console.error(`create-plugin: files written to ${dir}, but \`npm install\` failed — fix the cause and run it again there.`);
-    return 2;
+  try {
+    const sdkRange = resolveSdkRange({ override: sdk, warn: (m) => console.error(m) });
+    writeFiles(target, render(loadTemplates(), { id, sdkRange }));
+    gitInit(target, (m) => console.error(m));
+    if (install && !npmInstall(target)) {
+      console.error(`create-plugin: files written to ${dir}, but \`npm install\` failed — fix the cause and run it again there.`);
+      return 2;
+    }
+    console.log(nextSteps(id, dir));
+    return 0;
+  } catch (err) {
+    console.error(
+      `create-plugin: failed while scaffolding ${dir}: ${err instanceof Error ? err.message : String(err)} — the tree may be partial; remove it before retrying.`,
+    );
+    return 3;
   }
-  console.log(nextSteps(id, dir));
-  return 0;
 }
 
 /** Run only when this module is the process entry point, not when `bin/create-plugin.js` imports it. */

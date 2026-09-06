@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +48,7 @@ describe("create-plugin (spawned)", () => {
     writeFileSync(join(cwd, "gl3-plugin-probe/keep.txt"), "mine");
     const res = run(["probe", "--no-install"], cwd);
     expect(res.status).toBe(1);
-    expect(res.stderr).toContain("not empty");
+    expect(res.stderr).toContain("not an empty directory");
     expect(readdirSync(join(cwd, "gl3-plugin-probe"))).toEqual(["keep.txt"]);
   });
 
@@ -69,5 +69,19 @@ describe("create-plugin (spawned)", () => {
     const res = run(["probe", "custom-dir", "--no-install", "--sdk", "^1.0.0"], cwd);
     expect(res.status, res.stderr).toBe(0);
     expect(existsSync(join(cwd, "custom-dir/package.json"))).toBe(true);
+  });
+
+  it("runs main exactly once when invoked through the packaged bin", () => {
+    execFileSync(join(REPO, "node_modules/.bin/tsc"), ["--build", "--force"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      stdio: "pipe",
+    });
+    const bin = fileURLToPath(new URL("../bin/create-plugin.js", import.meta.url));
+    const res = spawnSync(process.execPath, [bin, "probe", "--no-install", "--sdk", "^1.0.0"], { cwd, encoding: "utf8" });
+    expect(res.status, res.stderr).toBe(0);
+    // A second invocation of main would hit the now-non-empty dir and exit 1, so a
+    // single 0 plus a single next-steps banner is the proof of one run.
+    expect(res.stdout.match(/Created @gl3-plugins\/probe/g)).toHaveLength(1);
+    expect(existsSync(join(cwd, "gl3-plugin-probe/package.json"))).toBe(true);
   });
 });
