@@ -267,6 +267,11 @@ describe("renderNode", () => {
       ]);
   });
 
+  it("maps a propertyPanel to its type id", () => {
+    expect(renderNode({ kind: "propertyPanel", pluginId: "brothel" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "propertyPanel", pluginId: "brothel" }]);
+  });
+
   it("maps a singleton assetBinder, whose entity fields are absent", () => {
     const out = renderNode({ kind: "assetBinder", slot: "banner", scope: "casino" }, {});
     // Null, not "": the renderer branches on it to decide whether to draw an

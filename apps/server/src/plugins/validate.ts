@@ -288,6 +288,8 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     }
   }
 
+  const declaredPropertyTypes = new Set(manifests.flatMap((m) => m.providesProperties.map((d) => d.id)));
+
   // Containment runs second: every basePath is known by now, so a route or an
   // action under a *later* basePath of the same plugin is not reported as a
   // violation.
@@ -338,6 +340,18 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
     }
 
     const allPages = [...manifest.pages, ...manifest.adminPages];
+    // A propertyPanel sells a franchise; naming a type nobody in this boot
+    // declares would render an empty panel forever, so it fails at boot with
+    // the type named — the same posture as an unknown `requires`.
+    for (const page of allPages) {
+      for (const typeId of propertyPanelTypeIds(page.view)) {
+        if (!declaredPropertyTypes.has(typeId)) {
+          fail(
+            `plugin "${manifest.id}" page "${page.id}" declares a propertyPanel for property type "${typeId}", which no plugin in this boot declares through providesProperties`,
+          );
+        }
+      }
+    }
     for (const page of allPages) {
       for (const action of viewActions(page.view)) {
         const path = actionPath(action);
@@ -365,4 +379,15 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
   // declaring the same asset slot twice is a hard boot failure, and the
   // collector already throws with the right prefix.
   collectAssetSlots(manifests);
+}
+
+/** Every `propertyPanel.pluginId` in a view, panels and lists included. */
+function propertyPanelTypeIds(view: unknown): string[] {
+  if (typeof view !== "object" || view === null) return [];
+  const node = view as { kind?: unknown; pluginId?: unknown; children?: unknown; items?: unknown };
+  const own = node.kind === "propertyPanel" && typeof node.pluginId === "string" ? [node.pluginId] : [];
+  const nested = [node.children, node.items]
+    .filter((v): v is unknown[] => Array.isArray(v))
+    .flatMap((v) => v.flatMap(propertyPanelTypeIds));
+  return [...own, ...nested];
 }

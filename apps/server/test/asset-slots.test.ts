@@ -167,6 +167,25 @@ describe("per-row slots with their own picker", () => {
 });
 
 describe("boot validation", () => {
+  it("rejects a propertyPanel for a property type no plugin in the boot declares, and accepts a declared one", () => {
+    const page = (pluginId: string) => ({
+      id: "seller.page", path: "/seller",
+      view: { kind: "panel" as const, title: "Shop", children: [{ kind: "propertyPanel" as const, pluginId }] },
+    });
+    const seller = definePlugin({
+      id: "seller", version: "1.0.0", basePaths: ["/api/seller"],
+      providesProperties: [{ id: "seller", name: "Shop", price: 1n, leverLabel: "Lever" }],
+      pages: [page("seller")],
+    });
+    expect(() => validatePlugins([seller])).not.toThrow();
+    const stranger = definePlugin({
+      id: "stranger", version: "1.0.0", basePaths: ["/api/stranger"], pages: [{ ...page("seller"), id: "stranger.page", path: "/stranger" }],
+    });
+    // Declared by another plugin in the same boot: fine. Alone: refused, naming the type.
+    expect(() => validatePlugins([seller, stranger])).not.toThrow();
+    expect(() => validatePlugins([stranger])).toThrow(/propertyPanel for property type "seller"/);
+  });
+
   it("rejects an assetBinder on a player-facing page", () => {
     const plugin = definePlugin({
       id: "leaky", version: "1.0.0", basePaths: ["/api/leaky", "/api/admin/leaky"],

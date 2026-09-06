@@ -104,6 +104,13 @@ describe("MenuBadgeSchema", () => {
   it("rejects a negative count", () => {
     expect(() => MenuBadgeSchema.parse({ path: "/mail", count: -1 })).toThrow();
   });
+
+  it("accepts an optional hidden flag and nothing else", () => {
+    const hidden = { path: "/plugins/brothel.index", count: 0, hidden: true };
+    expect(MenuBadgeSchema.parse(hidden)).toEqual(hidden);
+    expect(() => MenuBadgeSchema.parse({ path: "/mail", count: 0, hidden: "yes" })).toThrow();
+    expect(() => MenuBadgeSchema.parse({ path: "/mail", count: 0, visible: false })).toThrow();
+  });
 });
 
 describe("MoneyFormatSchema", () => {

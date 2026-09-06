@@ -59,7 +59,7 @@ describe("invalidationKeys", () => {
     // shape — so without this a traveller keeps seeing the old town's roster
     // until the query remounts.
     expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([
-      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(),
+      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges(),
     ]);
   });
 
@@ -79,7 +79,7 @@ describe("invalidationKeys", () => {
   });
 
   it("refreshes the ladder on a rank up", () => {
-    expect(invalidationKeys(event("player.rankedUp"), VIEWER)).toEqual([keys.me(), keys.ranks()]);
+    expect(invalidationKeys(event("player.rankedUp"), VIEWER)).toEqual([keys.me(), keys.ranks(), keys.menuBadges()]);
   });
 
   it("refreshes the combat surfaces when a shot lands", () => {

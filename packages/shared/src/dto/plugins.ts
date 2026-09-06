@@ -280,6 +280,13 @@ const leafOptions = [
       size: z.enum(["sm", "md", "lg"]).optional(),
     })
     .strict(),
+  /** The town's property row for `pluginId` — see the SDK's copy for why. */
+  z
+    .object({
+      kind: z.literal("propertyPanel"),
+      pluginId: z.string().min(1),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("slotImage"),

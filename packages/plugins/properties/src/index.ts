@@ -789,25 +789,28 @@ const adminDeleteRoute = route({
 // Event declarations (cont.)
 // ---------------------------------------------------------------------------
 
+// menuBadges: a consumer plugin can key a nav entry on ownership
+// (MenuBadge.hidden — the brothel's owner-only office), so a handover must
+// re-ask the caller's menu.
 const boughtEvent = {
   name: "bought",
   payload: z.object({ typeName: z.string(), locationName: z.string(), price: z.string() }),
   describe: "{actorName} bought the {typeName} in {locationName} for {price}",
-  invalidates: ["properties", "me"],
+  invalidates: ["properties", "me", "menuBadges"],
 };
 
 const droppedEvent = {
   name: "dropped",
   payload: z.object({ typeName: z.string(), locationName: z.string(), refund: z.string() }),
   describe: "{actorName} dropped the {typeName} in {locationName} for {refund} back",
-  invalidates: ["properties", "me"],
+  invalidates: ["properties", "me", "menuBadges"],
 };
 
 const transferredEvent = {
   name: "transferred",
   payload: z.object({ typeName: z.string(), locationName: z.string() }),
   describe: "{actorName} transferred the {typeName} in {locationName} to you",
-  invalidates: ["properties", "me"],
+  invalidates: ["properties", "me", "menuBadges"],
 };
 
 // ---------------------------------------------------------------------------
