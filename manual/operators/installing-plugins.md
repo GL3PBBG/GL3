@@ -3,7 +3,9 @@
 > **Audience:** an operator running the published container image (or a
 > from-source deployment) who wants to add a plugin that is not compiled into
 > the server. If you are *writing* a plugin, see
-> [Create a plugin](../guides/create-a-plugin.md) instead.
+> [Create a standalone plugin](../guides/create-a-standalone-plugin.md) (a
+> package of its own) or [Create a plugin](../guides/create-a-plugin.md) (inside
+> this repository) instead.
 
 ## The one idea to hold on to: install ≠ load
 

@@ -216,6 +216,27 @@ describe("travel admin", () => {
     expect(allowed.statusCode).toBe(204);
   });
 
+  it("exposes minLevel on both admin forms and prefills the update form from the chosen town", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth() });
+    expect(res.statusCode).toBe(200);
+    const section = res.json().sections.find((s: { pluginId: string }) => s.pluginId === "travel");
+    type Field = { name: string; type: string; prefillForm?: boolean };
+    type Node = { kind: string; action?: string; fields?: Field[]; children?: Node[] };
+    const forms: Node[] = [];
+    const walk = (node: Node) => {
+      if (node.kind === "form") forms.push(node);
+      for (const child of node.children ?? []) walk(child);
+    };
+    for (const page of section.pages) walk(page.view);
+    const create = forms.find((f) => f.action === "POST /api/admin/travel/locations");
+    const update = forms.find((f) => f.action === "POST /api/admin/travel/locations/update");
+    expect(create?.fields?.find((f) => f.name === "minLevel")?.type).toBe("number");
+    expect(update?.fields?.find((f) => f.name === "minLevel")?.type).toBe("number");
+    // Picking a town seeds the edit — an operator raising one town's level
+    // should not have to retype its name, fare and cooldown (crimes' precedent).
+    expect(update?.fields?.find((f) => f.name === "id")?.prefillForm).toBe(true);
+  });
+
   it("404s deleting an unknown town", async () => {
     const del = await app.inject({
       method: "DELETE", url: "/api/admin/travel/locations/00000000-0000-7000-8000-000000000000",

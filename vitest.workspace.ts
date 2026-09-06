@@ -208,6 +208,18 @@ export default defineWorkspace([
     ...srcAliases,
   },
   {
+    // The plugin scaffolder. Pure/no-DB: renders templates, spawns tsc/git/npm
+    // in scratch dirs. Its generated-plugin test needs packages/plugin-sdk/dist
+    // (built by `npm run build`), which `npm run verify` guarantees.
+    test: {
+      name: "@gl3/create-plugin",
+      root: "./packages/create-plugin",
+      include: ["test/**/*.test.ts"],
+      testTimeout: 60_000, // tsc + npm-free symlink install in a scratch dir
+    },
+    ...srcAliases,
+  },
+  {
     // Mostly pure client modules — money/rank/error formatting and the
     // event→cache-key map — which run in node and need no DOM. A file that
     // renders (hooks via @testing-library/react) opts into a DOM per file

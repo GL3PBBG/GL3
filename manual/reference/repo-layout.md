@@ -8,6 +8,7 @@
 | `packages/shared` (`@gl3/shared`) | Zod event contracts and DTOs, shared by server and web; published on `npm.gl3.dev` |
 | `packages/plugin-sdk` (`@gl3/plugin-sdk`) | The SDK third-party plugins build against; also published |
 | `packages/plugins/*` | The twenty-seven bundled gameplay plugins (combat, detectives, travel, gangs, casino, the MCCodes family, ...) |
+| `packages/create-plugin` (`@gl3/create-plugin`) | Scaffolder for standalone `@gl3-plugins/*` packages, run via `npx --registry=https://npm.gl3.dev`; also published |
 | `examples/` | Example plugin packages |
 | `scripts/` | Repo maintenance scripts (`plugins:generate`, the docs reference generator `generate-reference.mjs`, stale test-clone cleanup, ...) |
 | `manual/` | This documentation site (VitePress) |

@@ -668,13 +668,19 @@ const adminPage: PageSchema = {
         { name: "name", label: "Name", type: "text" },
         { name: "travelCost", label: "Travel cost", type: "money" },
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+        // Blank submits "" → z.coerce.number → 0 = open town, the V2 default.
+        { name: "minLevel", label: "Minimum level", type: "number", min: 0 },
         { name: "combatMode", label: "Combat mode", type: "select", optionsSource: "GET /api/admin/travel/combat-modes", valueKey: "id", labelKey: "name" },
       ] },
       { kind: "form", action: "POST /api/admin/travel/locations/update", submitLabel: "Update town", fields: [
-        { name: "id", label: "Town", type: "select", optionsSource: "GET /api/admin/travel/locations", valueKey: "id", labelKey: "name" },
+        // prefillForm: picking the town seeds every text/number field below
+        // from the list row (crimes' precedent) — the list route already
+        // serialises each column as the string the form would post.
+        { name: "id", label: "Town", type: "select", optionsSource: "GET /api/admin/travel/locations", valueKey: "id", labelKey: "name", prefillForm: true },
         { name: "name", label: "Name", type: "text" },
         { name: "travelCost", label: "Travel cost", type: "money" },
         { name: "travelCooldownSeconds", label: "Cooldown seconds", type: "number" },
+        { name: "minLevel", label: "Minimum level", type: "number", min: 0 },
         { name: "combatMode", label: "Combat mode", type: "select", optionsSource: "GET /api/admin/travel/combat-modes", valueKey: "id", labelKey: "name" },
       ] },
     ],
