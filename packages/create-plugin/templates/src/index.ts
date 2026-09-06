@@ -7,7 +7,7 @@ import { MIGRATIONS } from "./migrations.js";
  *
  * Fields (the schema is `.strict()`; an unknown key throws at import):
  *   id version apiVersion basePaths tables migrations routes pages adminPages
- *   events jobs provides filters providesAssets providesProperties
+ *   events jobs provides filters providesAssets providesProperties providesAttributes
  *
  * - Every route path AND every view action path (`table.source`, `form.action`,
  *   `optionsSource`, `rowActions[].action`) must sit under a basePath.

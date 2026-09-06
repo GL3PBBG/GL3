@@ -126,7 +126,7 @@ export function makeHarness(db: TestDb, options: HarnessOptions = {}) {
               },
             },
             locks: {
-              player: (ids: string[]) => recordLock({ kind: "player", ids: [...ids].sort() }),
+              player: (ids: string[]) => recordLock({ kind: "player", ids: [...new Set(ids)].sort() }),
               location: (id: string) => recordLock({ kind: "location", ids: [id] }),
               locations: (ids: readonly (string | null)[]) => recordLock({ kind: "locations", ids }),
               gangAndPlayer: (gangId: string, playerId: string) =>
