@@ -9,10 +9,15 @@ import {
   BustResponseSchema,
   BuyBulletsResponseSchema,
   CellBlockListResponseSchema,
+  type ChangePasswordRequest,
   CommitCrimeResponseSchema,
   CrimeListResponseSchema,
+  type DeleteAccountRequest,
   JailStatusSchema,
   LeaderboardResponseSchema,
+  type LegalDoc,
+  type LegalDocResponse,
+  LegalDocResponseSchema,
   LocationListResponseSchema,
   MeResponseSchema,
   RankListResponseSchema,
@@ -164,12 +169,13 @@ export function useRoundStandings(roundId: string, kind: LeaderboardKind) {
 export function useAuth(mode: "login" | "register") {
   const queryClient = useQueryClient();
   return useMutation({
-    // `email` is required by RegisterRequestSchema and absent from
-    // LoginRequestSchema — sent conditionally rather than always, so a login
-    // never carries a stray field the server schema doesn't expect.
-    mutationFn: async (input: { username: string; password: string; email?: string }) => {
+    // `email` and `acceptTerms` are required by RegisterRequestSchema and
+    // absent from LoginRequestSchema — sent conditionally rather than
+    // always, so a login never carries a stray field the server schema
+    // doesn't expect.
+    mutationFn: async (input: { username: string; password: string; email?: string; acceptTerms?: boolean }) => {
       const requestBody = mode === "register"
-        ? { username: input.username, email: input.email, password: input.password }
+        ? { username: input.username, email: input.email, password: input.password, acceptTerms: input.acceptTerms }
         : { username: input.username, password: input.password };
       const body = AuthResponseSchema.parse(
         await api(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify(requestBody) }),
@@ -247,6 +253,36 @@ export function useLogout() {
       }
     },
     onSettled: () => { queryClient.clear(); },
+  });
+}
+
+export function useChangePassword() {
+  return useMutation<void, Error, ChangePasswordRequest>({
+    mutationFn: async (input) =>
+      api<void>("/api/auth/password", { method: "POST", body: JSON.stringify(input) }),
+  });
+}
+
+/**
+ * 204 on success; the account is gone server-side, so the local token and
+ * every cached query go with it — same shape as useLogout's cleanup. The
+ * host decides where to navigate (web: /login with an accountDeleted note).
+ */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, DeleteAccountRequest>({
+    mutationFn: async (input) =>
+      api<void>("/api/auth/delete", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: () => { tokenStore.clear(); queryClient.clear(); },
+  });
+}
+
+/** Public; the register page reads it before any session exists. */
+export function useLegalDoc(doc: LegalDoc) {
+  return useQuery<LegalDocResponse>({
+    queryKey: keys.legal(doc),
+    queryFn: async () => LegalDocResponseSchema.parse(await api(`/api/legal/${doc}`)),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

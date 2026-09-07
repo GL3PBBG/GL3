@@ -87,4 +87,9 @@ describe("describeError", () => {
     expect(describeError(new ApiError(409, "not_sold_here"))).toBeTruthy();
     expect(describeError(new ApiError(409, "no_location"))).toBeTruthy();
   });
+
+  it("has copy for the danger-zone codes", () => {
+    expect(describeError(new ApiError(400, "terms_not_accepted"))).toBe("Accept the Terms of Service and Privacy Policy to register.");
+    expect(describeError(new ApiError(409, "sole_administrator"))).toBe("You're the only administrator — give another player the Administrator role first.");
+  });
 });
