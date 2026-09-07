@@ -462,6 +462,7 @@ export default defineWorkspace([
         "test/money-ranks.test.ts",
         "test/news.test.ts",
         "test/oc-worker.test.ts",
+        "test/oc-resolve-deleted-member.test.ts",
         "test/oc-concurrency.test.ts",
         "test/oc.test.ts",
         "test/oc-ledger.test.ts",
