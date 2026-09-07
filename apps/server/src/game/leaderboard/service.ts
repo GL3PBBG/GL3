@@ -46,9 +46,12 @@ export async function topN(
     .from(players).where(inArray(players.id, scored.map((e) => e.playerId)));
   const nameById = new Map(rows.map((r) => [r.id, r.username]));
 
-  return scored.map((entry, i) => ({
-    playerId: entry.playerId, username: nameById.get(entry.playerId) ?? "unknown", score: entry.score, rank: i + 1,
-  }));
+  // An id with no players row is a ghost — a deleted account whose post-
+  // commit ZREM never ran. Drop it rather than rank "unknown"; the list may
+  // then be shorter than n, which is the honest answer.
+  return scored
+    .filter((entry) => nameById.has(entry.playerId))
+    .map((entry, i) => ({ playerId: entry.playerId, username: nameById.get(entry.playerId)!, score: entry.score, rank: i + 1 }));
 }
 
 /**
@@ -73,5 +76,12 @@ export async function rebuildLeaderboards(
     pipeline.zadd(key("bank", prefix), row.bank.toString(), row.playerId);
     pipeline.zadd(key("exp", prefix), expScore(row.level, row.exp, routed).toString(), row.playerId);
   }
+  await pipeline.exec();
+}
+
+/** Account deletion: the row is gone, so every board forgets the id. Best-effort post-commit; topN tolerates a miss. */
+export async function removePlayer(redis: Redis, playerId: string, prefix = DEFAULT_LEADERBOARD_PREFIX): Promise<void> {
+  const pipeline = redis.pipeline();
+  for (const kind of ["cash", "bank", "exp"] as const) pipeline.zrem(key(kind, prefix), playerId);
   await pipeline.exec();
 }

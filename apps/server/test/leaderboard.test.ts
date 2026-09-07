@@ -7,7 +7,7 @@ import { loadConfig } from "../src/config.js";
 import { players, playerStats } from "../src/db/schema/index.js";
 import bankPlugin from "@gl3/plugin-bank";
 import { callPluginRoute } from "./helpers/plugin-route.js";
-import { rebuildLeaderboards, recordScore, topN } from "../src/game/leaderboard/service.js";
+import { rebuildLeaderboards, recordScore, removePlayer, topN } from "../src/game/leaderboard/service.js";
 import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -218,5 +218,27 @@ describe("GET /api/leaderboard/:kind — mode field on routed vs unrouted boots"
     await app.close();
     for (const w of loadedPlugins.workers) await w.close();
     for (const q of loadedPlugins.queues.values()) await q.close();
+  });
+});
+
+describe("removePlayer / ghosts", () => {
+  it("removePlayer clears the id from every kind", async () => {
+    const a = await insertPlayer("Alice", 100n, 5n);
+    await recordScore(redis, "cash", a, 100n, PREFIX);
+    await recordScore(redis, "bank", a, 0n, PREFIX);
+    await recordScore(redis, "exp", a, 5n, PREFIX);
+    await removePlayer(redis, a, PREFIX);
+    for (const kind of ["cash", "bank", "exp"] as const) {
+      expect(await redis.zscore(`${PREFIX}:${kind}`, a)).toBeNull();
+    }
+  });
+
+  it("topN drops an id no longer in players rather than showing 'unknown'", async () => {
+    const a = await insertPlayer("Alice", 100n, 0n);
+    await recordScore(redis, "cash", a, 100n, PREFIX);
+    await recordScore(redis, "cash", "00000000-0000-7000-8000-00000000dead", 999n, PREFIX);
+    const rows = await topN(db, redis, "cash", 10, PREFIX);
+    expect(rows.map((r) => r.username)).toEqual(["Alice"]);
+    expect(rows[0]?.rank).toBe(1);
   });
 });
