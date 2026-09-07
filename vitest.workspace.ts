@@ -374,6 +374,7 @@ export default defineWorkspace([
         "test/auth-reset.test.ts",
         "test/auth-password-change.test.ts",
         "test/auth-verify.test.ts",
+        "test/auth-register-terms.test.ts",
         "test/auth.test.ts",
         "test/ip-telemetry.test.ts",
         "test/admin-anti-bot.test.ts",

@@ -31,7 +31,7 @@ describe("email verification hard gate", () => {
   it("registers with email, is gated, verifies, plays", async () => {
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `v_${Date.now()}`, email: `v${Date.now()}@x.com`, password: "password123" },
+      payload: { username: `v_${Date.now()}`, email: `v${Date.now()}@x.com`, password: "password123", acceptTerms: true },
     });
     expect(register.statusCode).toBe(201);
     const { token, playerId } = register.json();
@@ -62,7 +62,7 @@ describe("email verification hard gate", () => {
   it("verify code is single-use", async () => {
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `su_${Date.now()}`, email: `su${Date.now()}@x.com`, password: "password123" },
+      payload: { username: `su_${Date.now()}`, email: `su${Date.now()}@x.com`, password: "password123", acceptTerms: true },
     });
     const { playerId } = register.json();
     const code = await verifyCodeFor(redis, playerId);
@@ -106,7 +106,7 @@ describe("email verification hard gate", () => {
   it("login re-asserts the unverified flag after a Redis flush of the key", async () => {
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `re_${Date.now()}`, email: `re${Date.now()}@x.com`, password: "password123" },
+      payload: { username: `re_${Date.now()}`, email: `re${Date.now()}@x.com`, password: "password123", acceptTerms: true },
     });
     const { playerId, username } = register.json();
 
@@ -130,7 +130,7 @@ describe("POST /api/auth/verify/resend", () => {
   it("re-issues a working code and rejects an already-verified player", async () => {
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `rs_${Date.now()}`, email: `rs${Date.now()}@x.com`, password: "password123" },
+      payload: { username: `rs_${Date.now()}`, email: `rs${Date.now()}@x.com`, password: "password123", acceptTerms: true },
     });
     const { token, playerId } = register.json();
 

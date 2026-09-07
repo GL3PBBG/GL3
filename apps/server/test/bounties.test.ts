@@ -46,7 +46,7 @@ beforeEach(async () => {
   const target = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Marked", email: "marked@example.test", password: "hunter2hunter2" },
+    payload: { username: "Marked", email: "marked@example.test", password: "hunter2hunter2", acceptTerms: true },
   });
   ({ playerId: targetId } = target.json());
 });

@@ -216,7 +216,7 @@ describe("POST /api/mail", () => {
   // means without ever tripping the sender-side check above.
   it("403s replying in a real thread to a recipient who isn't part of it", async () => {
     // Never authenticates as Clemenza below, just needs the username to resolve as a recipient.
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", email: "clemenza@example.test", password: "hunter2hunter2" } });
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Clemenza", email: "clemenza@example.test", password: "hunter2hunter2", acceptTerms: true } });
     const first = await app.inject({
       method: "POST", url: "/api/mail", headers: { authorization: `Bearer ${senderToken}` },
       payload: { recipientUsername: "Sonny", subject: "Business", body: "We need to talk." },

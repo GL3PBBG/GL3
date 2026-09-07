@@ -258,7 +258,7 @@ async function main() {
   const registerRes = await fetchWithRetry(`http://localhost:${SERVER_PORT}/api/auth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username, email, password }),
+    body: JSON.stringify({ username, email, password, acceptTerms: true }),
   });
   if (registerRes.status !== 201) {
     throw new Error(`register failed: ${registerRes.status} ${await registerRes.text()}`);

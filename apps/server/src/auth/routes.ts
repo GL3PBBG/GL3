@@ -104,6 +104,7 @@ export function registerAuthRoutes(
   }, async (request, reply) => {
     const parsed = RegisterRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", issues: parsed.error.issues });
+    if (parsed.data.acceptTerms !== true) return reply.code(400).send({ error: "terms_not_accepted" });
 
     const existing = await db.select({ id: players.id }).from(players).where(eq(players.username, parsed.data.username));
     if (existing.length > 0) return reply.code(409).send({ error: "username_taken" });
@@ -147,6 +148,7 @@ export function registerAuthRoutes(
           passwordHash,
           signupIp: clientIp(request, config.clientIpHeader),
           lastIp: clientIp(request, config.clientIpHeader),
+          termsAcceptedAt: new Date(),
         });
         await tx.insert(playerStats).values({ playerId, ...seededStats });
 

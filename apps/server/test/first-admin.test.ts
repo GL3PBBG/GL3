@@ -69,7 +69,7 @@ describe("first registered player becomes admin", () => {
       Array.from({ length: 4 }, (_, i) =>
         app.inject({
           method: "POST", url: "/api/auth/register",
-          payload: { username: `Racer${i}`, email: `racer${i}@example.test`, password: "hunter2hunter2" },
+          payload: { username: `Racer${i}`, email: `racer${i}@example.test`, password: "hunter2hunter2", acceptTerms: true },
         }),
       ),
     );

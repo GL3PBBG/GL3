@@ -130,7 +130,7 @@ describe("password reset", () => {
     const email = `unverified_${Date.now()}@example.test`;
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `uv_${Date.now()}`, email, password: "password123" },
+      payload: { username: `uv_${Date.now()}`, email, password: "password123", acceptTerms: true },
     });
     expect(register.statusCode).toBe(201);
     const { playerId } = register.json() as { playerId: string };

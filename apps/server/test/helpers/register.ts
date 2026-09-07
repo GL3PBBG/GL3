@@ -30,7 +30,7 @@ export async function registerVerifiedPlayer(
   const register = await server.app.inject({
     method: "POST", url: "/api/auth/register",
     remoteAddress: overrides?.remoteAddress,
-    payload: { username, email, password },
+    payload: { username, email, password, acceptTerms: true },
   });
   if (register.statusCode !== 201) {
     throw new Error(`registerVerifiedPlayer: register failed ${register.statusCode}: ${register.body}`);

@@ -56,6 +56,8 @@ export const players = pgTable("players", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  /** NULL only for a row inserted by code that predates the terms gate; the migration backfilled every existing row. */
+  termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
   /** Client IP at registration (anti-bot layer 0). NULL predates 0022. */
   signupIp: text("signup_ip"),
   /** Client IP of the most recent stamped request — written by register,

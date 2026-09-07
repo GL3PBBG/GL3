@@ -176,7 +176,7 @@ describe("PUT /api/gangs/:gangId/permissions", () => {
   // "this player is not in this gang" condition.
   it("404s a permission granted to a player who is not a member of the gang, storing no dormant row", async () => {
     // Never authenticates as Fredo below, just needs a real player row.
-    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2" } });
+    const outsider = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2", acceptTerms: true } });
     const { playerId: outsiderId } = outsider.json();
 
     const grant = await app.inject({

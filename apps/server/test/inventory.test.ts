@@ -135,7 +135,7 @@ describe("GET /api/inventory", () => {
     // one fails if `playerId` is ever dropped from it.
     const other = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Tony", email: "tony@example.test", password: "hunter2hunter2" },
+      payload: { username: "Tony", email: "tony@example.test", password: "hunter2hunter2", acceptTerms: true },
     });
     const pistol = await seedItem("weapon", { accuracy: 60, damageMin: 5, damageMax: 15 });
     await grant(other.json().playerId, pistol, 1);

@@ -26,7 +26,7 @@ describe("POST /api/auth/register", () => {
   it("creates a player with stats and returns a session token", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" },
+      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -39,8 +39,8 @@ describe("POST /api/auth/register", () => {
   });
 
   it("rejects a duplicate username case-insensitively", async () => {
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
-    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "vito", email: "vito2@family.test", password: "hunter2hunter2" } });
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true } });
+    const res = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "vito", email: "vito2@family.test", password: "hunter2hunter2", acceptTerms: true } });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "username_taken" });
   });
@@ -48,11 +48,11 @@ describe("POST /api/auth/register", () => {
   it("rejects a duplicate email with email_taken, not username_taken", async () => {
     await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" },
+      payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true },
     });
     const res = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: "Michael", email: "vito@family.test", password: "hunter2hunter2" },
+      payload: { username: "Michael", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true },
     });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "email_taken" });
@@ -160,7 +160,7 @@ describe("POST /api/auth/login — legacy MCCodes upgrade (spec 2026-08-26 §7 i
 
 describe("POST /api/auth/login — username-enumeration resistance", () => {
   it("returns byte-identical 401s for an unknown username and a wrong password", async () => {
-    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
+    await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true } });
 
     const unknownUser = await app.inject({
       method: "POST", url: "/api/auth/login",
@@ -194,7 +194,7 @@ describe("POST /api/auth/login — NUL byte handling", () => {
 
 describe("GET /api/auth/me", () => {
   it("returns the player behind a bearer token and 401 without one", async () => {
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
+    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true } });
     const { token } = reg.json();
 
     const ok = await app.inject({ method: "GET", url: "/api/auth/me", headers: { authorization: `Bearer ${token}` } });
@@ -206,7 +206,7 @@ describe("GET /api/auth/me", () => {
   });
 
   it("returns the points balance as a decimal string", async () => {
-    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2" } });
+    const reg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Vito", email: "vito@family.test", password: "hunter2hunter2", acceptTerms: true } });
     const { token, playerId } = reg.json();
 
     await db.update(playerStats).set({ points: 1234n }).where(sql`player_id = ${playerId}`);

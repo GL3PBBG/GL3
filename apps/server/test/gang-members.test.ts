@@ -118,7 +118,7 @@ describe("GET /api/gangs/:gangId/members", () => {
   // or it would advertise authority the server would refuse to honour.
   it("ignores a permission row belonging to someone who is not a member", async () => {
     // Never authenticates as the outsider below, just needs a real player row.
-    const outsiderReg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2" } });
+    const outsiderReg = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2", acceptTerms: true } });
     const outsiderId: string = outsiderReg.json().playerId;
     await db.insert(gangPermissions).values({ gangId, playerId: outsiderId, permission: "kick" });
 

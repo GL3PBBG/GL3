@@ -995,7 +995,7 @@ describe("GET /api/combat/log", () => {
       // Only playerId is used below — this player never authenticates, so
       // there's no need to verify them, just to get past registration's now-
       // required email.
-      payload: { username: "Luca", email: "luca@example.test", password: "hunter2hunter2" },
+      payload: { username: "Luca", email: "luca@example.test", password: "hunter2hunter2", acceptTerms: true },
     });
     const strangerId: string = stranger.json().playerId;
     await db.insert(combatLog).values({

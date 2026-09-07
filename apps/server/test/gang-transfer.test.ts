@@ -150,7 +150,7 @@ describe("POST /api/gangs/:gangId/transfer", () => {
 
   it("404s a target who is in no gang", async () => {
     // Never authenticates as the stranger below, just needs a real player row.
-    const stranger = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2" } });
+    const stranger = await app.inject({ method: "POST", url: "/api/auth/register", payload: { username: "Barzini", email: "barzini@example.test", password: "hunter2hunter2", acceptTerms: true } });
     const res = await transfer(bossToken, stranger.json().playerId);
     expect(res.statusCode).toBe(404);
   });

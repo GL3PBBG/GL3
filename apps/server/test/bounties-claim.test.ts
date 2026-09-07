@@ -115,21 +115,21 @@ beforeEach(async () => {
   const target = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2" },
+    payload: { username: "Fredo", email: "fredo@example.test", password: "hunter2hunter2", acceptTerms: true },
   });
   ({ playerId: targetId } = target.json());
 
   const backer = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Backer", email: "backer@example.test", password: "hunter2hunter2" },
+    payload: { username: "Backer", email: "backer@example.test", password: "hunter2hunter2", acceptTerms: true },
   });
   ({ playerId: backerId } = backer.json());
 
   const backer2 = await app.inject({
     method: "POST",
     url: "/api/auth/register",
-    payload: { username: "Backer2", email: "backer2@example.test", password: "hunter2hunter2" },
+    payload: { username: "Backer2", email: "backer2@example.test", password: "hunter2hunter2", acceptTerms: true },
   });
   ({ playerId: backer2Id } = backer2.json());
 });

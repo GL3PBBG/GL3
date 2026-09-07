@@ -114,7 +114,7 @@ describe("POST /api/push/devices", () => {
   it("403s email_unverified — device registration is not on GATE_EXEMPT", async () => {
     const register = await app.inject({
       method: "POST", url: "/api/auth/register",
-      payload: { username: `pu_${Date.now()}`, email: `pu${Date.now()}@x.com`, password: "password123" },
+      payload: { username: `pu_${Date.now()}`, email: `pu${Date.now()}@x.com`, password: "password123", acceptTerms: true },
     });
     expect(register.statusCode).toBe(201);
     const { token } = register.json() as { token: string };
