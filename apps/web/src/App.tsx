@@ -11,6 +11,7 @@ import { Shop } from "./pages/Shop.js";
 import { Dashboard } from "./pages/Dashboard.js";
 import { Inventory } from "./pages/Inventory.js";
 import { Leaderboards } from "./pages/Leaderboards.js";
+import { Legal } from "./pages/Legal.js";
 import { Login } from "./pages/Login.js";
 import { Mail } from "./pages/Mail.js";
 import { MailThread } from "./pages/MailThread.js";
@@ -53,6 +54,8 @@ export function App(): JSX.Element {
         */}
         <Route path="/forgot" element={<Forgot />} />
         <Route path="/reset" element={<Reset />} />
+        <Route path="/terms" element={<Legal doc="terms" />} />
+        <Route path="/privacy" element={<Legal doc="privacy" />} />
         {me.isSuccess ? (
           <>
             {/*

@@ -201,6 +201,8 @@
 .field textarea { min-height: 6rem; resize: vertical; font: inherit; }
 .ok { color: var(--success); }
 .bad { color: var(--danger); }
+.danger { border: 1px solid var(--danger); border-radius: 6px; padding: 0.75rem; }
+.dangerButton { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 /*
  * A row of hands, side by side — the casino table's other seats. `--card-w` is
