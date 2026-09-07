@@ -302,6 +302,7 @@ export default defineWorkspace([
         "test/plugin-ctx-cooldown.test.ts",
         "test/rate-limit.test.ts",
         "test/auth-verify-tokens.test.ts",
+        "test/session-destroy-others.test.ts",
       ],
       // No rateLimitIsolation setupFile: neither file boots a server or
       // exercises the real ratelimit:register:*/ratelimit:login:* keys —

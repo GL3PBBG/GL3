@@ -51,3 +51,16 @@ export async function createTicket(redis: Redis, playerId: string, ttlSeconds = 
 export async function consumeTicket(redis: Redis, ticket: string): Promise<string | null> {
   return redis.getdel(ticketKey(ticket));
 }
+
+/**
+ * Password CHANGE (not reset): every other device logs out, the device that
+ * changed it stays signed in. The reverse index is rewritten to the survivor
+ * alone so a later destroyAllSessions still finds it.
+ */
+export async function destroyOtherSessions(redis: Redis, playerId: string, keepToken: string): Promise<void> {
+  const tokens = (await redis.smembers(sessionsOf(playerId))).filter((t) => t !== keepToken);
+  if (tokens.length > 0) {
+    await redis.del(...tokens.map((t) => key(t)));
+    await redis.srem(sessionsOf(playerId), ...tokens);
+  }
+}

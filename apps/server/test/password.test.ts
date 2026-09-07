@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { hashPassword, legacyHash, legacyMccodesHash, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "../src/auth/password.js";
+import { hashPassword, legacyHash, legacyMccodesHash, matchesStoredPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "../src/auth/password.js";
 
 describe("argon2id passwords", () => {
   it("verifies a correct password", async () => {
@@ -84,5 +84,30 @@ describe("MCCodes legacy passwords (spec 2026-08-26 §7 item 10)", () => {
 
   it("compares case-insensitively against uppercase hex from a MySQL dump", () => {
     expect(verifyLegacyMccodesPassword(salted.toUpperCase(), "abcd1234", "hunter2")).toBe(true);
+  });
+});
+
+describe("matchesStoredPassword", () => {
+  const empty = { passwordHash: null, legacyPasswordSha256: null, legacyV2Id: null, legacyMccodesHash: null, legacyMccodesSalt: null };
+
+  it("argon2 row: ok with the right password, legacy null", async () => {
+    const row = { ...empty, passwordHash: await hashPassword("correct horse") };
+    expect(await matchesStoredPassword(row, "correct horse")).toEqual({ ok: true, legacy: null });
+    expect(await matchesStoredPassword(row, "wrong")).toEqual({ ok: false, legacy: null });
+  });
+
+  it("legacy V2 row reports legacy: v2 so login can upgrade", async () => {
+    const row = { ...empty, legacyPasswordSha256: legacyHash(42, "pw"), legacyV2Id: 42 };
+    expect(await matchesStoredPassword(row, "pw")).toEqual({ ok: true, legacy: "v2" });
+    expect((await matchesStoredPassword(row, "nope")).ok).toBe(false);
+  });
+
+  it("legacy MCCodes row reports legacy: mccodes", async () => {
+    const row = { ...empty, legacyMccodesHash: legacyMccodesHash("salt", "pw"), legacyMccodesSalt: "salt" };
+    expect(await matchesStoredPassword(row, "pw")).toEqual({ ok: true, legacy: "mccodes" });
+  });
+
+  it("a row with no credential at all never matches", async () => {
+    expect((await matchesStoredPassword(empty, "anything")).ok).toBe(false);
   });
 });

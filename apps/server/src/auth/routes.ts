@@ -10,7 +10,7 @@ import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { touchPresence } from "../presence/touch.js";
-import { hashPassword, verifyLegacyMccodesPassword, verifyLegacyPassword, verifyPassword } from "./password.js";
+import { hashPassword, matchesStoredPassword } from "./password.js";
 import { answerChallenge, isChallenged, mintQuestion } from "./challenge.js";
 import { clientIp, DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
@@ -235,34 +235,22 @@ export function registerAuthRoutes(
     const [player] = await db.select().from(players).where(eq(players.username, parsed.data.username));
     if (!player) return reply.code(401).send({ error: "invalid_credentials" });
 
-    let authenticated = false;
-
-    if (player.passwordHash) {
-      authenticated = await verifyPassword(player.passwordHash, parsed.data.password);
-    } else if (player.legacyPasswordSha256 !== null && player.legacyV2Id !== null) {
-      // SPEC §4.3: verify against the V2 formula, then rehash with argon2id and null the legacy column.
-      authenticated = verifyLegacyPassword(player.legacyPasswordSha256, player.legacyV2Id, parsed.data.password);
-      if (authenticated) {
-        const upgraded = await hashPassword(parsed.data.password);
-        await db.update(players)
-          .set({ passwordHash: upgraded, legacyPasswordSha256: null })
-          .where(eq(players.id, player.id));
-        request.log.info({ event: "auth.legacy_upgraded", playerId: player.id });
-      }
-    } else if (player.legacyMccodesHash !== null) {
-      // MCCodes formula (spec 2026-08-26 §7 item 10): md5(pass_salt . md5(pw)),
-      // with an empty/NULL salt meaning the older unsalted md5(pw) form. Same
-      // lazy-upgrade flow as the V2 branch above.
-      authenticated = verifyLegacyMccodesPassword(
-        player.legacyMccodesHash, player.legacyMccodesSalt ?? "", parsed.data.password,
-      );
-      if (authenticated) {
-        const upgraded = await hashPassword(parsed.data.password);
-        await db.update(players)
-          .set({ passwordHash: upgraded, legacyMccodesHash: null, legacyMccodesSalt: null })
-          .where(eq(players.id, player.id));
-        request.log.info({ event: "auth.legacy_upgraded", playerId: player.id, legacy: "mccodes" });
-      }
+    const match = await matchesStoredPassword(player, parsed.data.password);
+    const authenticated = match.ok;
+    if (authenticated && match.legacy === "v2") {
+      // SPEC §4.3: verified against the V2 formula, rehash with argon2id and null the legacy column.
+      const upgraded = await hashPassword(parsed.data.password);
+      await db.update(players)
+        .set({ passwordHash: upgraded, legacyPasswordSha256: null })
+        .where(eq(players.id, player.id));
+      request.log.info({ event: "auth.legacy_upgraded", playerId: player.id });
+    } else if (authenticated && match.legacy === "mccodes") {
+      // MCCodes formula (spec 2026-08-26 §7 item 10): same lazy-upgrade flow.
+      const upgraded = await hashPassword(parsed.data.password);
+      await db.update(players)
+        .set({ passwordHash: upgraded, legacyMccodesHash: null, legacyMccodesSalt: null })
+        .where(eq(players.id, player.id));
+      request.log.info({ event: "auth.legacy_upgraded", playerId: player.id, legacy: "mccodes" });
     }
 
     if (!authenticated) return reply.code(401).send({ error: "invalid_credentials" });

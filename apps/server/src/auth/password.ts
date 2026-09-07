@@ -50,3 +50,34 @@ export function verifyLegacyMccodesPassword(storedHash: string, salt: string, pl
   if (stored.length !== computed.length) return false;
   return timingSafeEqual(Buffer.from(stored, "utf8"), Buffer.from(computed, "utf8"));
 }
+
+/** The credential columns of a `players` row — exactly what the login route selects. */
+export interface StoredPasswordRow {
+  passwordHash: string | null;
+  legacyPasswordSha256: string | null;
+  legacyV2Id: number | null;
+  legacyMccodesHash: string | null;
+  legacyMccodesSalt: string | null;
+}
+
+/**
+ * The one password check: argon2id first, then the V2 and MCCodes legacy
+ * formulas. Login, change-password and delete-account all go through here so
+ * the three cannot drift. `legacy` tells LOGIN which lazy upgrade to write;
+ * the other two callers only read `ok` (a live session implies login already
+ * upgraded the hash, so they only ever see the argon2 branch in practice).
+ */
+export async function matchesStoredPassword(
+  row: StoredPasswordRow, plaintext: string,
+): Promise<{ ok: boolean; legacy: "v2" | "mccodes" | null }> {
+  if (row.passwordHash) {
+    return { ok: await verifyPassword(row.passwordHash, plaintext), legacy: null };
+  }
+  if (row.legacyPasswordSha256 !== null && row.legacyV2Id !== null) {
+    return { ok: verifyLegacyPassword(row.legacyPasswordSha256, row.legacyV2Id, plaintext), legacy: "v2" };
+  }
+  if (row.legacyMccodesHash !== null) {
+    return { ok: verifyLegacyMccodesPassword(row.legacyMccodesHash, row.legacyMccodesSalt ?? "", plaintext), legacy: "mccodes" };
+  }
+  return { ok: false, legacy: null };
+}
