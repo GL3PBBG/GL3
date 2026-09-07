@@ -1,20 +1,22 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { ChallengeAnswerRequestSchema, ChangePasswordRequestSchema, ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
+import { ChallengeAnswerRequestSchema, ChangePasswordRequestSchema, DeleteAccountRequestSchema, ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
 import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
 import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
-import { touchPresence } from "../presence/touch.js";
+import { PRESENCE_KEY, touchPresence } from "../presence/touch.js";
 import { hashPassword, matchesStoredPassword } from "./password.js";
-import { answerChallenge, isChallenged, mintQuestion } from "./challenge.js";
+import { answerChallenge, challengeFlagKey, challengeQuestionKey, isChallenged, mintQuestion } from "./challenge.js";
 import { clientIp, DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { collectAttributePools, memberRegenMultiplier } from "../plugins/attribute-pools.js";
+import { lockGangAndPlayerForUpdate, lockPlayersForUpdate } from "../economy/ledger.js";
+import { DEFAULT_LEADERBOARD_PREFIX, removePlayer } from "../game/leaderboard/service.js";
 import { createSession, destroyAllSessions, destroyOtherSessions, destroySession, readSession } from "./session.js";
 import { clearBanned, isBanned, markBanned } from "./ban.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
@@ -67,6 +69,7 @@ export function registerAuthRoutes(
   // their own app via `buildApp`, which always supplies this) keeps working
   // with no attribute pools declared.
   manifests: () => readonly PluginManifest[] = () => [],
+  leaderboardPrefix = DEFAULT_LEADERBOARD_PREFIX,
 ): void {
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const token = bearer(request);
@@ -415,8 +418,8 @@ export function registerAuthRoutes(
    */
   app.post("/api/auth/password", {
     preHandler: [
-      requireAuth,
       tokenBucket(redis, { name: "password", limit: 5, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
+      requireAuth,
     ],
   }, async (request, reply) => {
     const playerId = request.playerId;
@@ -441,6 +444,76 @@ export function registerAuthRoutes(
     const token = bearer(request);
     if (token) await destroyOtherSessions(redis, playerId, token);
     return reply.code(200).send({});
+  });
+
+  /**
+   * Hard delete, immediate. Cascades and set-nulls are already declared on
+   * every FK onto players (core and all nine table-owning plugins); the one
+   * thing the route must add is LOCK ORDER — the set-null onto
+   * gangs.boss/underboss_player_id takes the gang row AFTER the player row,
+   * which inverts the gang→player edge every gang route uses. So: gang-and-
+   * player through the canonical helper first, then the DELETE.
+   * See test/delete-account-lock-order.test.ts.
+   */
+  app.post("/api/auth/delete", {
+    preHandler: [
+      // Own bucket, not "password": a delete attempt is a distinct action
+      // from a password change and must not share (or exhaust) that quota.
+      tokenBucket(redis, { name: "delete", limit: 10, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
+      requireAuth,
+    ],
+  }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const parsed = DeleteAccountRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const [player] = await db.select({
+      passwordHash: players.passwordHash,
+      legacyPasswordSha256: players.legacyPasswordSha256, legacyV2Id: players.legacyV2Id,
+      legacyMccodesHash: players.legacyMccodesHash, legacyMccodesSalt: players.legacyMccodesSalt,
+    }).from(players).where(eq(players.id, playerId));
+    if (!player) return reply.code(401).send({ error: "unauthorized" });
+    if (!(await matchesStoredPassword(player, parsed.data.password)).ok) {
+      return reply.code(401).send({ error: "invalid_credentials" });
+    }
+
+    // Sole-administrator guard: `roles` counts because it is transitively
+    // full admin (a roles holder can grant themselves `*`). Counterpart of
+    // cannot_demote_self / cannot_revoke_own_role.
+    const ADMIN_KEYS = ["*", "roles"];
+    const callerGrants = await loadGrants(db, playerId);
+    if (callerGrants.some((g) => ADMIN_KEYS.includes(g))) {
+      const others = await db.select({ id: players.id }).from(players)
+        .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
+        .where(and(ne(players.id, playerId), inArray(roleModuleAccess.moduleKey, ADMIN_KEYS)))
+        .limit(1);
+      if (others.length === 0) return reply.code(409).send({ error: "sole_administrator" });
+    }
+
+    await db.transaction(async (tx) => {
+      const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats)
+        .where(eq(playerStats.playerId, playerId));
+      if (stats?.gangId) await lockGangAndPlayerForUpdate(tx, stats.gangId, playerId);
+      else await lockPlayersForUpdate(tx, [playerId]);
+      await tx.delete(players).where(eq(players.id, playerId));
+    });
+
+    // Post-commit, best-effort: a failure here is a logged ghost (topN and
+    // the presence reader both tolerate a missing row), never a 500 for a
+    // committed delete.
+    try {
+      await destroyAllSessions(redis, playerId);
+      await removePlayer(redis, playerId, leaderboardPrefix);
+      await redis.zrem(PRESENCE_KEY, playerId);
+      await redis.del(
+        `unverified:${playerId}`, `banned:${playerId}`, `lastseenmark:${playerId}`,
+        challengeFlagKey(playerId), challengeQuestionKey(playerId),
+      );
+    } catch (err) {
+      request.log.error({ err, playerId }, "post-delete redis cleanup failed");
+    }
+    return reply.code(204).send();
   });
 
   app.get("/api/auth/me", { preHandler: requireAuth }, async (request, reply) => {

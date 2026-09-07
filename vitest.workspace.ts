@@ -373,6 +373,7 @@ export default defineWorkspace([
         "test/combat-miss-will.test.ts",
         "test/auth-reset.test.ts",
         "test/auth-password-change.test.ts",
+        "test/auth-delete-account.test.ts",
         "test/auth-verify.test.ts",
         "test/auth-register-terms.test.ts",
         "test/auth.test.ts",

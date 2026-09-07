@@ -78,17 +78,17 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   );
 
   app.get("/health", async () => ({ status: "ok" }));
+  const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   // `loaded` (below) is not assigned until well after this call — pass a
   // thunk, not `loaded.manifests` itself, so /api/auth/me reads the
   // post-loadPlugins binding at request time rather than throwing
   // "Cannot access 'loaded' before initialization" at boot.
   registerAuthRoutes(
     app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix,
-    () => loaded!.manifests,
+    () => loaded!.manifests, leaderboardPrefix,
   );
 
   const requireAuth = app.requireAuth as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-  const leaderboardPrefix = deps.leaderboardPrefix ?? DEFAULT_LEADERBOARD_PREFIX;
   // Jail and hospital are combat-adjacent sentence mechanics — gangster game,
   // not framework. A framework boot registers neither; nothing can sentence a
   // player there (no crimes, no combat), so the routes would be dead weight
