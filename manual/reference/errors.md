@@ -85,7 +85,9 @@ report is all just "no report").
 | `invalid_color` | 400 | core | A theme color override is not a valid hex color string (blank means no override). |
 | `invalid_combat_mode` | 400 | travel | Admin supplied a combat mode other than 'open' or 'underground' |
 | `invalid_credentials` | 401 | core | The login username and password do not match any account. |
+| `invalid_date` | 400 | core | Legal settings: the effective date must be YYYY-MM-DD or blank. |
 | `invalid_effects` | 400 | inventory | The admin-supplied effect figures do not form a valid effects payload for that item type |
+| `invalid_email` | 400 | core | Legal settings: the contact email is not a valid address (blank is allowed). |
 | `invalid_formula` | 400 | crimes | Admin submitted a success formula that fails to parse (parser message in details) |
 | `invalid_game_multiplier` | 500 | casino | Installed-game defect: the game declares a non-finite or negative maxPayoutMultiplier |
 | `invalid_game_name` | 400 | core | The submitted game name is longer than 60 characters (blank falls back to the default). |
@@ -173,6 +175,7 @@ report is all just "no report").
 | `session_closed` | 409 | casino | The caller's most recent session is already settled — nothing open to act on |
 | `session_expired` | 409 | casino | The open hand is past its expiry and cannot be played (it will be forfeited on the next `play`) |
 | `session_open` | 409 | casino | The caller already has a live, unexpired open hand |
+| `sole_administrator` | 409 | core | Account deletion refused: the caller is the only player holding a `*` or `roles` grant; assign another administrator first. |
 | `stock_above_max` | 400 | bullets | Admin tried to set a town's bullet stock above the configured max-stock ceiling (`maxStock` in details) |
 | `stock_not_found` | 404 | inventory | No shop-stock row exists for that town-and-item pair |
 | `table_full` | 409 | casino | The table already has the maximum number of seats |
@@ -181,6 +184,7 @@ report is all just "no report").
 | `target_in_super_max` | 409 | core | The target inmate is in super max (V2's solitary state, entered by failing an escape attempt) and cannot be bailed or busted until that extended sentence expires. |
 | `target_jailed` | 409 | combat | Target is in jail |
 | `target_not_found` | 400 / 404 | bounties, detectives, oc | bounties: No player exists with that username; detectives: No player exists with that username (400, not 404 — hire-input problems are pinned to 400); oc: No player with that username exists to invite |
+| `terms_not_accepted` | 400 | core | Registration refused: `acceptTerms` was not `true`. |
 | `tier_not_found` | 404 | theft | No theft tier with the given id exists |
 | `topic_locked` | 409 | forum | The topic is locked and accepts no more replies |
 | `topic_not_found` | 404 | forum | The named topic does not exist |
