@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
-import { ChallengeAnswerRequestSchema, ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
+import { ChallengeAnswerRequestSchema, ChangePasswordRequestSchema, ForgotRequestSchema, LoginRequestSchema, RegisterRequestSchema, ResetRequestSchema, VerifyRequestSchema } from "@gl3/shared";
 import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
@@ -15,7 +15,7 @@ import { answerChallenge, isChallenged, mintQuestion } from "./challenge.js";
 import { clientIp, DEFAULT_RATE_LIMIT_PREFIX, tokenBucket, withinRateLimit } from "./rate-limit.js";
 import { loadGrants } from "../plugins/routes.js";
 import { collectAttributePools, memberRegenMultiplier } from "../plugins/attribute-pools.js";
-import { createSession, destroyAllSessions, destroySession, readSession } from "./session.js";
+import { createSession, destroyAllSessions, destroyOtherSessions, destroySession, readSession } from "./session.js";
 import { clearBanned, isBanned, markBanned } from "./ban.js";
 import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, issueResetToken, issueVerifyToken, markUnverified } from "./verify.js";
 
@@ -27,7 +27,9 @@ import { clearUnverified, consumeResetToken, consumeVerifyToken, isUnverified, i
  * exemption, `useGameEvents` minting a ticket from the /verify page itself
  * would 403 and retrigger the client's own gate redirect to /verify, looping.
  */
-const GATE_EXEMPT = ["/api/auth/verify", "/api/auth/logout", "/api/auth/me", "/api/ws/ticket"];
+const GATE_EXEMPT = ["/api/auth/verify", "/api/auth/logout", "/api/auth/me", "/api/ws/ticket",
+  // A player who never verified can still fix their password or leave.
+  "/api/auth/password", "/api/auth/delete"];
 
 declare module "fastify" {
   interface FastifyRequest { playerId?: string }
@@ -401,6 +403,41 @@ export function registerAuthRoutes(
       .set({ passwordHash, legacyPasswordSha256: null, legacyMccodesHash: null, legacyMccodesSalt: null })
       .where(eq(players.id, playerId));
     await destroyAllSessions(redis, playerId);
+    return reply.code(200).send({});
+  });
+
+  /**
+   * Password CHANGE, keyed on the current password rather than a reset token.
+   * The caller's own session survives; every other device logs out. Gate-
+   * exempt so an unverified player is not locked out of fixing a password.
+   */
+  app.post("/api/auth/password", {
+    preHandler: [
+      requireAuth,
+      tokenBucket(redis, { name: "password", limit: 5, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
+    ],
+  }, async (request, reply) => {
+    const playerId = request.playerId;
+    if (!playerId) return reply.code(401).send({ error: "unauthorized" });
+    const parsed = ChangePasswordRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const [player] = await db.select({
+      passwordHash: players.passwordHash,
+      legacyPasswordSha256: players.legacyPasswordSha256, legacyV2Id: players.legacyV2Id,
+      legacyMccodesHash: players.legacyMccodesHash, legacyMccodesSalt: players.legacyMccodesSalt,
+    }).from(players).where(eq(players.id, playerId));
+    if (!player) return reply.code(401).send({ error: "unauthorized" });
+    if (!(await matchesStoredPassword(player, parsed.data.currentPassword)).ok) {
+      return reply.code(401).send({ error: "invalid_credentials" });
+    }
+
+    const passwordHash = await hashPassword(parsed.data.newPassword);
+    await db.update(players)
+      .set({ passwordHash, legacyPasswordSha256: null, legacyMccodesHash: null, legacyMccodesSalt: null })
+      .where(eq(players.id, playerId));
+    const token = bearer(request);
+    if (token) await destroyOtherSessions(redis, playerId, token);
     return reply.code(200).send({});
   });
 

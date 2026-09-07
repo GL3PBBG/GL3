@@ -372,6 +372,7 @@ export default defineWorkspace([
         "test/combat-melee-slot.test.ts",
         "test/combat-miss-will.test.ts",
         "test/auth-reset.test.ts",
+        "test/auth-password-change.test.ts",
         "test/auth-verify.test.ts",
         "test/auth.test.ts",
         "test/ip-telemetry.test.ts",
