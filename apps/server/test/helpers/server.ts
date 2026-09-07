@@ -25,6 +25,10 @@ export async function bootTestServer(
    * key the app wrote (e.g. an `emailverify:*` verification code) without
    * opening a second connection. See `registerVerifiedPlayer`. */
   redis: Redis;
+  /** This boot's private leaderboard namespace — exposed so a test can read
+   * or seed a `<prefix>:<kind>` ZSET directly rather than only through the
+   * HTTP surface. See auth-delete-account.test.ts. */
+  leaderboardPrefix: string;
 }> {
   // GL3_PROFILE is pinned per call, not inherited: an ambient variable in a
   // developer's shell must not flip a test file's plugin set.
@@ -116,6 +120,7 @@ export async function bootTestServer(
     // driver the server wrote them through.
     assetDriver,
     redis,
+    leaderboardPrefix,
     close: async () => {
       for (const w of loadedPlugins.workers) await w.close();
       for (const q of loadedPlugins.queues.values()) await q.close();

@@ -45,6 +45,14 @@ function bearer(request: FastifyRequest): string | null {
 }
 
 /**
+ * Typed sentinel thrown from inside `db.transaction(...)` in the delete
+ * route's sole-administrator guard — the callback must never call
+ * `reply.send` itself, so this crosses the transaction boundary as a thrown
+ * value and is mapped to the 409 in the surrounding `catch`.
+ */
+class SoleAdministratorError extends Error {}
+
+/**
  * PostgreSQL SQLSTATE 23505 = unique_violation. drizzle-orm wraps the raw
  * driver error in its own `DrizzleQueryError`, with the real `PostgresError`
  * attached as `.cause` — so the unique-violation check has to look one level
@@ -452,14 +460,19 @@ export function registerAuthRoutes(
    * thing the route must add is LOCK ORDER — the set-null onto
    * gangs.boss/underboss_player_id takes the gang row AFTER the player row,
    * which inverts the gang→player edge every gang route uses. So: gang-and-
-   * player through the canonical helper first, then the DELETE.
+   * player through the canonical helper first, then the DELETE. The sole-
+   * administrator guard lives INSIDE the same transaction, after that lock
+   * step and behind `pg_advisory_xact_lock(7461004)`: outside a transaction
+   * (or without a serializing lock) it is check-then-act — two mutual last-
+   * admins deleting concurrently could each see "someone else covers me" and
+   * both pass. The advisory lock forces every concurrent admin-delete
+   * through this check one at a time, so the second one to run observes the
+   * first's already-committed DELETE, never a stale count.
    * See test/delete-account-lock-order.test.ts.
    */
   app.post("/api/auth/delete", {
     preHandler: [
-      // Own bucket, not "password": a delete attempt is a distinct action
-      // from a password change and must not share (or exhaust) that quota.
-      tokenBucket(redis, { name: "delete", limit: 10, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
+      tokenBucket(redis, { name: "password", limit: 5, windowSeconds: 900, ipHeader: config.clientIpHeader }, rateLimitPrefix),
       requireAuth,
     ],
   }, async (request, reply) => {
@@ -478,26 +491,35 @@ export function registerAuthRoutes(
       return reply.code(401).send({ error: "invalid_credentials" });
     }
 
-    // Sole-administrator guard: `roles` counts because it is transitively
-    // full admin (a roles holder can grant themselves `*`). Counterpart of
-    // cannot_demote_self / cannot_revoke_own_role.
-    const ADMIN_KEYS = ["*", "roles"];
-    const callerGrants = await loadGrants(db, playerId);
-    if (callerGrants.some((g) => ADMIN_KEYS.includes(g))) {
-      const others = await db.select({ id: players.id }).from(players)
-        .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
-        .where(and(ne(players.id, playerId), inArray(roleModuleAccess.moduleKey, ADMIN_KEYS)))
-        .limit(1);
-      if (others.length === 0) return reply.code(409).send({ error: "sole_administrator" });
-    }
+    try {
+      await db.transaction(async (tx) => {
+        const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats)
+          .where(eq(playerStats.playerId, playerId));
+        if (stats?.gangId) await lockGangAndPlayerForUpdate(tx, stats.gangId, playerId);
+        else await lockPlayersForUpdate(tx, [playerId]);
 
-    await db.transaction(async (tx) => {
-      const [stats] = await tx.select({ gangId: playerStats.gangId }).from(playerStats)
-        .where(eq(playerStats.playerId, playerId));
-      if (stats?.gangId) await lockGangAndPlayerForUpdate(tx, stats.gangId, playerId);
-      else await lockPlayersForUpdate(tx, [playerId]);
-      await tx.delete(players).where(eq(players.id, playerId));
-    });
+        // Sole-administrator guard: `roles` counts because it is transitively
+        // full admin (a roles holder can grant themselves `*`). Counterpart of
+        // cannot_demote_self / cannot_revoke_own_role.
+        const ADMIN_KEYS = ["*", "roles"];
+        const callerGrantRows = await tx.select({ moduleKey: roleModuleAccess.moduleKey }).from(players)
+          .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
+          .where(eq(players.id, playerId));
+        if (callerGrantRows.some((g) => ADMIN_KEYS.includes(g.moduleKey))) {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(7461004)`);
+          const others = await tx.select({ id: players.id }).from(players)
+            .innerJoin(roleModuleAccess, eq(roleModuleAccess.roleId, players.roleId))
+            .where(and(ne(players.id, playerId), inArray(roleModuleAccess.moduleKey, ADMIN_KEYS)))
+            .limit(1);
+          if (others.length === 0) throw new SoleAdministratorError();
+        }
+
+        await tx.delete(players).where(eq(players.id, playerId));
+      });
+    } catch (err) {
+      if (err instanceof SoleAdministratorError) return reply.code(409).send({ error: "sole_administrator" });
+      throw err;
+    }
 
     // Post-commit, best-effort: a failure here is a logged ghost (topN and
     // the presence reader both tolerate a missing row), never a 500 for a
