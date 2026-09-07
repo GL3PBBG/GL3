@@ -107,8 +107,14 @@ function ChangePassword(): JSX.Element {
 }
 
 function DangerZone(): JSX.Element {
-  const remove = useDeleteAccount();
   const navigate = useNavigate();
+  // onDeleted, not a call-site mutate() onSuccess: deletion resets the query
+  // cache, which unmounts this component (App flips to its logged-out
+  // branch) before react-query would otherwise call a call-site callback —
+  // see the doc comment on useDeleteAccount.
+  const remove = useDeleteAccount({
+    onDeleted: () => { navigate("/login", { state: { accountDeleted: true } }); },
+  });
   const [password, setPassword] = useState("");
   const [step, setStep] = useState<DeleteStep>("idle");
   const press = (): void => {
@@ -116,7 +122,6 @@ function DangerZone(): JSX.Element {
     setStep(next);
     if (next === "fire") {
       remove.mutate({ password }, {
-        onSuccess: () => { navigate("/login", { state: { accountDeleted: true } }); },
         onError: () => { setStep("idle"); },
       });
     }

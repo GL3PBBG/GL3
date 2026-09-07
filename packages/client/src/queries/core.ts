@@ -291,29 +291,36 @@ export function useChangePassword() {
 
 /**
  * 204 on success; the account is gone server-side, so the local token and
- * every cached query go with it — same shape as useLogout's cleanup. The
- * host decides where to navigate (web: /login with an accountDeleted note).
+ * every cached query go with it — same shape as useLogout's cleanup.
+ *
+ * `onDeleted` runs INSTEAD of a call-site `mutate(vars, { onSuccess })`
+ * callback, on purpose: `resetQueries()` below notifies App's `me` observer
+ * synchronously (before this hook's `onSuccess` resolves), which flips App
+ * to its logged-out branch and unmounts the caller (Profile/DangerZone) in
+ * the same tick. `MutationObserver#notify` in react-query only invokes a
+ * call-site `onSuccess` when `this.hasListeners()` is still true
+ * (`mutationObserver.js`: `if (this.#mutateOptions && this.hasListeners())`
+ * guards every call-site callback), and React's `useSyncExternalStore`
+ * cleanup unsubscribes that listener on unmount — so a call-site `onSuccess`
+ * passed to `.mutate()` would silently never fire once the caller is gone.
+ * `onDeleted` is invoked here, inside the hook's own `onSuccess`, while the
+ * caller is still mounted and before anything can unmount it.
  */
-export function useDeleteAccount() {
+export function useDeleteAccount(options?: { onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   return useMutation<void, Error, DeleteAccountRequest>({
     mutationFn: async (input) =>
       api<void>("/api/auth/delete", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: async () => {
       tokenStore.clear();
+      options?.onDeleted?.();
       // Cancel first: an authenticated request already in flight would
       // otherwise resolve after clear() and repopulate the cache with a
       // logged-in `me`.
       await queryClient.cancelQueries();
-      // Reset before clear — see the matching comment in useLogout. This
-      // hook-level onSuccess is fully awaited (Mutation.execute awaits
-      // this.options.onSuccess before dispatching "success") before the
-      // call-site onSuccess in DangerZone runs its navigate("/login"), so
-      // App's `me` observer has already been notified and flipped to
-      // logged-out by the time the router sees the new path — the earlier
-      // fix (clear() alone) left App's observer holding a stale success
-      // result, so the DangerZone's navigate landed on a still-authenticated
-      // Shell (no /login route there) instead of the login form.
+      // Reset before clear — see the matching comment in useLogout. Query.reset()
+      // dispatches to every attached observer (unlike clear(), which is silent),
+      // so App's `me` observer is notified and flips to logged-out here.
       await queryClient.resetQueries();
       queryClient.clear();
     },
