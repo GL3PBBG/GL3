@@ -107,6 +107,32 @@ export function shouldServeIndex(urlPath) {
   return !CONTENT_TYPES.has(ext);
 }
 
+/**
+ * Android App Links: `/.well-known/assetlinks.json` must name the operator's
+ * app package and signing certificates, which is deployment configuration,
+ * not engine source — so it comes from the `ASSETLINKS_JSON` environment
+ * variable rather than a file in the bundle. Unset means the route 404s as it
+ * always did. The value is re-serialised so a malformed setting fails loudly
+ * here (null, logged once at startup) instead of being handed to Android's
+ * verifier as garbage; the operator's own JSON is otherwise served verbatim
+ * in content.
+ */
+export function assetLinksBody(env) {
+  const raw = env.ASSETLINKS_JSON;
+  if (raw === undefined || raw.trim() === "") return null;
+  try {
+    return JSON.stringify(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+const ASSETLINKS_PATH = "/.well-known/assetlinks.json";
+const assetLinks = assetLinksBody(process.env);
+if (process.env.ASSETLINKS_JSON !== undefined && assetLinks === null) {
+  console.warn("web: ASSETLINKS_JSON is set but is not valid JSON; /.well-known/assetlinks.json will 404");
+}
+
 function send(res, status, headers, stream) {
   res.writeHead(status, headers);
   if (stream) stream.pipe(res);
@@ -120,6 +146,18 @@ const server = createServer(async (req, res) => {
   }
 
   const urlPath = new URL(req.url, `http://${req.headers.host ?? "localhost"}`).pathname;
+
+  if (urlPath === ASSETLINKS_PATH && assetLinks !== null) {
+    const body = Buffer.from(assetLinks, "utf8");
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": body.length,
+      "cache-control": "no-cache",
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+    return;
+  }
+
   const filePath = safePath(urlPath);
   if (filePath === null) {
     send(res, 400, { "content-type": "text/plain; charset=utf-8" });

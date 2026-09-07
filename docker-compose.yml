@@ -127,6 +127,11 @@ services:
     profiles: ["app"]
     image: ghcr.io/gl3pbbg/gl3-web:latest
     restart: unless-stopped
+    environment:
+      # Android App Links (optional): the JSON served at
+      # /.well-known/assetlinks.json, naming the mobile app's package and
+      # signing-certificate fingerprints. Unset means the path 404s.
+      ASSETLINKS_JSON: ${ASSETLINKS_JSON:-}
 
   router:
     profiles: ["app"]

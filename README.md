@@ -41,7 +41,9 @@ default, the email verification link prints to
 `docker compose --profile app logs server`.
 Hosting elsewhere: set `GL3_PUBLIC_ORIGIN` (the URL players reach the game
 at, which feeds the CORS allowlist the WebSocket gateway also checks) and
-`GL3_PORT`. Want the engine without the gangster
+`GL3_PORT`. A mobile app that claims the game's links (Android App Links)
+needs `ASSETLINKS_JSON` on the web container: the JSON served at
+`/.well-known/assetlinks.json`, unset means 404. Want the engine without the gangster
 game? `GL3_PROFILE=framework` boots the openPBBG-shaped platform instead
 (see [Game modes](https://docs.gl3.dev/operators/framework-profile.html)).
 
