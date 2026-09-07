@@ -29,6 +29,7 @@ import { registerPluginRoutes } from "./plugins/routes.js";
 import { loadSettings } from "./settings/load.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { registerThemeRoutes } from "./theme/routes.js";
+import { registerLegalRoutes } from "./legal/routes.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
@@ -107,6 +108,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerPushRoutes(app, deps.db, requireAuth);
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db, assetDriver);
+  registerLegalRoutes(app, deps.db);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while

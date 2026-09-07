@@ -31,6 +31,7 @@ import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
 import { themePage } from "../theme/page.js";
+import { legalPage } from "../legal/page.js";
 
 const AssignBodySchema = z.object({
   username: z.string().min(1),
@@ -124,6 +125,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     { id: "players", name: "players (moderation)" },
     { id: "anti-bot", name: "anti-bot (detection & challenges)" },
     { id: "theme", name: "theme" },
+    { id: "legal", name: "legal (terms & privacy)" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
 }
@@ -219,6 +221,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "theme",
         pages: [{ pluginId: "theme", id: themePage.id, path: themePage.path, view: themePage.view }],
+      });
+    }
+    if (hasPermission(grants, "legal")) {
+      sections.push({
+        pluginId: "legal",
+        pages: [{ pluginId: "legal", id: legalPage.id, path: legalPage.path, view: legalPage.view }],
       });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });
