@@ -28,7 +28,7 @@ Cash, points, items, properties, ranks and every other in-game feature are part 
 
 ## 5. Termination
 
-We may suspend or ban an account that breaks these terms. You may delete your account at any time from your profile page; deletion removes your account and its data immediately and cannot be undone.
+We may suspend or ban an account that breaks these terms. You may delete your account at any time from your profile page; deletion removes your account and its data immediately and cannot be undone. If you cannot sign in — for example because your account has been banned — email {{contactEmail}} and we will delete your account on request.
 
 ## 6. No warranty; limitation of liability
 
