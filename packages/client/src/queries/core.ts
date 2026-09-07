@@ -265,6 +265,18 @@ export function useLogout() {
       // otherwise resolve after clear() and repopulate the cache with a
       // logged-in `me` (same race as useDeleteAccount, above).
       await queryClient.cancelQueries();
+      // Reset before clear, not instead of it: App.tsx is the parent of
+      // <BrowserRouter> and holds its own `useMe()` observer, which only
+      // re-renders when ITS query is notified. queryClient.clear() removes
+      // queries from the cache silently (QueryCache.clear -> remove ->
+      // query.destroy(), which cancels but never dispatches) — App's
+      // observer keeps rendering its last successful `me` and the Shell
+      // stays mounted. Query.reset() calls setState(), which DOES dispatch
+      // to every attached observer; resetQueries() also refetches active
+      // queries, and with the token already cleared that refetch 401s,
+      // flipping App to logged-out. Doing this after clear() would be a
+      // no-op — there would be nothing left in the cache to reset.
+      await queryClient.resetQueries();
       queryClient.clear();
     },
   });
@@ -293,6 +305,16 @@ export function useDeleteAccount() {
       // otherwise resolve after clear() and repopulate the cache with a
       // logged-in `me`.
       await queryClient.cancelQueries();
+      // Reset before clear — see the matching comment in useLogout. This
+      // hook-level onSuccess is fully awaited (Mutation.execute awaits
+      // this.options.onSuccess before dispatching "success") before the
+      // call-site onSuccess in DangerZone runs its navigate("/login"), so
+      // App's `me` observer has already been notified and flipped to
+      // logged-out by the time the router sees the new path — the earlier
+      // fix (clear() alone) left App's observer holding a stale success
+      // result, so the DangerZone's navigate landed on a still-authenticated
+      // Shell (no /login route there) instead of the login form.
+      await queryClient.resetQueries();
       queryClient.clear();
     },
   });
