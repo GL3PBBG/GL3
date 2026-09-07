@@ -671,6 +671,24 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
     const nameById = new Map(namedRows.map((r) => [r.id, r.username]));
     const leaderName = nameById.get(heist.leaderId) ?? "unknown";
 
+    // `p_oc_members.player_id` and `p_oc_heists.leader_id` carry NO foreign
+    // key onto `players`, so a member who hard-deleted their account through
+    // `POST /api/auth/delete` still has a row here while their `players` and
+    // `player_stats` rows are gone. Paying or jailing that id throws
+    // (`player_stats missing for …`), BullMQ retries forever, and the
+    // survivors stay latched by `p_oc_members_active_player`. So: pay and
+    // jail only the ids that still exist.
+    //
+    // The split stays over CREW_SIZE. A hard-deleted account's escrowed
+    // buy-in and its share of the pot are FORFEITED, not redistributed —
+    // redistributing would pay the survivors more for a crew member's
+    // departure than for their participation. The principled fix is a
+    // foreign key on all five FK-less `player_id` columns plus a decision on
+    // a deleted LEADER (escrow refund vs forfeit); until that lands, this
+    // keeps the job from wedging. If the leader is the deleted one, the
+    // leader's share and remainder go unpaid for the same reason.
+    const alive = new Set(namedRows.map((r) => r.id));
+
     // One shared roll (same scale as crimes': 0..10_000).
     const roll = rng.int(0, 10_000);
     const success = roll < Math.round(successChance * 10_000);
@@ -685,6 +703,7 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
       // division truncates.
       const remainder = total - share * BigInt(CREW_SIZE);
       for (const m of members) {
+        if (!alive.has(m.playerId)) continue;
         const amount = m.playerId === heist.leaderId ? share + remainder : share;
         await tx.economy.applyBalanceChange({
           playerId: m.playerId, amount, kind: "cash", reason: "oc.payout", refId: heist.id,
@@ -692,6 +711,7 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
       }
     } else {
       for (const m of members) {
+        if (!alive.has(m.playerId)) continue;
         await tx.jail.sendToJail(m.playerId, jailSeconds);
       }
     }
