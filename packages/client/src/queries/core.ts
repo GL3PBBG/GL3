@@ -45,11 +45,19 @@ import { keys } from "../api/keys.js";
 import { tokenStore } from "../config.js";
 import { jailRefetchInterval } from "./shared.js";
 
-export function useMe() {
+/**
+ * `enabled` defaults to true, matching every existing caller. A public page
+ * that may render for a logged-out visitor should pass `enabled: false` in
+ * that case — a second observer mounting on an already-errored, `retry:
+ * false` `me` query otherwise refetches on mount and loops with the page's
+ * own re-render (see apps/web/src/pages/Legal.tsx).
+ */
+export function useMe(options?: { enabled?: boolean }) {
   return useQuery<MeResponse>({
     queryKey: keys.me(),
     queryFn: async () => MeResponseSchema.parse(await api("/api/auth/me")),
     retry: false,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -252,7 +260,13 @@ export function useLogout() {
         tokenStore.clear();
       }
     },
-    onSettled: () => { queryClient.clear(); },
+    onSettled: async () => {
+      // Cancel first: an authenticated request already in flight would
+      // otherwise resolve after clear() and repopulate the cache with a
+      // logged-in `me` (same race as useDeleteAccount, above).
+      await queryClient.cancelQueries();
+      queryClient.clear();
+    },
   });
 }
 
@@ -273,7 +287,14 @@ export function useDeleteAccount() {
   return useMutation<void, Error, DeleteAccountRequest>({
     mutationFn: async (input) =>
       api<void>("/api/auth/delete", { method: "POST", body: JSON.stringify(input) }),
-    onSuccess: () => { tokenStore.clear(); queryClient.clear(); },
+    onSuccess: async () => {
+      tokenStore.clear();
+      // Cancel first: an authenticated request already in flight would
+      // otherwise resolve after clear() and repopulate the cache with a
+      // logged-in `me`.
+      await queryClient.cancelQueries();
+      queryClient.clear();
+    },
   });
 }
 
