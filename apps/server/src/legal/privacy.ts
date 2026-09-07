@@ -27,11 +27,11 @@ Push notifications are delivered through Expo's push notification service. Hosti
 
 ## 5. Retention
 
-We keep your data for as long as your account exists. Deleting your account from the profile page removes your account and its data immediately, except for gang, forum and news content you authored, which is kept without your name attached, and server logs, which expire on their own schedule.
+We keep your data for as long as your account exists. Deleting your account from the profile page removes your account and its data immediately, except gang, forum and news records and messages you sent, which are kept without your name, and game records that reference you only by outcome (a bounty you claimed, a property you released), which are kept with the reference removed; server logs expire on their own schedule.
 
 ## 6. Your rights
 
-You can access, correct or delete your data from the profile page, or by contacting {{contactEmail}}. If you live in {{jurisdiction}} or another region with its own data protection law, you may have additional statutory rights.
+Access and deletion are self-service from your profile page. To correct your data — for example your email address or username — contact {{contactEmail}}. If you live in {{jurisdiction}} or another region with its own data protection law, you may have additional statutory rights.
 
 ## 7. Children
 
