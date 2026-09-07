@@ -52,7 +52,7 @@ describe("terms acceptance at registration", () => {
     expect(row?.at).toBeInstanceOf(Date);
   });
 
-  it("migration backfill: the column is NOT NULL for every pre-existing row", async () => {
+  it("migration: terms_accepted_at exists and is nullable (backfill is an UPDATE, not a default)", async () => {
     // The template database ran 0024 over an empty table; prove the column
     // exists and that a raw insert without it (an old code path) still gets
     // NULL rather than erroring — grandfathering is an UPDATE in the
