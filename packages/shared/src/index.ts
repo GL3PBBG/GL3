@@ -20,6 +20,7 @@ export * from "./dto/hospital.js";
 export * from "./dto/inventory.js";
 export * from "./dto/jail.js";
 export * from "./dto/leaderboard.js";
+export * from "./dto/legal.js";
 export * from "./dto/mail.js";
 export * from "./dto/news.js";
 export * from "./dto/notifications.js";

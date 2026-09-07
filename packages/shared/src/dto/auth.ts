@@ -10,6 +10,11 @@ export const RegisterRequestSchema = z.object({
   // NUL today, but that is an implementation detail, not a guarantee.
   email: noNulByte(z.string().email().max(254)),
   password: z.string().min(8).max(200),
+  // Optional in the SCHEMA so the handler can answer a dedicated
+  // `terms_not_accepted` rather than zod's generic `invalid_request`; the
+  // handler refuses anything but `true`. Optional also keeps an older client
+  // parsing — it fails at the handler with a sentence, not at the parser.
+  acceptTerms: z.boolean().optional(),
 });
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
 
@@ -28,6 +33,18 @@ export const ResetRequestSchema = z.object({
   password: z.string().min(8).max(200),
 });
 export type ResetRequest = z.infer<typeof ResetRequestSchema>;
+
+export const ChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(8).max(200),
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
+
+/** POST, not DELETE: the body carries the password re-check. */
+export const DeleteAccountRequestSchema = z.object({
+  password: z.string().min(1).max(200),
+});
+export type DeleteAccountRequest = z.infer<typeof DeleteAccountRequestSchema>;
 
 /**
  * Unlike `RegisterRequestSchema.username`, login's username isn't
