@@ -18,6 +18,7 @@ let level: number;
 let cash: string;
 let jailed: boolean;
 let availabilityStatus: number;
+let journeyArt: string | null;
 let action: (url: string) => Response | Promise<Response>;
 let fetchMock: ReturnType<typeof vi.fn>;
 let client: QueryClient;
@@ -26,6 +27,8 @@ beforeEach(() => {
   rows = [town(1, "Harbour", 0), town(2, "Vice Heights", 10), town(3, "Summit", 30)];
   installed = ["travel", "bullets", "theft", "brothel"];
   gates = {minLevel: 15, townMinLevel: 10};
+  journeyArt = "/travel-banner.svg";
+  vi.stubGlobal("matchMedia", vi.fn(() => ({matches: false})));
   level = 10; cash = "1000"; jailed = false; availabilityStatus = 200;
   action = (url) => {
     const locationId = url.split("/").at(-1)!;
@@ -37,6 +40,7 @@ beforeEach(() => {
     if (init?.method === "POST") return action(url);
     if (url === "/api/auth/me") return json({playerId: id(10), username: "Vito", cash, bank: "0", points: "0", bullets: "0", exp: "0", grants: [], level});
     if (url === "/api/jail") return json({jailed, until: null, remainingSeconds: 0, superMax: false});
+    if (url === "/api/assets/slot/core/page-travel") return json({url: journeyArt});
     if (url === "/api/locations") return json({locations: rows});
     if (url === "/api/plugins") return json({installed, menu: [], pages: [], events: [], moneyFormat: {symbol: "$", position: "prefix", thousandsSep: ","}});
     if (url === "/api/brothel/availability") return json(gates, availabilityStatus);
@@ -108,7 +112,16 @@ it("reveals arrival only after success and refreshes current city, cash, and loc
   expect(screen.queryByRole("status", {name: "Arrival confirmed"})).toBeNull();
   await waitFor(() => expect(writes()).toHaveLength(1));
   resolve(await success(`/api/travel/${id(2)}`));
-  await screen.findByText("Welcome to Vice Heights");
+  await screen.findByRole("region", {name: "Travel journey"});
+  expect(screen.queryByRole("region", {name: "Current city"})).toBeNull();
+  expect(screen.queryByRole("status", {name: "Arrival confirmed"})).toBeNull();
+  const journey = screen.getByRole("region", {name: "Travel journey"});
+  expect(journey.querySelector("img")?.getAttribute("src")).toBe("/travel-banner.svg");
+  expect(within(journey).getByText("Leaving Harbour")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", {name: "Skip journey →"}));
+  await screen.findByRole("status", {name: "Arrival confirmed"});
+  expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
+  expect(screen.getAllByRole("region", {name: "Current city"})).toHaveLength(1);
   await screen.findByRole("heading", {name: "Vice Heights", level: 1});
   expect(screen.getByRole("link", {name: "Brothel →"})).toBeTruthy();
   expect(screen.getByText("$900")).toBeTruthy();
@@ -124,6 +137,7 @@ it("places a refusal beside the chosen city and releases the optimistic cooldown
   await waitFor(() => expect(card("Vice Heights").getByRole("alert")).toBeTruthy());
   expect(card("Vice Heights").getByRole("button", {name: "Travel"})).toHaveProperty("disabled", false);
   expect(screen.queryByText(/Welcome to/)).toBeNull();
+  expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
   expect(screen.getByRole("heading", {name: "Harbour", level: 1})).toBeTruthy();
 });
 
@@ -150,4 +164,34 @@ it("blocks travel from jail and shows why", async () => {
   expect(screen.getByText("You can't travel from jail.")).toBeTruthy();
   expect(card("Vice Heights").getByRole("button", {name: "Travel"})).toHaveProperty("disabled", true);
   expect(writes()).toHaveLength(0);
+});
+
+it("automatically reveals arrival after the short scene even without configured artwork", async () => {
+  journeyArt = null;
+  await mount();
+  expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
+  fireEvent.click(card("Vice Heights").getByRole("button", {name: "Travel"}));
+  await screen.findByRole("region", {name: "Travel journey"});
+  await screen.findByRole("status", {name: "Arrival confirmed"}, {timeout: 3000});
+  expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
+  expect(screen.getByRole("heading", {name: "Vice Heights", level: 1})).toBe(document.activeElement);
+  expect(writes()).toHaveLength(1);
+});
+
+it("goes directly to confirmed arrival for reduced motion", async () => {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({matches: true})));
+  await mount();
+  fireEvent.click(card("Vice Heights").getByRole("button", {name: "Travel"}));
+  await screen.findByRole("status", {name: "Arrival confirmed"});
+  expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
+});
+
+it("lets keyboard users skip the scene with Escape", async () => {
+  await mount();
+  fireEvent.click(card("Vice Heights").getByRole("button", {name: "Travel"}));
+  const skip = await screen.findByRole("button", {name: "Skip journey →"});
+  expect(document.activeElement).toBe(skip);
+  fireEvent.keyDown(skip, {key: "Escape"});
+  await screen.findByRole("status", {name: "Arrival confirmed"});
+  expect(screen.getByRole("heading", {name: "Vice Heights", level: 1})).toBe(document.activeElement);
 });

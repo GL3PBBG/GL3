@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCountdowns, canAfford, formatDuration, refusalCooldownSeconds, useBrothelAvailability, useJail, useLocations, useMe, usePlugins, useTravel } from "@gl3/client";
 import type { LocationDto } from "@gl3/shared";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
-import { GameImage } from "../components/GameImage.js";
+import { GameImage, useSlotImage } from "../components/GameImage.js";
 import styles from "./Travel.module.css";
 
 const COOLDOWN_ID = "travel";
+const JOURNEY_REVEAL_MS = 1800;
 
 function CityArt({ location }: { location: LocationDto }): JSX.Element {
   return <div className={styles.art}>
@@ -31,9 +32,33 @@ export function Travel(): JSX.Element {
   const [attempt, setAttempt] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ locationId: string; error: unknown } | null>(null);
   const [arrival, setArrival] = useState<LocationDto | null>(null);
-
-  const arrivalRef = useRef<HTMLElement>(null);
-  useEffect(() => { if (arrival) arrivalRef.current?.scrollIntoView?.({ block: "nearest" }); }, [arrival]);
+  const [journey, setJourney] = useState<{ from: string | null; to: LocationDto } | null>(null);
+  // Resolve the admin's travel artwork ahead of a trip, without drawing a
+  // second header. Missing artwork never delays the confirmed arrival.
+  const journeyArt = useSlotImage("core", "page-travel");
+  const headerRef = useRef<HTMLElement>(null);
+  const skipRef = useRef<HTMLButtonElement>(null);
+  const cityHeadingRef = useRef<HTMLHeadingElement>(null);
+  const focusArrival = useRef(false);
+  const finishJourney = useCallback(() => {
+    if (!journey) return;
+    focusArrival.current = document.activeElement === skipRef.current;
+    setArrival(journey.to);
+    setJourney(null);
+  }, [journey]);
+  useEffect(() => {
+    if (!journey) return;
+    skipRef.current?.focus({ preventScroll: true });
+    const timer = window.setTimeout(finishJourney, JOURNEY_REVEAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [journey, finishJourney]);
+  useEffect(() => {
+    if (journey || arrival) headerRef.current?.scrollIntoView?.({ block: "nearest" });
+    if (arrival && focusArrival.current) {
+      cityHeadingRef.current?.focus({ preventScroll: true });
+      focusArrival.current = false;
+    }
+  }, [journey, arrival]);
 
   const cooldown = remaining[COOLDOWN_ID] ?? 0;
   useEffect(() => {
@@ -45,6 +70,7 @@ export function Travel(): JSX.Element {
   const rows = locations.data?.locations ?? [];
   const here = rows.find((row) => row.current);
   const player = me.data;
+  const displayedCity = arrival ? rows.find(row => row.id === arrival.id) ?? arrival : here;
   const blocked = jail.data?.jailed ? "You can't travel from jail."
     : jail.isError ? "Your jail status is unavailable. Try again shortly."
     : !jail.data ? "Checking your status…" : null;
@@ -64,20 +90,26 @@ export function Travel(): JSX.Element {
   </>;
 
   return <>
-    {arrival ? <section ref={arrivalRef} className={styles.arrival} role="status" aria-label="Arrival confirmed" key={arrival.id}>
-      <div className={styles.arrivalArt}><CityArt location={arrival} /></div>
-      <span className={styles.eyebrow}>Arrival confirmed</span>
-      <h2>Welcome to {arrival.name}</h2>
-      <p>You've arrived. Find your next move in town.</p>
-      <button type="button" onClick={() => setArrival(null)} aria-label="Dismiss arrival">×</button>
-    </section> : null}
-    {here ? <section className={styles.hero} aria-label="Current city">
-      <CityArt location={here} />
+    {journey ? <section ref={headerRef} className={styles.journey} aria-label="Travel journey"
+      onKeyDown={(event) => { if (event.key === "Escape") finishJourney(); }}>
+      <div className={styles.journeyArt} aria-hidden="true">
+        <GameImage key={journeyArt ?? "journey"} url={journeyArt ?? undefined} alt="" size="banner" zoomable={false} />
+      </div>
+      <div className={styles.journeyBody}>
+        <span className={styles.eyebrow}>On the road</span>
+        <div role="status"><p>{journey.from ? `Leaving ${journey.from}` : "A new chapter begins"}</p><h1>Next stop: {journey.to.name}</h1></div>
+        <div className={styles.routeLine} aria-hidden="true"><span /></div>
+        <button ref={skipRef} type="button" onClick={finishJourney}>Skip journey →</button>
+      </div>
+    </section> : displayedCity ? <section ref={headerRef} className={`${styles.hero} ${arrival ? styles.arrived : ""}`} aria-label="Current city">
+      <CityArt location={displayedCity} />
       <div className={styles.heroBody}>
-        <span className={styles.eyebrow}>You are here</span>
-        <h1>{here.name}</h1>
-        {facts(here)}
-        {services(here)}
+        <div role={arrival ? "status" : undefined} aria-label={arrival ? "Arrival confirmed" : undefined}>
+          <span className={styles.eyebrow}>{arrival ? "Welcome to" : "You are here"}</span>{" "}
+          <h1 ref={cityHeadingRef} tabIndex={-1}>{displayedCity.name}</h1>
+        </div>
+        {facts(displayedCity)}
+        {services(displayedCity)}
       </div>
     </section> : null}
     <Panel title="Travel">
@@ -114,7 +146,7 @@ export function Travel(): JSX.Element {
                 {location.fareLabel ? <small>{location.fareLabel}</small> : null}
               </div>
               <p className={styles.meta}>{formatDuration(location.travelCooldownSeconds)} cooldown after arrival{location.minLevel > 0 ? ` · level ${location.minLevel}` : ""}</p>
-              <button type="button" disabled={location.current || levelLocked || !affordable || blocked !== null || travel.isPending || cooldown > 0}
+              <button type="button" disabled={location.current || levelLocked || !affordable || blocked !== null || travel.isPending || journey !== null || cooldown > 0}
                 onClick={() => {
                   setAttempt(location.id);
                   setRefusal(null);
@@ -123,7 +155,11 @@ export function Travel(): JSX.Element {
                   travel.mutate(location.id, {
                     onSuccess: (response) => {
                       const destination = rows.find((row) => row.id === response.locationId);
-                      if (destination) setArrival(destination);
+                      if (!destination) return;
+                      // This is presentation after success, never a promise
+                      // that an in-flight or refused request moved the player.
+                      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) setArrival(destination);
+                      else setJourney({ from: here?.name ?? null, to: destination });
                     },
                     onError: (error) => {
                       setRefusal({ locationId: location.id, error });

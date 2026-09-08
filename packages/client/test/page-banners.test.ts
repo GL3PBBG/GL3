@@ -26,6 +26,10 @@ describe("bannerSlotFor", () => {
     expect(bannerSlotFor("/plugins/jail")).toBeNull();
   });
 
+  it("leaves travel artwork to the page's journey scene instead of stacking headers", () => {
+    expect(bannerSlotFor("/plugins/travel.index")).toBeNull();
+  });
+
   it("returns null for a /plugins route with no banner entry", () => {
     expect(bannerSlotFor("/plugins/gym.index")).toBeNull();
   });

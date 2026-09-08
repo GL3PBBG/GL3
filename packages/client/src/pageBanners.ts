@@ -33,7 +33,8 @@ export const PAGE_BANNERS: Record<string, BannerSlot> = {
   "/news": { slot: "page-news", alt: "News" },
   "/shop": { slot: "page-shop", alt: "Shop" },
   "/plugins/bullets.index": { slot: "page-bullets", alt: "Bullet shop" },
-  "/plugins/travel.index": { slot: "page-travel", alt: "Travel" },
+  // Travel draws its current-city header itself. Adding page-travel here
+  // stacks the old banner above it whenever an admin has bound that artwork.
   "/ranks": { slot: "page-ranks", alt: "Ranks" },
   "/leaderboards": { slot: "page-leaderboards", alt: "Leaderboards" },
   "/inventory": { slot: "page-inventory", alt: "Inventory" },
