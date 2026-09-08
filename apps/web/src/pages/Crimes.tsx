@@ -1,6 +1,7 @@
-import { useEffect } from "react";
-import { refusalCooldownSeconds, useCountdowns, ApiError, useCommitCrime, useCrimes, useJail } from "@gl3/client";
-import { CooldownButton, ErrorText, Loading, Money, Panel } from "../components/ui.js";
+import { useEffect, useRef, useState } from "react";
+import type { GameEvent } from "@gl3/shared";
+import { refusalCooldownSeconds, useCountdowns, ApiError, useCommitCrime, useCrimes, useEvents, useJail, useMe } from "@gl3/client";
+import { Amount, CooldownButton, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./Crimes.module.css";
 import { GameImage } from "../components/GameImage.js";
 
@@ -12,11 +13,53 @@ import { GameImage } from "../components/GameImage.js";
  */
 const COOLDOWN_ID = "crime";
 
+type CrimeResult = Extract<GameEvent, { type: "crime.resolved" }>;
+
+export function CrimeOutcome({ result }: { result: CrimeResult }): JSX.Element {
+  const calledOff = result.cause === "insufficient_pool";
+  const caught = result.jailedUntil !== null;
+  const tone = calledOff ? "neutral" : caught ? "caught" : result.success ? "success" : "failed";
+  return <div className={styles.outcome} data-outcome={tone}>
+    <span className={styles.outcomeIcon} aria-hidden="true">{calledOff ? "—" : caught ? "!" : result.success ? "$" : "×"}</span>
+    <div className={styles.outcomeBody}>
+      <span className={styles.eyebrow}>Job report · {result.crimeName}</span>
+      <h3>{calledOff ? "Job called off" : caught ? result.success ? "Paid, but caught" : "Caught in the act" : result.success ? "Job pulled off" : "The job fell through"}</h3>
+      <p>{calledOff ? "Your resources changed before the job could run. You couldn't cover the cost."
+        : caught ? "The police caught up with you. Check jail for your release options."
+        : result.success ? "You made your move and collected the take."
+        : "This one didn't pay off. Regroup and choose your next move."}</p>
+      <div className={styles.rewards}>
+        <span><b>+<Money value={result.payout} /></b><small>Cash earned</small></span>
+        <span><b>+<Amount value={result.exp} /></b><small>XP gained</small></span>
+        {result.bullets !== "0" ? <span><b>+<Amount value={result.bullets} /></b><small>Bullets gained</small></span> : null}
+      </div>
+      {result.jailedUntil !== null ? <p className={styles.sentence}>Jailed until <When iso={result.jailedUntil} /></p> : null}
+    </div>
+  </div>;
+}
+
 export function Crimes(): JSX.Element {
   const crimes = useCrimes();
   const jail = useJail();
   const commit = useCommitCrime();
+  const me = useMe();
+  const events = useEvents();
+  const seen = useRef(new Set(events.map((event) => event.id)));
+  const [result, setResult] = useState<CrimeResult | null>(null);
+  const [queuedCrime, setQueuedCrime] = useState<string | null>(null);
   const { remaining, seed, start } = useCountdowns();
+
+  // The POST only accepts a job. Only a fresh, confirmed event for this
+  // player can reveal rewards; historical or other players' events cannot.
+  useEffect(() => {
+    const fresh = events.find((event): event is CrimeResult =>
+      event.type === "crime.resolved" && event.actorId === me.data?.playerId && !seen.current.has(event.id));
+    seen.current = new Set(events.map((event) => event.id));
+    if (fresh) {
+      setResult(fresh);
+      setQueuedCrime((id) => id === fresh.crimeId ? null : id);
+    }
+  }, [events, me.data?.playerId]);
 
   const jailed = jail.data?.jailed === true;
   const cooldown = remaining[COOLDOWN_ID] ?? 0;
@@ -47,6 +90,7 @@ export function Crimes(): JSX.Element {
       <ul className={styles.crimeList}>
         {crimes.data?.crimes.map((crime) => (
           <li key={crime.id} className={styles.crime}>
+            <div className={styles.crimeRow}>
             <GameImage url={crime.imageUrl} alt={crime.name} size="md" />
             <div className={styles.crimeGrow}>
               <strong>{crime.name}</strong>
@@ -62,11 +106,14 @@ export function Crimes(): JSX.Element {
               seconds={cooldown}
               disabled={jailed || commit.isPending}
               onClick={() => {
+                setResult(null);
+                setQueuedCrime(crime.id);
                 // Lock optimistically so the button reacts on click rather than
                 // when the resolved event lands; the refetch re-seeds the truth.
                 start(COOLDOWN_ID, crime.cooldownSeconds);
                 commit.mutate(crime.id, {
                   onError: (error) => {
+                    setQueuedCrime(null);
                     // The optimistic guess was wrong — take the server's
                     // number, and RELEASE the lock on a refusal that never
                     // burned the cooldown (insufficient_brave and friends):
@@ -78,9 +125,15 @@ export function Crimes(): JSX.Element {
                 });
               }}
             />
+            </div>
+            <div aria-live="polite" aria-atomic="true">
+              {result?.crimeId === crime.id ? <CrimeOutcome key={result.id} result={result} /> : null}
+              {queuedCrime === crime.id ? <p className={styles.pending}>{commit.isPending ? "Making your move…" : "Job queued. Waiting for the outcome…"}</p> : null}
+            </div>
           </li>
         ))}
       </ul>
+      {result && !crimes.data?.crimes.some((crime) => crime.id === result.crimeId) ? <CrimeOutcome key={result.id} result={result} /> : null}
       <ErrorText error={commit.error} />
     </Panel>
   );
