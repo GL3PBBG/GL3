@@ -49,6 +49,8 @@ export const keys = {
   // answers for wherever the caller currently is, and travelling invalidates
   // it through player.travelled anyway.
   inventory: () => ["inventory"] as const,
+  // Matches the theft plugin's declared "garage" event invalidation prefix.
+  garage: () => ["garage"] as const,
   shop: () => ["shop"] as const,
   combatTargets: () => ["combat", "targets"] as const,
   combatLog: () => ["combat", "log"] as const,

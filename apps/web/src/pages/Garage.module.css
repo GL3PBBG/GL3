@@ -1,0 +1,25 @@
+.intro { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0 1rem; }
+.intro h3 { font-size: 1.8rem; margin: 0.3rem 0; }
+.summary { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; min-width: 0; }
+.summary > div { display: grid; gap: 0.2rem; }
+.summary strong { color: var(--accent); font-size: 1.15rem; overflow-wrap: anywhere; }
+.summary > div > span { font-size: 0.72rem; color: var(--muted); }
+.filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+.filters button { background: var(--surface-sunk); border-color: var(--line); color: var(--muted); font-size: 0.8rem; box-shadow: none; }
+.filters button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.location { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.75rem; }
+.location > svg { color: var(--accent); }
+.location > span:last-child { margin-left: auto; }
+.conditionLabel { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.75rem; margin: 1rem 0 0.3rem; color: var(--muted); }
+.conditionLabel strong { color: var(--fg); }
+.condition { height: 6px; border-radius: 10px; background: var(--panel); overflow: hidden; }
+.condition > div { height: 100%; background: var(--success); transition: width var(--dur) var(--ease-out); }
+.condition[data-worn="true"] > div { background: var(--danger); }
+.prices { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.6rem; padding: 0.75rem 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); font-size: 0.85rem; }
+.prices dd { text-align: right; overflow-wrap: anywhere; }
+.notice { color: var(--muted); font-size: 0.8rem; }
+.confirm { margin-top: 0.75rem; border: 1px solid var(--accent-rim); border-radius: var(--radius); padding: 0.75rem; background: var(--accent-soft); font-size: 0.85rem; }
+.confirm p { margin: 0; }
+.feedback { color: var(--success); background: var(--success-soft); border-left: 3px solid var(--success); padding: 0.65rem 0.8rem; font-size: 0.85rem; }
+.empty { max-width: 360px; margin: 1rem auto; padding: 1rem; text-align: center; }
+.empty h3 { margin-top: 1rem; }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@gl3/client";
 import styles from "./ui.module.css";
 
@@ -149,7 +150,9 @@ function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: ()
     return () => { window.removeEventListener("keydown", onKey); };
   }, [onClose]);
 
-  return (
+  // Cards clip their artwork and Panels establish a container for layout.
+  // Mount outside both so fixed positioning covers the viewport.
+  return createPortal(
     <div className={styles.lightbox} role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
       {/* Stop propagation so clicking the image itself does not close it —
           only the backdrop around it does. */}
@@ -160,6 +163,6 @@ function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: ()
         onClick={(event) => { event.stopPropagation(); }}
       />
       <button ref={closeRef} type="button" className={styles.lightboxClose} onClick={onClose}>Close</button>
-    </div>
+    </div>, document.body,
   );
 }

@@ -9,3 +9,4 @@ export * from "./casino.js";
 export * from "./forum.js";
 export * from "./admin.js";
 export * from "./stats.js";
+export * from "./garage.js";

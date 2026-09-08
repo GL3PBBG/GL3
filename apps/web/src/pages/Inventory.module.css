@@ -1,0 +1,4 @@
+/* Long weapon descriptions must wrap without widening the loadout above. */
+.contents { grid-template-columns: minmax(0, 1fr); }
+.contents > div { min-width: 0; }
+.contents li > span { white-space: normal; overflow-wrap: anywhere; min-width: 0; }

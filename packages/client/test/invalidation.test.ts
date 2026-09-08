@@ -59,7 +59,7 @@ describe("invalidationKeys", () => {
     // shape — so without this a traveller keeps seeing the old town's roster
     // until the query remounts.
     expect(invalidationKeys(event("player.travelled"), VIEWER)).toEqual([
-      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges(),
+      keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges(), keys.garage(),
     ]);
   });
 

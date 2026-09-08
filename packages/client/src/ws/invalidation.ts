@@ -44,7 +44,7 @@ export function invalidationKeys(
       // "Here now" roster is the same shape: per-town rows under a global key.
       // menuBadges: a plugin can hide its nav entry by town (MenuBadge.hidden),
       // so the traveller's menu must be re-asked on arrival.
-      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges()];
+      return [keys.me(), keys.locations(), keys.shop(), keys.bulletShop(), keys.combatTargets(), keys.menuBadges(), keys.garage()];
     case "bank.transacted":
       return [keys.me()];
     case "bullets.purchased":

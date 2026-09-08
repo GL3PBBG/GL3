@@ -1,9 +1,12 @@
-import type { InventoryItem } from "@gl3/shared";
+import type { InventoryItem, InventoryResponse } from "@gl3/shared";
 import { Link } from "react-router-dom";
 import { Amount, ErrorText, Loading, Panel } from "../components/ui.js";
 import { figureEffect, numericEffect, stringEffect, weaponStatLine, useInventory, useEquip, useHospital, useUseItem } from "@gl3/client";
 import styles from "./pages.module.css";
 import { GameImage } from "../components/GameImage.js";
+import { CollectionArt, type CollectionKind } from "../components/CollectionArt.js";
+import collection from "../components/Collection.module.css";
+import inventoryStyles from "./Inventory.module.css";
 
 /**
  * The three item types this page renders specially. Anything else is listed
@@ -70,6 +73,12 @@ function ItemStats({ item }: { item: InventoryItem }): JSX.Element | null {
   return null;
 }
 
+const EQUIPMENT_SLOTS: readonly { key: keyof InventoryResponse["equipped"]; label: string; kind: CollectionKind; empty: string }[] = [
+  { key: "weaponItemId", label: "Firearm", kind: "firearm", empty: "Equip a firearm from the weapons below." },
+  { key: "weaponMeleeItemId", label: "Melee", kind: "melee", empty: "Equip a melee weapon from the weapons below." },
+  { key: "armorItemId", label: "Armor", kind: "armor", empty: "Equip armor from your inventory below." },
+];
+
 export function Inventory(): JSX.Element {
   const inventory = useInventory();
   const hospital = useHospital();
@@ -106,57 +115,30 @@ export function Inventory(): JSX.Element {
       ) : null}
       <ErrorText error={actionError} />
 
-      <div className={styles.stack}>
+      <div className={`${styles.stack} ${inventoryStyles.contents}`}>
         <div>
-          <h3 className={styles.meta}>Equipped</h3>
-          <ul className={styles.rows}>
-            <li className={styles.row}>
-              <span>Weapon: {equipped.weaponItemId
-                ? items.find((i) => i.itemId === equipped.weaponItemId)?.name ?? "unknown"
-                : "none"}</span>
-              {equipped.weaponItemId ? (
-                <button
-                  type="button"
-                  disabled={equip.isPending}
-                  onClick={() => equip.mutate({ weaponItemId: null })}
-                >
-                  Unequip
-                </button>
-              ) : null}
-            </li>
-            <li className={styles.row}>
-              <span>Melee: {equipped.weaponMeleeItemId
-                ? items.find((i) => i.itemId === equipped.weaponMeleeItemId)?.name ?? "unknown"
-                : "none"}</span>
-              {equipped.weaponMeleeItemId ? (
-                <button
-                  type="button"
-                  disabled={equip.isPending}
-                  onClick={() => equip.mutate({ weaponMeleeItemId: null })}
-                >
-                  Unequip
-                </button>
-              ) : null}
-            </li>
-            <li className={styles.row}>
-              <span>Armor: {equipped.armorItemId
-                ? items.find((i) => i.itemId === equipped.armorItemId)?.name ?? "unknown"
-                : "none"}</span>
-              {equipped.armorItemId ? (
-                <button
-                  type="button"
-                  disabled={equip.isPending}
-                  onClick={() => equip.mutate({ armorItemId: null })}
-                >
-                  Unequip
-                </button>
-              ) : null}
-            </li>
+          <h3 className={styles.meta}>Your loadout</h3>
+          <ul className={`${collection.grid} ${collection.slots}`} aria-label="Equipped gear">
+            {EQUIPMENT_SLOTS.map((slot) => {
+              const itemId = equipped[slot.key];
+              const item = items.find((owned) => owned.itemId === itemId);
+              return <li key={slot.key} className={`${collection.card} ${itemId ? collection.equipped : ""}`}>
+                <CollectionArt url={item?.imageUrl} name={item?.name ?? slot.label} kind={slot.kind} />
+                <div className={collection.body}>
+                  <div className={collection.slotTop}><span className={collection.eyebrow}>{slot.label}</span><span className={collection.badge}>{itemId ? "Equipped" : "Empty slot"}</span></div>
+                  <h4 className={collection.title}>{item?.name ?? (itemId ? "Unavailable item" : "Nothing equipped")}</h4>
+                  {item ? <div className={collection.meta}><ItemStats item={item} /></div> : <p className={collection.meta}>{itemId ? "Item details are unavailable. You can still clear this slot." : slot.empty}</p>}
+                  {item ? <ItemActions item={item} /> : null}
+                  {itemId ? <div className={collection.actions}><button type="button" aria-label={`Unequip ${slot.label.toLowerCase()}`} disabled={equip.isPending}
+                    onClick={() => equip.mutate({ [slot.key]: null })}>Unequip</button></div> : null}
+                </div>
+              </li>;
+            })}
           </ul>
         </div>
 
         {items.length === 0 ? (
-          <p className={styles.meta}>You own nothing. Buy something at the shop.</p>
+          <p className={styles.meta}>Your inventory is empty. <Link to="/shop">Visit the shop</Link> to build your loadout.</p>
         ) : null}
 
         {weapons.length > 0 ? (

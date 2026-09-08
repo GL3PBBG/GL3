@@ -1,0 +1,21 @@
+.grid { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 1rem; margin: 0; padding: 0; }
+.card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunk); box-shadow: var(--shadow-lift); }
+.art { position: relative; display: grid; place-items: center; min-width: 0; height: 168px; padding: 0.75rem; box-sizing: border-box; background: radial-gradient(ellipse at 50% 85%, var(--accent-soft), transparent 70%), var(--surface-sunk); border-bottom: 1px solid var(--line-soft); }
+.art > button { display: block; width: 100%; height: 100%; }
+.art > button > img, .art > span { width: 100%; height: 100%; max-height: 100%; box-sizing: border-box; object-fit: contain; border: 0; background-color: transparent; }
+.silhouette { width: 160px; max-width: 80%; height: 100px; color: color-mix(in oklab, var(--muted) 65%, var(--line)); }
+.body { padding: 1rem; }
+.eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.68rem; }
+.title { font: 800 1.35rem/1.15 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; margin: 0.45rem 0; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 0.82rem; margin: 0.4rem 0 0.8rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.8rem; }
+.actions button { flex: 1; }
+.actions a { font-size: 0.85rem; }
+.badge { display: inline-block; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.2rem 0.45rem; font-size: 0.65rem; color: var(--muted); }
+.equipped { border-color: var(--accent-rim); }
+.equipped .badge { color: var(--success); background: var(--success-soft); border-color: color-mix(in oklab, var(--success) 35%, transparent); }
+.slotTop { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.7rem; }
+.slots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.slots .art { height: 132px; }
+.slots .title { font-size: 1.15rem; }
+@media (max-width: 680px) { .slots { grid-template-columns: 1fr; } }
