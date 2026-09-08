@@ -171,6 +171,11 @@
 .stack { display: grid; gap: 1rem; }
 .rowStack { display: grid; gap: 0.25rem; min-width: 0; }
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+/* A table row action's armed confirm (plugins/PageRenderer TableBlock): the
+   question, then Confirm / Cancel as one `.actions` run beneath it. The
+   min-width stops a narrow action column folding the sentence into a word
+   per line; the table's own width takes the rest. */
+.confirm { display: grid; gap: 0.35rem; min-width: min(16rem, 70vw); }
 /* A vertical run of control groups. `Panel` puts no space between its
    children, so the casino table's bet row, hand actions and Leave button sat
    flush against each other and against the cards above them. `justify-items:
