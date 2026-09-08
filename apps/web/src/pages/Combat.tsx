@@ -1,5 +1,7 @@
+import { useState } from "react";
+import { CombatScene } from "./CombatScene.js";
 import { Link } from "react-router-dom";
-import type { AttackResponse, TargetReason, WeaponChoice, WeaponConditionDto } from "@gl3/shared";
+import type { AttackResponse, CombatTarget, TargetReason, WeaponChoice, WeaponConditionDto } from "@gl3/shared";
 import { formatMoney, useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe, useRepairWeapon, useWeaponCondition } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
 import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
@@ -159,6 +161,7 @@ function AttackButtons({ weapon, targetId, disabled, fire }: {
 }
 
 export function Combat(): JSX.Element {
+  const [encounter, setEncounter] = useState<{ target: CombatTarget; sequence: number } | null>(null);
   const targets = useCombatTargets();
   const log = useCombatLog();
   const me = useMe();
@@ -182,6 +185,7 @@ export function Combat(): JSX.Element {
 
   return (
     <Panel title="Combat">
+      <CombatScene target={encounter?.target ?? null} sequence={encounter?.sequence ?? 0} result={attack.data} pending={attack.isPending} failed={attack.isError} />
       <ErrorText error={attack.error} />
 
       {jailed ? <p className={styles.bad}>You can't shoot anyone from jail.</p> : null}
@@ -223,7 +227,10 @@ export function Combat(): JSX.Element {
                       weapon={weapon.data}
                       targetId={target.playerId}
                       disabled={blocked || attack.isPending}
-                      fire={(input) => attack.mutate(input)}
+                      fire={(input) => {
+                        setEncounter((previous) => ({ target: { ...target }, sequence: (previous?.sequence ?? 0) + 1 }));
+                        attack.mutate(input);
+                      }}
                     />
                   ) : (
                     <span className={styles.muted}>

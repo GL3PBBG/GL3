@@ -1,0 +1,34 @@
+.scene { margin: 0 0 1.5rem; overflow: hidden; border: 1px solid #56606a; border-radius: 8px; background: #101923; color: #e9e1d2; }
+.heading, .identity, .footer { padding: 1rem 1.25rem; }
+.heading { display:flex; justify-content:space-between; gap:1rem; color:#c3af88; font: 11px var(--font-mono); letter-spacing:.12em; border-bottom:1px solid #ffffff18; }
+.identity { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:1rem; }
+.identity strong { overflow-wrap:anywhere; } .identity strong:last-child { text-align:right; } .identity > span { color:#9e8970; font-size:12px; }
+.stage { height:280px; position:relative; overflow:hidden; isolation:isolate; background:radial-gradient(ellipse at 70% 20%, #3e4d53, #17232f 65%); }
+.skyline { position:absolute; inset:0 0 20%; opacity:.6; background:repeating-linear-gradient(90deg,transparent 0 35px,#0b1520 35px 80px), repeating-linear-gradient(0deg,#17222c 0 30px,#8e825522 30px 34px); clip-path:polygon(0 20%,15% 20%,15% 0,29% 0,29% 35%,48% 35%,48% 10%,66% 10%,66% 28%,85% 28%,85% 0,100% 0,100% 100%,0 100%); }
+.sign { position:absolute; left:40%; top:35px; padding:8px; border:1px solid #b57d6955; color:#c38a74; font:10px var(--font-mono); letter-spacing:.2em; transform:rotate(-4deg); }
+.road { position:absolute; inset:75% 0 0; background:linear-gradient(#43505a,#19232c); border-top:2px solid #75818b; }
+.attacker,.defender { position:absolute; bottom:5px; width:160px; transform-origin:50% 90%; }
+.attacker { left:12%; } .defender { right:12%; } .defender svg { transform:scaleX(-1); } .attacker svg,.defender svg { display:block; width:100%; }
+.effects { position:absolute; inset:0; pointer-events:none; }
+.flash { position:absolute; left:calc(12% + 140px); top:105px; font-size:55px; color:#ffe1a0; animation:flash .35s both; }
+.impact { position:absolute; right:calc(12% + 65px); top:110px; font-size:65px; color:#f6c178; animation:flash .45s .2s both; }
+.damage { position:absolute; right:8%; top:8px; display:grid; text-align:center; color:#ffcc9c; text-shadow:0 2px 8px #000; animation:reveal .6s .2s both; }
+.damage strong { font:700 34px var(--font-mono); } .damage span { font-size:11px; letter-spacing:.16em; } .damage small { font-size:11px; color:#c6d9e4; }
+[data-outcome="backfire"] .damage { right:auto; left:8%; color:#ff9b91; }
+[data-outcome="hit"] .defender { animation:recoil .65s .2s; }
+[data-outcome="fatal"] .defender { animation:fall .8s .2s both; }
+[data-outcome="backfire"] .attacker { animation:recoil .65s; }
+[data-weapon="firearm"]:not([data-outcome="backfire"]) .attacker { animation:recoil .4s; }
+[data-weapon="melee"] .attacker, [data-weapon="fists"] .attacker { animation:lunge .65s; }
+.healthLabel { display:flex; justify-content:space-between; gap:1rem; font-size:12px; margin-bottom:8px; }
+.health { height:8px; overflow:hidden; border-radius:4px; background:#ffffff18; } .health > div { height:100%; background:linear-gradient(90deg,#947444,#e3bd78); }
+.healthChange { animation:health .8s .2s both; }
+.footer p { margin:12px 0 0; color:#afbcc6; font-size:12px; }
+@keyframes health { from { width:var(--before); } to { width:var(--after); } }
+@keyframes recoil { 30% { transform:translateX(-9px) rotate(-5deg); } }
+@keyframes lunge { 40% { transform:translateX(35px) rotate(9deg); } }
+@keyframes fall { to { transform:translateY(35px) rotate(80deg); opacity:.55; } }
+@keyframes flash { 0%,100% { opacity:0; transform:scale(.5); } 35% { opacity:1; transform:scale(1.2); } }
+@keyframes reveal { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+@media(max-width:520px) { .stage { height:240px; } .attacker,.defender { width:125px; } .attacker { left:3%; } .defender { right:3%; } .flash { left:calc(3% + 105px); top:100px; } .impact { right:15%; top:100px; } .heading { font-size:9px; letter-spacing:.04em; } .sign { left:32%; } }
+@media(prefers-reduced-motion:reduce) { .scene *, .scene *::before { animation:none !important; transition:none !important; } .flash,.impact { display:none; } [data-outcome="fatal"] .defender { opacity:.4; } }
