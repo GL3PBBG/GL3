@@ -13,6 +13,7 @@ export const keys = {
   jail: () => ["jail"] as const,
   crimes: () => ["crimes"] as const,
   legal: (doc: "terms" | "privacy") => ["legal", doc] as const,
+  brothelAvailability: () => ["brothel", "availability"] as const,
   locations: () => ["locations"] as const,
   /** The bullet shop: stock, the effective price, and the per-purchase cap. */
   bulletShop: () => ["bulletShop"] as const,

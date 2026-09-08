@@ -397,6 +397,13 @@ export function useTravel() {
     // is what keeps this off Fastify's empty-JSON-body 400 path.
     mutationFn: async (locationId: string) =>
       TravelResponseSchema.parse(await api(`/api/travel/${locationId}`, { method: "POST" })),
+    onSuccess: () => {
+      // Refresh local services even when the travel WebSocket event is missed.
+      for (const queryKey of [keys.shop(), keys.bulletShop(), keys.combatTargets(),
+        keys.menuBadges(), keys.garage(), keys.properties(), keys.hudExtras()]) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: keys.me() });
       void queryClient.invalidateQueries({ queryKey: keys.locations() });

@@ -1,0 +1,49 @@
+.hero { overflow: hidden; border: 1px solid var(--accent-rim); border-radius: var(--radius); margin-bottom: 1.25rem; background: var(--surface-sunk); box-shadow: var(--shadow-lift); }
+.art { height: 180px; position: relative; background: radial-gradient(ellipse at 70% 90%, var(--accent-soft), transparent 70%), var(--surface-sunk); overflow: hidden; }
+.art > button, .art > span { display: block; width: 100%; height: 100%; }
+.art > button > img, .art > span { width: 100%; height: 100%; object-fit: cover; max-height: none; border: 0; border-radius: 0; }
+.hero .art { height: clamp(160px, 25vw, 280px); }
+.heroBody { padding: 1.25rem 1.5rem; }
+.eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.68rem; }
+.hero h1 { font: 800 clamp(1.8rem, 5vw, 3rem)/1.1 var(--font-display); text-transform: uppercase; margin: 0.35rem 0 0.75rem; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 0.8rem; margin: 0.5rem 0 0.8rem; overflow-wrap: anywhere; }
+.mode { font-size: 0.72rem; color: var(--muted); }
+.services { display: flex; flex-wrap: wrap; gap: 0.7rem 1.4rem; margin-top: 1rem; font-size: 0.85rem; }
+.services span { color: var(--muted); }
+.intro { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0 1rem; }
+.intro h3 { font-size: 1.4rem; margin: 0; }
+.wallet { display: grid; align-content: start; gap: 0.2rem; min-width: 0; }
+.wallet span { color: var(--muted); font-size: 0.7rem; }
+.wallet strong { color: var(--accent); overflow-wrap: anywhere; }
+.readiness { padding: 0.8rem 1rem; background: var(--accent-soft); border-left: 3px solid var(--accent); font-size: 0.85rem; margin-bottom: 1.25rem; }
+.readiness > span { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.3rem; }
+.notice { color: var(--danger); font-size: 0.85rem; }
+.grid { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; margin: 0; padding: 0; }
+.card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunk); }
+.card[data-current="true"] { border-color: var(--accent-rim); }
+.body { padding: 1rem; flex: 1; display: flex; flex-direction: column; align-items: start; }
+.body h3 { font: 800 1.45rem/1.15 var(--font-display); text-transform: uppercase; margin: 0.6rem 0; overflow-wrap: anywhere; max-width: 100%; }
+.body > button { width: 100%; margin-top: auto; }
+.badge, .venues > span { font-size: 0.68rem; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.2rem 0.45rem; color: var(--muted); }
+.card[data-current="true"] .badge { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-rim); }
+.venues { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.8rem; }
+.fare { width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.4rem; padding-top: 0.8rem; border-top: 1px solid var(--line-soft); margin-top: auto; }
+.fare > span, .fare small { font-size: 0.75rem; color: var(--muted); }
+.fare > strong { color: var(--accent); overflow-wrap: anywhere; }
+.fare s { font-size: 0.75rem; color: var(--muted); font-weight: 400; margin-right: 0.5rem; }
+.fare small { flex-basis: 100%; overflow-wrap: anywhere; }
+.arrival { display: flow-root; scroll-margin-top: 6rem; position: relative; padding: 1.2rem 3rem 1.2rem 1.2rem; border: 1px solid var(--accent-rim); border-radius: var(--radius); background: var(--accent-soft); margin-bottom: 1rem; animation: arrive 420ms var(--ease-out) both; }
+.arrival h2 { margin: 0.3rem 0; overflow-wrap: anywhere; }
+.arrival p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.arrival > button { position: absolute; right: 0.6rem; top: 0.6rem; background: transparent; color: var(--muted); border: 0; padding: 0.3rem 0.6rem; }
+@keyframes arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .arrival { animation: none; } }
+
+.skyline { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--line); pointer-events: none; }
+.art > button, .art > span { position: relative; }
+.art > span { background: transparent; }
+.arrivalArt { float: left; width: 100px; margin: 0 1rem 0.5rem 0; }
+.arrivalArt .art { height: 75px; border-radius: var(--radius); }
+@media (max-width: 480px) { .arrivalArt { float: none; margin-bottom: 0.7rem; } }
+
+.services .placesLabel, .venues .placesLabel { flex-basis: 100%; padding: 0; border: 0; color: var(--muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; }

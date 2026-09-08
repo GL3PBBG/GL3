@@ -10,3 +10,4 @@ export * from "./forum.js";
 export * from "./admin.js";
 export * from "./stats.js";
 export * from "./garage.js";
+export * from "./brothel.js";
