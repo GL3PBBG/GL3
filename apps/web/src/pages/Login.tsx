@@ -37,7 +37,20 @@ export function Login(): JSX.Element {
       {/* aria-label, not a visible <label>: the placeholder is the visual
           design, but a placeholder alone names the field for nobody once it
           has content. */}
-      <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" aria-label="Username" autoComplete="username" />
+      {/* Register mode mirrors RegisterRequestSchema so the browser names
+          the rule before a round trip; login mode stays unconstrained so a
+          legacy V2 username outside the pattern can still sign in. */}
+      <input
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Username"
+        aria-label="Username"
+        autoComplete="username"
+        required
+        {...(mode === "register"
+          ? { minLength: 3, maxLength: 30, pattern: "[A-Za-z0-9_\\-]+", title: "3–30 characters: letters, digits, _ and - only" }
+          : {})}
+      />
       {mode === "register" ? (
         <input
           value={email}
@@ -56,6 +69,8 @@ export function Login(): JSX.Element {
         placeholder="Password"
         aria-label="Password"
         autoComplete={mode === "login" ? "current-password" : "new-password"}
+        required
+        {...(mode === "register" ? { minLength: 8, maxLength: 200, title: "At least 8 characters" } : {})}
       />
       {mode === "register" ? (
         <label className={styles.terms}>

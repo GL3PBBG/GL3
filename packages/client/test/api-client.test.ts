@@ -40,6 +40,32 @@ describe("api()", () => {
     expect(gates).toEqual(["challenge_required"]);
   });
 
+  it("carries the server's zod issues on invalid_request, dropping malformed entries", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(400, {
+      error: "invalid_request",
+      issues: [
+        { code: "too_small", minimum: 8, type: "string", inclusive: true, path: ["password"], message: "String must contain at least 8 character(s)" },
+        { code: "invalid_string", validation: "regex", path: ["username"], message: "letters, digits, _ and - only" },
+        { code: "custom", path: ["nested", 0, "field"], message: "deep" },
+        "not an issue",
+        { path: ["email"] },
+      ],
+    }));
+    const err = await api("/api/auth/register", { method: "POST", body: JSON.stringify({}) }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).issues).toEqual([
+      { path: "password", message: "String must contain at least 8 character(s)", code: "too_small", minimum: 8 },
+      { path: "username", message: "letters, digits, _ and - only", code: "invalid_string" },
+      { path: "nested.0.field", message: "deep", code: "custom" },
+    ]);
+  });
+
+  it("leaves issues undefined when the body carries none", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(409, { error: "username_taken" }));
+    const err = await api("/x", { method: "POST" }).catch((e: unknown) => e);
+    expect((err as ApiError).issues).toBeUndefined();
+  });
+
   it("does not call onGate for other errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json(401, { error: "unauthorized" }));
     await expect(api("/api/auth/me")).rejects.toMatchObject({ status: 401, code: "unauthorized" });
