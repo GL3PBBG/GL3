@@ -47,6 +47,7 @@ export function Crimes(): JSX.Element {
   const seen = useRef(new Set(events.map((event) => event.id)));
   const [result, setResult] = useState<CrimeResult | null>(null);
   const [queuedCrime, setQueuedCrime] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<{ crimeId: string; error: Error } | null>(null);
   const { remaining, seed, start } = useCountdowns();
 
   // The POST only accepts a job. Only a fresh, confirmed event for this
@@ -58,6 +59,7 @@ export function Crimes(): JSX.Element {
     if (fresh) {
       setResult(fresh);
       setQueuedCrime((id) => id === fresh.crimeId ? null : id);
+      setRefusal((current) => current?.crimeId === fresh.crimeId ? null : current);
     }
   }, [events, me.data?.playerId]);
 
@@ -107,6 +109,7 @@ export function Crimes(): JSX.Element {
               disabled={jailed || commit.isPending}
               onClick={() => {
                 setResult(null);
+                setRefusal(null);
                 setQueuedCrime(crime.id);
                 // Lock optimistically so the button reacts on click rather than
                 // when the resolved event lands; the refetch re-seeds the truth.
@@ -114,6 +117,9 @@ export function Crimes(): JSX.Element {
                 commit.mutate(crime.id, {
                   onError: (error) => {
                     setQueuedCrime(null);
+                    // Refusals never emit crime.resolved. Keep their message
+                    // beside the attempted crime, where the player is looking.
+                    setRefusal({ crimeId: crime.id, error });
                     // The optimistic guess was wrong — take the server's
                     // number, and RELEASE the lock on a refusal that never
                     // burned the cooldown (insufficient_brave and friends):
@@ -130,11 +136,12 @@ export function Crimes(): JSX.Element {
               {result?.crimeId === crime.id ? <CrimeOutcome key={result.id} result={result} /> : null}
               {queuedCrime === crime.id ? <p className={styles.pending}>{commit.isPending ? "Making your move…" : "Job queued. Waiting for the outcome…"}</p> : null}
             </div>
+            {refusal?.crimeId === crime.id ? <ErrorText error={refusal.error} /> : null}
           </li>
         ))}
       </ul>
       {result && !crimes.data?.crimes.some((crime) => crime.id === result.crimeId) ? <CrimeOutcome key={result.id} result={result} /> : null}
-      <ErrorText error={commit.error} />
+      {refusal && !crimes.data?.crimes.some((crime) => crime.id === refusal.crimeId) ? <ErrorText error={refusal.error} /> : null}
     </Panel>
   );
 }

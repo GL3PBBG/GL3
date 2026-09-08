@@ -75,13 +75,36 @@ it("reveals confirmed results beneath the correct crime, ignoring history and ot
   expect(screen.queryByText("Job queued. Waiting for the outcome…")).toBeNull();
 });
 
-it("releases the optimistic cooldown and pending report after an API refusal", () => {
+it("shows insufficient-brave feedback beside the attempted crime and releases its optimistic cooldown", () => {
   state.mutate.mockImplementation((_id, options) => options.onError(new ApiError(409, "insufficient_brave")));
   mount(Crimes);
   fireEvent.click(screen.getAllByRole("button", { name: "Commit" })[0]!);
   expect(screen.queryByText("Job queued. Waiting for the outcome…")).toBeNull();
   expect(screen.getAllByRole("button", { name: "Commit" }).every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
   expect(screen.queryByText("Job pulled off")).toBeNull();
+  const row = screen.getByText("Corner hustle", { selector: "strong" }).closest("li")!;
+  expect(within(row).getByRole("alert").textContent).toBe("You're not feeling brave enough — it comes back over time.");
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+});
+
+it("clears the previous refusal when another crime is attempted", () => {
+  state.mutate.mockImplementationOnce((_id, options) => options.onError(new ApiError(409, "insufficient_brave")));
+  mount(Crimes);
+  fireEvent.click(screen.getAllByRole("button", { name: "Commit" })[0]!);
+  expect(screen.getByRole("alert")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "Commit" })[1]!);
+  expect(screen.queryByRole("alert")).toBeNull();
+  const row = screen.getByText("Warehouse job", { selector: "strong" }).closest("li")!;
+  expect(within(row).getByText("Job queued. Waiting for the outcome…")).toBeTruthy();
+});
+
+it("keeps the refusal visible if a refetch removes the attempted crime", () => {
+  state.mutate.mockImplementation((_id, options) => options.onError(new ApiError(409, "insufficient_brave")));
+  const view = mount(Crimes);
+  fireEvent.click(screen.getAllByRole("button", { name: "Commit" })[0]!);
+  state.queries.crimes.data.crimes = [];
+  view.rerender(createElement(MemoryRouter, null, createElement(Crimes)));
+  expect(screen.getByRole("alert").textContent).toContain("not feeling brave enough");
 });
 
 it("shows jail and actual rewards together when a successful crime still gets the player caught", () => {
