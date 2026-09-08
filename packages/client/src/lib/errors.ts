@@ -1,4 +1,4 @@
-import { ApiError } from "../api/apiError.js";
+import { ApiError, type FieldIssue } from "../api/apiError.js";
 
 /**
  * Player-facing copy for the server's snake_case error codes.
@@ -120,6 +120,36 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** "45s", "2m 05s" — used to make the timed errors say how long. */
+/** `acceptTerms` → "Accept terms", `username` → "Username", `""` → "". */
+function fieldLabel(path: string): string {
+  const leaf = path.split(".").filter((segment) => !/^\d+$/.test(segment)).pop() ?? "";
+  const words = leaf.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words.length === 0 ? "" : words[0]!.toUpperCase() + words.slice(1);
+}
+
+/**
+ * One zod issue as a player-facing sentence. The length rules and the email
+ * check get rewritten — zod's own "String must contain at least 8
+ * character(s)" is for developers — and every other message (a custom regex
+ * message like "letters, digits, _ and - only", or "Required") is shown
+ * verbatim after the field's name.
+ */
+export function describeIssue(issue: FieldIssue): string {
+  const label = fieldLabel(issue.path);
+  const subject = label.length === 0 ? "Value" : label;
+  if (issue.code === "too_small" && issue.minimum !== undefined) {
+    return `${subject} must be at least ${issue.minimum} characters.`;
+  }
+  if (issue.code === "too_big" && issue.maximum !== undefined) {
+    return `${subject} must be at most ${issue.maximum} characters.`;
+  }
+  if (issue.code === "invalid_string" && /email/i.test(issue.message)) {
+    return `${subject}: enter a valid email address.`;
+  }
+  const message = issue.message.replace(/\.+$/, "");
+  return label.length === 0 ? `${message}.` : `${label}: ${message}.`;
+}
+
 export function formatDuration(totalSeconds: number): string {
   const seconds = Math.max(0, Math.trunc(totalSeconds));
   if (seconds < 60) return `${seconds}s`;
@@ -138,6 +168,13 @@ export function describeError(error: unknown): string {
   }
 
   const base = MESSAGES[error.code] ?? error.code;
+
+  // A 400 that names the field and rule beats "wasn't valid": registration
+  // was refusing players with no reason shown, because the server's zod
+  // issues were dropped on the floor here. First issue only — one sentence.
+  if (error.code === "invalid_request" && error.issues !== undefined && error.issues.length > 0) {
+    return describeIssue(error.issues[0]!);
+  }
 
   // The timed/quantified codes carry a number the base sentence should use.
   if (error.code === "jailed" && error.remainingSeconds !== undefined) {

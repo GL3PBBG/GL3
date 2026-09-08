@@ -1,10 +1,38 @@
-import { ApiError, type ApiErrorDetail } from "./apiError.js";
+import { ApiError, type ApiErrorDetail, type FieldIssue } from "./apiError.js";
 import { clientConfig } from "../config.js";
 
-export { ApiError, type ApiErrorDetail };
+export { ApiError, type ApiErrorDetail, type FieldIssue };
 
 function asCount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * The zod issue list a 400 `invalid_request` may carry. Each entry is kept
+ * only if it has a string message and an array path; anything else is
+ * dropped rather than failing the whole error, since the code alone is still
+ * a usable ApiError. An empty or absent list is `undefined`.
+ */
+function asIssues(value: unknown): FieldIssue[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const issues: FieldIssue[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry["message"] !== "string" || !Array.isArray(entry["path"])) continue;
+    const path = entry["path"].map((segment) => String(segment)).join(".");
+    const code = typeof entry["code"] === "string" ? entry["code"] : undefined;
+    const minimum = asCount(entry["minimum"]);
+    const maximum = asCount(entry["maximum"]);
+    issues.push({
+      path,
+      message: entry["message"],
+      ...(code === undefined ? {} : { code }),
+      ...(minimum === undefined ? {} : { minimum }),
+      ...(maximum === undefined ? {} : { maximum }),
+    });
+  }
+  return issues.length > 0 ? issues : undefined;
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -46,6 +74,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       remainingSeconds: asCount(body["remainingSeconds"]) ?? fromHeader,
       available: asCount(body["available"]),
       maxBuy: asCount(body["maxBuy"]),
+      issues: asIssues(body["issues"]),
     });
   }
   if (response.status === 204) return undefined as T;

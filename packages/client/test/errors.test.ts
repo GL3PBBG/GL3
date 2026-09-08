@@ -26,6 +26,31 @@ describe("describeError", () => {
     );
   });
 
+  it("names the field and rule when invalid_request carries zod issues", () => {
+    const err = (issues: ApiError["issues"]) => new ApiError(400, "invalid_request", { issues });
+    expect(describeError(err([{ path: "password", message: "String must contain at least 8 character(s)", code: "too_small", minimum: 8 }])))
+      .toBe("Password must be at least 8 characters.");
+    expect(describeError(err([{ path: "username", message: "String must contain at most 30 character(s)", code: "too_big", maximum: 30 }])))
+      .toBe("Username must be at most 30 characters.");
+    expect(describeError(err([{ path: "username", message: "letters, digits, _ and - only", code: "invalid_string" }])))
+      .toBe("Username: letters, digits, _ and - only.");
+    expect(describeError(err([{ path: "email", message: "Invalid email", code: "invalid_string" }])))
+      .toBe("Email: enter a valid email address.");
+    // First issue wins — one sentence, not a wall.
+    expect(describeError(err([
+      { path: "username", message: "letters, digits, _ and - only", code: "invalid_string" },
+      { path: "password", message: "String must contain at least 8 character(s)", code: "too_small", minimum: 8 },
+    ]))).toBe("Username: letters, digits, _ and - only.");
+    // camelCase paths read as words; a pathless issue still gets its message.
+    expect(describeError(err([{ path: "acceptTerms", message: "Required", code: "invalid_type" }])))
+      .toBe("Accept terms: Required.");
+    expect(describeError(err([{ path: "", message: "Unrecognized key", code: "unrecognized_keys" }])))
+      .toBe("Unrecognized key.");
+    // No issues at all: the generic sentence, unchanged.
+    expect(describeError(new ApiError(400, "invalid_request"))).toBe("That request wasn't valid.");
+    expect(describeError(err([]))).toBe("That request wasn't valid.");
+  });
+
   it("falls back to the raw code so a new server code stays diagnosable", () => {
     expect(describeError(new ApiError(400, "brand_new_code"))).toBe("brand_new_code");
   });
