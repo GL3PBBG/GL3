@@ -232,24 +232,30 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
                     // Two-step in place, the property board's shape rather
                     // than `window.confirm`: the first click armed it, this
                     // renders the question with an explicit way out.
+                    // The question sits on its own line above a paired
+                    // Confirm / Cancel. Inline with the buttons, a phone's
+                    // auto-width action column squeezed the sentence to a
+                    // word a line and wrapped the two buttons apart.
                     return (
-                      <Fragment key={actionIndex}>
-                        <span className={styles.meta} role="alert">{rowAction.confirm}</span>{" "}
-                        <button
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() => { void fire(key, resolved); }}
-                        >
-                          Confirm
-                        </button>{" "}
-                        <button
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() => { setArmed(null); }}
-                        >
-                          Cancel
-                        </button>
-                      </Fragment>
+                      <span key={actionIndex} className={styles.confirm}>
+                        <span className={styles.meta} role="alert">{rowAction.confirm}</span>
+                        <span className={styles.actions}>
+                          <button
+                            type="button"
+                            disabled={busy !== null}
+                            onClick={() => { void fire(key, resolved); }}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy !== null}
+                            onClick={() => { setArmed(null); }}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      </span>
                     );
                   }
                   return (
