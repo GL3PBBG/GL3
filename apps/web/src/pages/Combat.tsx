@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CombatScene } from "./CombatScene.js";
 import { Link } from "react-router-dom";
 import type { AttackResponse, CombatTarget, TargetReason, WeaponChoice, WeaponConditionDto } from "@gl3/shared";
@@ -161,6 +161,8 @@ function AttackButtons({ weapon, targetId, disabled, fire }: {
 }
 
 export function Combat(): JSX.Element {
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [encounter, setEncounter] = useState<{ target: CombatTarget; sequence: number } | null>(null);
   const targets = useCombatTargets();
   const log = useCombatLog();
@@ -182,10 +184,39 @@ export function Combat(): JSX.Element {
   const jailed = jail.data?.jailed === true;
   const hospitalised = hospital.data?.hospitalised === true;
   const blocked = jailed || hospitalised;
+  const selected = rows.find((target) => target.playerId === selectedId)
+    ?? (selectedId === null ? rows.find((target) => target.attackable) : undefined);
+  const chooseTarget = (targetId: string): void => {
+    setSelectedId(targetId);
+    setEncounter(null);
+    attack.reset();
+  };
 
   return (
     <Panel title="Combat">
-      <CombatScene target={encounter?.target ?? null} sequence={encounter?.sequence ?? 0} result={attack.data} pending={attack.isPending} failed={attack.isError} />
+      <div ref={sceneRef} style={{ scrollMarginTop: "1rem" }}>
+        <CombatScene target={encounter?.target ?? selected ?? null} sequence={encounter?.sequence ?? 0} result={attack.data} pending={attack.isPending} failed={attack.isError}>
+          <label>
+            Target{" "}
+            <select value={selected?.playerId ?? ""} disabled={attack.isPending} onChange={(event) => chooseTarget(event.target.value)}>
+              <option value="" disabled>Choose an enemy</option>
+              {rows.map((target) => <option key={target.playerId} value={target.playerId} disabled={!target.attackable}>
+                {target.username}{!target.attackable ? ` — ${target.reason ? REASONS[target.reason] : "Unavailable"}` : ""}
+              </option>)}
+            </select>
+          </label>
+          {selected ? <AttackButtons
+            weapon={weapon.data}
+            targetId={selected.playerId}
+            disabled={blocked || attack.isPending || !selected.attackable || attack.data?.targetKilled === true}
+            fire={(input) => {
+              setSelectedId(selected.playerId);
+              setEncounter((previous) => ({ target: { ...selected }, sequence: (previous?.sequence ?? 0) + 1 }));
+              attack.mutate(input);
+            }}
+          /> : null}
+        </CombatScene>
+      </div>
       <ErrorText error={attack.error} />
 
       {jailed ? <p className={styles.bad}>You can't shoot anyone from jail.</p> : null}
@@ -223,15 +254,12 @@ export function Combat(): JSX.Element {
                     <Amount value={String(target.maxHealth)} />
                   </span>
                   {target.attackable ? (
-                    <AttackButtons
-                      weapon={weapon.data}
-                      targetId={target.playerId}
-                      disabled={blocked || attack.isPending}
-                      fire={(input) => {
-                        setEncounter((previous) => ({ target: { ...target }, sequence: (previous?.sequence ?? 0) + 1 }));
-                        attack.mutate(input);
-                      }}
-                    />
+                    <button type="button" disabled={attack.isPending} onClick={() => {
+                      chooseTarget(target.playerId);
+                      sceneRef.current?.scrollIntoView({ block: "start" });
+                    }}>
+                      Select target
+                    </button>
                   ) : (
                     <span className={styles.muted}>
                       {" — "}{target.reason ? REASONS[target.reason] : "Can't be shot"}

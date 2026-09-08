@@ -32,3 +32,8 @@
 @keyframes reveal { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
 @media(max-width:520px) { .stage { height:240px; } .attacker,.defender { width:125px; } .attacker { left:3%; } .defender { right:3%; } .flash { left:calc(3% + 105px); top:100px; } .impact { right:15%; top:100px; } .heading { font-size:9px; letter-spacing:.04em; } .sign { left:32%; } }
 @media(prefers-reduced-motion:reduce) { .scene *, .scene *::before { animation:none !important; transition:none !important; } .flash,.impact { display:none; } [data-outcome="fatal"] .defender { opacity:.4; } }
+
+.controls { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; margin-bottom:1rem; }
+.controls label { flex:1 1 180px; min-width:0; font-size:12px; }
+.controls select { max-width:100%; width:100%; margin-top:4px; }
+.controls button { flex:0 0 auto; }

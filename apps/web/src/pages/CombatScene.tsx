@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { AttackResponse, CombatTarget } from "@gl3/shared";
 import css from "./CombatScene.module.css";
 
@@ -16,7 +17,8 @@ function Fighter({ gun = false, melee = false }: { gun?: boolean; melee?: boolea
   </svg>;
 }
 
-export function CombatScene({ target, result, pending, failed, sequence }: {
+export function CombatScene({ target, result, pending, failed, sequence, children }: {
+  children?: ReactNode;
   target: CombatTarget | null; result: AttackResponse | undefined; pending: boolean; failed: boolean; sequence: number;
 }): JSX.Element {
   const outcome = result?.backfire ? "backfire" : result?.targetKilled ? "fatal" : result?.hit ? "hit" : "miss";
@@ -25,7 +27,7 @@ export function CombatScene({ target, result, pending, failed, sequence }: {
   const before = target ? Math.max(0, Math.min(100, target.health / Math.max(1, target.maxHealth) * 100)) : 100;
   return <section className={css.scene} aria-label="Combat encounter">
     <div className={css.heading}><span>STREET ENCOUNTER</span><span>{pending ? "Taking action…" : failed ? "Attack unsuccessful" : result ? "Attack resolved" : "Ready when you are"}</span></div>
-    <div className={css.identity}><strong>You</strong><span>VS</span><strong>{target?.username ?? "Choose a target below"}</strong></div>
+    <div className={css.identity}><strong>You</strong><span>VS</span><strong>{target?.username ?? "Choose a target"}</strong></div>
     <div className={css.stage} key={sequence} data-outcome={result ? outcome : "idle"} data-weapon={result?.weapon}>
       <div className={css.skyline} />
       <div className={css.sign}>NO WAY BACK</div>
@@ -43,11 +45,12 @@ export function CombatScene({ target, result, pending, failed, sequence }: {
       </div> : null}
     </div>
     <div className={css.footer}>
+      {children ? <div className={css.controls}>{children}</div> : null}
       <div className={css.healthLabel}><span>{target ? `${target.username} · health` : "Target health"}</span><strong>{target ? `${health} / ${target.maxHealth}` : "—"}</strong></div>
       <div className={css.health} role={target ? "meter" : undefined} aria-label="Target health" aria-valuemin={0} aria-valuemax={target?.maxHealth} aria-valuenow={target ? health : undefined}>
         <div key={`${sequence}-${result ? "after" : "before"}`} className={result ? css.healthChange : undefined} style={{ width: `${percent}%`, ...{ "--before": `${before}%`, "--after": `${percent}%` } }} />
       </div>
-      <p>{pending ? "Lining up the attack…" : failed ? "No impact to show. Check the error below." : result?.targetKilled ? "Target defeated." : result?.backfire ? "Your weapon backfired. You took the impact." : result?.hit ? "Hit landed. The target is still standing." : result ? "The attack missed. No damage dealt." : "Choose Shoot, Strike or Punch below to attack."}</p>
+      <p>{pending ? "Lining up the attack…" : failed ? "No impact to show. Check the error below." : result?.targetKilled ? "Target defeated." : result?.backfire ? "Your weapon backfired. You took the impact." : result?.hit ? "Hit landed. The target is still standing." : result ? "The attack missed. No damage dealt." : "Choose a target, then Shoot, Strike or Punch to attack."}</p>
     </div>
   </section>;
 }
