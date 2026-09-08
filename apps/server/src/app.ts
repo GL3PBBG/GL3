@@ -1,5 +1,5 @@
 import cors from "@fastify/cors";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from "fastify";
 import type { Redis } from "ioredis";
 import { registerAssetRoutes } from "./assets/routes.js";
 import { createStorageDriver } from "./assets/factory.js";
@@ -27,6 +27,7 @@ import { loadPlugins, type LoadedPlugins } from "./plugins/loader.js";
 import { registerPluginsEndpoint } from "./plugins/manifest-endpoint.js";
 import { registerPluginRoutes } from "./plugins/routes.js";
 import { loadSettings } from "./settings/load.js";
+import { requestLogSerializer } from "./logging.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { registerThemeRoutes } from "./theme/routes.js";
 import { registerLegalRoutes } from "./legal/routes.js";
@@ -55,7 +56,13 @@ export interface AppDeps {
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const loadedSettings = await loadSettings(deps.db);
   const assetDriver = deps.assetDriver ?? createStorageDriver(config.assets);
-  const app = Fastify({ logger: config.nodeEnv !== "test" });
+  // Custom `req` serializer so the request log carries the same client IP
+  // the rate limiter, presence and ip telemetry already use (`CLIENT_IP_HEADER`)
+  // rather than the raw socket peer — see `logging.ts`.
+  const logger: NonNullable<FastifyServerOptions["logger"]> = config.nodeEnv === "test"
+    ? false
+    : { serializers: { req: requestLogSerializer(config.clientIpHeader) } };
+  const app = Fastify({ logger });
   await app.register(cors, { origin: config.corsOrigins, credentials: true });
 
   // Several POST routes take no body (commit a crime, mint a WS ticket, travel,
