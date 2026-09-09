@@ -36,10 +36,18 @@ export interface NavCategory {
  */
 export type { NavCategoryId } from "@gl3/shared";
 
+/* Home is the general-purpose group: the dashboard plus the pages a player
+   visits regardless of where they are standing — Bank and News are core,
+   and the attribute family (gym, education, jobs) declares here too. Town
+   was overfull and Home held one entry before this split. */
 const HOME: NavCategory = {
   id: "home",
   label: "Home",
-  items: [{ to: "/", label: "Dashboard" }],
+  items: [
+    { to: "/", label: "Dashboard" },
+    { to: "/bank", label: "Bank" },
+    { to: "/news", label: "News" },
+  ],
 };
 
 /* Plugin-only today: the crimes category's core items moved onto the
@@ -60,13 +68,13 @@ const ACTIONS: NavCategory = {
   items: [],
 };
 
-/* Bank and Shop are the framework's town services; casino/travel/
-   jail/hospital are plugin/synthetic pages folded in from the payload. */
+/* Shop is the framework's one town service; casino/travel/jail/hospital
+   are plugin/synthetic pages folded in from the payload. Bank moved to Home:
+   it is not a place in a town, it follows the player everywhere. */
 const TOWN: NavCategory = {
   id: "town",
   label: "Town",
   items: [
-    { to: "/bank", label: "Bank" },
     { to: "/shop", label: "Shop" },
   ],
 };
@@ -78,7 +86,6 @@ const SOCIAL: NavCategory = {
     { to: "/mail", label: "Mail" },
     { to: "/forum", label: "Forum" },
     { to: "/players", label: "Players" },
-    { to: "/news", label: "News" },
     { to: "/notifications", label: "Alerts" },
   ],
 };

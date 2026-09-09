@@ -145,7 +145,8 @@ describe("category and label lookup", () => {
   it("a framework payload leaves no crimes category and a services-only Town", () => {
     expect(nav.some((c) => c.id === "crimes")).toBe(false);
     expect(nav.some((c) => c.id === "actions")).toBe(false);
-    expect(nav.find((c) => c.id === "town")!.items.map((i) => i.label)).toEqual(["Bank", "Shop"]);
+    expect(nav.find((c) => c.id === "town")!.items.map((i) => i.label)).toEqual(["Shop"]);
+    expect(nav.find((c) => c.id === "home")!.items.map((i) => i.label)).toEqual(["Dashboard", "Bank", "News"]);
   });
 
   it("folds the gameplay plugin pages into Crimes and drops the empty Actions category", () => {

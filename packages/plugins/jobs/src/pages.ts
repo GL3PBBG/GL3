@@ -3,7 +3,7 @@ import type { PageSchema } from "@gl3/plugin-sdk";
 export const jobsPage: PageSchema = {
   id: "jobs.index",
   path: "/jobs",
-  menu: { label: "Jobs", order: 24, category: "town" },
+  menu: { label: "Jobs", order: 24, category: "home" },
   view: {
     kind: "panel",
     title: "Jobs",

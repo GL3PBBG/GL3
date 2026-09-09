@@ -3,7 +3,7 @@ import type { PageSchema } from "@gl3/plugin-sdk";
 export const educationPage: PageSchema = {
   id: "education.index",
   path: "/education",
-  menu: { label: "Education", order: 23, category: "town" },
+  menu: { label: "Education", order: 23, category: "home" },
   view: {
     kind: "panel",
     title: "Education",
