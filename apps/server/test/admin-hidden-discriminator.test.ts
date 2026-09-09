@@ -48,11 +48,12 @@ describe("inventory admin forms carry itemType as a hidden constant", () => {
   const discriminators = fields.filter((field) => field.name === "itemType");
 
   it("finds one on every item form", () => {
-    // Four create forms and four update forms — "melee" joined both sets as a
+    // Five create forms and five update forms — "melee" joined both sets as a
     // FORM-level discriminant (stored as item_type "weapon"; the body schema
-    // maps it back). Guards the walker as much as the count: a walker that
-    // found nothing would make the next test pass vacuously.
-    expect(discriminators.length).toBe(8);
+    // maps it back), and "misc" (effect-less items another plugin reads by
+    // id) joined both after it. Guards the walker as much as the count: a
+    // walker that found nothing would make the next test pass vacuously.
+    expect(discriminators.length).toBe(10);
   });
 
   it("declares every one hidden, carrying the type its form creates", () => {
@@ -61,10 +62,12 @@ describe("inventory admin forms carry itemType as a hidden constant", () => {
       ["hidden", "melee"],
       ["hidden", "armor"],
       ["hidden", "consumable"],
+      ["hidden", "misc"],
       ["hidden", "weapon"],
       ["hidden", "melee"],
       ["hidden", "armor"],
       ["hidden", "consumable"],
+      ["hidden", "misc"],
     ]);
   });
 });
