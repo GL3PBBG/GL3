@@ -37,7 +37,7 @@
 .hero, .journey { scroll-margin-top: 6rem; }
 .journey { position: relative; isolation: isolate; overflow: hidden; border: 1px solid var(--accent-rim); border-radius: var(--radius); margin-bottom: 1.25rem; background: var(--surface-sunk); }
 .journeyArt { position: absolute; inset: 0; z-index: -1; background: radial-gradient(ellipse at 70% 40%, var(--accent-soft), transparent 80%); }
-.journeyArt > img, .journeyArt > span { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; object-fit: cover; animation: passingScenery 1.8s ease-out both; }
+.journeyArt > img, .journeyArt > span { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; object-fit: cover; animation: passingScenery 3.6s ease-out both; }
 .journeyArt::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface-sunk), color-mix(in srgb, var(--surface-sunk) 75%, transparent)); }
 .journeyBody { padding: clamp(1.25rem, 5vw, 3rem); min-height: 320px; display: flex; flex-direction: column; justify-content: center; align-items: start; }
 .journeyBody h1 { font: 800 clamp(1.8rem, 5vw, 3rem)/1.1 var(--font-display); text-transform: uppercase; margin: 0.5rem 0 1.5rem; overflow-wrap: anywhere; }

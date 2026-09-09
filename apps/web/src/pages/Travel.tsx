@@ -7,7 +7,9 @@ import { GameImage, useSlotImage } from "../components/GameImage.js";
 import styles from "./Travel.module.css";
 
 const COOLDOWN_ID = "travel";
-const JOURNEY_REVEAL_MS = 1800;
+// Keep in step with `passingScenery` in Travel.module.css: the scenery slide
+// is sized to end exactly when the arrival panel replaces it.
+const JOURNEY_REVEAL_MS = 3600;
 
 function CityArt({ location }: { location: LocationDto }): JSX.Element {
   return <div className={styles.art}>
@@ -159,7 +161,13 @@ export function Travel(): JSX.Element {
                       // This is presentation after success, never a promise
                       // that an in-flight or refused request moved the player.
                       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) setArrival(destination);
-                      else setJourney({ from: here?.name ?? null, to: destination });
+                      else {
+                        // The scene mounts at the top of the page; a player
+                        // who clicked Travel on the last card is scrolled to
+                        // the bottom and would otherwise watch nothing.
+                        window.scrollTo?.({ top: 0, behavior: "smooth" });
+                        setJourney({ from: here?.name ?? null, to: destination });
+                      }
                     },
                     onError: (error) => {
                       setRefusal({ locationId: location.id, error });

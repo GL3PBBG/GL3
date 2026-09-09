@@ -29,6 +29,7 @@ beforeEach(() => {
   gates = {minLevel: 15, townMinLevel: 10};
   journeyArt = "/travel-banner.svg";
   vi.stubGlobal("matchMedia", vi.fn(() => ({matches: false})));
+  vi.stubGlobal("scrollTo", vi.fn());
   level = 10; cash = "1000"; jailed = false; availabilityStatus = 200;
   action = (url) => {
     const locationId = url.split("/").at(-1)!;
@@ -172,10 +173,18 @@ it("automatically reveals arrival after the short scene even without configured 
   expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
   fireEvent.click(card("Vice Heights").getByRole("button", {name: "Travel"}));
   await screen.findByRole("region", {name: "Travel journey"});
-  await screen.findByRole("status", {name: "Arrival confirmed"}, {timeout: 3000});
+  await screen.findByRole("status", {name: "Arrival confirmed"}, {timeout: 6000});
   expect(screen.queryByRole("region", {name: "Travel journey"})).toBeNull();
   expect(screen.getByRole("heading", {name: "Vice Heights", level: 1})).toBe(document.activeElement);
   expect(writes()).toHaveLength(1);
+});
+
+it("scrolls to the top when the journey starts, so the scene is in view", async () => {
+  await mount();
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  fireEvent.click(card("Vice Heights").getByRole("button", {name: "Travel"}));
+  await screen.findByRole("region", {name: "Travel journey"});
+  expect(window.scrollTo).toHaveBeenCalledWith({top: 0, behavior: "smooth"});
 });
 
 it("goes directly to confirmed arrival for reduced motion", async () => {
