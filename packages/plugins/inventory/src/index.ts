@@ -10,6 +10,7 @@ import {
   ConsumableEffectsSchema,
   ITEM_TYPE_ARMOR,
   ITEM_TYPE_CONSUMABLE,
+  ITEM_TYPE_MISC,
   ITEM_TYPE_WEAPON,
   MeleeEffectsSchema,
   PercentFigureSchema,
@@ -559,6 +560,11 @@ const ItemBodySchema = z.discriminatedUnion("itemType", [
     name: z.string().min(1).max(80),
     ...ConsumableStatsShape,
   }).strict(),
+  // No stats: a misc item is a name and nothing else (`effectsFor` writes `{}`).
+  z.object({
+    itemType: z.literal(ITEM_TYPE_MISC),
+    name: z.string().min(1).max(80),
+  }).strict(),
 ]);
 
 /**
@@ -591,13 +597,19 @@ const ItemUpdateSchema = z.discriminatedUnion("itemType", [
     name: blankable(z.string().min(1).max(80)),
     ...ConsumableStatsShape,
   }).strict(),
+  z.object({
+    itemType: z.literal(ITEM_TYPE_MISC),
+    id: z.string().uuid(),
+    name: blankable(z.string().min(1).max(80)),
+  }).strict(),
 ]);
 
 type ItemStatsBody =
   | ({ itemType: typeof ITEM_TYPE_WEAPON } & z.infer<z.ZodObject<typeof WeaponStatsShape>>)
   | ({ itemType: typeof FORM_TYPE_MELEE } & z.infer<z.ZodObject<typeof MeleeStatsShape>>)
   | ({ itemType: typeof ITEM_TYPE_ARMOR } & z.infer<z.ZodObject<typeof ArmorStatsShape>>)
-  | ({ itemType: typeof ITEM_TYPE_CONSUMABLE } & z.infer<z.ZodObject<typeof ConsumableStatsShape>>);
+  | ({ itemType: typeof ITEM_TYPE_CONSUMABLE } & z.infer<z.ZodObject<typeof ConsumableStatsShape>>)
+  | { itemType: typeof ITEM_TYPE_MISC };
 
 /**
  * Turn a validated body into the `effects` jsonb. The per-type effects schema
@@ -625,6 +637,8 @@ function effectsFor(body: ItemStatsBody): unknown {
         return MeleeEffectsSchema.parse({ power: body.power });
       case ITEM_TYPE_ARMOR:
         return ArmorEffectsSchema.parse({ armor: body.armor });
+      case ITEM_TYPE_MISC:
+        return {};
       case ITEM_TYPE_CONSUMABLE: {
         const deltas: Partial<Record<(typeof POOL_ORDER)[number], number | string>> = {};
         for (const pool of POOL_ORDER) {
@@ -1060,6 +1074,10 @@ const adminPage: PageSchema = {
             { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
             ...CONSUMABLE_STAT_FORM_FIELDS,
           ] },
+          { kind: "form", action: "POST /api/admin/inventory/items", submitLabel: "Add misc item (no effect; for other plugins)", fields: [
+            { name: "name", label: "Name", type: "text" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_MISC },
+          ] },
         ],
       },
       {
@@ -1089,6 +1107,11 @@ const adminPage: PageSchema = {
             { name: "itemType", type: "hidden", value: ITEM_TYPE_CONSUMABLE },
             { name: "name", label: "Rename to (optional)", type: "text" },
             ...CONSUMABLE_STAT_FORM_FIELDS,
+          ] },
+          { kind: "form", action: "POST /api/admin/inventory/items/update", submitLabel: "Rename misc item", fields: [
+            { name: "id", label: "Item", type: "select", optionsSource: "GET /api/admin/inventory/items", valueKey: "id", labelKey: "name" },
+            { name: "itemType", type: "hidden", value: ITEM_TYPE_MISC },
+            { name: "name", label: "Rename to", type: "text" },
           ] },
         ],
       },

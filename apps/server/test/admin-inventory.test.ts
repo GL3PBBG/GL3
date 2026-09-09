@@ -181,6 +181,34 @@ describe("inventory admin", () => {
     // one effect kind whose config had no form field at all, so a UI-authored
     // pools item shipped `{ kind: "pools" }` with no `pools` key and 400d
     // `wrong_slot` on its first use.
+    // A misc item carries no effects at all: it exists for another plugin to
+    // read (a key, a token, a quest object) and the inventory plugin never
+    // interprets it — the use route answers wrong_slot and equip refuses.
+    // Without a form arm for it, no such item could be authored.
+    it("creates a misc item with empty effects", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Warehouse Key", itemType: "misc" },
+      });
+      expect(res.statusCode).toBe(201);
+      const id: string = res.json().id;
+      const [row] = await db.select().from(items).where(eq(items.id, id));
+      expect(row?.itemType).toBe("misc");
+      expect(row?.effects).toEqual({});
+    });
+
+    it("lists a misc item with every stat cell blank", async () => {
+      await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Warehouse Key", itemType: "misc" },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/admin/inventory/items", headers: auth() });
+      const rows = list.json().rows as Array<Record<string, string>>;
+      expect(rows[0]).toMatchObject({
+        itemType: "misc", damage: "", power: "", armor: "", heal: "", effect: "", pools: "",
+      });
+    });
+
     it("creates a pools consumable from the delta fields, auto-selecting the kind", async () => {
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items", headers: auth(),
@@ -645,6 +673,36 @@ describe("inventory admin", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("item_type_mismatch");
+    });
+
+    it("renames a misc item and keeps its effects empty", async () => {
+      const create = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Warehouse Key", itemType: "misc" },
+      });
+      expect(create.statusCode).toBe(201);
+      const id: string = create.json().id;
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, itemType: "misc", name: "Dock Key" },
+      });
+      expect(res.statusCode).toBe(204);
+      const [row] = await db.select().from(items).where(eq(items.id, id));
+      expect(row?.name).toBe("Dock Key");
+      expect(row?.itemType).toBe("misc");
+      expect(row?.effects).toEqual({});
+    });
+
+    it("400s the misc form pointed at a weapon", async () => {
+      const id = await makeWeapon();
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, itemType: "misc", name: "Not A Key" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("item_type_mismatch");
+      const [row] = await db.select().from(items).where(eq(items.id, id));
+      expect(row?.effects).toMatchObject({ damageMin: 8, damageMax: 18 });
     });
 
     it("404s an unknown item id", async () => {

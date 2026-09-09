@@ -101,6 +101,13 @@ export type ConsumableEffects = z.infer<typeof ConsumableEffectsSchema>;
 export const ITEM_TYPE_WEAPON = "weapon";
 export const ITEM_TYPE_ARMOR = "armor";
 export const ITEM_TYPE_CONSUMABLE = "consumable";
+/**
+ * An item this plugin never interprets: no stats, no use, no slot — it exists
+ * for ANOTHER plugin to read by id (a key, a token, a quest object) and its
+ * `effects` is `{}`. Listed under "Other" on the inventory page, blank in the
+ * admin table, and `readEffects` passes it through like any unknown type.
+ */
+export const ITEM_TYPE_MISC = "misc";
 
 /**
  * `items.effects` is jsonb an admin can put anything in, so it is parsed
