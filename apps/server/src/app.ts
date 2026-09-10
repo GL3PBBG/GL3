@@ -205,7 +205,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix, config.clientIpHeader);
   registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
   registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
-  registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests);
+  registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests, loadedSettings);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an
   // empty one and reject every real binding.

@@ -7,7 +7,7 @@ import postgres from "postgres";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { players, roleModuleAccess, rounds, roles } from "../src/db/schema/index.js";
+import { players, playerStats, roleModuleAccess, rounds, roles, transactions } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -83,6 +83,59 @@ beforeEach(async () => {
 });
 
 afterAll(async () => { await closeServer(); await conn.end(); });
+
+describe("admin round prizes", () => {
+  it("uses configured prizes in the public page and actual settlement, preserving history", async () => {
+    const p = await registerPlayer("PrizeAdmin");
+    const body = { name: "Prize round", startsAt: iso(addDays(new Date(), -1)), endsAt: iso(addDays(new Date(), 1)), payoutPoints: "700, 300" };
+    const created = await app.inject({ method: "POST", url: "/api/admin/rounds", headers: auth(p.token), payload: body });
+    expect(created.statusCode).toBe(201);
+    const roundId = created.json().id as string;
+    const read = () => app.inject({ method: "GET", url: "/api/rounds", headers: auth(p.token) });
+    expect((await read()).json().active.payoutPoints).toEqual(["700", "300"]);
+
+    const table = await app.inject({ method: "GET", url: "/api/admin/rounds/table", headers: auth(p.token) });
+    expect(TableRowsResponseSchema.parse(table.json()).rows.find((r) => r.id === roundId)?.payoutPoints).toBe("700, 300");
+
+    const edit = (payoutPoints: string, endsAt = body.endsAt) => app.inject({
+      method: "POST", url: "/api/admin/rounds/edit", headers: auth(p.token),
+      payload: { ...body, roundId, payoutPoints, endsAt },
+    });
+    expect((await edit("900, 400")).statusCode).toBe(204);
+    expect((await edit("")).statusCode).toBe(204);
+    expect((await read()).json().active.payoutPoints).toEqual(["900", "400"]);
+
+    await db.update(playerStats).set({ exp: 100n }).where(eq(playerStats.playerId, p.playerId));
+    expect((await edit("", new Date(Date.now() - 1000).toISOString())).statusCode).toBe(204);
+    const history = (await read()).json();
+    expect(history.active).toBeNull();
+    expect(history.finished[0].payoutPoints).toEqual(["900", "400"]);
+    const payouts = await db.select().from(transactions).where(eq(transactions.refId, roundId));
+    expect(payouts).toHaveLength(1);
+    expect(payouts[0]).toMatchObject({ playerId: p.playerId, amount: 900n, balanceKind: "points" });
+    expect((await edit("9999")).json()).toEqual({ error: "round_finalized" });
+    expect((await read()).json().finished[0].payoutPoints).toEqual(["900", "400"]);
+  });
+
+  it("supports no prizes and rejects malformed awards before saving", async () => {
+    const p = await registerPlayer("NoPrizesAdmin");
+    const body = { name: "No prizes", startsAt: iso(addDays(new Date(), -1)), endsAt: iso(addDays(new Date(), 1)) };
+    const create = (payoutPoints: string) => app.inject({ method: "POST", url: "/api/admin/rounds", headers: auth(p.token), payload: { ...body, payoutPoints } });
+    for (const invalid of ["-5", "1.5", "oops", "9223372036854775808"]) {
+      expect((await create(invalid)).statusCode).toBe(400);
+    }
+    const created = await create("0");
+    expect(created.statusCode).toBe(201);
+    const [row] = await db.select().from(rounds).where(eq(rounds.id, created.json().id));
+    expect(row?.payoutPoints).toEqual([]);
+    await app.inject({ method: "GET", url: "/api/rounds", headers: auth(p.token) });
+    await db.update(playerStats).set({ exp: 100n }).where(eq(playerStats.playerId, p.playerId));
+    await db.update(rounds).set({ endsAt: new Date(Date.now() - 1000) }).where(eq(rounds.id, created.json().id));
+    const finished = await app.inject({ method: "GET", url: "/api/rounds", headers: auth(p.token) });
+    expect(finished.json().finished[0].payoutPoints).toEqual([]);
+    expect(await db.select().from(transactions).where(eq(transactions.refId, created.json().id))).toEqual([]);
+  });
+});
 
 describe("admin rounds: authorization", () => {
   // Core admin routes carry no loader tier — `auth: "admin"` is a plugin-route

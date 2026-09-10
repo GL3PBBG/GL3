@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RoundListResponseSchema, RoundStandingsResponseSchema } from "@gl3/shared";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { playerStats, roundEntries, rounds } from "../src/db/schema/index.js";
+import { players, playerStats, roundEntries, rounds } from "../src/db/schema/index.js";
 import { recordScore } from "../src/game/leaderboard/service.js";
 import { withCorePlugins } from "../src/plugins/core-plugins.js";
 import { loadPlugins, type LoadedPlugins } from "../src/plugins/loader.js";
@@ -92,6 +92,8 @@ describe("GET /api/rounds", () => {
 
     expect(parsed.active?.id).toBe(active);
     expect(parsed.active?.name).toBe("Live One");
+    expect(parsed.active?.payoutPoints).toEqual(["1000", "500", "250"]);
+    expect(parsed.finished.every((round) => round.payoutPoints === null)).toBe(true);
     expect(parsed.active?.secondsRemaining).not.toBeNull();
     expect(parsed.active!.secondsRemaining!).toBeGreaterThan(3590);
     expect(parsed.active!.secondsRemaining!).toBeLessThanOrEqual(3600);
@@ -101,6 +103,22 @@ describe("GET /api/rounds", () => {
 });
 
 describe("GET /api/rounds/:id/standings", () => {
+  it("shows every configured prize place beyond the usual top ten", async () => {
+    const { token, playerId } = await register(`many_prizes_${Date.now()}`);
+    const roundId = await seedRound("Many prizes", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
+    await db.update(rounds).set({ payoutPoints: Array(11).fill("100") }).where(eq(rounds.id, roundId));
+    await db.insert(roundEntries).values({ roundId, playerId, expAtStart: 0n });
+    for (let i = 0; i < 10; i += 1) {
+      const id = uuidv7();
+      await db.insert(players).values({ id, username: `prize_place_${i}` });
+      await db.insert(playerStats).values({ playerId: id, exp: BigInt(i + 1) });
+      await db.insert(roundEntries).values({ roundId, playerId: id, expAtStart: 0n });
+    }
+    const res = await app.inject({ method: "GET", url: `/api/rounds/${roundId}/standings`, headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(200);
+    expect(RoundStandingsResponseSchema.parse(res.json()).entries).toHaveLength(11);
+  });
+
   it("401s with no token", async () => {
     const roundId = await seedRound("Auth Round", ago(60_000), ahead(3_600_000), { snapshottedAt: ago(60_000) });
     const res = await app.inject({ method: "GET", url: `/api/rounds/${roundId}/standings` });

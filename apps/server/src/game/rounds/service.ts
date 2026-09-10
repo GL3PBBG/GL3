@@ -6,7 +6,7 @@ import type { Db } from "../../db/client.js";
 import { players, rounds } from "../../db/schema/index.js";
 import { applyBalanceChange, lockPlayersForUpdate, type Tx } from "../../economy/ledger.js";
 import { insertNotification } from "../notifications/service.js";
-import { payoutPoints } from "./settings.js";
+import { roundPayoutPoints } from "./settings.js";
 import { roundStandings } from "./standings.js";
 
 export interface ActiveRound {
@@ -30,6 +30,7 @@ interface ProbeRow {
   startsAt: Date | null;
   endsAt: Date | null;
   snapshottedAt: Date | null;
+  payoutPoints: string[] | null;
   /** Evaluated against the DATABASE clock, never the app's. */
   ended: boolean;
 }
@@ -53,6 +54,7 @@ async function probe(exec: Db | Tx): Promise<ProbeRow | undefined> {
     startsAt: rounds.startsAt,
     endsAt: rounds.endsAt,
     snapshottedAt: rounds.snapshottedAt,
+    payoutPoints: rounds.payoutPoints,
     ended: sql<boolean>`(${rounds.endsAt} is not null and ${rounds.endsAt} <= now())`,
   }).from(rounds)
     .where(sql`${rounds.finalizedAt} is null and ${rounds.startsAt} is not null and ${rounds.startsAt} <= now()`)
@@ -121,7 +123,7 @@ async function finalize(tx: Tx, round: ProbeRow, settings: Record<string, string
   // Step 2 — pay. `tx`, not `db`: ranking must see the freeze this transaction
   // just wrote. `finalized: true` so a concurrent crime payout cannot shift a
   // placing. `minDelta: 0n` so a round nobody played pays nobody.
-  const awards = payoutPoints(settings);
+  const awards = roundPayoutPoints(round, settings).map(BigInt);
   const winners = awards.length === 0
     ? []
     : await roundStandings(tx, round.id, "exp", awards.length, true, 0n);
@@ -150,7 +152,7 @@ async function finalize(tx: Tx, round: ProbeRow, settings: Record<string, string
 
   // Step 3 — stamp. The WHERE is the arbiter of "did THIS call settle it".
   const stamped = await tx.update(rounds)
-    .set({ finalizedAt: sql`now()` })
+    .set({ finalizedAt: sql`now()`, payoutPoints: awards.map(String) })
     .where(and(eq(rounds.id, round.id), isNull(rounds.finalizedAt)))
     .returning({ id: rounds.id });
   if (stamped.length === 0) return null;

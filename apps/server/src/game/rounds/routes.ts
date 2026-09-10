@@ -7,6 +7,7 @@ import type { Db } from "../../db/client.js";
 import { rounds } from "../../db/schema/index.js";
 import { ensureCurrentRound } from "./service.js";
 import { roundStandings } from "./standings.js";
+import { roundPayoutPoints } from "./settings.js";
 
 const ParamsSchema = z.object({ id: IdSchema });
 const QuerySchema = z.object({ kind: LeaderboardKindSchema.default("exp") }).strict();
@@ -17,6 +18,7 @@ const BOARD_SIZE = 10;
 interface RoundRow {
   id: string; name: string;
   startsAt: Date | null; endsAt: Date | null; finalizedAt: Date | null;
+  payoutPoints: string[] | null;
 }
 
 /**
@@ -28,13 +30,14 @@ function secondsRemaining(endsAt: Date | null): number | null {
   return Math.max(0, Math.floor((endsAt.getTime() - Date.now()) / 1000));
 }
 
-const toDto = (row: RoundRow) => ({
+const toDto = (row: RoundRow, settings: Record<string, string>) => ({
   id: row.id,
   name: row.name,
   startsAt: row.startsAt?.toISOString() ?? null,
   endsAt: row.endsAt?.toISOString() ?? null,
   secondsRemaining: secondsRemaining(row.endsAt),
   finalizedAt: row.finalizedAt?.toISOString() ?? null,
+  payoutPoints: row.finalizedAt === null ? roundPayoutPoints(row, settings) : row.payoutPoints,
 });
 
 export function registerRoundsRoutes(
@@ -61,8 +64,8 @@ export function registerRoundsRoutes(
       : (await db.select().from(rounds).where(eq(rounds.id, active.id)))[0] ?? null;
 
     return reply.send({
-      active: activeRow === null ? null : toDto(activeRow),
-      finished: finishedRows.map(toDto),
+      active: activeRow === null ? null : toDto(activeRow, settings),
+      finished: finishedRows.map((row) => toDto(row, settings)),
     });
   });
 
@@ -80,7 +83,11 @@ export function registerRoundsRoutes(
     if (!round) return reply.code(404).send({ error: "round_not_found" });
 
     const finalized = round.finalizedAt !== null;
-    const entries = await roundStandings(db, round.id, query.data.kind, BOARD_SIZE, finalized);
+    // Include every prize-eligible place when the admin configures more than
+    // the usual ten rows. The award schedule is capped at 100 places.
+    const boardSize = query.data.kind === "exp"
+      ? Math.max(BOARD_SIZE, roundPayoutPoints(round, settings).length) : BOARD_SIZE;
+    const entries = await roundStandings(db, round.id, query.data.kind, boardSize, finalized);
     // Same rule as the leaderboard route: "level" only for the exp kind on a
     // routed boot, cash/bank never carry it.
     const mode = query.data.kind === "exp" && routed ? "level" as const : undefined;

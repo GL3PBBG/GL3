@@ -127,6 +127,8 @@ function ActiveRound({ round }: { round: RoundDto }): JSX.Element {
         {formatCountdown(secondsRemaining)}
       </p>
 
+      <RoundPrizes round={round} />
+
       <div className={styles.tabs}>
         {KINDS.map(([value, label]) => (
           <button
@@ -155,6 +157,7 @@ function HallOfFameEntry({ round }: { round: RoundDto }): JSX.Element {
         {round.name}
         {round.endsAt !== null ? <> &middot; <When iso={round.endsAt} /></> : null}
       </summary>
+      <RoundPrizes round={round} />
       <div className={styles.tabs}>
         {KINDS.map(([value, label]) => (
           <button
@@ -170,6 +173,36 @@ function HallOfFameEntry({ round }: { round: RoundDto }): JSX.Element {
       </div>
       <StandingsTable roundId={round.id} kind={kind} />
     </details>
+  );
+}
+
+export function RoundPrizes({ round }: { round: RoundDto }): JSX.Element {
+  const prizes = round.payoutPoints;
+  return (
+    <section className={styles.stack} aria-label="Round prizes">
+      <h3>Prizes</h3>
+      {prizes === null ? (
+        <p className={styles.meta}>Prize details were not recorded for this round.</p>
+      ) : prizes.every((points) => points === "0") ? (
+        <p className={styles.meta}>No points prizes for this round. Compete for a place in the hall of fame.</p>
+      ) : (
+        <>
+          <p className={styles.meta}>
+            Win points by gaining the most experience during this round. You must gain experience to qualify.
+            Prizes are credited automatically when the round settles after its end time.
+            Cash and Bank standings do not award prizes. Ties use a fixed player order.
+          </p>
+          <table className={styles.table}>
+            <thead><tr><th>Place</th><th>Prize</th></tr></thead>
+            <tbody>
+              {prizes.map((points, index) => (
+                <tr key={index}><td>#{index + 1}</td><td><Amount value={points} /> points</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
   );
 }
 

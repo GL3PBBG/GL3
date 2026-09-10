@@ -10,6 +10,8 @@ export const RoundDtoSchema = z.object({
   /** null when endsAt is null (an open-ended round never counts down). */
   secondsRemaining: z.number().int().nonnegative().nullable(),
   finalizedAt: TimestampSchema.nullable(),
+  /** Points by placing on the experience-gained board; null for legacy history. */
+  payoutPoints: z.array(z.string().regex(/^\d+$/)).nullable(),
 });
 export type RoundDto = z.infer<typeof RoundDtoSchema>;
 

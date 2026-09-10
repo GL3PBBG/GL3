@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, hallOfFameOrder } from "../src/pages/Rounds.js";
+import { formatCountdown, hallOfFameOrder, RoundPrizes } from "../src/pages/Rounds.js";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { keys } from "@gl3/client";
 import type { RoundDto } from "@gl3/shared";
 
@@ -36,9 +38,29 @@ function makeRound(overrides: Partial<RoundDto> = {}): RoundDto {
     endsAt: "2026-08-01T00:00:00Z",
     secondsRemaining: null,
     finalizedAt: "2026-08-01T00:00:00Z",
+    payoutPoints: null,
     ...overrides,
   };
 }
+
+describe("round prize display", () => {
+  const renderPrizes = (payoutPoints: string[] | null) => renderToStaticMarkup(createElement(RoundPrizes, { round: makeRound({ payoutPoints }) }));
+  it("shows the configured places and explains qualification and payout", () => {
+    const html = renderPrizes(["700", "300"]);
+    expect(html).toContain("#1");
+    expect(html).toContain("700");
+    expect(html).toContain("#2");
+    expect(html).toContain("300");
+    expect(html).toContain("You must gain experience to qualify");
+    expect(html).toContain("credited automatically");
+    expect(html).toContain("Cash and Bank standings do not award prizes");
+  });
+  it("distinguishes disabled prizes from unknown historical prizes", () => {
+    expect(renderPrizes([])).toContain("No points prizes");
+    expect(renderPrizes(["0", "0"])).toContain("No points prizes");
+    expect(renderPrizes(null)).toContain("Prize details were not recorded");
+  });
+});
 
 describe("hallOfFameOrder", () => {
   it("orders finished rounds newest first with open-ended rounds last", () => {

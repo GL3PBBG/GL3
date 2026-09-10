@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { payoutPoints } from "../src/game/rounds/settings.js";
+import { payoutPoints, RoundPayoutInputSchema } from "../src/game/rounds/settings.js";
 
 const DEFAULT = [1000n, 500n, 250n];
+
+describe("admin prize input", () => {
+  it("normalizes whole points without losing precision and distinguishes blank from no prizes", () => {
+    expect(RoundPayoutInputSchema.parse("001000, 500, 9007199254740993")).toEqual(["1000", "500", "9007199254740993"]);
+    expect(RoundPayoutInputSchema.parse(" ")).toBeUndefined();
+    expect(RoundPayoutInputSchema.parse(undefined)).toBeUndefined();
+    expect(RoundPayoutInputSchema.parse("0")).toEqual([]);
+  });
+  it.each(["-1", "1.5", "1e3", "abc", "100,,50", "100,", "9223372036854775808", Array(101).fill("1").join(",")])(
+    "rejects invalid prize input %s", (input) => {
+      expect(RoundPayoutInputSchema.safeParse(input).success).toBe(false);
+    },
+  );
+});
 
 describe("payoutPoints", () => {
   it("falls back to the default when the key is missing", () => {

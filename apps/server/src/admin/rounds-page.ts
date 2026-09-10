@@ -23,11 +23,13 @@ export const roundsPage: PageSchema = {
     kind: "panel",
     title: "Rounds",
     children: [
+      { kind: "text", value: "Prizes are points paid automatically when the round settles, ranked by experience gained during the round. Players need a positive experience gain to qualify. Cash and Bank standings do not award prizes. Enter whole points separated by commas, in placing order (e.g. 1000, 500, 250). Up to 100 places; enter 0 for no prizes. Changes to an active round apply immediately. Finished rounds cannot be edited." },
       { kind: "table", source: "GET /api/admin/rounds/table", columns: [
         { key: "name", label: "Name" },
         { key: "startsAt", label: "Starts" },
         { key: "endsAt", label: "Ends" },
         { key: "status", label: "Status" },
+        { key: "payoutPoints", label: "Prize points (1st, 2nd, …)" },
       ], rowActions: [
         // The route only ever deletes a `scheduled` round — an active or
         // ended one is owed a settle and a finalized one is the hall of fame.
@@ -37,12 +39,14 @@ export const roundsPage: PageSchema = {
         { name: "name", label: "Round name", type: "text" },
         { name: "startsAt", label: "Starts at (ISO 8601 UTC, e.g. 2026-09-01T00:00:00Z)", type: "text" },
         { name: "endsAt", label: "Ends at (ISO 8601 UTC)", type: "text" },
+        { name: "payoutPoints", label: "Prize points by place (blank uses server defaults)", type: "text" },
       ] },
       { kind: "form", action: "POST /api/admin/rounds/edit", submitLabel: "Edit round", fields: [
-        { name: "roundId", label: "Round", type: "select", optionsSource: "GET /api/admin/rounds/table", valueKey: "id", labelKey: "name" },
+        { name: "roundId", label: "Round", type: "select", optionsSource: "GET /api/admin/rounds/table", valueKey: "id", labelKey: "name", prefillForm: true },
         { name: "name", label: "Round name", type: "text" },
         { name: "startsAt", label: "Starts at (ISO 8601 UTC)", type: "text" },
         { name: "endsAt", label: "Ends at (ISO 8601 UTC)", type: "text" },
+        { name: "payoutPoints", label: "Prize points by place (blank keeps current prizes)", type: "text" },
       ] },
     ],
   },

@@ -30,6 +30,7 @@ import { wealthTaxPage } from "./wealth-tax-page.js";
 import { playersPage } from "./players-page.js";
 import { rolesPage } from "./roles-page.js";
 import { roundsPage } from "./rounds-page.js";
+import { RoundPayoutInputSchema, roundPayoutPoints } from "../game/rounds/settings.js";
 import { themePage } from "../theme/page.js";
 import { legalPage } from "../legal/page.js";
 
@@ -59,6 +60,7 @@ const RoundCreateBodySchema = z.object({
   name: z.string().transform((v) => v.trim()).pipe(z.string().min(1)),
   startsAt: z.string().datetime({ offset: true }),
   endsAt: z.string().datetime({ offset: true }),
+  payoutPoints: RoundPayoutInputSchema,
 }).strict();
 
 const RoundEditBodySchema = RoundCreateBodySchema.extend({ roundId: z.string().uuid() }).strict();
@@ -132,6 +134,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
 
 export function registerAdminRoutes(
   app: FastifyInstance, db: Db, redis: Redis, manifests: readonly PluginManifest[],
+  loadedSettings: Record<string, string> = {},
 ): void {
   // requireAuth is decorated by registerAuthRoutes, which app.ts runs first.
   // The grant check is two inline lines per handler on purpose: a helper
@@ -418,6 +421,7 @@ export function registerAdminRoutes(
         endsAt: r.endsAt?.toISOString() ?? null,
         finalizedAt: r.finalizedAt?.toISOString() ?? null,
         status: roundStatus(r, now),
+        payoutPoints: r.finalizedAt === null ? roundPayoutPoints(r, loadedSettings) : r.payoutPoints,
       })),
     });
   });
@@ -441,6 +445,8 @@ export function registerAdminRoutes(
         startsAt: r.startsAt?.toISOString() ?? "",
         endsAt: r.endsAt?.toISOString() ?? "",
         status: roundStatus(r, now),
+        payoutPoints: r.finalizedAt !== null && r.payoutPoints === null
+          ? "Not recorded" : roundPayoutPoints(r, loadedSettings).join(", ") || "0",
       })),
     });
   });
@@ -489,7 +495,10 @@ export function registerAdminRoutes(
       if (clash) return { kind: "overlap" as const };
 
       const id = uuidv7();
-      await tx.insert(rounds).values({ id, name: parsed.data.name, startsAt, endsAt });
+      await tx.insert(rounds).values({
+        id, name: parsed.data.name, startsAt, endsAt,
+        payoutPoints: parsed.data.payoutPoints ?? roundPayoutPoints({ payoutPoints: null }, loadedSettings),
+      });
       return { kind: "created" as const, id };
     });
 
@@ -532,7 +541,7 @@ export function registerAdminRoutes(
       if (clash) return { kind: "overlap" as const };
 
       await tx.update(rounds)
-        .set({ name: parsed.data.name, startsAt, endsAt })
+        .set({ name: parsed.data.name, startsAt, endsAt, payoutPoints: parsed.data.payoutPoints })
         .where(eq(rounds.id, parsed.data.roundId));
       return { kind: "ok" as const };
     });

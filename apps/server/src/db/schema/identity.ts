@@ -1,6 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
-  type AnyPgColumn, bigint, customType, index, integer, numeric, pgTable,
+  type AnyPgColumn, bigint, customType, index, integer, jsonb, numeric, pgTable,
   primaryKey, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import { gangs } from "./social.js";
@@ -30,6 +30,7 @@ export const rounds = pgTable("rounds", {
   endsAt: timestamp("ends_at", { withTimezone: true }),
   finalizedAt: timestamp("finalized_at", { withTimezone: true }),
   snapshottedAt: timestamp("snapshotted_at", { withTimezone: true }),
+  payoutPoints: jsonb("payout_points").$type<string[]>(),
 });
 
 export const players = pgTable("players", {

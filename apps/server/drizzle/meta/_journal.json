@@ -176,6 +176,13 @@
       "when": 1788739200000,
       "tag": "0024_terms_accepted",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788998400000,
+      "tag": "0025_round_prizes",
+      "breakpoints": true
     }
   ]
 }
