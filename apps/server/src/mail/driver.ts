@@ -1,6 +1,6 @@
 import type { MailConfig } from "../config.js";
 
-export interface MailMessage { to: string; subject: string; text: string }
+export interface MailMessage { to: string; subject: string; text: string; html?: string }
 
 /**
  * `send` resolves `false` on failure rather than throwing: registration and
@@ -24,7 +24,7 @@ export function createMailDriver(mail: MailConfig): MailDriver {
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${mail.apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ from: mail.from, to: [msg.to], subject: msg.subject, text: msg.text }),
+          body: JSON.stringify({ from: mail.from, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
           // A hung provider must not hang the caller: register and forgot-password
           // both rely on send() settling to keep their own never-throws contract
           // (see the class doc above), and an unbounded fetch would leave both

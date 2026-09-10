@@ -332,6 +332,7 @@ export default defineWorkspace([
         "test/hospital-status.test.ts",
         "test/rounds-standings.test.ts",
         "test/assets-service.test.ts",
+        "test/mail-auth.test.ts",
         "test/asset-sweep.test.ts",
         "test/player-attributes-schema.test.ts",
         "test/rank-level-sync.test.ts",

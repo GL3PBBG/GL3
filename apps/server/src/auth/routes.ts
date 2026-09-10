@@ -8,6 +8,8 @@ import { settlePool, type PluginManifest } from "@gl3/plugin-sdk";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import type { MailDriver } from "../mail/driver.js";
+import { authEmail } from "../mail/auth.js";
+import type { StorageDriver } from "../assets/driver.js";
 import { players, playerStats, playerTimers, ranks, roleModuleAccess, roles, rounds } from "../db/schema/index.js";
 import { PRESENCE_KEY, touchPresence } from "../presence/touch.js";
 import { hashPassword, matchesStoredPassword } from "./password.js";
@@ -67,6 +69,7 @@ function uniqueViolation(err: unknown): postgres.PostgresError | null {
 
 export function registerAuthRoutes(
   app: FastifyInstance, config: Config, db: Db, redis: Redis, mail: MailDriver,
+  assetDriver: StorageDriver,
   rateLimitPrefix = DEFAULT_RATE_LIMIT_PREFIX,
   // A THUNK, not the list itself: this function is called from app.ts before
   // the loader's `loaded` binding is assigned (buildApp assigns it further
@@ -232,10 +235,7 @@ export function registerAuthRoutes(
     // Post-commit, like events (rule 5): a mail failure must not unwind the row.
     await markUnverified(redis, playerId);
     const code = await issueVerifyToken(redis, playerId);
-    await mail.send({
-      to: parsed.data.email, subject: "Verify your GL3 account",
-      text: `Your verification code is ${code}\n\nOr click: ${config.mail.appBaseUrl}/verify?code=${code}\n\nThe code expires in 24 hours.`,
-    });
+    await mail.send(await authEmail(db, assetDriver, config.mail.appBaseUrl, parsed.data.email, "verify", code));
 
     const token = await createSession(redis, playerId, config.sessionTtlSeconds);
     return reply.code(201).send({ token, playerId, username: parsed.data.username });
@@ -368,8 +368,7 @@ export function registerAuthRoutes(
     if (!row?.email) return reply.code(409).send({ error: "no_email" });
     if (row.verifiedAt !== null) return reply.code(409).send({ error: "already_verified" });
     const code = await issueVerifyToken(redis, playerId);
-    await mail.send({ to: row.email, subject: "Verify your GL3 account",
-      text: `Your verification code is ${code}\n\nOr click: ${config.mail.appBaseUrl}/verify?code=${code}` });
+    await mail.send(await authEmail(db, assetDriver, config.mail.appBaseUrl, row.email, "verify", code));
     return reply.code(200).send({});
   });
 
@@ -395,10 +394,7 @@ export function registerAuthRoutes(
         .from(players).where(eq(players.email, parsed.data.email));
       if (row && row.verifiedAt !== null) {
         const token = await issueResetToken(redis, row.id);
-        await mail.send({
-          to: parsed.data.email, subject: "Reset your GL3 password",
-          text: `Reset link: ${config.mail.appBaseUrl}/reset?token=${token}\n\nThe link expires in 1 hour. If you didn't ask for this, ignore it.`,
-        });
+        await mail.send(await authEmail(db, assetDriver, config.mail.appBaseUrl, parsed.data.email, "reset", token));
       }
     }
     return reply.code(200).send({});

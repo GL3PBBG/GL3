@@ -92,7 +92,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // post-loadPlugins binding at request time rather than throwing
   // "Cannot access 'loaded' before initialization" at boot.
   registerAuthRoutes(
-    app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), deps.rateLimitPrefix,
+    app, config, deps.db, deps.redis, deps.mail ?? createMailDriver(config.mail), assetDriver, deps.rateLimitPrefix,
     () => loaded!.manifests, leaderboardPrefix,
   );
 

@@ -17,7 +17,7 @@ describe("mail config", () => {
 describe("log driver", () => {
   it("resolves true and never throws", async () => {
     const driver = createMailDriver({ driver: "log", apiKey: null, from: "noreply@gl3.dev", appBaseUrl: "http://localhost:5173" });
-    await expect(driver.send({ to: "a@x.com", subject: "s", text: "t" })).resolves.toBe(true);
+    await expect(driver.send({ to: "a@x.com", subject: "s", text: "t", html: "<h1>Mob City</h1>" })).resolves.toBe(true);
   });
 });
 
@@ -27,11 +27,12 @@ describe("resend driver", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("nope", { status: 422 }));
     const driver = createMailDriver({ driver: "resend", apiKey: "re_123", from: "noreply@gl3.dev", appBaseUrl: "http://localhost:5173" });
-    await expect(driver.send({ to: "a@x.com", subject: "s", text: "t" })).resolves.toBe(true);
+    await expect(driver.send({ to: "a@x.com", subject: "s", text: "t", html: "<h1>Mob City</h1>" })).resolves.toBe(true);
     await expect(driver.send({ to: "a@x.com", subject: "s", text: "t" })).resolves.toBe(false);
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(url).toBe("https://api.resend.com/emails");
     expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer re_123");
+    expect(JSON.parse(init!.body as string)).toMatchObject({ text: "t", html: "<h1>Mob City</h1>" });
     fetchSpy.mockRestore();
   });
 
