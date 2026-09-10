@@ -93,3 +93,32 @@ it("allows clearing a slot whose item details are unavailable", async () => {
   await waitFor(() => expect(loadout.queryByText("Unavailable item")).toBeNull());
   expect(loadout.getByText("Empty slot")).toBeTruthy();
 });
+
+it("lists consumable and non-consumable items alongside an equipped loadout", async () => {
+  inventory.items.push(
+    {itemId: id(4), name: "First aid kit", itemType: "consumable", effects: {heal: "50%"}, qty: 3},
+    {itemId: id(5), name: "Energy drink", itemType: "consumable", effects: {kind: "energy"}, effectLabel: "Restore energy", qty: 2},
+    {itemId: id(6), name: "Lockpick", itemType: "misc", effects: {}, qty: 4, actions: [{pluginId: "theft", label: "Steal a car", to: "/plugins/theft.index"}]},
+    {itemId: id(7), name: "Collector coin", itemType: "collectible", effects: {}, qty: 1},
+  );
+  const loadout = await mount();
+  expect(loadout.getAllByText("Equipped")).toHaveLength(3);
+
+  const consumables = within(screen.getByRole("heading", {name: "Consumables"}).parentElement!);
+  expect(consumables.getAllByRole("listitem")).toHaveLength(2);
+  const healRow = consumables.getByText(/First aid kit/).closest("li")!;
+  expect(healRow.textContent).toContain("First aid kit ×3");
+  expect(within(healRow).getByText("heals 50%")).toBeTruthy();
+  expect(within(healRow).getByRole<HTMLButtonElement>("button", {name: "Use"}).disabled).toBe(true);
+  const energyRow = consumables.getByText(/Energy drink/).closest("li")!;
+  expect(energyRow.textContent).toContain("Energy drink ×2");
+  expect(within(energyRow).getByText("Restore energy")).toBeTruthy();
+  expect(within(energyRow).getByRole<HTMLButtonElement>("button", {name: "Use"}).disabled).toBe(false);
+
+  const other = within(screen.getByRole("heading", {name: "Other"}).parentElement!);
+  expect(other.getAllByRole("listitem")).toHaveLength(2);
+  expect(other.getByText(/Lockpick/).textContent).toBe(" Lockpick ×4");
+  expect(other.getByText(/Collector coin/).textContent).toBe(" Collector coin ×1");
+  expect(other.getByRole("link", {name: "Steal a car"}).getAttribute("href")).toBe("/plugins/theft.index");
+  expect(other.queryByRole("button", {name: "Use"})).toBeNull();
+});
