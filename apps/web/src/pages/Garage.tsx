@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { canAfford, useGarage, useGarageAction, useJail, useMe, usePlugins, type GarageCar } from "@gl3/client";
 import { Amount, ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import { CollectionArt } from "../components/CollectionArt.js";
-import { SlotImage } from "../components/GameImage.js";
+import { SlotBanner } from "../components/GameImage.js";
 import { HudIcon } from "../components/HudIcon.js";
 import collection from "../components/Collection.module.css";
 import styles from "./Garage.module.css";
@@ -55,7 +55,7 @@ export function Garage(): JSX.Element {
   }
 
   return <Panel title="Garage">
-    <SlotImage scope="theft" slot="page-garage" alt="Garage" size="lg" />
+    <SlotBanner scope="theft" slot="page-garage" alt="Garage" />
     <div className={styles.intro}>
       <div><span className={collection.eyebrow}>Your collection</span><h3>Keys to the city</h3><p className={collection.meta}>Cars stay in the city you stole them in. Sell or repair them there.</p></div>
       <div className={styles.summary}><div><strong><Amount value={String(cars.length)} /></strong><span>Cars owned</span></div><div><strong><Money value={saleValue} /></strong><span>Current sale value</span></div></div>

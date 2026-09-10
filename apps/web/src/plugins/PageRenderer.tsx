@@ -2,7 +2,7 @@ import { Fragment, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
-import { GameImage, SlotImage } from "../components/GameImage.js";
+import { GameImage, SlotBanner, SlotImage } from "../components/GameImage.js";
 import { PropertyPanel } from "../components/PropertyPanel.js";
 import { HudIcon, poolIconFor } from "../components/HudIcon.js";
 import { Meter } from "../components/Meter.js";
@@ -931,7 +931,11 @@ export function PageRenderer({ instructions, onActionSuccess }: {
       case "image":
         return <GameImage key={index} url={inst.url} alt={inst.alt} size={inst.size} />;
       case "slotImage":
-        return <SlotImage key={index} scope={inst.scope} slot={inst.slot} alt={inst.alt} size={inst.size} />;
+        // The banner size is page chrome and takes core's own frame; the
+        // three fixed sizes are inline art and draw bare, zoomable.
+        return inst.size === "banner"
+          ? <SlotBanner key={index} scope={inst.scope} slot={inst.slot} alt={inst.alt} />
+          : <SlotImage key={index} scope={inst.scope} slot={inst.slot} alt={inst.alt} size={inst.size} />;
       case "propertyPanel":
         // The same component the bullets and casino pages embed; it reads
         // the town's property rows itself and shows Buy or the owner tools.

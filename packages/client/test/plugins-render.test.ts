@@ -258,13 +258,28 @@ describe("renderNode", () => {
       .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "lg" }]);
   });
 
-  it("maps a slotImage node, defaulting its size to lg", () => {
-    // A page banner is the whole point of this node, so the default is the big
-    // one — unlike a table cell, which defaults to a thumbnail.
+  it("maps a slotImage node, defaulting its size to banner", () => {
+    // A page banner is the whole point of this node, so the default is the
+    // page-chrome size — natural width capped at the content edge, the size
+    // Shell's core banners use — not `lg`, which is a fixed 128px thumbnail
+    // box (the garage and car-theft pages shipped that way for a year).
     expect(renderNode({ kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail" }, {}))
+      .toEqual<RenderInstruction[]>([
+        { kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail", size: "banner" },
+      ]);
+    expect(renderNode({ kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail", size: "lg" }, {}))
       .toEqual<RenderInstruction[]>([
         { kind: "slotImage", slot: "page-jail", scope: "core", alt: "Jail", size: "lg" },
       ]);
+  });
+
+  it("carries a banner-sized image node through, and never lets banner reach a cards hand", () => {
+    expect(renderNode({ kind: "image", url: "/assets/abc", alt: "A car", size: "banner" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "image", url: "/assets/abc", alt: "A car", size: "banner" }]);
+    // `cards` shares the sm/md/lg words but not the banner one: a hand has no
+    // natural-width rendering, so an out-of-range size falls to its default.
+    expect(renderNode({ kind: "cards", cards: ["Sa"], size: "banner" }, {}))
+      .toEqual<RenderInstruction[]>([{ kind: "cards", cards: ["Sa"], size: "md", caption: null }]);
   });
 
   it("maps a propertyPanel to its type id, with the side it asks for", () => {

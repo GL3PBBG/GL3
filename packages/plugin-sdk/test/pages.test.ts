@@ -106,6 +106,21 @@ describe("PageSchemaSchema", () => {
     expect(() => PageSchemaSchema.parse(withPanel({ kind: "propertyPanel", pluginId: "brothel", show: "both" }))).toThrow();
   });
 
+  it("accepts a banner-sized slotImage and image, the page-chrome size", () => {
+    // A page banner is the whole point of `slotImage`, and a banner is not a
+    // thumbnail: `lg` is a fixed 128px box, `banner` is natural size capped
+    // at the content width — the size Shell's own core banners render at.
+    const view = {
+      kind: "panel",
+      title: "Garage",
+      children: [
+        { kind: "slotImage", slot: "page-garage", alt: "Garage", size: "banner" },
+        { kind: "image", url: "/assets/abc", alt: "A car", size: "banner" },
+      ],
+    };
+    expect(ViewNodeSchema.parse(view)).toEqual(view);
+  });
+
   it("rejects a node kind outside the v1 vocabulary", () => {
     const bad = {
       ...page,

@@ -118,6 +118,23 @@ export function SlotImage({ scope, slot, alt, size = "lg", zoomable }: {
 }
 
 /**
+ * A singleton slot drawn as page chrome: the banner size, not zoomable (it
+ * already renders at natural size up to the content width, and a zoom control
+ * on chrome is noise), inside the hairline-and-fade frame. Shell's per-route
+ * banners and a plugin page's banner-sized `slotImage` both go through this,
+ * so a declared page's banner reaches the content edge exactly as a core
+ * page's does. The frame is `:not(:empty)`-gated in CSS: an unbound slot
+ * renders nothing at all, not an empty framed box.
+ */
+export function SlotBanner({ scope, slot, alt }: { scope: string; slot: string; alt: string }): JSX.Element {
+  return (
+    <div className={styles.pageBanner}>
+      <SlotImage scope={scope} slot={slot} alt={alt} size="banner" zoomable={false} />
+    </div>
+  );
+}
+
+/**
  * The full-size view. Deliberately plain: a backdrop, the image at its natural
  * size bounded by the viewport, and three ways out (Escape, the backdrop, the
  * close button) because a modal with one exit is a trap on some input device.

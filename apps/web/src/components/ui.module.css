@@ -187,6 +187,31 @@
   max-width: 100%;
   height: auto;
 }
+/* A page banner, framed like a plate in a case file: a hairline, and a fade
+   into the page along its bottom edge so whatever the operator uploaded
+   settles into the dark rather than floating on it. Core's route banners
+   (Shell) and a plugin page's banner-sized `slotImage` (PageRenderer) share
+   this one frame through SlotBanner, so both reach the content edge the same
+   way. No fixed height: an unbound slot renders nothing at all and must not
+   leave a gap. */
+.pageBanner:not(:empty) {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  line-height: 0;
+}
+.pageBanner:not(:empty)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 55%, color-mix(in oklab, var(--bg) 70%, transparent));
+}
+.pageBanner img { border: 0; border-radius: 0; }
 .gameImagePlaceholder {
   /* A quiet diagonal hatch rather than a broken-image glyph: "no art yet" is
      the normal state of most rows and must not read as an error. */

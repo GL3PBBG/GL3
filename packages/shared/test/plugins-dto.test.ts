@@ -21,6 +21,20 @@ describe("PluginsPayloadSchema", () => {
     expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
   });
 
+  it("accepts a banner-sized slotImage and image on the wire", () => {
+    const payload = {
+      menu: [], events: [], installed: [], moneyFormat: DEFAULT_MONEY_FORMAT,
+      pages: [{
+        pluginId: "theft", id: "theft.garage", path: "/garage",
+        view: { kind: "panel", title: "Garage", children: [
+          { kind: "slotImage", slot: "page-garage", alt: "Garage", size: "banner", scope: "theft" },
+          { kind: "image", url: "/assets/abc", alt: "A car", size: "banner" },
+        ] },
+      }],
+    };
+    expect(PluginsPayloadSchema.parse(payload)).toEqual(payload);
+  });
+
   it("rejects a view node with an unknown kind", () => {
     const bad = {
       menu: [], events: [],

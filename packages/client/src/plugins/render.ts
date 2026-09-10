@@ -32,9 +32,9 @@ export type RenderInstruction =
       emptyText: string | null;
     }
   | { kind: "form"; action: string; submitLabel: string; valuesSource: string | null; fields: FormField[] }
-  | { kind: "image"; url: string; alt: string; size: "sm" | "md" | "lg" }
+  | { kind: "image"; url: string; alt: string; size: ImageSize }
   | { kind: "propertyPanel"; pluginId: string; show: "buy" | "owned" | null }
-  | { kind: "slotImage"; scope: string; slot: string; alt: string; size: "sm" | "md" | "lg" }
+  | { kind: "slotImage"; scope: string; slot: string; alt: string; size: ImageSize }
   | { kind: "assetBinder"; scope: string; slot: string; entitySource: string | null; entityLabelKey: string | null }
   | {
       kind: "table";
@@ -72,6 +72,17 @@ function childArray(v: unknown): readonly unknown[] {
  */
 function isSize(v: unknown): v is "sm" | "md" | "lg" {
   return v === "sm" || v === "md" || v === "lg";
+}
+
+/**
+ * The sizes a standalone image can take: the three fixed boxes plus `banner`,
+ * natural width capped at the content edge. `cards` and `table.imageSize`
+ * stay on `isSize` — a hand and a cell have no natural-width rendering.
+ */
+export type ImageSize = "sm" | "md" | "lg" | "banner";
+
+function isImageSize(v: unknown): v is ImageSize {
+  return isSize(v) || v === "banner";
 }
 
 function isFieldType(v: unknown): v is "text" | "number" | "decimal" | "money" | "password" {
@@ -198,7 +209,7 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       alt: String(node.alt),
       // Normalised to a required value here so the renderer never re-derives
       // the DTO's optionality, the same way `allowEmpty` is above.
-      size: isSize(node.size) ? node.size : "md",
+      size: isImageSize(node.size) ? node.size : "md",
     }];
   }
   if (isNode(node, "propertyPanel")) {
@@ -214,7 +225,11 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
       scope: String(node.scope ?? ""),
       slot: String(node.slot),
       alt: String(node.alt),
-      size: isSize(node.size) ? node.size : "lg",
+      // A page banner is what this node is for, so absent means the page-chrome
+      // size. `lg` — a fixed 128px thumbnail box — is what every declared page
+      // used to ask for, which is why the garage and car-theft banners never
+      // reached the content edge while core's did.
+      size: isImageSize(node.size) ? node.size : "banner",
     }];
   }
   if (isNode(node, "assetBinder")) {

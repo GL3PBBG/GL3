@@ -242,7 +242,11 @@ const leafOptions = [
       // nothing at authoring time and cannot be retrofitted across every
       // installed plugin later.
       alt: z.string().min(1),
-      size: z.enum(["sm", "md", "lg"]).optional(),
+      // `banner` is the page-chrome size: natural width capped at the content
+      // edge, the size core's own route banners render at. The three below
+      // are fixed boxes for list rows. Not on `cards` or `table.imageSize`,
+      // which have no natural-width rendering.
+      size: z.enum(["sm", "md", "lg", "banner"]).optional(),
     })
     .strict(),
   /**
@@ -290,7 +294,8 @@ const leafOptions = [
       kind: z.literal("slotImage"),
       slot: z.string().min(1),
       alt: z.string().min(1),
-      size: z.enum(["sm", "md", "lg"]).optional(),
+      // Absent means `banner` — a page banner is what this node is for.
+      size: z.enum(["sm", "md", "lg", "banner"]).optional(),
       scope: z.string().min(1).optional(),
     })
     .strict(),

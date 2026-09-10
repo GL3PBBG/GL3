@@ -10,7 +10,7 @@ import { Meter } from "./Meter.js";
 import { HudIcon } from "./HudIcon.js";
 import { NavMenu } from "./NavMenu.js";
 import { Amount, Money } from "./ui.js";
-import { SlotImage } from "./GameImage.js";
+import { SlotBanner } from "./GameImage.js";
 import styles from "./Shell.module.css";
 import type { PlayerAttributesDto } from "@gl3/shared";
 
@@ -81,13 +81,7 @@ function PageBanner(): JSX.Element | null {
   // `/mail/:threadId` still shares the mail list's banner. See pageBanners.ts.
   const banner = bannerSlotFor(pathname);
   if (banner === null) return null;
-  return (
-    <div className={styles.pageBanner}>
-      {/* Not zoomable: the banner already renders at natural size up to the
-          content width, and a zoom control on page chrome is noise. */}
-      <SlotImage scope="core" slot={banner.slot} alt={banner.alt} size="banner" zoomable={false} />
-    </div>
-  );
+  return <SlotBanner scope="core" slot={banner.slot} alt={banner.alt} />;
 }
 
 /**

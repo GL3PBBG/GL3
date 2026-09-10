@@ -277,7 +277,8 @@ const leafOptions = [
       kind: z.literal("image"),
       url: z.string().min(1),
       alt: z.string().min(1),
-      size: z.enum(["sm", "md", "lg"]).optional(),
+      /** `banner` = natural width to the content edge; the rest are fixed boxes. */
+      size: z.enum(["sm", "md", "lg", "banner"]).optional(),
     })
     .strict(),
   /** The town's property row for `pluginId` — see the SDK's copy for why. */
@@ -293,7 +294,8 @@ const leafOptions = [
       kind: z.literal("slotImage"),
       slot: z.string().min(1),
       alt: z.string().min(1),
-      size: z.enum(["sm", "md", "lg"]).optional(),
+      /** Absent means `banner`. */
+      size: z.enum(["sm", "md", "lg", "banner"]).optional(),
       /** Loader-stamped, like `assetBinder.scope` below. */
       scope: z.string().min(1),
     })
