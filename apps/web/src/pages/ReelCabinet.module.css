@@ -48,9 +48,9 @@
 .footer button { font-size: .75rem; min-height: 38px; }
 .rules { width: 100%; max-width: 760px; margin: 22px auto 0; }
 .celebration { position: absolute; inset: -18px -5px 10px; display: grid; place-items: center; pointer-events: none; z-index: 2; }
-.winPlaque { position: relative; display: grid; gap: 3px; text-align: center; padding: 16px 28px; border: 2px solid #ffe3a3; border-radius: 14px; background: radial-gradient(ellipse at top, #684c22, #1a1720 85%); box-shadow: 0 0 35px #ffca5266, 0 6px 22px #000a; animation: winEnter 450ms cubic-bezier(.15,.8,.25,1.2) both; }
+.winPlaque { position: relative; min-width: 0; max-width: calc(100% - 24px); box-sizing: border-box; display: grid; gap: 3px; text-align: center; padding: 16px 28px; border: 2px solid #ffe3a3; border-radius: 14px; background: radial-gradient(ellipse at top, #684c22, #1a1720 85%); box-shadow: 0 0 35px #ffca5266, 0 6px 22px #000a; animation: winEnter 450ms cubic-bezier(.15,.8,.25,1.2) both; }
 .winPlaque > span { text-transform: uppercase; letter-spacing: .22em; color: #ffe5a8; font-weight: 800; }
-.winPlaque strong { color: #ffe7a3; font: 800 clamp(1.8rem, 7vw, 3.5rem)/1.2 var(--font-mono, monospace); }
+.winPlaque strong { min-width: 0; overflow-wrap: anywhere; color: #ffe7a3; font: 800 clamp(1.8rem, 7vw, 3.5rem)/1.2 var(--font-mono, monospace); }
 .winPlaque small { color: #d5c9ae; font-size: .65rem; }
 .bigWin .winPlaque { border-width: 3px; box-shadow: 0 0 65px #ffce6988, 0 8px 30px #000b; }
 .coins { position: absolute; inset: 0; overflow: hidden; }
