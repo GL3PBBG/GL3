@@ -21,7 +21,7 @@ deferred until settlement. Blinds are retained through previousState.
 
 Cash changes use the existing economy ledger. Machine and table credits are
 escrow liabilities, not player cash columns. All new cash legs for a game use
-casino.<game>.credits. Cash plus outstanding escrow is the conservation measure.
+`casino.<game>.credits`. Cash plus outstanding escrow is the conservation measure.
 Machine stakes/payouts retain casino house coverage and takeover semantics.
 Slot deposits are not skimmed; actual stakes attract the existing house skim.
 
