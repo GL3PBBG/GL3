@@ -1,26 +1,13 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, keys, renderNode } from "@gl3/client";
-import { CasinoMachineResponseSchema, type CasinoMachine, type CasinoGame } from "@gl3/shared";
+import { renderNode, useCasinoMachine, useCasinoMachineAction, type CasinoMachineVerb } from "@gl3/client";
+import type { CasinoMachine, CasinoGame } from "@gl3/shared";
 import { ErrorText, Money, Panel } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import { ReelCabinet } from "./ReelCabinet.js";
 import styles from "./pages.module.css";
 
-const QUERY_KEY = ["casino-machine"];
-export function useCasinoMachine() {
-  return useQuery({ queryKey: QUERY_KEY, queryFn: async () => CasinoMachineResponseSchema.parse(await api("/api/casino/machine")) });
-}
-function useMachineAction() {
-  const queries = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ verb, body }: { verb: string; body: Record<string, unknown> }) =>
-      CasinoMachineResponseSchema.parse(await api(`/api/casino/machine/${verb}`, { method: "POST", body: JSON.stringify(body) })),
-    onSuccess: response => { queries.setQueryData(QUERY_KEY, response); },
-    onError: () => { void queries.invalidateQueries({ queryKey: QUERY_KEY }); },
-    onSettled: () => { void queries.invalidateQueries({ queryKey: keys.me() }); },
-  });
-}
+export { useCasinoMachine };
+const useMachineAction = useCasinoMachineAction;
 
 export function MachineEntry({ game, minBet, cash, jailed }: { game: CasinoGame; minBet: string; cash: string; jailed: boolean }): JSX.Element {
   const [credits, setCredits] = useState("");
@@ -51,7 +38,7 @@ export function MachineScreen({ machine, jailed }: { machine: CasinoMachine; jai
     return () => window.clearTimeout(timer);
   }, [machine.revision, machine.animation, animating]);
   const busy = action.isPending || animating;
-  const send = (verb: string, fields: Record<string, unknown> = {}) => {
+  const send = (verb: CasinoMachineVerb, fields: Record<string, unknown> = {}) => {
     setConfirmCashout(false);
     action.mutate({ verb, body: { id: machine.id, revision: machine.revision, ...fields } });
   };

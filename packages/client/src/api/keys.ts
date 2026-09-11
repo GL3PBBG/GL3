@@ -74,6 +74,10 @@ export const keys = {
   // two always move together (sitting changes both, and a settle changes the
   // seat counts the lobby lists), and the table poll is a 2.5s query anyway.
   casinoTable: () => ["casino", "table"] as const,
+  // The caller's open machine session — `GET /api/casino/machine`. Nested
+  // under `casino()` for the same reason as the table: the lobby's own
+  // `invalidates: ["casino"]` and a pull-to-refresh then cover it too.
+  casinoMachine: () => ["casino", "machine"] as const,
 
   // Admin sections (grant-gated).
   adminSections: () => ["admin", "sections"] as const,
