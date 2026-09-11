@@ -147,9 +147,21 @@ export const CasinoStepResponseSchema = z.object({
 });
 export type CasinoStepResponse = z.infer<typeof CasinoStepResponseSchema>;
 
+export const ReelDisplaySchema = z.object({
+  reels: z.array(z.object({
+    image: z.string().min(1).max(32768), label: z.string().max(100),
+    held: z.boolean(), spin: z.boolean(), holdMove: z.number().int().min(0).max(11).nullable(),
+  })).length(3),
+  symbols: z.array(z.string().min(1).max(32768)).min(1).max(7),
+  collectable: MoneySchema,
+  rules: BoundedViewNodeDtoSchema,
+});
+export type ReelDisplay = z.infer<typeof ReelDisplaySchema>;
+
 export const CasinoMachineSchema = z.object({
   id: IdSchema, gameId: z.string(), gameName: z.string(),
   credits: MoneySchema, wager: MoneySchema, revision: z.number().int().nonnegative(),
+  reelDisplay: ReelDisplaySchema.optional(), payout: MoneySchema.optional(),
   inRound: z.boolean(), closed: z.boolean(), available: z.boolean(),
   view: BoundedViewNodeDtoSchema.nullable(), moves: z.array(GameMoveDtoSchema),
   animation: z.object({ view: BoundedViewNodeDtoSchema, durationMs: z.number().int().min(0).max(5000) }).optional(),

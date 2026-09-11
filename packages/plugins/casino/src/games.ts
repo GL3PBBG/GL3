@@ -63,6 +63,13 @@ export interface TableStep<S> {
   wagerDelta?: { seat: number; amount: bigint };
 }
 
+export interface ReelDisplay {
+  reels: { image: string; label: string; held: boolean; spin: boolean; holdMove: number | null }[];
+  symbols: string[];
+  collectable: string;
+  rules: ViewNode;
+}
+
 /**
  * The whole contract a casino game implements. `start`, `act` and `settle` are
  * PURE — no database, no ctx, no clock, no randomness, no io. That is what
@@ -73,6 +80,8 @@ export interface TableStep<S> {
 export interface GameDef<S = unknown> {
   /** Persistent credits and repeat rounds, with explicit cash-out. */
   machine?: boolean;
+  /** Public reel artwork and control placement; never includes future outcomes. */
+  reelDisplay?(state: S | null): ReelDisplay;
   /** Must equal the declaring plugin's id — checked in `buildRegistry`. */
   id: string;
   name: string;
