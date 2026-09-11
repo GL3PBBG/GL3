@@ -739,7 +739,8 @@ function AssetBinderBlock({ scope, slot, entitySource, entityLabelKey, refetchSi
  * Renders a flat list of RenderInstructions. Button/form actions are sent via
  * `api()` (the actions are `"METHOD /path"` strings declared in the schema).
  */
-export function PageRenderer({ instructions, onActionSuccess }: {
+export function PageRenderer({ instructions, onActionSuccess, animateCards = false }: {
+  animateCards?: boolean;
   instructions: readonly RenderInstruction[];
   /**
    * Fired after every 2xx action. The host (PluginPage/Admin) invalidates
@@ -972,7 +973,7 @@ export function PageRenderer({ instructions, onActionSuccess }: {
               </span>
             }
           >
-            <Hand codes={inst.cards} />
+            <Hand codes={inst.cards} animate={animateCards} />
           </Suspense>
         );
         if (inst.caption === null) {

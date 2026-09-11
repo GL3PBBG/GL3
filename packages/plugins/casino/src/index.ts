@@ -31,6 +31,7 @@ import {
 import { fromStorableState, toStorableState } from "./state.js";
 import { tableTickEvent } from "./table-engine.js";
 import { tableRoutes } from "./table-routes.js";
+import { machineRoutes } from "./machine-routes.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
 // Lives in `engine.ts` (with `notifyTakeover`, its only caller besides the
@@ -234,6 +235,7 @@ const lobbyRoute = route({
         return {
           gameId: game.id,
           name: game.name,
+          ...(game.machine ? { machine: true } : {}),
           // null, not "", so the page decides how to draw an unowned table —
           // the town is then a sink and a faucet bounded by `max_bet`.
           ownerName: ownerId === null ? null : (ownerNames.get(ownerId) ?? null),
@@ -830,8 +832,8 @@ export default definePlugin({
     view: { kind: "list", items: [] },
   }],
   migrations: CASINO_MIGRATIONS,
-  tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats" },
-  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes],
+  tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats", machines: "p_casino_machines" },
+  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes, ...machineRoutes],
   // The hub's only event, and a SILENT one: a table tick is a state signal
   // for the seats at that table, never a line in anybody's feed. Solo
   // `play`/`act` publish nothing at all — a solo hand has exactly one

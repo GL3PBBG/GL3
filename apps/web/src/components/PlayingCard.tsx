@@ -1,3 +1,4 @@
+import "./PlayingCard.css";
 import { cardComponent } from "./cards.js";
 
 const SUITS: Record<string, string> = { H: "hearts", D: "diamonds", C: "clubs", S: "spades" };
@@ -32,9 +33,9 @@ export function PlayingCard({ code }: { code: string }): JSX.Element {
   );
 }
 
-export function Hand({ codes }: { codes: string[] }): JSX.Element {
+export function Hand({ codes, animate = false }: { codes: string[]; animate?: boolean }): JSX.Element {
   return (
-    <span className="hand" role="group" aria-label={`${codes.length} cards`}>
+    <span className={animate ? "hand hand--animated" : "hand"} role="group" aria-label={`${codes.length} cards`}>
       {codes.map((code, i) => (
         <PlayingCard key={`${code}-${i}`} code={code} />
       ))}

@@ -81,4 +81,18 @@ export const CASINO_MIGRATIONS: { name: string; sql: string }[] = [
     name: "0006_one_seat_per_player",
     sql: `CREATE UNIQUE INDEX p_casino_seats_one_seat ON p_casino_seats (player_id)`,
   },
+  { name: "0007_machines", sql: `CREATE TABLE p_casino_machines (
+    id uuid PRIMARY KEY, player_id uuid NOT NULL, game_id text NOT NULL,
+    location_id uuid NOT NULL, property_id uuid,
+    credits bigint NOT NULL CHECK (credits >= 0),
+    wager bigint NOT NULL CHECK (wager > 0), state jsonb,
+    in_round boolean NOT NULL DEFAULT false,
+    revision integer NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    created_at timestamptz NOT NULL DEFAULT now()
+  )` },
+  { name: "0008_one_machine_per_player", sql: `CREATE UNIQUE INDEX p_casino_machines_player_open
+    ON p_casino_machines (player_id) WHERE status = 'open'` },
+  { name: "0009_table_credits", sql: `ALTER TABLE p_casino_seats
+    ADD COLUMN credits bigint CHECK (credits >= 0)` },
 ];

@@ -1,6 +1,22 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, integer, jsonb, pgTable, smallint, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
+/** Escrow liabilities. No foreign keys into the location/player lock graph. */
+export const casinoMachines = pgTable("p_casino_machines", {
+  id: uuid("id").primaryKey(),
+  playerId: uuid("player_id").notNull(),
+  gameId: text("game_id").notNull(),
+  locationId: uuid("location_id").notNull(),
+  propertyId: uuid("property_id"),
+  credits: bigint("credits", { mode: "bigint" }).notNull(),
+  wager: bigint("wager", { mode: "bigint" }).notNull(),
+  state: jsonb("state"),
+  inRound: boolean("in_round").notNull().default(false),
+  revision: integer("revision").notNull().default(0),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** The table this plugin OWNS. `migrations.ts` is the definition; this handle
  *  must be kept in step with it by hand. */
 export const casinoSessions = pgTable("p_casino_sessions", {
@@ -36,6 +52,7 @@ export const casinoTables = pgTable("p_casino_tables", {
 /** The third table this plugin OWNS, kept in step with `migrations.ts` by
  *  hand, same as `casinoSessions` above. */
 export const casinoSeats = pgTable("p_casino_seats", {
+  credits: bigint("credits", { mode: "bigint" }),
   id: uuid("id").primaryKey(),
   tableId: uuid("table_id").notNull(),
   playerId: uuid("player_id").notNull(),

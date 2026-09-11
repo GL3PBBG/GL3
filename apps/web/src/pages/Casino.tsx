@@ -11,6 +11,7 @@ import type {
 } from "@gl3/shared";
 import { SlotImage } from "../components/GameImage.js";
 import { PlayerLink } from "../components/PlayerLink.js";
+import { MachineEntry, MachineScreen, useCasinoMachine } from "./CasinoMachine.js";
 
 /**
  * Why the wager the player typed cannot be staked, in the server's own order.
@@ -131,6 +132,9 @@ export function tableActions(view: CasinoTableView, myCash: string): TableAction
   if (view.phase === "betting") {
     if (BigInt(mine.wager) > 0n) {
       return { ...none, reason: "Your stake is in — waiting on the other seats." };
+    }
+    if (mine.credits != null && BigInt(mine.credits) > 0n) {
+      return { canBet: true, canAct: false, canDouble: false, reason: null };
     }
     // Against the MINIMUM, not against anything typed: this asks whether a
     // legal bet exists for this player, and the cheapest one is the test.
@@ -382,7 +386,7 @@ function SeatRow({ seat, view }: {
           Seat {seat.seat + 1} — <PlayerLink playerId={seat.playerId} username={seat.username} />{isMine ? " (you)" : ""}
         </span>
         <span className={styles.meta}>
-          {staked ? <>stake <Money value={seat.wager} /></> : "no stake"}
+          {seat.credits != null && view.phase === "betting" ? <>Table credits <Money value={seat.credits} />{staked ? " · ready" : ""}</> : staked ? <>Starting stack <Money value={seat.wager} /></> : "no stake"}
           {/* Both badges are facts the player needs to read the table: a
               leaving seat is gone after this hand, and an idle count is how
               close a seat is to being swept out of it. */}
@@ -433,7 +437,8 @@ function TableScreen({ view, cash, jailed }: {
   const mine = view.mySeat === null
     ? undefined
     : view.seats.find((seat) => seat.seat === view.mySeat);
-  const inHand = mine !== undefined && BigInt(mine.wager) > 0n;
+  const retained = mine?.credits != null && BigInt(mine.credits) > 0n;
+  const inHand = mine !== undefined && BigInt(mine.wager) > 0n && (!view.bankroll || view.phase === "acting");
   const check = checkWager(wager, view.minBet, view.maxBet, cash);
   const busy = jailed || bet.isPending || act.isPending || leave.isPending;
   // `handActions`' shape, decided per seat rather than per hand: the table
@@ -467,18 +472,20 @@ function TableScreen({ view, cash, jailed }: {
       {view.view === null ? (
         <p className={styles.muted}>No hand on the table yet.</p>
       ) : (
-        <PageRenderer instructions={renderNode(view.view, {})} />
+        <PageRenderer key={view.bankroll ? view.handNo : undefined} animateCards={view.bankroll === true} instructions={renderNode(view.view, {})} />
       )}
 
       {/* One stack for every control on the table, so the bet row, the hand
           actions and Leave are spaced from each other and from the cards
           above — `Panel` puts no gap between its own children. */}
       <div className={styles.controls}>
-        {actions.canBet ? (
+        {view.bankroll ? <p className={styles.meta}>Your stack stays at this table between hands. Play the next hand with your remaining credits, or cash out when you leave.</p> : null}
+        {actions.canBet && retained ? <button type="button" disabled={busy} onClick={() => bet.mutate("0")}>Play next hand</button> : null}
+        {actions.canBet && !retained ? (
           <>
             <div className={styles.form}>
               <label>
-                <span className={styles.meta}>Wager </span>
+                <span className={styles.meta}>{view.bankroll ? "Buy-in credits " : "Wager "}</span>
                 <input
                   inputMode="numeric"
                   value={wager}
@@ -491,7 +498,7 @@ function TableScreen({ view, cash, jailed }: {
                 disabled={busy || check.kind !== "ok"}
                 onClick={() => { bet.mutate(wager, { onSuccess: () => { setWager(""); } }); }}
               >
-                Bet
+                {view.bankroll ? "Buy in & play" : "Bet"}
               </button>
             </div>
             {check.kind === "notAnAmount" && wager !== "" ? (
@@ -564,7 +571,7 @@ function TableScreen({ view, cash, jailed }: {
                 else leave.mutate();
               }}
             >
-              Leave table
+              {view.bankroll ? "Cash out & leave" : "Leave table"}
             </button>
           )}
         </div>
@@ -660,6 +667,7 @@ function RemoteTables({ remote }: { remote: readonly CasinoRemoteTables[] }): JS
 }
 
 export function Casino(): JSX.Element {
+  const machineQuery = useCasinoMachine();
   const lobby = useCasino();
   const me = useMe();
   const jail = useJail();
@@ -692,6 +700,9 @@ export function Casino(): JSX.Element {
   const [dismissed, setDismissed] = useState<string | null>(null);
 
   const jailed = jail.data?.jailed === true;
+  if (machineQuery.isLoading) return <Loading what="the casino" />;
+  if (machineQuery.isError) return <Panel title="Casino"><ErrorText error={machineQuery.error} /><button type="button" onClick={() => { void machineQuery.refetch(); }}>Retry</button></Panel>;
+  if (machineQuery.data?.machine) return <MachineScreen key={machineQuery.data.machine.id} machine={machineQuery.data.machine} jailed={jailed} />;
 
   // THE SEAT OUTRANKS THE LOBBY, and is checked before it. A seated player's
   // table is in the town the table is in, which need not be the town they are
@@ -722,7 +733,9 @@ export function Casino(): JSX.Element {
   }
   if (!lobby.data || !me.data) return <Loading what="the casino" />;
 
-  const { locationName, minBet, games, tableGames, remote, session } = lobby.data;
+  const { locationName, minBet, tableGames, remote, session } = lobby.data;
+  const games = lobby.data.games.filter(game => !game.machine);
+  const machines = lobby.data.games.filter(game => game.machine);
   const resumable = session === null || session.sessionId === dismissed
     ? null
     : resumedHand(session);
@@ -828,7 +841,7 @@ export function Casino(): JSX.Element {
         Minimum bet <Money value={minBet} /> · you hold <Money value={cash} />
       </p>
 
-      {games.length === 0 && tableGames.length === 0 ? (
+      {games.length === 0 && machines.length === 0 && tableGames.length === 0 ? (
         <p className={styles.muted}>No games are installed.</p>
       ) : null}
 
@@ -854,6 +867,8 @@ export function Casino(): JSX.Element {
       ) : null}
 
       {remote.length > 0 ? <RemoteTables remote={remote} /> : null}
+
+      {machines.map(game => <MachineEntry key={game.gameId} game={game} minBet={minBet} cash={cash} jailed={jailed} />)}
 
       {games.length === 0 ? null : (
         <>

@@ -173,3 +173,13 @@ describe("the table DTO the helper reads", () => {
     })).toThrow();
   });
 });
+
+describe("retained table credits", () => {
+  it("offers another hand from credits even when cash is empty and the stack is below the buy-in minimum", () => {
+    expect(tableActions(view({ bankroll: true, seats: [seat({ credits: "12" })] }), "0").canBet).toBe(true);
+  });
+  it("requires another buy-in after a bust and waits once ready", () => {
+    expect(tableActions(view({ bankroll: true, seats: [seat({ credits: "0" })] }), "0").canBet).toBe(false);
+    expect(tableActions(view({ bankroll: true, seats: [seat({ credits: "12", wager: "12" })] }), "0").canBet).toBe(false);
+  });
+});

@@ -12,6 +12,8 @@ export interface GameStep<S> {
    * exposure check. A game never moves money itself.
    */
   wagerDelta?: bigint;
+  /** Cosmetic reveal of an already committed outcome. */
+  animation?: { view: ViewNode; durationMs: number };
 }
 
 export interface TableSeatInput {
@@ -69,6 +71,8 @@ export interface TableStep<S> {
  * the house can pay it and writes every ledger row.
  */
 export interface GameDef<S = unknown> {
+  /** Persistent credits and repeat rounds, with explicit cash-out. */
+  machine?: boolean;
   /** Must equal the declaring plugin's id — checked in `buildRegistry`. */
   id: string;
   name: string;
@@ -112,6 +116,8 @@ export interface GameDef<S = unknown> {
 }
 
 export interface TableGameDef<S = unknown> {
+  /** Player-funded stacks retained between hands; only rake reaches the house. */
+  bankroll?: boolean;
   /** Must equal the declaring plugin's id — checked in `buildTableRegistry`. */
   id: string;
   name: string;
@@ -131,7 +137,7 @@ export interface TableGameDef<S = unknown> {
    * and a hub that predates it stay compatible; a rotation-sensitive game
    * (poker's button) uses it when present and derives from the seed when not.
    */
-  deal(input: { seats: TableSeatInput[]; seed: string; handNo?: number }): TableStep<S>;
+  deal(input: { seats: TableSeatInput[]; seed: string; handNo?: number; previousState?: unknown }): TableStep<S>;
   act(state: S, seat: number, action: unknown): TableStep<S>;
   /** What happens to a seat whose turn timer lapsed. Pure, like the rest. */
   autoAct(state: S, seat: number): TableStep<S>;
