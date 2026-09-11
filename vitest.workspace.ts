@@ -395,6 +395,8 @@ export default defineWorkspace([
         "test/bullets-restock-lock-order.test.ts",
         "test/casino-boot.test.ts",
         "test/casino-play.test.ts",
+        "test/casino-machines.test.ts",
+        "test/casino-bankroll.test.ts",
         "test/casino-act.test.ts",
         "test/casino-lock-order.test.ts",
         "test/casino-abba-stress.test.ts",

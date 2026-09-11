@@ -34,6 +34,7 @@ const MovesFieldSchema = z.array(GameMoveDtoSchema).nullable().optional();
  * there is not.
  */
 export const CasinoGameSchema = z.object({
+  machine: z.boolean().optional(),
   /** The GameDef id, which is also the declaring plugin's id. */
   gameId: z.string(),
   name: z.string(),
@@ -146,8 +147,20 @@ export const CasinoStepResponseSchema = z.object({
 });
 export type CasinoStepResponse = z.infer<typeof CasinoStepResponseSchema>;
 
+export const CasinoMachineSchema = z.object({
+  id: IdSchema, gameId: z.string(), gameName: z.string(),
+  credits: MoneySchema, wager: MoneySchema, revision: z.number().int().nonnegative(),
+  inRound: z.boolean(), closed: z.boolean(), available: z.boolean(),
+  view: BoundedViewNodeDtoSchema.nullable(), moves: z.array(GameMoveDtoSchema),
+  animation: z.object({ view: BoundedViewNodeDtoSchema, durationMs: z.number().int().min(0).max(5000) }).optional(),
+});
+export type CasinoMachine = z.infer<typeof CasinoMachineSchema>;
+export const CasinoMachineResponseSchema = z.object({ machine: CasinoMachineSchema.nullable(), cashedOut: MoneySchema.optional() });
+export type CasinoMachineResponse = z.infer<typeof CasinoMachineResponseSchema>;
+
 /** One occupied seat at a table, as `GET /api/casino/table` reports it. */
 export const CasinoTableSeatSchema = z.object({
+  credits: MoneySchema.nullable().optional(),
   seat: z.number().int().min(0).max(4),
   playerId: IdSchema,
   username: z.string(),
@@ -170,6 +183,7 @@ export type CasinoTableSeat = z.infer<typeof CasinoTableSeatSchema>;
  * when the table has no state yet (before the first deal of a hand).
  */
 export const CasinoTableViewSchema = z.object({
+  bankroll: z.boolean().optional(),
   tableId: IdSchema,
   gameId: z.string(),
   gameName: z.string(),

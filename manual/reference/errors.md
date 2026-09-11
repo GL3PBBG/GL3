@@ -72,6 +72,7 @@ report is all just "no report").
 | `insufficient_<var>` | 409 | crimes | The crime prices a cost in an attribute pool (brave, energy, ...) that the caller cannot pay; the code names the pool, e.g. insufficient_brave |
 | `insufficient_bullets` | 409 | combat | The caller holds fewer bullets than the weapon needs per shot |
 | `insufficient_cash` | 400 | gangs | The caller does not have enough cash on hand to deposit that amount |
+| `insufficient_credits` | 409 | casino | The machine credits cannot cover the requested wager |
 | `insufficient_energy` | 409 | combat, core, gym | combat: Opening an engagement costs half the caller's max energy and their energy pool is below it; core: The caller lacks the 10 energy a jail-bust attempt costs.; gym: The caller does not have enough energy for that many reps |
 | `insufficient_funds` | 409 | bank, bounties, bullets, casino, combat, core, detectives, education, houses, inventory, oc, properties, theft, travel | bank: The caller's balance cannot cover the movement (cash for a deposit or the open fee, bank balance for a withdrawal); bounties: Caller's cash cannot cover the bounty amount; bullets: Caller's cash cannot cover the purchase; casino: Caller's cash cannot cover the wager, raise, or table bet; combat: Caller's cash cannot cover the repair cost; core: The caller cannot afford the fee (bail or hospital discharge) this action charges.; detectives: Caller's cash cannot cover the hire cost (wealth-scaled unit x detectives x hours); education: The caller cannot afford the course fee; houses: The caller cannot afford the house's price; inventory: The caller cannot afford the purchase; oc: The caller cannot afford the heist's buy-in; properties: Caller cannot afford the property's declared price; theft: Caller cannot afford the repair cost; travel: Caller cannot afford the travel fare |
 | `insufficient_gang_funds` | 400 | gangs | The gang bank holds less than the requested withdrawal |
@@ -111,12 +112,17 @@ report is all just "no report").
 | `leader_cannot_leave` | 403 | oc | The heist's leader cannot leave their own heist — they must cancel it instead |
 | `lever_above_cap` | 400 | bullets | Factory owner tried to set a bullet price above the admin's max-cost cap (`maxCost` in details) |
 | `lever_too_low` | 400 | properties | The lever (price/limit) value is below the $100 floor |
-| `location_changed` | 409 | travel | Caller's location kept changing mid-request (concurrent travels by the same player); retry |
+| `location_changed` | 409 | casino, travel | Caller's location kept changing mid-request (concurrent travels by the same player); retry |
 | `location_in_use` | 409 | travel | Town cannot be deleted while players are standing in it or plugin assets (an owned property, an open casino hand, a garaged car) still reference it |
 | `location_not_found` | 404 | bullets, inventory, properties, travel | bullets: Admin stock update named a location that does not exist; inventory: The named town does not exist (admin shop stocking); properties: Admin create named a town that does not exist; travel: No town with the given id exists (unknown destination, or an admin edit/delete named a town that doesn't exist) |
 | `location_type_taken` | 409 | properties | This town already has a property of that type (one per type per town) |
+| `machine_closed` | 409 | casino | The machine wallet has already been cashed out |
+| `machine_credit_limit` | 409 | casino | The spin could exceed the machine credit limit; cash out first |
+| `machine_open` | 409 | casino | The player already has an open machine wallet |
+| `machine_raise_unsupported` | 400 | casino | A machine game tried to increase its fixed wager during a round |
 | `mail_not_found` | 404 | mail | No message with that id is addressed to the caller |
 | `min_above_max` | 400 | bullets | Admin submitted a restock minimum-per-hour greater than the maximum-per-hour |
+| `mixed_escrow` | 409 / 500 | casino | Legacy house escrow and retained player credits cannot be mixed in the same table hand |
 | `money_rank_not_found` | 404 | ranks | No money rank with the given id exists to update or delete |
 | `news_not_found` | 404 | news | The named news post does not exist (admin delete) |
 | `no_cars_in_tier` | 409 | theft | No stealable cars fall in that tier's value bracket (or every car there has zero steal weight) |
@@ -124,10 +130,12 @@ report is all just "no report").
 | `no_email` | 409 | core | The account has no email address on file, so a verification code cannot be sent. |
 | `no_house_to_sell` | 409 | houses | The caller owns no house above the baseline 100-will lodging, so there is nothing to sell |
 | `no_location` | 409 | bullets, casino, inventory, oc, properties, theft | bullets: The caller has no valid current town (not located anywhere, or the location/stats row vanished mid-request); casino: The caller is not in any town; inventory: The caller is not standing in any town, so there is no local shop to buy from; oc: The caller is not standing in any town, so the heist has nowhere to be staged; properties: Caller has no player record/current location, so no town-scoped purchase is possible; theft: Caller is not standing in any town, so there is nowhere to park a stolen car |
+| `no_machine` | 404 | casino | The requested machine wallet does not belong to the caller or no longer exists |
 | `no_melee_weapon` | 409 | combat | The attack asked for the melee slot (weapon: "melee") and it is empty — no silent fallback to slot 1's gun |
 | `no_promotion` | 409 | jobs | No higher-paying rank in the caller's job has requirements the caller currently meets |
 | `no_session` | 404 | casino | The caller has no casino session at all (or the row is gone) |
 | `no_such_game` | 404 | casino | That game id is not in the registry (game plugin not installed or not registered) |
+| `no_such_machine` | 404 | casino | The installed casino game does not provide a persistent-credit machine |
 | `no_such_table` | 404 | casino | The table chosen for sit is gone (deleted after settling empty) — a retry opens a fresh one |
 | `no_such_target` | 404 | combat | Target player does not exist |
 | `not_a_member` | 403 / 404 | gangs | The player concerned (the caller, or the targeted player) is not a member of that gang |
@@ -146,6 +154,7 @@ report is all just "no report").
 | `not_your_turn` | 409 | casino | It is another seat's turn to act |
 | `notification_not_found` | 404 | notifications | No notification with that id belongs to the caller |
 | `on_cooldown` | 429 | crimes, forum, oc, travel | crimes: Crime cooldown live (`retryAfter` in details and the `retry-after` header carry the wait); forum: The caller created a topic or posted too recently and must wait out the posting cooldown; oc: The caller is still on the heist cooldown set when their last heist resolved and cannot join a new one yet; travel: Caller's travel cooldown has not expired yet |
+| `own_house` | 409 | casino | The player cannot wager at a machine they own |
 | `package_not_found` | 404 | membership | The named membership package does not exist |
 | `player_not_found` | 404 | core, gangs, membership, properties | core: The named player does not exist (or the caller's own player row is missing).; gangs: The named target player does not exist; membership: No player with that recipient username exists; properties: No player with the given username exists to transfer the property to |
 | `pool_not_active` | 400 | inventory | The consumable names a pool (energy/will/brave) with max 0 — nobody declared it on this install |
@@ -163,8 +172,10 @@ report is all just "no report").
 | `role_not_found` | 404 | core | No role exists with the given id. |
 | `role_taken` | 409 | oc | An accepted member already holds that role in the heist |
 | `round_finalized` | 400 | core | The round has already been settled into the hall of fame and can no longer be edited. |
+| `round_finished` | 409 | casino | The machine round has already settled |
 | `round_not_found` | 404 | core | No round exists with the given id. |
 | `round_not_scheduled` | 409 | core | Only a round that has not yet started can be deleted; this one is active, ended, or finalized. |
+| `round_open` | 409 | casino | The machine already has an unfinished round |
 | `round_overlap` | 400 | core | The round's time window overlaps another unfinalized round. |
 | `same_gang` | 409 | bounties, combat | bounties: Target is in the placer's own gang; combat: Target is in the caller's gang |
 | `same_ip_blocked` | 409 | membership, properties | membership: Gift refused: giver and recipient share a recorded signup or last-seen IP and `membership.block_same_ip_transfer` is not set to false (anti-bot layer 3); properties: Transfer refused: giver and recipient share a recorded signup or last-seen IP and `properties.block_same_ip_transfer` is not set to false (anti-bot layer 3) |
@@ -176,6 +187,7 @@ report is all just "no report").
 | `session_expired` | 409 | casino | The open hand is past its expiry and cannot be played (it will be forfeited on the next `play`) |
 | `session_open` | 409 | casino | The caller already has a live, unexpired open hand |
 | `sole_administrator` | 409 | core | Account deletion refused: the caller is the only player holding a `*` or `roles` grant; assign another administrator first. |
+| `stale_machine` | 409 | casino | The supplied machine revision is outdated; reload its current state before retrying |
 | `stock_above_max` | 400 | bullets | Admin tried to set a town's bullet stock above the configured max-stock ceiling (`maxStock` in details) |
 | `stock_not_found` | 404 | inventory | No shop-stock row exists for that town-and-item pair |
 | `table_full` | 409 | casino | The table already has the maximum number of seats |

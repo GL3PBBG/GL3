@@ -224,6 +224,13 @@ export function resolveTablePayouts(
   return payouts;
 }
 
+/** Refund an idle stack under lockTable's player locks. */
+export async function refundTableCredits(tx: PluginTx, table: TableRow, seat: SeatRow): Promise<void> {
+  if (seat.credits !== null && seat.credits > 0n) await tx.economy.applyBalanceChange({
+    playerId: seat.playerId, amount: seat.credits, kind: "cash", reason: `casino.${table.gameId}.credits`,
+  });
+}
+
 /**
  * Ends the hand: pays every in-hand seat, hands the table over if the house
  * came up short, then resets the row for the next one.
@@ -243,9 +250,28 @@ export async function settleHand(
   const payouts = resolveTablePayouts(game, fromStorableState(table.state), seats);
   const ordered = [...seats].sort((a, b) => a.seatNo - b.seatNo);
 
+  const played = ordered.filter((s) => s.wager > 0n);
+  const bankrolled = played.length > 0 && played.every((s) => s.credits !== null);
+  if (played.some((s) => s.credits !== null) && !bankrolled) throw new PluginError("mixed_escrow", 500);
+  if (bankrolled) {
+    const total = played.reduce((n, s) => n + s.wager, 0n);
+    const returned = [...payouts.values()].reduce((n, p) => n + p, 0n);
+    if (returned > total) throw new PluginError("invalid_payout", 500);
+    const rake = total - returned;
+    if (rake > 0n && house.propertyId !== null) {
+      await payOwner(tx, house.propertyId, rake, `casino.${table.gameId}.credits`);
+    }
+    for (const seat of played) {
+      const credits = payouts.get(seat.id) ?? 0n;
+      if (credits > 9_000_000_000_000_000_000n) throw new PluginError("invalid_payout", 500);
+      seat.credits = credits;
+      await tx.db.update(casinoSeats).set({ credits }).where(eq(casinoSeats.id, seat.id));
+    }
+  }
+
   let seized = false;
   for (const seat of ordered) {
-    if (seat.wager <= 0n) continue;
+    if (bankrolled || seat.wager <= 0n) continue;
     const payout = payouts.get(seat.id) ?? 0n;
     if (payout <= 0n) continue;
     // `!seized` is load-bearing, not an optimisation. `takeOverFrom` moved
@@ -285,6 +311,7 @@ export async function settleHand(
   // The `leaving` flag is a deferred leave: the seat stayed for the hand its
   // stake was in (spec §5, "no money is ever dropped by leaving") and is freed
   // now that the stake has settled.
+  for (const seat of seats) if (seat.leaving) await refundTableCredits(tx, table, seat);
   await tx.db.delete(casinoSeats)
     .where(and(eq(casinoSeats.tableId, table.id), eq(casinoSeats.leaving, true)));
 
@@ -338,7 +365,7 @@ export async function applyStep(
       throw new PluginError("invalid_wager_delta", 500);
     }
     const seat = seats.find((s) => s.seatNo === delta.seat);
-    if (seat === undefined || seat.wager <= 0n) throw new PluginError("invalid_wager_delta", 500);
+    if (seat === undefined || seat.wager <= 0n || seat.credits !== null) throw new PluginError("invalid_wager_delta", 500);
 
     // BEFORE taking the extra money: a raised wager raises the whole table's
     // exposure, and `payOwner`'s clamp would otherwise short-pay a winner in
@@ -413,7 +440,7 @@ export async function dealIfReady(
   if (!force && seats.some((s) => !s.leaving && s.wager === 0n)) return;
 
   const bettors = seats.filter((s) => s.wager > 0n);
-  if (bettors.length === 0) {
+  if (bettors.length === 0 || (game.bankroll && bettors.length < 2 && bettors.some((s) => s.credits !== null))) {
     // A lapse with nobody betting just stops the clock — the idle sweep runs
     // only at a real deal (spec §5, amended), so a wholly idle table sits.
     if (table.deadlineAt !== null) {
@@ -426,13 +453,14 @@ export async function dealIfReady(
 
   // THE IDLE SWEEP, at deal time. A seat that sat this deal out gains a hand;
   // at `table_idle_kick_hands` it is freed. Kicking here is safe precisely
-  // because these seats hold no money — every wager belongs to a bettor.
+  // because these seats have no wager in play. Retained credits are refunded.
   const kickAt = readTableIdleKickHands(ctx.settings);
   const kicked: string[] = [];
   for (const seat of seats) {
     if (seat.leaving || seat.wager > 0n) continue;
     const idleHands = seat.idleHands + 1;
     if (idleHands >= kickAt) {
+      await refundTableCredits(tx, table, seat);
       kicked.push(seat.id);
       continue;
     }
@@ -454,6 +482,7 @@ export async function dealIfReady(
     // The number this hand is stored under (written below) — lets a game
     // rotate a dealer button across hands without holding state of its own.
     handNo: table.handNo + 1,
+    previousState: fromStorableState(table.state),
   }));
   const seed = randomBytes(16).toString("hex");
   const handNo = table.handNo + 1;

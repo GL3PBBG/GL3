@@ -16,7 +16,7 @@ import {
 } from "./settings.js";
 import {
   advanceTable, applyStep, assertTableCanCover, clockLapsed, dealIfReady, lockTable,
-  publishTableTick, readTableUnlocked,
+  publishTableTick, readTableUnlocked, refundTableCredits,
   type LockedTable, type SeatRow,
 } from "./table-engine.js";
 
@@ -151,6 +151,7 @@ async function freeSeat(
    *  `locked.seats` any more — the clock's casualties, when `leave` ran it. */
   alsoTell: readonly { playerId: string }[] = [],
 ): Promise<{ status: 200; body: { left: boolean; deferred: boolean } }> {
+  await refundTableCredits(tx, locked.table, mine);
   await tx.db.delete(casinoSeats).where(eq(casinoSeats.id, mine.id));
   if (locked.seats.length === 1) {
     await tx.db.delete(casinoTables).where(eq(casinoTables.id, locked.table.id));
@@ -193,7 +194,7 @@ const leaveRoute = route({
       const mine = locked.seats.find((s) => s.playerId === player.id);
       if (mine === undefined) throw new PluginError("not_seated", 404);
 
-      if (mine.wager === 0n) {
+      if (mine.wager === 0n || (mine.credits !== null && locked.table.phase === "betting")) {
         // THE WAGER-0 FAST EXIT, and it is a safety property rather than an
         // optimisation. `leave` is the ONLY way out of a seat and
         // `p_casino_seats`' UNIQUE(player_id) is game-wide, so a leave that
@@ -266,6 +267,7 @@ export async function renderTablePayload(
     tableId: table.id,
     gameId: table.gameId,
     gameName: game.name,
+    bankroll: game.bankroll === true || seats.some((s) => s.credits !== null),
     locationId: table.locationId,
     locationName: loc?.name ?? "",
     phase: table.phase,
@@ -280,6 +282,7 @@ export async function renderTablePayload(
       playerId: s.playerId,
       username: names.get(s.playerId) ?? "",
       wager: s.wager.toString(),
+      credits: s.credits?.toString() ?? null,
       leaving: s.leaving,
       idleHands: s.idleHands,
     })),
@@ -455,7 +458,7 @@ const betRoute = route({
   handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    const wager = BigInt(body.wager);
+    let wager = BigInt(body.wager);
     const registry = await buildTableRegistry(ctx, ctx.installedPluginIds);
 
     return ctx.transaction(async (tx) => {
@@ -464,19 +467,31 @@ const betRoute = route({
       // (`wagerDelta`, mid-hand and bounded), never a second bet.
       if (mine.wager > 0n) throw new PluginError("already_bet", 409);
 
-      const minBet = readMinBet(ctx.settings);
+      // Existing legacy stakes finish using their original money model.
+      const legacyHand = locked.seats.some((s) => s.wager > 0n && s.credits === null);
+      const bankrolled = mine.credits !== null || (game.bankroll === true && !legacyHand);
+      if (bankrolled && legacyHand) throw new PluginError("mixed_escrow", 409);
+      const retained = bankrolled && mine.credits !== null && mine.credits > 0n;
+      if (retained) wager = mine.credits!;
+      const minBet = retained ? 1n : readMinBet(ctx.settings);
       if (wager < minBet) throw new PluginError("wager_below_min", 400);
       // The FROZEN house's lever (`lockTable` resolved it from the table's own
       // `property_id`), so a table sold mid-hand keeps the bounds it was
       // dealt under.
-      if (wager > locked.house.maxBet) throw new PluginError("wager_above_max", 400);
+      if (!retained && wager > locked.house.maxBet) throw new PluginError("wager_above_max", 400);
 
-      await assertTableCanCover(
+      if (!bankrolled) await assertTableCanCover(
         tx, locked.house, locked.seats, game.maxPayoutMultiplier,
         { seat: mine.seatNo, amount: wager },
       );
       try {
-        await escrow(tx, locked.house, player.id, wager, locked.table.gameId);
+        if (bankrolled) {
+          if (!retained) await tx.economy.applyBalanceChange({
+            playerId: player.id, amount: -wager, kind: "cash", reason: `casino.${locked.table.gameId}.credits`,
+          });
+          mine.credits = wager;
+          await tx.db.update(casinoSeats).set({ credits: wager }).where(eq(casinoSeats.id, mine.id));
+        } else await escrow(tx, locked.house, player.id, wager, locked.table.gameId);
       } catch (error) {
         // The GUARD, never `instanceof` — see `applyStep`'s twin.
         if (isInsufficientFundsError(error)) throw new PluginError("insufficient_funds", 409);

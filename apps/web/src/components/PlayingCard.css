@@ -1,0 +1,13 @@
+@keyframes casino-deal {
+  from { opacity: 0; transform: translateY(-28px) rotateY(90deg) rotate(-8deg); }
+  to { opacity: 1; transform: translateY(0) rotateY(0) rotate(0); }
+}
+.hand--animated { perspective: 900px; }
+.hand--animated > [data-card] { animation: casino-deal 550ms ease-out both; }
+.hand--animated > [data-card]:nth-child(2) { animation-delay: 100ms; }
+.hand--animated > [data-card]:nth-child(3) { animation-delay: 200ms; }
+.hand--animated > [data-card]:nth-child(4) { animation-delay: 300ms; }
+.hand--animated > [data-card]:nth-child(5) { animation-delay: 400ms; }
+@media (prefers-reduced-motion: reduce) {
+  .hand--animated > [data-card] { animation: none; }
+}
