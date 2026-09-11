@@ -32,6 +32,8 @@ function view(row: Machine, game?: GameDef, step?: GameStep<unknown>) {
     id: row.id, gameId: row.gameId, gameName: game?.name ?? row.gameId,
     credits: row.credits.toString(), wager: row.wager.toString(), revision: row.revision,
     inRound: row.inRound, closed: row.status === "closed", available: game?.machine === true,
+    ...(game?.reelDisplay ? { reelDisplay: guardGame(game.id, "view", () => game.reelDisplay!(state)) } : {}),
+    ...(!row.inRound && state !== null && game ? { payout: resolvePayout(game, state, row.wager).toString() } : {}),
     view: step?.view ?? (state !== null && game?.view ? guardGame(game.id, "view", () => game.view!(state)) : null),
     moves: row.inRound && game?.moves ? boundMoves(guardGame(game.id, "moves", () => game.moves!(state))) : [],
     ...(step?.animation ? { animation: {

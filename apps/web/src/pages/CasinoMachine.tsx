@@ -4,6 +4,7 @@ import { api, keys, renderNode } from "@gl3/client";
 import { CasinoMachineResponseSchema, type CasinoMachine, type CasinoGame } from "@gl3/shared";
 import { ErrorText, Money, Panel } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
+import { ReelCabinet } from "./ReelCabinet.js";
 import styles from "./pages.module.css";
 
 const QUERY_KEY = ["casino-machine"];
@@ -55,6 +56,19 @@ export function MachineScreen({ machine, jailed }: { machine: CasinoMachine; jai
     action.mutate({ verb, body: { id: machine.id, revision: machine.revision, ...fields } });
   };
   const betValid = /^[1-9]\d{0,17}$/.test(wager) && BigInt(wager) <= BigInt(machine.credits);
+  if (machine.reelDisplay) return <div>
+    <ReelCabinet machine={machine} display={machine.reelDisplay} busy={busy} animating={animating} jailed={jailed} reducedMotion={reducedMotion} wager={wager} onWager={setWager} send={send}
+      cashout={<div className={styles.actions}>
+        <button type="button" disabled={busy} onClick={() => {
+          if (machine.inRound && !confirmCashout) setConfirmCashout(true);
+          else send("cashout");
+        }}>{confirmCashout ? "Forfeit this bet and cash out credits" : "Cash out & leave"}</button>
+        {confirmCashout ? <button type="button" onClick={() => setConfirmCashout(false)}>Keep playing</button> : null}
+      </div>} />
+    {!machine.available ? <p role="alert">This game is unavailable. You can still cash out.</p> : null}
+    {jailed ? <p role="alert">You can cash out, but cannot play from a cell.</p> : null}
+    <ErrorText error={action.error} />
+  </div>;
   return <Panel title={machine.gameName}>
     <div className={styles.controls}>
       <p className={styles.big} aria-live="polite">{animating ? "Reels spinning…" : <>Machine credits <Money value={machine.credits} /></>}</p>
