@@ -1,4 +1,17 @@
 {
+ "casino:no_such_machine": "The installed casino game does not provide a persistent-credit machine",
+ "casino:no_machine": "The requested machine wallet does not belong to the caller or no longer exists",
+ "casino:machine_closed": "The machine wallet has already been cashed out",
+ "casino:stale_machine": "The supplied machine revision is outdated; reload its current state before retrying",
+ "casino:machine_raise_unsupported": "A machine game tried to increase its fixed wager during a round",
+ "casino:machine_credit_limit": "The spin could exceed the machine credit limit; cash out first",
+ "casino:machine_open": "The player already has an open machine wallet",
+ "casino:own_house": "The player cannot wager at a machine they own",
+ "casino:insufficient_credits": "The machine credits cannot cover the requested wager",
+ "casino:round_open": "The machine already has an unfinished round",
+ "casino:round_finished": "The machine round has already settled",
+ "casino:mixed_escrow": "Legacy house escrow and retained player credits cannot be mixed in the same table hand",
+
  "bank:account_not_opened": "Deposit refused: an account-open fee is configured and the caller has never paid it (no `bank.opened` timer)",
  "bank:amount_must_be_positive": "Deposit/withdraw amount is zero or negative",
  "bank:insufficient_funds": "The caller's balance cannot cover the movement (cash for a deposit or the open fee, bank balance for a withdrawal)",
