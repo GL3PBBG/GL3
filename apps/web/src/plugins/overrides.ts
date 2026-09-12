@@ -1,3 +1,4 @@
+import { AdminInventory } from "../pages/AdminInventory.js";
 import type { ComponentType } from "react";
 import { AdminEconomy } from "../pages/AdminEconomy.js";
 import { Bounties } from "../pages/Bounties.js";
@@ -28,6 +29,7 @@ import { Travel } from "../pages/Travel.js";
  */
 export const PAGE_OVERRIDES: ReadonlyMap<string, ComponentType> = new Map([
   ["core-economy-admin", AdminEconomy],
+  ["inventory-admin", AdminInventory],
   ["crimes.index", Crimes],
   ["combat.index", Combat],
   ["bounties.index", Bounties],

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ChallengeAnswerResponse,
   type ChallengeQuestion,
@@ -247,6 +247,19 @@ export function useReset() {
   });
 }
 
+/** Drop the previous player's data while keeping the session observer connected. */
+async function resetSessionQueries(queryClient: QueryClient, onReset?: () => void): Promise<void> {
+  await queryClient.cancelQueries();
+  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== keys.me()[0] });
+  // Removing `me` disconnects App's existing observer from later login
+  // invalidations. Reset it in place so logout and the next login both notify it.
+  const reset = queryClient.resetQueries({ queryKey: keys.me(), exact: true });
+  // Navigate with any confirmation state before the signed-out catch-all can
+  // mount. The query is already reset, so this cannot show an authed page.
+  onReset?.();
+  await reset;
+}
+
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -260,25 +273,7 @@ export function useLogout() {
         tokenStore.clear();
       }
     },
-    onSettled: async () => {
-      // Cancel first: an authenticated request already in flight would
-      // otherwise resolve after clear() and repopulate the cache with a
-      // logged-in `me` (same race as useDeleteAccount, above).
-      await queryClient.cancelQueries();
-      // Reset before clear, not instead of it: App.tsx is the parent of
-      // <BrowserRouter> and holds its own `useMe()` observer, which only
-      // re-renders when ITS query is notified. queryClient.clear() removes
-      // queries from the cache silently (QueryCache.clear -> remove ->
-      // query.destroy(), which cancels but never dispatches) — App's
-      // observer keeps rendering its last successful `me` and the Shell
-      // stays mounted. Query.reset() calls setState(), which DOES dispatch
-      // to every attached observer; resetQueries() also refetches active
-      // queries, and with the token already cleared that refetch 401s,
-      // flipping App to logged-out. Doing this after clear() would be a
-      // no-op — there would be nothing left in the cache to reset.
-      await queryClient.resetQueries();
-      queryClient.clear();
-    },
+    onSettled: () => resetSessionQueries(queryClient),
   });
 }
 
@@ -290,21 +285,8 @@ export function useChangePassword() {
 }
 
 /**
- * 204 on success; the account is gone server-side, so the local token and
- * every cached query go with it — same shape as useLogout's cleanup.
- *
- * `onDeleted` runs INSTEAD of a call-site `mutate(vars, { onSuccess })`
- * callback, on purpose: `resetQueries()` below notifies App's `me` observer
- * synchronously (before this hook's `onSuccess` resolves), which flips App
- * to its logged-out branch and unmounts the caller (Profile/DangerZone) in
- * the same tick. `MutationObserver#notify` in react-query only invokes a
- * call-site `onSuccess` when `this.hasListeners()` is still true
- * (`mutationObserver.js`: `if (this.#mutateOptions && this.hasListeners())`
- * guards every call-site callback), and React's `useSyncExternalStore`
- * cleanup unsubscribes that listener on unmount — so a call-site `onSuccess`
- * passed to `.mutate()` would silently never fire once the caller is gone.
- * `onDeleted` is invoked here, inside the hook's own `onSuccess`, while the
- * caller is still mounted and before anything can unmount it.
+ * Clear the deleted session before navigating. A hook-level callback survives
+ * the Profile page unmounting when the session query resets.
  */
 export function useDeleteAccount(options?: { onDeleted?: () => void }) {
   const queryClient = useQueryClient();
@@ -313,16 +295,7 @@ export function useDeleteAccount(options?: { onDeleted?: () => void }) {
       api<void>("/api/auth/delete", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: async () => {
       tokenStore.clear();
-      options?.onDeleted?.();
-      // Cancel first: an authenticated request already in flight would
-      // otherwise resolve after clear() and repopulate the cache with a
-      // logged-in `me`.
-      await queryClient.cancelQueries();
-      // Reset before clear — see the matching comment in useLogout. Query.reset()
-      // dispatches to every attached observer (unlike clear(), which is silent),
-      // so App's `me` observer is notified and flips to logged-out here.
-      await queryClient.resetQueries();
-      queryClient.clear();
+      await resetSessionQueries(queryClient, options?.onDeleted);
     },
   });
 }

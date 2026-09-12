@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { useAuth } from "@gl3/client";
+import { Link, Navigate, useLocation } from "react-router-dom";
+import { useAuth, useMe } from "@gl3/client";
 import { ErrorText } from "../components/ui.js";
 import { BrandMark } from "../components/BrandMark.js";
 import styles from "./Login.module.css";
@@ -12,12 +12,17 @@ export function Login(): JSX.Element {
   const [password, setPassword] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
   const auth = useAuth(mode);
+  // Observe the current session directly: router navigation can render this
+  // page before App receives the query notification for logout/deletion.
+  const me = useMe({ enabled: false });
   // Set by Reset.tsx's navigate("/login", { state }) after a successful
   // password change — a one-shot note, not persisted anywhere.
   const location = useLocation();
   const passwordChanged = (location.state as { passwordChanged?: boolean } | null)?.passwordChanged === true;
   // Set by Profile.tsx's DangerZone after a successful account deletion.
   const accountDeleted = (location.state as { accountDeleted?: boolean } | null)?.accountDeleted === true;
+
+  if (me.isSuccess) return <Navigate to="/" replace />;
 
   return (
     <div className={styles.landing}>
