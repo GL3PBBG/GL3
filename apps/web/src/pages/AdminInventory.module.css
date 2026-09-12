@@ -1,0 +1,20 @@
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 0.8rem; margin-bottom: 1rem; }
+.toolbar > label:first-child { flex: 1 1 15rem; }
+.field { display: grid; align-content: start; gap: 0.35rem; min-width: 0; font-size: 0.9rem; }
+.field input, .field select { width: 100%; min-width: 0; box-sizing: border-box; }
+.field small { color: var(--muted); font-size: 0.78rem; line-height: 1.4; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
+.form { display: grid; gap: 1.2rem; }
+.form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.form legend { font-weight: 600; margin-bottom: 0.8rem; }
+.form fieldset:disabled { opacity: 0.7; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.tableWrap { overflow-x: auto; }
+.tableWrap td { vertical-align: top; }
+.tableWrap td:first-child { min-width: 9rem; }
+.summary { color: var(--muted); font-size: 0.85rem; max-width: 28rem; }
+.type { white-space: nowrap; font-size: 0.85rem; }
+.secondary { background: var(--surface-sunk); color: var(--fg); border-color: var(--line); box-shadow: none; }
+.danger { background: var(--surface-sunk); color: var(--danger); border-color: var(--danger); box-shadow: none; }
+.notice { padding: 0.7rem 0.9rem; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.confirm { display: grid; gap: 0.5rem; max-width: 24rem; }

@@ -29,6 +29,45 @@ const auth = () => ({ authorization: `Bearer ${adminToken}` });
 
 describe("inventory admin", () => {
   describe("items", () => {
+    it("returns exact stored values for the item editor", async () => {
+      const id = uuidv7();
+      const effects = { damageMin: 3, damageMax: 9, accuracy: 0, backfireChance: 0, dps: 0.5 };
+      await db.insert(items).values({ id, name: "Editor gun", itemType: "weapon", effects });
+      const result = await app.inject({ method: "GET", url: `/api/admin/inventory/items/${id}`, headers: auth() });
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toEqual({ id, name: "Editor gun", itemType: "weapon", effects });
+      const missing = await app.inject({ method: "GET", url: `/api/admin/inventory/items/${uuidv7()}`, headers: auth() });
+      expect(missing.statusCode).toBe(404);
+      const anonymous = await app.inject({ method: "GET", url: `/api/admin/inventory/items/${id}` });
+      expect(anonymous.statusCode).toBe(401);
+      const member = await registerVerifiedPlayer({ app, redis }, { username: "Member" });
+      const forbidden = await app.inject({ method: "GET", url: `/api/admin/inventory/items/${id}`, headers: { authorization: `Bearer ${member.token}` } });
+      expect(forbidden.statusCode).toBe(403);
+    });
+
+    it("preserves an explicit zero backfire chance when saving the editor", async () => {
+      const create = await app.inject({ method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Safe gun", itemType: "weapon", damageMin: 1, damageMax: 2, backfireChance: 0 } });
+      expect(create.statusCode).toBe(201);
+      const id = create.json().id;
+      const update = await app.inject({ method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, name: "Renamed gun", itemType: "weapon", damageMin: 1, damageMax: 2, backfireChance: "0" } });
+      expect(update.statusCode).toBe(204);
+      const [stored] = await db.select().from(items).where(eq(items.id, id));
+      expect(stored?.effects).toMatchObject({ backfireChance: 0 });
+    });
+
+    it("keeps custom consumable configuration when editing the same effect", async () => {
+      const id = uuidv7();
+      await db.insert(items).values({ id, name: "Custom tonic", itemType: "consumable",
+        effects: { kind: "custom-tonic", duration: 60, bonus: { exp: 12 } } });
+      const update = await app.inject({ method: "POST", url: "/api/admin/inventory/items/update", headers: auth(),
+        payload: { id, name: "Renamed tonic", itemType: "consumable", kind: "custom-tonic", heal: "", energy: "", will: "", brave: "" } });
+      expect(update.statusCode).toBe(204);
+      const [stored] = await db.select().from(items).where(eq(items.id, id));
+      expect(stored?.effects).toEqual({ kind: "custom-tonic", duration: 60, bonus: { exp: 12 } });
+    });
+
     it("creates a weapon whose effects parse through the combat schema", async () => {
       const res = await app.inject({
         method: "POST", url: "/api/admin/inventory/items", headers: auth(),

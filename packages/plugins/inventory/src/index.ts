@@ -458,6 +458,7 @@ function blankable<T extends z.ZodTypeAny>(inner: T): z.ZodEffects<z.ZodOptional
  */
 const WeaponStatFields = {
   accuracy: blankable(z.coerce.number().int().min(0).max(100)),
+  backfireChance: blankable(z.coerce.number().int().min(0).max(100)),
   bulletsPerShot: blankable(z.coerce.number().int().positive()),
   critChance: blankable(z.coerce.number().int().min(0).max(100)),
   /** One of two floats in the vocabulary — hence the `decimal` form field type. */
@@ -626,6 +627,7 @@ function effectsFor(body: ItemStatsBody): unknown {
           damageMin: body.damageMin,
           damageMax: body.damageMax,
           ...(body.accuracy !== undefined && { accuracy: body.accuracy }),
+          ...(body.backfireChance !== undefined && { backfireChance: body.backfireChance }),
           ...(body.bulletsPerShot !== undefined && { bulletsPerShot: body.bulletsPerShot }),
           ...(body.critChance !== undefined && { critChance: body.critChance }),
           ...(body.critMultiplier !== undefined && { critMultiplier: body.critMultiplier }),
@@ -805,6 +807,20 @@ const adminItemListRoute = route({
   },
 });
 
+// Editing needs the stored values, not the formatted table cells (which
+// combine damage bounds and substitute em dashes for absent optional stats).
+const adminItemDetailRoute = route({
+  method: "GET", path: "/api/admin/inventory/items/:id", auth: "admin",
+  params: z.object({ id: z.string().uuid() }),
+  handler: async (ctx, { params }) => {
+    const [item] = await ctx.transaction(async (tx) => tx.db
+      .select({ id: items.id, name: items.name, itemType: items.itemType, effects: items.effects })
+      .from(items).where(eq(items.id, params.id)));
+    if (!item) throw new PluginError("item_not_found", 404);
+    return { status: 200, body: item };
+  },
+});
+
 const adminItemCreateRoute = route({
   method: "POST", path: "/api/admin/inventory/items", auth: "admin",
   body: ItemBodySchema,
@@ -837,7 +853,7 @@ const adminItemUpdateRoute = route({
       // null and equipping refuses — a bricked item, from a valid-looking
       // submit. Refuse it instead.
       const [existing] = await tx.db
-        .select({ itemType: items.itemType })
+        .select({ itemType: items.itemType, effects: items.effects })
         .from(items)
         .where(eq(items.id, body.id));
       if (!existing) return "not_found" as const;
@@ -847,9 +863,18 @@ const adminItemUpdateRoute = route({
       // effects agreeing, and combat degrades a non-melee row in the melee
       // slot to fists) — while an armor or consumable target still refuses.
       if (existing.itemType !== storedItemType(body.itemType)) return "mismatch" as const;
+      // Plugin consumables may carry config that the standard stat editor
+      // does not expose. Keep it when editing the same effect kind.
+      let nextEffects = effects;
+      if (body.itemType === ITEM_TYPE_CONSUMABLE
+        && consumableKind(existing.effects) === consumableKind(effects)
+        && typeof existing.effects === "object" && existing.effects !== null) {
+        const { kind: _kind, heal: _heal, pools: _pools, ...config } = existing.effects as Record<string, unknown>;
+        nextEffects = { ...config, ...(effects as Record<string, unknown>) };
+      }
       await tx.db
         .update(items)
-        .set({ effects, ...(body.name !== undefined && { name: body.name }) })
+        .set({ effects: nextEffects, ...(body.name !== undefined && { name: body.name }) })
         .where(eq(items.id, body.id));
       return "ok" as const;
     });
@@ -993,6 +1018,7 @@ const adminShopDeleteRoute = route({
 const WEAPON_STAT_FORM_FIELDS = [
   { name: "damageMin", label: "Damage min", type: "number" },
   { name: "damageMax", label: "Damage max", type: "number" },
+  { name: "backfireChance", label: "Backfire % (blank = combat default)", type: "number" },
   { name: "accuracy", label: "Accuracy % (blank = combat default)", type: "number" },
   { name: "bulletsPerShot", label: "Bullets per shot (blank = 1)", type: "number" },
   { name: "critChance", label: "Crit chance % (blank = 0)", type: "number" },
@@ -1186,7 +1212,7 @@ export default definePlugin({
   migrations: SHOP_MIGRATIONS,
   routes: [
     listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute,
-    adminItemListRoute, adminItemCreateRoute, adminItemUpdateRoute, adminItemDeleteRoute,
+    adminItemListRoute, adminItemDetailRoute, adminItemCreateRoute, adminItemUpdateRoute, adminItemDeleteRoute,
     adminShopListRoute, adminShopUpsertRoute, adminShopDeleteRoute,
     adminLocationListRoute,
   ],
