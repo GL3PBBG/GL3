@@ -904,6 +904,7 @@ const targetsRoute = route({
     if (player === null) throw new PluginError("unauthorized", 401);
 
     const config = readCombatSettings((key) => ctx.settings.get(key));
+    const cooldownRemaining = await ctx.cooldown.peek("combat.attack", player.id);
 
     return ctx.transaction(async (tx) => {
       const [me] = await tx.db
@@ -911,7 +912,7 @@ const targetsRoute = route({
         .from(playerStats)
         .where(eq(playerStats.playerId, player.id));
       if (!me) throw new PluginError("unauthorized", 401);
-      if (me.locationId === null) return { status: 200, body: { mode: "open" as const, targets: [] } };
+      if (me.locationId === null) return { status: 200, body: { mode: "open" as const, targets: [], cooldownRemaining } };
 
       const [town] = await tx.db
         .select({ combatMode: locations.combatMode })
@@ -932,7 +933,7 @@ const targetsRoute = route({
         // below for the same pre-LIMIT reason the report set does.
         const quoted = await ctx.filters.apply(exposure, { locationId: me.locationId, exposed: [] });
         const visible = new Set([...reported, ...quoted.exposed]);
-        if (visible.size === 0) return { status: 200, body: { mode, targets: [] } };
+        if (visible.size === 0) return { status: 200, body: { mode, targets: [], cooldownRemaining } };
         reportedIds = [...visible];
       }
 
@@ -970,6 +971,7 @@ const targetsRoute = route({
         status: 200,
         body: {
           mode,
+          cooldownRemaining,
           targets: rows.map((row) => {
             // Evaluated in the same order attack's PER-TARGET checks run
             // (hospitalised/jailed here read the ROW's own sentence, same as

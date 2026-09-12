@@ -140,9 +140,25 @@ describe("session navigation", () => {
     expect(token).toBeNull();
   });
 
-  it("preserves the account-deleted notice and allows login afterward", async () => {
+  it.each([false, true])("preserves the account-deleted notice and allows login afterward (slow session refresh: %s)", async (slowRefresh) => {
+    let finishSessionRefresh: ((response: Response) => void) | undefined;
+    if (slowRefresh) {
+      const fetchNormally = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation((input, init) => {
+        if (input === "/api/auth/me" && token === null) {
+          return new Promise<Response>((resolve) => { finishSessionRefresh = resolve; });
+        }
+        return fetchNormally(input, init);
+      });
+    }
     openApp("/profile");
     fireEvent.click(await screen.findByRole("button", { name: "Delete account" }));
+    if (slowRefresh) {
+      await waitFor(() => expect(finishSessionRefresh).toBeDefined());
+      expect(window.location.pathname).toBe("/login");
+      expect(window.history.state.usr).toEqual({ accountDeleted: true });
+      await act(async () => { finishSessionRefresh!(Response.json({ error: "unauthorized" }, { status: 401 })); });
+    }
     await screen.findByText("Your account has been deleted.");
     expect(window.location.pathname).toBe("/login");
     await login();

@@ -38,7 +38,10 @@ export function App(): JSX.Element {
   useGameEvents(me.data?.playerId);
 
   return (
-    <BrowserRouter>
+    // Session query updates are urgent. Keep navigation at the same priority
+    // so signing out cannot overtake the account-deletion redirect and replace
+    // its confirmation state with the generic login redirect.
+    <BrowserRouter useTransitions={false}>
       {me.isLoading ? <Loading /> : <Routes>
         {/* Recovery and legal pages remain accessible with an active session. */}
         <Route path="/forgot" element={<Forgot />} />

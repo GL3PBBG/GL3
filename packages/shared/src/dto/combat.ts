@@ -27,6 +27,8 @@ export const CombatTargetSchema = z.object({
 export type CombatTarget = z.infer<typeof CombatTargetSchema>;
 
 export const CombatTargetListResponseSchema = z.object({
+  /** Remaining time on the caller's shared attack cooldown, in seconds. */
+  cooldownRemaining: z.number().int().nonnegative(),
   /** `underground` towns list only players the caller holds an active detective report on. */
   mode: CombatModeSchema,
   targets: z.array(CombatTargetSchema),

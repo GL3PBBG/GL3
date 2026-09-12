@@ -464,6 +464,13 @@ describe("POST /api/combat/attack/:targetId — legality", () => {
     const remaining = Number(second.headers["retry-after"]);
     expect(remaining).toBeGreaterThan(15);
     expect(remaining).toBeLessThanOrEqual(20);
+    const snapshot = await app.inject({
+      method: "GET", url: "/api/combat/targets",
+      headers: { authorization: `Bearer ${attackerToken}` },
+    });
+    expect(snapshot.statusCode).toBe(200);
+    expect(snapshot.json().cooldownRemaining).toBeGreaterThan(15);
+    expect(snapshot.json().cooldownRemaining).toBeLessThanOrEqual(20);
   });
 
   it("keeps the flat cooldown for a weapon that declares no dps", async () => {
@@ -1086,6 +1093,7 @@ describe("GET /api/combat/targets", () => {
 
     const res = await targets(attacker.token);
     expect(res.statusCode).toBe(200);
+    expect(res.json().cooldownRemaining).toBe(0);
     const list = res.json<{ targets: Target[] }>().targets;
     const row = list.find((t) => t.playerId === victim.id);
     expect(row).toMatchObject({ attackable: true, reason: null, username: victim.username });

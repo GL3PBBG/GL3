@@ -164,12 +164,14 @@ export function useAttack() {
       // player.killed event covers for onlookers, but the attacker's own
       // mutation response is what has to refresh their own view of it here.
       void queryClient.invalidateQueries({ queryKey: keys.me() });
-      void queryClient.invalidateQueries({ queryKey: keys.combatTargets() });
       void queryClient.invalidateQueries({ queryKey: keys.combatLog() });
       void queryClient.invalidateQueries({ queryKey: keys.hospital() });
       // Every shot wears the weapon, hit, miss, or backfire alike.
       void queryClient.invalidateQueries({ queryKey: keys.weaponCondition() });
     },
+    // Refused attacks can also consume the cooldown. Keep the mutation pending
+    // until its remaining time has been refreshed before enabling another shot.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.combatTargets() }),
   });
 }
 

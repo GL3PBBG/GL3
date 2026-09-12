@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CombatScene } from "./CombatScene.js";
 import { Link } from "react-router-dom";
 import type { AttackResponse, CombatTarget, TargetReason, WeaponChoice, WeaponConditionDto } from "@gl3/shared";
-import { formatMoney, useAttack, useCombatLog, useCombatTargets, useHospital, useJail, useMe, useRepairWeapon, useWeaponCondition } from "@gl3/client";
+import { ApiError, formatDuration, formatMoney, useAttack, useCombatLog, useCombatTargets, useCountdowns, useHospital, useJail, useMe, useRepairWeapon, useWeaponCondition } from "@gl3/client";
 import { PlayerLink } from "../components/PlayerLink.js";
-import { Amount, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
+import { Amount, CooldownButton, ErrorText, Loading, Money, Panel, When } from "../components/ui.js";
 import styles from "./pages.module.css";
 
 /**
@@ -129,10 +129,11 @@ function WeaponPanel({ weapon }: { weapon: WeaponConditionDto }): JSX.Element {
  * for the bat is never forced through a lousy gun. A single armed slot needs
  * no choice — the server's precedence fires it — and fists need none either.
  */
-function AttackButtons({ weapon, targetId, disabled, fire }: {
+function AttackButtons({ weapon, targetId, disabled, seconds, fire }: {
   weapon: WeaponConditionDto | undefined;
   targetId: string;
   disabled: boolean;
+  seconds: number;
   fire: (input: { targetId: string; weapon?: WeaponChoice }) => void;
 }): JSX.Element {
   const slot1Armed = weapon?.itemId != null;
@@ -143,20 +144,14 @@ function AttackButtons({ weapon, targetId, disabled, fire }: {
   if (slot1Armed && hasMelee) {
     return (
       <>
-        <button type="button" disabled={disabled} onClick={() => fire({ targetId, weapon: "firearm" })}>
-          {slot1Label}
-        </button>
-        <button type="button" disabled={disabled} onClick={() => fire({ targetId, weapon: "melee" })}>
-          Strike
-        </button>
+        <CooldownButton label={slot1Label} seconds={seconds} disabled={disabled} onClick={() => fire({ targetId, weapon: "firearm" })} />
+        <CooldownButton label="Strike" seconds={seconds} disabled={disabled} onClick={() => fire({ targetId, weapon: "melee" })} />
       </>
     );
   }
   const label = slot1Armed ? slot1Label : hasMelee ? "Strike" : "Punch";
   return (
-    <button type="button" disabled={disabled} onClick={() => fire({ targetId })}>
-      {label}
-    </button>
+    <CooldownButton label={label} seconds={seconds} disabled={disabled} onClick={() => fire({ targetId })} />
   );
 }
 
@@ -171,6 +166,12 @@ export function Combat(): JSX.Element {
   const hospital = useHospital();
   const attack = useAttack();
   const weapon = useWeaponCondition();
+  const { remaining, seed, start } = useCountdowns();
+  const cooldown = remaining["combat.attack"] ?? 0;
+
+  useEffect(() => {
+    seed("combat.attack", targets.data?.cooldownRemaining ?? 0, targets.dataUpdatedAt);
+  }, [targets.data?.cooldownRemaining, targets.dataUpdatedAt, seed]);
 
   if (targets.isLoading) return <Loading what="targets" />;
   if (targets.error) return <ErrorText error={targets.error} />;
@@ -208,13 +209,21 @@ export function Combat(): JSX.Element {
           {selected ? <AttackButtons
             weapon={weapon.data}
             targetId={selected.playerId}
+            seconds={cooldown}
             disabled={blocked || attack.isPending || !selected.attackable || attack.data?.targetKilled === true}
             fire={(input) => {
               setSelectedId(selected.playerId);
               setEncounter((previous) => ({ target: { ...selected }, sequence: (previous?.sequence ?? 0) + 1 }));
-              attack.mutate(input);
+              attack.mutate(input, {
+                onError: (error) => {
+                  if (error instanceof ApiError && error.code === "cooldown" && error.retryAfter !== undefined) {
+                    start("combat.attack", error.retryAfter);
+                  }
+                },
+              });
             }}
           /> : null}
+          {cooldown > 0 ? <span className={styles.meta}>Next attack in {formatDuration(cooldown)}</span> : null}
         </CombatScene>
       </div>
       <ErrorText error={attack.error} />
