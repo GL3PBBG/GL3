@@ -16,13 +16,26 @@ import { CasinoMachineResponseSchema, type CasinoMachine } from "@gl3/shared";
 const { db, sql: connection } = testDb();
 let server: Awaited<ReturnType<typeof bootTestServer>>;
 let installed = true;
+/** A machine game whose deal is the whole round — a slot landing three of a
+ *  kind on the first spin — so `start` comes back `done` and pays 3×. */
+const INSTANT: GameDef<{ wager: bigint }> = {
+  id: "instant", name: "Instant", machine: true, maxPayoutMultiplier: 3, action: FARO.action,
+  start: ({ wager }) => ({ state: { wager }, view: { kind: "text", value: "instant: three in a row" }, done: true }),
+  act: () => { throw new Error("round_finished"); },
+  settle: (state, wager) => { if (wager !== state.wager) throw new Error("wager_mismatch"); return wager * 3n; },
+  view: () => ({ kind: "text", value: "instant: three in a row" }),
+};
 const plugin = definePlugin({ id: "faro", version: "1.0.0", basePaths: ["/api/faro"],
   filters: [on(games, (_ctx, list) => installed ? [...list, { ...FARO, machine: true } as GameDef] : list)],
+});
+// Its own plugin: a game's id must be the declaring plugin's id.
+const instantPlugin = definePlugin({ id: "instant", version: "1.0.0", basePaths: ["/api/instant"],
+  filters: [on(games, (_ctx, list) => [...list, INSTANT as GameDef])],
 });
 beforeAll(async () => {
   await resetDb(db);
   await db.insert(settings).values({ key: "properties.skim_percent", value: "10" });
-  server = await bootTestServer({ plugins: [plugin] });
+  server = await bootTestServer({ plugins: [plugin, instantPlugin] });
 });
 afterAll(async () => { await server?.close(); await connection.end(); });
 let count = 0;
@@ -81,6 +94,22 @@ describe("persistent machine credits", () => {
     const [net] = await db.select({ sum: sql<string>`sum(${transactions.amount})::text` }).from(transactions)
       .where(and(eq(transactions.reason, "casino.faro.credits"), sql`${transactions.playerId} in (${user.playerId}, ${owner!.playerId})`));
     expect(net!.sum).toBe("-30");
+  });
+
+  it("settles a spin the game finishes on the deal: paid at once, no round left open, the next spin is free to go", async () => {
+    const { user } = await setup();
+    let machine = (await request(user.token, "open", { gameId: "instant", credits: "1000", wager: "100" }))!.machine!;
+    machine = (await request(user.token, "spin", { ...stamp(machine), wager: "100" }))!.machine!;
+    // 1000 − 100 staked + 300 returned. `payout` is the whole return, and the
+    // round is over: nothing to act on, nothing to hold.
+    expect(machine).toMatchObject({ credits: "1200", payout: "300", inRound: false, closed: false, moves: [] });
+    await request(user.token, "act", { ...stamp(machine), action: "win" }, 409);
+    // A fresh read agrees — the settle was persisted, not just replied.
+    expect((await request(user.token, ""))!.machine).toMatchObject({ credits: "1200", inRound: false, revision: machine.revision });
+    machine = (await request(user.token, "spin", { ...stamp(machine), wager: "200" }))!.machine!;
+    expect(machine).toMatchObject({ credits: "1600", payout: "600", inRound: false });
+    await request(user.token, "cashout", stamp(machine));
+    expect(await cash(user.playerId)).toBe(9000n + 1600n);
   });
 
   it("serializes simultaneous spins and rejects stale actions from the prior round", async () => {
