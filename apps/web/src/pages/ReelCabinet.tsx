@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CasinoMachine, ReelDisplay } from "@gl3/shared";
-import { renderNode } from "@gl3/client";
+import { renderNode, type CasinoMachineVerb } from "@gl3/client";
 import { Money } from "../components/ui.js";
 import { PageRenderer } from "../plugins/PageRenderer.js";
 import css from "./ReelCabinet.module.css";
@@ -26,7 +26,7 @@ function WinAmount({ amount, animate }: { amount: string; animate: boolean }): J
 export function ReelCabinet({ machine, display, busy, animating, jailed, reducedMotion, wager, onWager, send, cashout }: {
   machine: CasinoMachine; display: ReelDisplay; busy: boolean; animating: boolean;
   jailed: boolean; reducedMotion: boolean; wager: string; onWager: (value: string) => void;
-  send: (verb: string, fields?: Record<string, unknown>) => void; cashout: ReactNode;
+  send: (verb: CasinoMachineVerb, fields?: Record<string, unknown>) => void; cashout: ReactNode;
 }): JSX.Element {
   const seenRevision = useRef(machine.revision);
   const [celebration, setCelebration] = useState<number | null>(null);

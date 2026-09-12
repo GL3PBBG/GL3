@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CasinoLeaveResponseSchema,
   CasinoLobbyResponseSchema,
+  CasinoMachineResponseSchema,
   CasinoSitResponseSchema,
   CasinoStepResponseSchema,
   CasinoTableResponseSchema,
   type CasinoLeaveResponse,
   type CasinoLobbyResponse,
+  type CasinoMachineResponse,
   type CasinoSitResponse,
   type CasinoStepResponse,
   type CasinoTableResponse,
@@ -187,6 +189,47 @@ export function useTableAct() {
       ),
     onSuccess: (table) => { queryClient.setQueryData(keys.casinoTable(), table); },
     // A double raises the stake and a settle pays out, so cash moves here.
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.me() }); },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Machines
+// ---------------------------------------------------------------------------
+
+/**
+ * The caller's open machine session, wherever it is — `{ machine: null }`
+ * when they hold none. A machine outranks both the seat and the lobby: its
+ * credits are the player's cash on loan, so a page with one open shows it
+ * before anything else.
+ */
+export function useCasinoMachine() {
+  return useQuery<CasinoMachineResponse>({
+    queryKey: keys.casinoMachine(),
+    queryFn: async () => CasinoMachineResponseSchema.parse(await api("/api/casino/machine")),
+  });
+}
+
+/** The body every machine verb takes past `open`: the session and the revision it was read at. */
+export type CasinoMachineVerb = "open" | "spin" | "act" | "cashout";
+
+/**
+ * One mutation for all four machine verbs. Every reply is the whole machine,
+ * written straight into the machine query so the reels the player is looking
+ * at are the ones the server settled; an error invalidates instead, because a
+ * `stale_machine` 409 means the cached revision is the one that is wrong.
+ * Cash moves on `open` (credits in) and `cashout` (credits back), so `me` is
+ * refreshed whichever verb ran.
+ */
+export function useCasinoMachineAction() {
+  const queryClient = useQueryClient();
+  return useMutation<CasinoMachineResponse, Error, { verb: CasinoMachineVerb; body: Record<string, unknown> }>({
+    mutationFn: async ({ verb, body }) =>
+      CasinoMachineResponseSchema.parse(
+        await api(`/api/casino/machine/${verb}`, { method: "POST", body: JSON.stringify(body) }),
+      ),
+    onSuccess: (response) => { queryClient.setQueryData(keys.casinoMachine(), response); },
+    onError: () => { void queryClient.invalidateQueries({ queryKey: keys.casinoMachine() }); },
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: keys.me() }); },
   });
 }
