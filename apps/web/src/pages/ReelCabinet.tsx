@@ -36,8 +36,8 @@ export function ReelCabinet({ machine, display, busy, animating, jailed, reduced
   useEffect(() => {
     if (animating || seenRevision.current === machine.revision) return;
     seenRevision.current = machine.revision;
-    if (!machine.inRound && profit > 0n) setCelebration(machine.revision);
-  }, [animating, machine.revision, machine.inRound, profit]);
+    if (!machine.inRound && payout > 0n) setCelebration(machine.revision);
+  }, [animating, machine.revision, machine.inRound, payout]);
   useEffect(() => {
     if (celebration === null) return;
     const timer = window.setTimeout(() => setCelebration(null), bigWin ? 3600 : 2600);

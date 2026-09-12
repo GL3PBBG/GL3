@@ -59,9 +59,35 @@ describe("interactive reel cabinet", () => {
     const resumed = render(createElement(ReelCabinet, { ...props, machine: won }));
     expect(resumed.container.querySelector("[data-win-effect]")).toBeNull();
   });
-  it.each(["0", "100"])("does not celebrate a loss or break-even return (%s)", payout => {
+  it("celebrates a single-cherry stake return after the reveal, then expires without replay on reload", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "requestAnimationFrame", "cancelAnimationFrame"] });
     const { rerender, container } = render(createElement(ReelCabinet, props));
-    rerender(createElement(ReelCabinet, { ...props, machine: { ...machine, revision: 2, inRound: false, payout, moves: [] } }));
+    const won = { ...machine, revision: 2, inRound: false, payout: "100", credits: "1000", moves: [] };
+    const settledDisplay = { ...display, collectable: "0", reels: display.reels.map(reel => ({ ...reel, held: false, holdMove: null })) };
+    const settledProps = { ...props, machine: won, display: settledDisplay, reducedMotion: false };
+    rerender(createElement(ReelCabinet, { ...settledProps, animating: true, busy: true }));
+    expect(container.querySelector("[data-win-effect]")).toBeNull();
+    rerender(createElement(ReelCabinet, settledProps));
+    const effect = container.querySelector("[data-win-effect]");
+    expect(effect).toBeTruthy();
+    expect(effect?.querySelectorAll("i")).toHaveLength(16);
+    expect(container.querySelector('[data-big-win="true"]')).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Your stake is back");
+    for (const hold of screen.getAllByRole("button", { name: /Hold reel/ })) {
+      expect(hold).toHaveProperty("disabled", true);
+      expect(hold.getAttribute("aria-pressed")).toBe("false");
+    }
+    expect(screen.getByRole("button", { name: "Spin" })).toHaveProperty("disabled", false);
+    act(() => vi.advanceTimersByTime(1200));
+    expect(effect?.querySelector("strong")?.textContent).toBe("$100");
+    act(() => vi.advanceTimersByTime(1401));
+    expect(container.querySelector("[data-win-effect]")).toBeNull();
+    cleanup();
+    expect(render(createElement(ReelCabinet, settledProps)).container.querySelector("[data-win-effect]")).toBeNull();
+  });
+  it("does not celebrate a loss", () => {
+    const { rerender, container } = render(createElement(ReelCabinet, props));
+    rerender(createElement(ReelCabinet, { ...props, machine: { ...machine, revision: 2, inRound: false, payout: "0", moves: [] } }));
     expect(container.querySelector("[data-win-effect]")).toBeNull();
   });
   it("keeps another spin available during celebration and stops the effect when the next round starts", () => {
