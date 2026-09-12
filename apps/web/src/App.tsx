@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useMe, useGameEvents } from "@gl3/client";
 import { Shell } from "./components/Shell.js";
 import { Loading } from "./components/ui.js";
@@ -37,29 +37,10 @@ export function App(): JSX.Element {
   // It lives above the router so navigation never drops the socket.
   useGameEvents(me.data?.playerId);
 
-  if (me.isLoading) return <Loading />;
-
   return (
     <BrowserRouter>
-      <Routes>
-        {/*
-          Hoisted above the me.isSuccess branch, not inside either side of it:
-          a password-reset link is followed from an email client, and the
-          browser it opens in may well still hold a perfectly valid session
-          from before the player forgot their password — GET /api/auth/me
-          succeeds for ANY valid session regardless of verification state, so
-          "logged in" is not "mid-reset-flow". These must be reachable no
-          matter which branch below is live, or a logged-in visitor's /reset
-          link falls through Shell's own catch-all to NotFound. /login joins
-          them for a narrower reason: account deletion resets the query cache
-          before navigating, and that reset can flip `me.isSuccess` (and this
-          whole re-render) to false in the SAME tick the navigate lands on
-          /login — if /login lived only in the logged-out branch below, the
-          still-authenticated branch active a frame earlier would answer
-          /login with its own `*` -> NotFound instead. A logged-in visitor
-          who lands on /login this way simply sees the login form, which is
-          harmless.
-        */}
+      {me.isLoading ? <Loading /> : <Routes>
+        {/* Recovery and legal pages remain accessible with an active session. */}
         <Route path="/forgot" element={<Forgot />} />
         <Route path="/reset" element={<Reset />} />
         <Route path="/terms" element={<Legal doc="terms" />} />
@@ -124,19 +105,9 @@ export function App(): JSX.Element {
             </Route>
           </>
         ) : (
-          <>
-            {/*
-              No token (or an expired/invalid one — /me answered 401). /login
-              is declared above, not here — this branch keeps only its
-              catch-all, so any other URL a logged-out visitor lands on still
-              shows something useful rather than a blank router miss.
-              /forgot, /reset, /terms and /privacy are declared above too —
-              this branch no longer needs any of them.
-            */}
-            <Route path="*" element={<Login />} />
-          </>
+          <Route path="*" element={<Navigate to="/login" replace />} />
         )}
-      </Routes>
+      </Routes>}
     </BrowserRouter>
   );
 }
