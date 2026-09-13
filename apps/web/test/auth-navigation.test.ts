@@ -86,11 +86,20 @@ async function login(password = "password") {
   fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 }
 
+async function expectPlayingAs(username: string) {
+  // Session observers and the effect-driven redirect can settle separately.
+  // Require the destination and account together, not an intermediate DOM match.
+  await waitFor(() => {
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByText(`Playing as ${username}`)).toBeTruthy();
+  });
+}
+
 describe("session navigation", () => {
   it.each([false, true])("logs out and immediately signs in without a refresh (network failure: %s)", async (failure) => {
     logoutFails = failure;
     openApp("/");
-    await screen.findByText("Playing as Alice");
+    await expectPlayingAs("Alice");
     queryClient.setQueryData(["private-player-data"], { secret: "Alice's data" });
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
     await screen.findByRole("button", { name: "Log in" });
@@ -98,8 +107,7 @@ describe("session navigation", () => {
     expect(token).toBeNull();
     expect(queryClient.getQueryData(["private-player-data"])).toBeUndefined();
     await login();
-    await screen.findByText("Playing as Bob");
-    expect(window.location.pathname).toBe("/");
+    await expectPlayingAs("Bob");
   });
 
   it("redirects a signed-out deep link to login and enters the game after login", async () => {
@@ -108,8 +116,7 @@ describe("session navigation", () => {
     await screen.findByRole("button", { name: "Log in" });
     expect(window.location.pathname).toBe("/login");
     await login();
-    await screen.findByText("Playing as Bob");
-    expect(window.location.pathname).toBe("/");
+    await expectPlayingAs("Bob");
   });
 
   it("enters the game after registration", async () => {
@@ -121,14 +128,12 @@ describe("session navigation", () => {
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "password" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
-    await screen.findByText("Playing as Bob");
-    expect(window.location.pathname).toBe("/");
+    await expectPlayingAs("Bob");
   });
 
   it("redirects an existing session away from login", async () => {
     openApp("/login");
-    await screen.findByText("Playing as Alice");
-    expect(window.location.pathname).toBe("/");
+    await expectPlayingAs("Alice");
   });
 
   it("keeps failed login on the login page", async () => {
@@ -162,12 +167,12 @@ describe("session navigation", () => {
     await screen.findByText("Your account has been deleted.");
     expect(window.location.pathname).toBe("/login");
     await login();
-    await screen.findByText("Playing as Bob");
+    await expectPlayingAs("Bob");
   });
 
   it("discards an authenticated response that arrives after logout", async () => {
     openApp("/");
-    await screen.findByText("Playing as Alice");
+    await expectPlayingAs("Alice");
     let finishRequest!: (response: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((resolve) => { finishRequest = resolve; }));
     let refetch!: Promise<void>;
@@ -181,6 +186,6 @@ describe("session navigation", () => {
     await waitFor(() => expect(queryClient.getQueryData(keys.me())).toBeUndefined());
     expect(window.location.pathname).toBe("/login");
     await login();
-    await screen.findByText("Playing as Bob");
+    await expectPlayingAs("Bob");
   });
 });

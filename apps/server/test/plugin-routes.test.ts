@@ -22,6 +22,18 @@ const testPlugin = definePlugin({
   basePaths: ["/api/rt"],
   routes: [
     route({
+      method: "POST", path: "/api/rt/raw", auth: "public", rawBody: true,
+      handler: async (_ctx, { rawBody, headers }) => ({ status: 200, body: {
+        raw: rawBody ? Buffer.from(rawBody).toString("base64") : null,
+        signature: headers?.["stripe-signature"],
+      } }),
+    }),
+    route({
+      method: "POST", path: "/api/rt/json", auth: "public",
+      body: z.object({ value: z.string() }),
+      handler: async (_ctx, { body, rawBody }) => ({ status: 200, body: { ...body, hasRawBody: rawBody !== undefined } }),
+    }),
+    route({
       method: "GET",
       path: "/api/rt/open",
       auth: "public",
@@ -115,6 +127,27 @@ afterAll(async () => {
 });
 
 describe("plugin routes", () => {
+  it("preserves webhook bytes and signature headers without JSON parsing", async () => {
+    const payload = ' { "value" : "café ☃", "extra": true }\r\n';
+    const res = await app.inject({ method: "POST", url: "/api/rt/raw", payload,
+      headers: { "content-type": "application/json", "Stripe-Signature": "t=123,v1=abc" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ raw: Buffer.from(payload).toString("base64"), signature: "t=123,v1=abc" });
+  });
+  it("leaves malformed bytes untouched for signature checks and enforces the body limit", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/rt/raw", payload: '{invalid', headers: { "content-type": "application/json" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().raw).toBe(Buffer.from('{invalid').toString("base64"));
+    const oversized = await app.inject({ method: "POST", url: "/api/rt/raw", payload: 'x'.repeat(1024 * 1024 + 1), headers: { "content-type": "application/json" } });
+    expect(oversized.statusCode).toBe(413);
+  });
+  it("retains ordinary JSON parsing and schema validation outside raw-body routes", async () => {
+    const ok = await app.inject({ method: "POST", url: "/api/rt/json", payload: { value: "normal" } });
+    expect(ok.json()).toEqual({ value: "normal", hasRawBody: false });
+    const invalid = await app.inject({ method: "POST", url: "/api/rt/json", payload: { value: 123 } });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it("serves a public route without a token", async () => {
     const res = await app.inject({ method: "GET", url: "/api/rt/open" });
     expect(res.statusCode).toBe(200);
