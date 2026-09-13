@@ -154,6 +154,18 @@ inverting an explicit lock order elsewhere) — hence the rule.
   economy-mutating worker an idempotency key tied to `job.id` (BullMQ is
   at-least-once).
 
+## Signed webhooks
+
+With `@gl3/plugin-sdk` 1.0.10 and a server build containing raw-body route support,
+set `rawBody: true` on a webhook route. The handler receives the original
+`Uint8Array` in `input.rawBody` and lowercase HTTP headers in `input.headers`.
+The route's `body` is also the raw buffer; omit a JSON body schema and verify the
+signature before parsing event data. Do not reconstruct signed payloads with
+`JSON.stringify`. These transport fields are optional for direct/test calls.
+
+Raw parsing is scoped to the opted-in route and retains Fastify's body-size
+limit. Other routes keep their existing JSON parsing and Zod validation.
+
 ## Tests
 
 See [Testing conventions](/guides/testing-conventions). Every plugin lands with a

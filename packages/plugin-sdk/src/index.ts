@@ -64,7 +64,7 @@ export {
   type AssetSlot,
   SINGLETON_ENTITY_ID,
 } from "./manifest.js";
-export { route, type PluginRoute, type RouteDef, type RouteResult } from "./route.js";
+export { route, type PluginRoute, type RouteDef, type RouteResult, type RouteTransport } from "./route.js";
 export { hasPermission } from "./authz.js";
 export {
   settlePool,

@@ -6,6 +6,13 @@ export interface RouteResult {
   body?: unknown;
 }
 
+/** Optional transport data supplied by the HTTP loader, not direct/test calls. */
+export interface RouteTransport {
+  readonly headers?: Readonly<Record<string, string | string[] | undefined>>;
+  /** Original bytes, only for routes that opt into rawBody. Never reserialized JSON. */
+  readonly rawBody?: Uint8Array;
+}
+
 export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny, Q extends z.ZodTypeAny> {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
@@ -19,6 +26,8 @@ export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny, Q exte
    * the loader answers 423 + `retry-after`.
    */
   accessInHospital?: boolean;
+  /** Deliver the body as untouched bytes for webhook signature verification. */
+  rawBody?: boolean;
   params?: P;
   body?: B;
   /**
@@ -31,7 +40,7 @@ export interface RouteDef<P extends z.ZodTypeAny, B extends z.ZodTypeAny, Q exte
   query?: Q;
   handler: (
     ctx: PluginCtx,
-    input: { params: z.infer<P>; body: z.infer<B>; query: z.infer<Q> },
+    input: { params: z.infer<P>; body: z.infer<B>; query: z.infer<Q> } & RouteTransport,
   ) => Promise<RouteResult>;
 }
 
@@ -48,10 +57,11 @@ export interface PluginRoute {
   auth: "player" | "public" | "admin";
   accessInJail: boolean;
   accessInHospital: boolean;
+  rawBody?: boolean;
   params: z.ZodTypeAny;
   body: z.ZodTypeAny;
   query: z.ZodTypeAny;
-  handler(ctx: PluginCtx, input: { params: unknown; body: unknown; query: unknown }): Promise<RouteResult>;
+  handler(ctx: PluginCtx, input: { params: unknown; body: unknown; query: unknown } & RouteTransport): Promise<RouteResult>;
 }
 
 export function route<
@@ -65,6 +75,7 @@ export function route<
     auth: def.auth ?? "player",
     accessInJail: def.accessInJail ?? true,
     accessInHospital: def.accessInHospital ?? true,
+    ...(def.rawBody === undefined ? {} : { rawBody: def.rawBody }),
     params: def.params ?? z.unknown(),
     body: def.body ?? z.unknown(),
     query: def.query ?? z.unknown(),

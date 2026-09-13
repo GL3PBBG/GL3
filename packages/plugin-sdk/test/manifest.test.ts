@@ -200,6 +200,12 @@ describe("adminPages", () => {
 });
 
 describe("route auth admin", () => {
+  it("route() preserves the opt-in raw body mode without enabling it by default", () => {
+    const base = { method: "POST" as const, path: "/api/test/hook", handler: async () => ({ status: 200 }) };
+    expect(route({ ...base, rawBody: true }).rawBody).toBe(true);
+    expect(route(base).rawBody).toBeUndefined();
+  });
+
   it("route() accepts auth admin and carries it through", () => {
     const r = route({
       method: "GET", path: "/api/admin/hello/things", auth: "admin",

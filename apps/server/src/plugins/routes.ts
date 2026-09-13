@@ -2,7 +2,7 @@ import type { PlayerSnapshot, PluginManifest } from "@gl3/plugin-sdk";
 import { isPluginError, hasPermission } from "@gl3/plugin-sdk";
 import { dumpRecentQueries, type Db } from "../db/client.js";
 import { eq } from "drizzle-orm";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from "fastify";
 import { players, playerStats, roleModuleAccess } from "../db/schema/index.js";
 import { settleHospital } from "../game/hospital/status.js";
 import { createOutboxDelivery } from "../bus/outbox.js";
@@ -22,7 +22,7 @@ export function registerPluginRoutes(
     for (const pluginRoute of manifest.routes) {
       const preHandler = pluginRoute.auth === "public" ? [] : [app.requireAuth];
 
-      app.route({
+      const routeOptions: RouteOptions = {
         method: pluginRoute.method,
         url: pluginRoute.path,
         preHandler,
@@ -90,7 +90,11 @@ export function registerPluginRoutes(
           });
 
           try {
-            const result = await pluginRoute.handler(ctx, { params: params.data, body: body.data, query: query.data });
+            const result = await pluginRoute.handler(ctx, {
+              params: params.data, body: body.data, query: query.data,
+              headers: request.headers,
+              ...(pluginRoute.rawBody && Buffer.isBuffer(request.body) ? { rawBody: request.body } : {}),
+            });
             return result.body === undefined
               ? await reply.code(result.status).send()
               : await reply.code(result.status).send(result.body);
@@ -157,7 +161,19 @@ export function registerPluginRoutes(
             throw error;
           }
         },
-      });
+      };
+      if (pluginRoute.rawBody) {
+        // Encapsulate the parser so ordinary plugin and core routes retain
+        // their JSON validation. Fastify still enforces its body-size limit.
+        void app.register((scoped, _options, done) => {
+          scoped.removeAllContentTypeParsers();
+          scoped.addContentTypeParser("*", { parseAs: "buffer" }, (_request, bytes, parsed) => parsed(null, bytes));
+          scoped.route(routeOptions);
+          done();
+        });
+      } else {
+        app.route(routeOptions);
+      }
     }
   }
 }
