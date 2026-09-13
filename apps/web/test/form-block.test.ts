@@ -1,3 +1,4 @@
+import { checkoutDestination } from "../src/plugins/checkout.js";
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { createElement } from "react";
@@ -132,5 +133,16 @@ describe("action success notifies the host", () => {
     fireEvent.click(screen.getByRole("button", { name: "Train" }));
     await waitFor(() => { expect(screen.getByRole("alert")).toBeTruthy(); });
     expect(onActionSuccess).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("checkout destinations", () => {
+  it("accepts hosted Stripe checkout and ignores normal action responses", () => {
+    expect(checkoutDestination({ checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_123#secret" })).toBe("https://checkout.stripe.com/c/pay/cs_test_123#secret");
+    expect(checkoutDestination({ ok: true })).toBeNull();
+  });
+  it.each(["javascript:alert(1)", "https://checkout.stripe.com.evil.test/pay", "https://checkout.stripe.com@evil.test", "http://checkout.stripe.com/pay", "https://checkout.stripe.com:8443/pay", "https://user@checkout.stripe.com/pay"])("rejects %s", checkoutUrl => {
+    expect(() => checkoutDestination({ checkoutUrl })).toThrow();
   });
 });

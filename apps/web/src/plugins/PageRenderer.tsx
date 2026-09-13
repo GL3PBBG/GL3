@@ -1,3 +1,4 @@
+import { checkoutDestination } from "./checkout.js";
 import { Fragment, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FormValuesResponseSchema, TableRowsResponseSchema } from "@gl3/shared";
@@ -784,11 +785,13 @@ export function PageRenderer({ instructions, onActionSuccess, animateCards = fal
       // The client sets `content-type: application/json` iff `init.body` is
       // present, and the server answers a bodyless request carrying that header
       // with 400 FST_ERR_CTP_EMPTY_JSON_BODY — so a `button` (no body) must not
-      // pass the key at all. Nothing reads the response.
-      await api<unknown>(path, {
+      // pass the key at all. Checkout actions return a hosted destination.
+      const result = await api<unknown>(path, {
         method,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      const checkout = checkoutDestination(result);
+      if (checkout) window.location.assign(checkout);
       // Any successful action may have mutated table-backed data — bump
       // the signal so every TableBlock on this page re-fetches.
       setRefetchSignal((n) => n + 1);
