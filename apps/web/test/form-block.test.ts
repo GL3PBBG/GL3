@@ -1,3 +1,5 @@
+import { ViewNodeDtoSchema } from "@gl3/shared";
+import { renderNode } from "@gl3/client";
 import { checkoutDestination } from "../src/plugins/checkout.js";
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
@@ -144,5 +146,28 @@ describe("checkout destinations", () => {
   });
   it.each(["javascript:alert(1)", "https://checkout.stripe.com.evil.test/pay", "https://checkout.stripe.com@evil.test", "http://checkout.stripe.com/pay", "https://checkout.stripe.com:8443/pay", "https://user@checkout.stripe.com/pay"])("rejects %s", checkoutUrl => {
     expect(() => checkoutDestination({ checkoutUrl })).toThrow();
+  });
+});
+
+describe("product list choices", () => {
+  it("shows all products with optional crossed-out prices and submits the selected pack", async () => {
+    const fetch = stubFetch((_url, init) => init?.method === "POST" ? { ok: true } : { rows: [
+      { id: "small", name: "Starter", description: "100 points", price: "€5.00", original: "€9.99" },
+      { id: "large", name: "Big pack", description: "500 points", price: "€20.00" },
+    ] });
+    mount(renderNode(ViewNodeDtoSchema.parse({ kind: "form", action: "POST /api/purchases", submitLabel: "Continue to checkout",
+      fields: [{ name: "packId", label: "Points pack", type: "select", presentation: "list",
+        optionsSource: "GET /api/packs", valueKey: "id", labelKey: "name", descriptionKey: "description",
+        priceKey: "price", originalPriceKey: "original", allowEmpty: false, prefillForm: false }] }), {}));
+    const choices = await screen.findAllByRole("radio");
+    expect(choices).toHaveLength(2);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText("€9.99").tagName).toBe("S");
+    expect(screen.getByText("€5.00").tagName).toBe("STRONG");
+    fireEvent.click(choices[1]!);
+    fireEvent.click(screen.getByText("Continue to checkout"));
+    await waitFor(() => { expect(fetch).toHaveBeenCalledWith("/api/purchases", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ packId: "large" }),
+    })); });
   });
 });

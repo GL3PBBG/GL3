@@ -327,6 +327,34 @@ function SelectField({ field, value, onChange, refetchSignal }: {
 
   if (error !== null) return <ErrorText error={error} />;
 
+  if (field.presentation === "list") {
+    return <div role="radiogroup" aria-label={field.label} className={styles.productOptions}>
+      {loading ? <p role="status">Loading…</p> : rows.length === 0 ? <p>No products available.</p> : null}
+      {field.allowEmpty && <label className={styles.productOption}>
+        <input type="radio" name={field.name} checked={value === ""} onChange={() => { onChange("", null); }} />
+        <span>None</span>
+      </label>}
+      {!loading && rows.map(row => {
+        const optionValue = row[field.valueKey] ?? "";
+        const originalPrice = field.originalPriceKey ? row[field.originalPriceKey] : "";
+        const price = field.priceKey ? row[field.priceKey] : "";
+        const description = field.descriptionKey ? row[field.descriptionKey] : "";
+        return <label key={optionValue} className={styles.productOption}>
+          <input type="radio" name={field.name} value={optionValue} required={!field.allowEmpty}
+            checked={value === optionValue} onChange={() => { onChange(optionValue, row); }} />
+          <span className={styles.productDetails}>
+            <strong>{row[field.labelKey] ?? optionValue}</strong>
+            {description && <span>{description}</span>}
+          </span>
+          <span className={styles.productPrice}>
+            {originalPrice && <s aria-label={`Original price ${originalPrice}`}>{originalPrice}</s>}
+            {price && <strong>{price}</strong>}
+          </span>
+        </label>;
+      })}
+    </div>;
+  }
+
   const options = rows.map((row) => ({
     value: row[field.valueKey] ?? "",
     label: row[field.labelKey] ?? row[field.valueKey] ?? "",
@@ -552,8 +580,9 @@ function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSig
         // constant off the field itself. Rendering an
         // `<input type="hidden">` would only add a second, unread copy.
         if (field.type === "hidden") return null;
+        const FieldWrapper = field.type === "select" && field.presentation === "list" ? "div" : "label";
         return (
-          <label key={field.name} className={styles.field}>
+          <FieldWrapper key={field.name} className={styles.field}>
             <span className={styles.meta}>{field.label}</span>
             {field.type === "select" ? (
               <SelectField
@@ -603,7 +632,7 @@ function FormBlock({ index, inst, formValues, setFormValues, pending, refetchSig
                 }}
               />
             )}
-          </label>
+          </FieldWrapper>
         );
       })}
       <button type="submit" disabled={pending}>{inst.submitLabel}</button>

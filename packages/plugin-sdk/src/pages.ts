@@ -115,6 +115,10 @@ const leafOptions = [
               name: z.string(),
               label: z.string(),
               type: z.literal("select"),
+              presentation: z.literal("list").optional(),
+              descriptionKey: z.string().optional(),
+              priceKey: z.string().optional(),
+              originalPriceKey: z.string().optional(),
               // Same rule and same reason as `table.source`: options render on
               // mount, so the fetch must never mutate, and the loader's
               // containment pass treats it as a view action.

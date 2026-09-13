@@ -13,7 +13,7 @@
 export type FormField =
   | { name: string; label: string; type: "text" | "number" | "decimal" | "money" | "password"; min?: number; max?: number }
   | { name: string; type: "hidden"; value: string }
-  | { name: string; label: string; type: "select"; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean; prefillForm: boolean };
+  | { name: string; label: string; type: "select"; presentation?: "list"; descriptionKey?: string; priceKey?: string; originalPriceKey?: string; optionsSource: string; valueKey: string; labelKey: string; allowEmpty: boolean; prefillForm: boolean };
 
 export type RenderInstruction =
   | { kind: "text"; value: string }
@@ -163,6 +163,10 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
           name,
           label,
           type: "select",
+          ...(f.presentation === "list" ? { presentation: "list" as const } : {}),
+          ...(typeof f.descriptionKey === "string" ? { descriptionKey: f.descriptionKey } : {}),
+          ...(typeof f.priceKey === "string" ? { priceKey: f.priceKey } : {}),
+          ...(typeof f.originalPriceKey === "string" ? { originalPriceKey: f.originalPriceKey } : {}),
           optionsSource: String(f.optionsSource),
           valueKey: String(f.valueKey),
           labelKey: String(f.labelKey),

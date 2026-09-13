@@ -176,3 +176,9 @@ test file registered in `vitest.workspace.ts`'s explicit include list.
 Before a plugin goes to the registry it passes the hand audit in
 [Review a plugin](/guides/review-a-plugin) — write against its checklist from
 the start rather than discovering the lock-order rules at review time.
+
+Select fields may opt into `presentation: "list"` for visible radio choices.
+`descriptionKey`, `priceKey`, and `originalPriceKey` name optional string columns
+in the existing options response; the web renderer crosses out the original price.
+These are display fields only and do not change the selected value submitted to
+the action. This requires shared 1.0.19, SDK 1.0.11 and a web image with list support.

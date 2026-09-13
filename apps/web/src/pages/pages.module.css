@@ -239,3 +239,19 @@
 /* A keyValue label carrying a pool glyph (PageRenderer's PoolLabel). */
 .iconLabel { display: inline-flex; align-items: center; gap: 0.3rem; }
 .iconLabel svg { color: color-mix(in oklab, var(--accent) 65%, var(--muted)); flex: none; }
+
+
+.productOptions { display: grid; gap: 0.75rem; }
+.productOption {
+  display: flex; align-items: center; gap: 1rem; padding: 1rem;
+  border: 1px solid var(--border, #454545); border-radius: 8px; cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.productOption:hover, .productOption:has(input:checked) {
+  border-color: var(--accent, #c9a65c); background: rgba(201, 166, 92, 0.08);
+}
+.productOption:focus-within { outline: 2px solid var(--accent, #c9a65c); outline-offset: 2px; }
+.productOption input[type="radio"] { width: auto; flex: 0 0 auto; accent-color: var(--accent, #c9a65c); }
+.productDetails { display: grid; gap: 0.25rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.productPrice { display: grid; gap: 0.25rem; text-align: right; }
+.productPrice s { opacity: 0.65; font-size: 0.875em; }
