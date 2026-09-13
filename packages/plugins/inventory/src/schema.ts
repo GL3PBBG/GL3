@@ -42,6 +42,9 @@ export const playerStats = pgTable("player_stats", {
   playerId: uuid("player_id").primaryKey(),
   cash: bigint("cash", { mode: "bigint" }).notNull(),
   exp: bigint("exp", { mode: "bigint" }).notNull(),
+  // The level-model progression figure (core migration 0016); the equip
+  // route's firearm gate reads it on a routed boot, `exp` on an exp boot.
+  level: integer("level").notNull(),
   health: integer("health").notNull(),
   /** Per-player cap override (core migration 0017); NULL = the rank's cap. */
   healthMax: integer("health_max"),

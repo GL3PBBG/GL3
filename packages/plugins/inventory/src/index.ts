@@ -187,6 +187,7 @@ const equipRoute = route({
       const [stats] = await tx.db
         .select({
           exp: playerStats.exp,
+          level: playerStats.level,
           weaponItemId: playerStats.weaponItemId,
           weaponMeleeItemId: playerStats.weaponMeleeItemId,
           armorItemId: playerStats.armorItemId,
@@ -227,7 +228,17 @@ const equipRoute = route({
           }
           const parsed = WeaponEffectsSchema.safeParse(owned.effects);
           if (!parsed.success) throw new PluginError("wrong_slot", 400);
-          if (BigInt(parsed.data.minRankExp) > stats.exp) {
+          // The requirement gate, branched on the boot's progression model
+          // exactly as combat's newbie gate is (`isNewbie`). On a routed
+          // boot exp is within-level and resets at every level-up, so the
+          // exp figure is not a progression measure there at all — only
+          // `minLevel` against `player_stats.level` is. The other model's
+          // figure is stored but never consulted.
+          if (ctx.progression === "level") {
+            if (parsed.data.minLevel > stats.level) {
+              throw new PluginError("insufficient_level", 409, { required: parsed.data.minLevel });
+            }
+          } else if (BigInt(parsed.data.minRankExp) > stats.exp) {
             throw new PluginError("rank_too_low", 409);
           }
         } else if (slot === "weapon-melee") {
@@ -465,6 +476,7 @@ const WeaponStatFields = {
   critMultiplier: blankable(z.coerce.number().min(1)),
   armorPierce: blankable(z.coerce.number().int().nonnegative()),
   minRankExp: blankable(z.coerce.number().int().nonnegative()),
+  minLevel: blankable(z.coerce.number().int().nonnegative()),
   /**
    * The other float, and the one that paces the attack cooldown: combat waits
    * the weapon's average damage divided by this. Positive, so a 400 here is
@@ -633,6 +645,7 @@ function effectsFor(body: ItemStatsBody): unknown {
           ...(body.critMultiplier !== undefined && { critMultiplier: body.critMultiplier }),
           ...(body.armorPierce !== undefined && { armorPierce: body.armorPierce }),
           ...(body.minRankExp !== undefined && { minRankExp: body.minRankExp }),
+          ...(body.minLevel !== undefined && { minLevel: body.minLevel }),
           ...(body.dps !== undefined && { dps: body.dps }),
         });
       case FORM_TYPE_MELEE:
@@ -730,7 +743,7 @@ function poolDeltaCell(parsed: Record<string, unknown>): string {
 function statCells(itemType: string, effects: unknown): Record<string, string> {
   const blank = {
     damage: "", accuracy: "", bulletsPerShot: "", critChance: "",
-    critMultiplier: "", armorPierce: "", minRankExp: "", dps: "", power: "",
+    critMultiplier: "", armorPierce: "", minRankExp: "", minLevel: "", dps: "", power: "",
     armor: "", heal: "", effect: "", pools: "",
   };
   const parsed = readEffects(itemType, effects);
@@ -764,6 +777,7 @@ function statCells(itemType: string, effects: unknown): Record<string, string> {
         critMultiplier: String(w.critMultiplier),
         armorPierce: String(w.armorPierce),
         minRankExp: String(w.minRankExp),
+        minLevel: String(w.minLevel),
         // Em dash, like `accuracy`: absent is not zero. An unpaced weapon
         // keeps the flat cooldown, and showing "0" would read as instant.
         dps: w.dps === undefined ? "—" : String(w.dps),
@@ -1024,12 +1038,16 @@ const WEAPON_STAT_FORM_FIELDS = [
   { name: "critChance", label: "Crit chance % (blank = 0)", type: "number" },
   { name: "critMultiplier", label: "Crit multiplier (blank = 1)", type: "decimal" },
   { name: "armorPierce", label: "Armor pierce (blank = 0)", type: "number" },
-  { name: "minRankExp", label: "Min rank exp (blank = 0)", type: "number" },
+  // One requirement figure per progression model; the loader prunes the
+  // other model's field from this boot's form (progression-view.ts), the
+  // same gate combat's newbie thresholds and ranks' columns use.
+  { name: "minRankExp", label: "Min rank exp (blank = 0)", type: "number", when: { progression: "exp" } },
+  { name: "minLevel", label: "Min level (blank = 0)", type: "number", when: { progression: "level" } },
   // `decimal` for the same reason `critMultiplier` is: a `number` input takes
   // the default step="1" and refuses to submit 0.5 — the exact value a
   // half-rate weapon needs.
   { name: "dps", label: "Damage/sec (blank = flat cooldown)", type: "decimal" },
-] as const satisfies readonly { name: string; label: string; type: "number" | "decimal" }[];
+] as const satisfies readonly { name: string; label: string; type: "number" | "decimal"; when?: { progression: "exp" | "level" } }[];
 
 /**
  * Spread into both consumable forms for the same reason the weapon fields are:
@@ -1070,7 +1088,8 @@ const adminPage: PageSchema = {
             { key: "critChance", label: "Crit %" },
             { key: "critMultiplier", label: "Crit ×" },
             { key: "armorPierce", label: "Pierce" },
-            { key: "minRankExp", label: "Min rank exp" },
+            { key: "minRankExp", label: "Min rank exp", when: { progression: "exp" } },
+            { key: "minLevel", label: "Min level", when: { progression: "level" } },
             { key: "dps", label: "DPS" },
             { key: "power", label: "Power" },
             { key: "armor", label: "Armor" },

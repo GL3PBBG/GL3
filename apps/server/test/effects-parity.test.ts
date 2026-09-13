@@ -24,12 +24,18 @@ describe("weapon effects schema parity", () => {
     critMultiplier: 1.5,
     armorPierce: 3,
     minRankExp: 400,
+    minLevel: 3,
     backfireChance: 4,
     dps: 0.5,
   };
 
   it("parses one fixture identically through both copies", () => {
     expect(CombatWeapon.parse(fixture)).toEqual(InventoryWeapon.parse(fixture));
+  });
+
+  it("carries minLevel through both copies — zod strips an unknown key silently, so parity alone would not notice one side missing it", () => {
+    expect(CombatWeapon.parse(fixture).minLevel).toBe(3);
+    expect(InventoryWeapon.parse(fixture).minLevel).toBe(3);
   });
 
   it("applies the same defaults to a minimal item", () => {

@@ -37,6 +37,16 @@ export const WeaponEffectsSchema = z.object({
    */
   minRankExp: z.number().int().nonnegative().default(0),
   /**
+   * The level-model counterpart of `minRankExp`, compared against
+   * `player_stats.level`. Which of the two the equip gate reads is decided
+   * by the boot's progression model (`ctx.progression`): on a routed boot
+   * (a `progression` plugin is loaded — the gl3 and mccodes profiles)
+   * `player_stats.exp` is WITHIN-level and resets on every level-up, so an
+   * exp comparison there re-arms forever. Both figures are always stored;
+   * the other model's one is simply never consulted.
+   */
+  minLevel: z.number().int().nonnegative().default(0),
+  /**
    * Optional for the same reason `accuracy` is: a migrated V2 item has no
    * such column and must still parse. Combat fills an absent value from
    * `combat.backfire.base_chance`. An explicit 0 means "never backfires" and
