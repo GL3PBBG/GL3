@@ -98,8 +98,10 @@ Compose has no native init containers; the same effect is two one-shot
 services with `depends_on: { condition: service_completed_successfully }` on
 the server. The repository's `docker-compose.yml` ships exactly that as its
 `app` profile — `docker compose --profile app up` runs both one-shots (the
-`migrate` service and the `plugins` installer, which needs `GL3_NPM_TOKEN` in
-`.env`), then the server, against the file's own Postgres and Redis.
+`migrate` service and the optional `plugins` installer), then the server,
+against the file's own Postgres and Redis. With `PLUGIN_PACKAGES` empty (the
+default), the installer skips all registry access. `GL3_NPM_TOKEN` is needed
+only when you select premium packages.
 
 ## Troubleshooting
 

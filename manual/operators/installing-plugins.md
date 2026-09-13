@@ -53,7 +53,7 @@ From `.env.example`:
 | `PLUGIN_IDS` | Selects among plugins **compiled into** this server build (the generated static import map). Under `GL3_PROFILE=framework` it is the only way gameplay/family plugins load. Irrelevant to externally installed plugins — do **not** add your dynamic plugin's id here. |
 | `PLUGIN_PACKAGES` | Comma-separated npm package **specifiers** (e.g. `@acme/plugin-x`) to load from outside the build. Naming a package here is the enabling act; packages listed load unconditionally, in every profile. |
 | `PLUGIN_DIR` | The directory the packages are resolved from — in production, a mounted volume. When **unset**, packages resolve from the server's own `node_modules`, which is what a from-source deployment wants. |
-| `GL3_NPM_TOKEN` | Registry credential for `npm.gl3.dev`, consumed by the shipped compose `plugins` installer service (it writes an `.npmrc` before `npm i`). The compose `app` profile refuses to start without it. |
+| `GL3_NPM_TOKEN` | Registry credential for `npm.gl3.dev`, consumed by the shipped compose `plugins` installer service (it writes an `.npmrc` before `npm i`). Only premium packages require it; the free game starts without it. |
 
 Resolution looks for `<PLUGIN_DIR>/node_modules/<specifier>`, i.e. exactly the
 layout `npm i --prefix <PLUGIN_DIR> <specifier>` produces. The full Node
@@ -214,13 +214,18 @@ always required, matching how plugin settings already behave (read at boot).
 
 The repository's `docker-compose.yml` **already ships this** under its `app`
 profile (`docker compose --profile app up`): the one-shot service is named
-`plugins`, it installs whatever `PLUGIN_PACKAGES` names (default
-`@gl3-plugins/market`) into the `plugins-data` volume, and it authenticates
-to `npm.gl3.dev` by writing an `.npmrc` from `GL3_NPM_TOKEN` (required in
-`.env`). The server sets `PLUGIN_DIR=/data/plugins`, mounts the volume
-read-only, and `depends_on: plugins: service_completed_successfully`. **Do
+`plugins`, it installs the comma-separated packages in `PLUGIN_PACKAGES`
+into the `plugins-data` volume. This list is empty by default: the installer
+exits successfully without contacting the registry, and the free game starts
+without a key. To install premium packages, set `GL3_NPM_TOKEN` in `.env`;
+the installer adds that credential to its `.npmrc`. The server sets
+`PLUGIN_DIR=/data/plugins`, mounts the volume read-only, and `depends_on: plugins: service_completed_successfully`. **Do
 not add a second installer service** — to change what installs, set
 `PLUGIN_PACKAGES` in `.env` and re-up.
+
+If you used the older Compose default that loaded Market automatically, set
+`PLUGIN_PACKAGES=@gl3-plugins/market` explicitly before switching to the new file
+to keep loading it.
 
 For a compose file of your own, the shape is (shipped service abridged):
 

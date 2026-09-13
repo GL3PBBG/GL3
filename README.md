@@ -29,16 +29,19 @@ that installed base: bigint money, argon2id, real foreign keys
 docker compose --profile app up
 ```
 
-That command (after setting `GL3_NPM_TOKEN` in `.env` — the plugins
-installer's registry credential) stands up the whole game from the published
-images: Postgres and Redis (internal to the compose network), a one-shot
-migrate container that asserts the schema, a one-shot plugins installer
-(filling the `plugins-data` volume from `PLUGIN_PACKAGES`), the server
+That command stands up the free game from the published images, with no
+registry key or Premium subscription required: Postgres and Redis, a one-shot
+migrate container that asserts the schema, an optional plugins installer
+(skipped unless `PLUGIN_PACKAGES` is set), the server
 (starter content seeded at boot), the web bundle, and an nginx router keeping
 the browser same-origin (`deploy/nginx.conf`). Open http://localhost:8080 and
 register; the first player becomes Administrator. With `EMAIL_DRIVER` at its
 default, the email verification link prints to
 `docker compose --profile app logs server`.
+
+To add premium plugins, set `PLUGIN_PACKAGES` and `GL3_NPM_TOKEN` in `.env`;
+see [Installing plugins](https://docs.gl3.dev/operators/installing-plugins.html).
+
 Hosting elsewhere: set `GL3_PUBLIC_ORIGIN` (the URL players reach the game
 at, which feeds the CORS allowlist the WebSocket gateway also checks) and
 `GL3_PORT`. A mobile app that claims the game's links (Android App Links)
