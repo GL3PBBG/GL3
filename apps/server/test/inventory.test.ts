@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { items, playerItems, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -77,7 +77,7 @@ describe("GET /api/inventory", () => {
 
     expect(res.json().items[0].effects).toEqual({
       accuracy: 60, damageMin: 5, damageMax: 15,
-      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0, minLevel: 0,
     });
   });
 
@@ -100,7 +100,7 @@ describe("GET /api/inventory", () => {
 
     expect(res.json().items[0].effects).toEqual({
       damageMin: 5, damageMax: 15,
-      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+      bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0, minLevel: 0,
     });
   });
 
@@ -214,12 +214,18 @@ describe("PUT /api/inventory/equip", () => {
     expect(res.json()).toMatchObject({ error: "wrong_slot" });
   });
 
-  it("409s a weapon whose minRankExp exceeds the player's exp", async () => {
+  // The default boot is the gl3 union, which loads `progression` and so runs
+  // the LEVEL model: `player_stats.exp` is within-level and resets on every
+  // level-up, so an exp comparison there re-arms forever (the trap
+  // `ctx.progression`'s docblock names). A firearm's requirement on a routed
+  // boot is `minLevel` against `player_stats.level`; `minRankExp` is the
+  // exp-model figure and is not consulted at all here.
+  it("409s insufficient_level on a level boot when minLevel exceeds the player's level", async () => {
     const cannon = await seedItem("weapon", {
-      accuracy: 90, damageMin: 50, damageMax: 90, minRankExp: 1_000_000,
+      accuracy: 90, damageMin: 50, damageMax: 90, minLevel: 5,
     });
     await grant(playerId, cannon, 1);
-    await db.update(playerStats).set({ exp: 10n }).where(eq(playerStats.playerId, playerId));
+    await db.update(playerStats).set({ level: 4 }).where(eq(playerStats.playerId, playerId));
 
     const res = await app.inject({
       method: "PUT", url: "/api/inventory/equip",
@@ -228,7 +234,91 @@ describe("PUT /api/inventory/equip", () => {
     });
 
     expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "insufficient_level", required: 5 });
+  });
+
+  it("equips at exactly minLevel on a level boot", async () => {
+    const cannon = await seedItem("weapon", {
+      accuracy: 90, damageMin: 50, damageMax: 90, minLevel: 5,
+    });
+    await grant(playerId, cannon, 1);
+    await db.update(playerStats).set({ level: 5 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: cannon },
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("ignores minRankExp on a level boot — within-level exp is not a progression figure", async () => {
+    const cannon = await seedItem("weapon", {
+      accuracy: 90, damageMin: 50, damageMax: 90, minRankExp: 1_000_000,
+    });
+    await grant(playerId, cannon, 1);
+    await db.update(playerStats).set({ exp: 10n, level: 1 }).where(eq(playerStats.playerId, playerId));
+
+    const res = await app.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weaponItemId: cannon },
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+// Pinned { profile: "v2" }: the exp-model gate is the V2 game's rule, where
+// `player_stats.exp` is lifetime and ranks are exp thresholds. Its own boot
+// because the file-level app above is the gl3 union (level model).
+describe("PUT /api/inventory/equip — the exp-model firearm gate (v2 profile)", () => {
+  let v2App: FastifyInstance;
+  let v2Redis: Redis;
+  let closeV2: () => Promise<void>;
+  let v2Token: string;
+  let v2PlayerId: string;
+
+  beforeAll(async () => {
+    ({ app: v2App, close: closeV2, redis: v2Redis } = await bootTestServer({ profile: "v2" }));
+  });
+  beforeEach(async () => {
+    ({ token: v2Token, playerId: v2PlayerId } = await registerVerifiedPlayer({ app: v2App, redis: v2Redis }, { username: "Vito" }));
+  });
+  afterAll(async () => { await closeV2(); });
+
+  it("409s rank_too_low when minRankExp exceeds the player's exp", async () => {
+    const cannon = await seedItem("weapon", {
+      accuracy: 90, damageMin: 50, damageMax: 90, minRankExp: 1_000_000,
+    });
+    await grant(v2PlayerId, cannon, 1);
+    await db.update(playerStats).set({ exp: 10n }).where(eq(playerStats.playerId, v2PlayerId));
+
+    const res = await v2App.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${v2Token}` },
+      payload: { weaponItemId: cannon },
+    });
+
+    expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "rank_too_low" });
+  });
+
+  it("ignores minLevel on an exp boot — level is not the progression figure there", async () => {
+    const cannon = await seedItem("weapon", {
+      accuracy: 90, damageMin: 50, damageMax: 90, minLevel: 99,
+    });
+    await grant(v2PlayerId, cannon, 1);
+    await db.update(playerStats).set({ exp: 1_000_000n, level: 1 }).where(eq(playerStats.playerId, v2PlayerId));
+
+    const res = await v2App.inject({
+      method: "PUT", url: "/api/inventory/equip",
+      headers: { authorization: `Bearer ${v2Token}` },
+      payload: { weaponItemId: cannon },
+    });
+
+    expect(res.statusCode).toBe(200);
   });
 });
 

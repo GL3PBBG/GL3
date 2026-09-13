@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, keys } from "@gl3/client";
+import { api, keys, usePlugins } from "@gl3/client";
 import { ErrorText, Loading, Money, Panel } from "../components/ui.js";
 import {
   adminItemListSchema, adminItemSchema, adminLocationsSchema, adminShopSchema,
-  itemDraft, itemFields, itemPayload, itemSummary, itemTypes, rowType,
+  itemDraft, itemPayload, itemSummary, itemTypes, rowType, visibleItemFields,
   type AdminItem, type AdminStock, type ItemDraft, type ItemFormType,
 } from "../lib/adminInventory.js";
 import common from "./pages.module.css";
@@ -41,6 +41,7 @@ function ItemForm({ item, onCancel, onSaved }: {
   const initial = item === undefined ? { name: "", itemType: "weapon" as const } : itemDraft(item);
   const [draft, setDraft] = useState<ItemDraft>(initial ?? { name: item?.name ?? "", itemType: "misc" });
   const [validation, setValidation] = useState<string | null>(null);
+  const fields = visibleItemFields(draft.itemType, usePlugins().data?.progression);
   const save = useMutation({
     mutationFn: () => api(`${base}/items${item ? "/update" : ""}`, {
       method: "POST", body: JSON.stringify({ ...itemPayload(draft), ...(item ? { id: item.id } : {}) }),
@@ -83,10 +84,10 @@ function ItemForm({ item, onCancel, onSaved }: {
           </label>
         </div>
       </fieldset>
-      {itemFields[draft.itemType].length > 0 && <fieldset disabled={save.isPending}>
+      {fields.length > 0 && <fieldset disabled={save.isPending}>
         <legend>{itemTypes[draft.itemType]} stats</legend>
         <div className={styles.fields}>
-          {itemFields[draft.itemType].map((field) => <label className={styles.field} key={field.name}>
+          {fields.map((field) => <label className={styles.field} key={field.name}>
             {field.label}
             <input aria-label={field.label} aria-describedby={field.hint ? `item-hint-${field.name}` : undefined} type={field.type ?? "number"} required={field.required} min={field.min} max={field.max}
               step={field.type === "text" ? undefined : field.step ?? "1"}

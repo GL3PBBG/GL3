@@ -18,9 +18,17 @@ export const adminLocationsSchema = z.object({ rows: z.array(z.object({ id: z.st
 export const itemTypes = { weapon: "Firearm", melee: "Melee weapon", armor: "Armor", consumable: "Consumable", misc: "Miscellaneous" };
 export type ItemFormType = keyof typeof itemTypes;
 export type ItemDraft = Record<string, string> & { name: string; itemType: ItemFormType };
+export type Progression = "exp" | "level";
 export interface ItemField {
   name: string; label: string; type?: "text" | "number"; required?: boolean;
   min?: number; max?: number; step?: string; hint?: string;
+  /**
+   * Shown only on a boot running this progression model — the same gate the
+   * manifest form's `when: { progression }` applies. The field's value is
+   * still drafted and posted either way (both figures are stored; the boot
+   * decides which one the equip gate reads).
+   */
+  when?: { progression: Progression };
 }
 export const itemFields: Record<ItemFormType, ItemField[]> = {
   weapon: [
@@ -31,7 +39,8 @@ export const itemFields: Record<ItemFormType, ItemField[]> = {
     { name: "critChance", label: "Critical chance (%)", min: 0, max: 100, hint: "Default: 0" },
     { name: "critMultiplier", label: "Critical multiplier", min: 1, step: "any", hint: "Default: 1" },
     { name: "armorPierce", label: "Armor penetration", min: 0, hint: "Default: 0" },
-    { name: "minRankExp", label: "Required experience", min: 0, hint: "Default: 0" },
+    { name: "minRankExp", label: "Required experience", min: 0, hint: "Default: 0", when: { progression: "exp" } },
+    { name: "minLevel", label: "Required level", min: 0, hint: "Default: 0", when: { progression: "level" } },
     { name: "backfireChance", label: "Backfire chance (%)", min: 0, max: 100, hint: "Blank uses the combat default; 0 disables backfires." },
     { name: "dps", label: "Damage per second", min: 0, step: "any", hint: "Must be positive. Blank uses the standard attack cooldown." },
   ],
@@ -46,6 +55,16 @@ export const itemFields: Record<ItemFormType, ItemField[]> = {
   ],
   misc: [],
 };
+
+/**
+ * The fields the editor renders for one item type on one boot. `progression`
+ * is `/api/plugins`' figure; absent (an older server, or the payload not yet
+ * loaded) reads as `"exp"`, matching `PluginsPayloadSchema`'s own note.
+ */
+export function visibleItemFields(itemType: ItemFormType, progression: Progression | undefined): ItemField[] {
+  const model = progression ?? "exp";
+  return itemFields[itemType].filter((field) => field.when === undefined || field.when.progression === model);
+}
 
 export function effectsRecord(effects: unknown): Record<string, unknown> {
   return typeof effects === "object" && effects !== null && !Array.isArray(effects)

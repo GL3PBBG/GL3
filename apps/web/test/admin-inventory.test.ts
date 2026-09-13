@@ -67,8 +67,29 @@ describe("admin inventory editor", () => {
     await screen.findByText("New Lupara saved.");
     expect(posts[0]).toEqual({ url: `${base}/items/update`, body: {
       id: "gun", name: "New Lupara", itemType: "weapon", damageMin: "10", damageMax: "20", accuracy: "0",
-      bulletsPerShot: "2", critChance: "5", critMultiplier: "1.5", armorPierce: "3", minRankExp: "100", backfireChance: "0", dps: "0.5",
+      bulletsPerShot: "2", critChance: "5", critMultiplier: "1.5", armorPierce: "3", minRankExp: "100", minLevel: "", backfireChance: "0", dps: "0.5",
     } });
+  });
+
+  // The exp-model boot is the default above: `/api/plugins` is unmocked there
+  // and the editor falls back to "exp". A routed boot answers
+  // `progression: "level"`, and then the weapon form must show the level
+  // requirement and hide the exp one — the equip gate reads only `minLevel`.
+  it("shows the level requirement instead of the exp one on a level boot", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/plugins") return Response.json({ installed: ["inventory"], menu: [], pages: [], events: [], moneyFormat: { symbol: "$", position: "prefix", thousandsSep: "," }, progression: "level" });
+      return inner(url, init);
+    });
+    details["gun"]!.effects = { ...details["gun"]!.effects as object, minLevel: 12 };
+    mount(); await edit("Lupara");
+    await screen.findByLabelText("Required level");
+    expect(value("Required level")).toBe("12");
+    expect(screen.queryByLabelText("Required experience")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Lupara saved.");
+    expect(posts[0]!.body).toMatchObject({ minLevel: "12", minRankExp: "100" });
   });
 
   it("keeps optional stats blank and retains unsaved changes on focus", async () => {

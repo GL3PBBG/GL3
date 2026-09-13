@@ -79,7 +79,7 @@ describe("inventory admin", () => {
       expect(row?.itemType).toBe("weapon");
       expect(row?.effects).toEqual({
         damageMin: 10, damageMax: 20, accuracy: 65,
-        bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0,
+        bulletsPerShot: 1, critChance: 0, critMultiplier: 1, armorPierce: 0, minRankExp: 0, minLevel: 0,
       });
     });
 
@@ -94,7 +94,7 @@ describe("inventory admin", () => {
           name: "Tommy Gun", itemType: "weapon",
           damageMin: 12, damageMax: 30, accuracy: 40,
           bulletsPerShot: 6, critChance: 15, critMultiplier: 2.5,
-          armorPierce: 8, minRankExp: 5000,
+          armorPierce: 8, minRankExp: 5000, minLevel: 7,
         },
       });
       expect(res.statusCode).toBe(201);
@@ -102,8 +102,43 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({
         damageMin: 12, damageMax: 30, accuracy: 40,
         bulletsPerShot: 6, critChance: 15, critMultiplier: 2.5,
-        armorPierce: 8, minRankExp: 5000,
+        armorPierce: 8, minRankExp: 5000, minLevel: 7,
       });
+    });
+
+    // Both requirement figures are always stored; the boot's progression
+    // model decides which one the equip gate reads. The admin form only
+    // SHOWS the one this boot uses (`when: { progression }`), so the other
+    // arrives blank from the renderer and must read as 0, not as absent.
+    it("stores a blank minLevel as 0 and prunes the exp field from a level boot's weapon form", async () => {
+      const res = await app.inject({
+        method: "POST", url: "/api/admin/inventory/items", headers: auth(),
+        payload: { name: "Snub", itemType: "weapon", damageMin: 1, damageMax: 2, minLevel: "", minRankExp: "" },
+      });
+      expect(res.statusCode).toBe(201);
+      const [row] = await db.select().from(items).where(eq(items.id, res.json().id));
+      expect(row?.effects).toMatchObject({ minLevel: 0, minRankExp: 0 });
+
+      // The default test boot is the gl3 union — a routed (level) boot.
+      // Admin pages are served (and pruned) by /api/admin/plugins, not the
+      // player manifest.
+      const sections = await app.inject({ method: "GET", url: "/api/admin/plugins", headers: auth() });
+      const inventory = (sections.json().sections as Array<{ pluginId: string; pages: Array<{ id: string; view: unknown }> }>)
+        .find((s) => s.pluginId === "inventory");
+      const page = inventory?.pages.find((p) => p.id === "inventory-admin");
+      expect(page).toBeDefined();
+      const names = new Set<string>();
+      const walk = (node: unknown): void => {
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (typeof node !== "object" || node === null) return;
+        const rec = node as Record<string, unknown>;
+        if (typeof rec["name"] === "string") names.add(rec["name"]);
+        if (typeof rec["key"] === "string") names.add(rec["key"]);
+        Object.values(rec).forEach(walk);
+      };
+      walk(page?.view);
+      expect(names.has("minLevel")).toBe(true);
+      expect(names.has("minRankExp")).toBe(false);
     });
 
     // The renderer posts every field in the form, blank ones as "". Left to
@@ -125,7 +160,7 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({
         damageMin: 5, damageMax: 9,
         bulletsPerShot: 1, critChance: 0, critMultiplier: 1,
-        armorPierce: 0, minRankExp: 0,
+        armorPierce: 0, minRankExp: 0, minLevel: 0,
       });
     });
 
@@ -421,6 +456,7 @@ describe("inventory admin", () => {
         critMultiplier: "1.5",
         armorPierce: "3",
         minRankExp: "100",
+        minLevel: "0",
         dps: "1.5",
         // Blank, not "—": a firearm has no power stat at all.
         power: "",
@@ -574,7 +610,7 @@ describe("inventory admin", () => {
           id, itemType: "weapon",
           damageMin: 20, damageMax: 45, accuracy: 80,
           bulletsPerShot: 3, critChance: 25, critMultiplier: 3,
-          armorPierce: 12, minRankExp: 9000,
+          armorPierce: 12, minRankExp: 9000, minLevel: 11,
         },
       });
       expect(res.statusCode).toBe(204);
@@ -582,7 +618,7 @@ describe("inventory admin", () => {
       expect(row?.effects).toEqual({
         damageMin: 20, damageMax: 45, accuracy: 80,
         bulletsPerShot: 3, critChance: 25, critMultiplier: 3,
-        armorPierce: 12, minRankExp: 9000,
+        armorPierce: 12, minRankExp: 9000, minLevel: 11,
       });
     });
 
