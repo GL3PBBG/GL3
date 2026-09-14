@@ -255,3 +255,12 @@
 .productDetails { display: grid; gap: 0.25rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .productPrice { display: grid; gap: 0.25rem; text-align: right; }
 .productPrice s { opacity: 0.65; font-size: 0.875em; }
+
+.formCard:has(.productOptions) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.formCard:has(.productOptions) > button[type="submit"] {
+  justify-self: start;
+  margin-top: 0.75rem;
+}
