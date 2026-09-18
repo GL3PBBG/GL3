@@ -18,8 +18,13 @@ import { bootTestServer } from "./helpers/server.js";
  * 2026-09-18-core-view-pages-design §5): a client that renders a plugin page
  * from the view vocabulary — the Godot client does — must find a real view
  * behind each door, and every `source`/`action` in it must be a route this
- * boot actually serves. `apps/web` is unaffected: `PAGE_OVERRIDES` still wins
- * there, so nothing here asserts anything about the browser.
+ * boot actually serves — which these tests prove by fetching each one, not by
+ * leaning on boot validation. Containment (a source under the plugin's own
+ * basePaths) is a separate guarantee and belongs to
+ * `plugin-validate.test.ts`; it did not even cover `keyValueSource` or
+ * `meterSource` until this cluster closed that gap. `apps/web` is unaffected:
+ * `PAGE_OVERRIDES` still wins there, so nothing here asserts anything about
+ * the browser.
  */
 const { db, sql: conn } = testDb();
 let app: FastifyInstance;

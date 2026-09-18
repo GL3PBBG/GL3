@@ -803,8 +803,6 @@ export default definePlugin({
   // `locationsListed` predates this list and shipped undeclared; declaring all
   // three now costs nothing and gives validate.ts its prefix check.
   provides: [locationsListed, fares, travelCompleted],
-  // No `menu`, `pages` or `events`: plugin-manifest-endpoint.test.ts asserts a
-  // no-arg boot answers GET /api/plugins with exactly
-  // { menu: [], pages: [], events: [] }. No `jobs`: buildApp throws at boot if
-  // a core plugin declares any.
+  // No `events`: travel publishes core's own `player.travelled`, not a plugin
+  // envelope. No `jobs`: buildApp throws at boot if a core plugin declares any.
 });

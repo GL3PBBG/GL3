@@ -95,10 +95,11 @@ function hasDotSegment(path: string): boolean {
 /**
  * Every HTTP endpoint a page's view can drive.
  *
- * Five of the fifteen node kinds carry at least one: `button`, `cooldownButton`,
- * `form`, `table`, and `assetBinder` (the last optionally). Forms additionally
- * carry optional `valuesSource` and per-field `optionsSource` beyond their main
- * action. The two other path-shaped fields are deliberately not here. `link.to`
+ * Seven of the fifteen node kinds carry at least one: `button`, `cooldownButton`,
+ * `form`, `table`, `keyValueSource`, `meterSource`, and `assetBinder` (the last
+ * optionally). Forms additionally carry optional `valuesSource` and per-field
+ * `optionsSource` beyond their main action. The two other path-shaped fields are
+ * deliberately not here. `link.to`
  * is an app-internal *client* route (`/plugins/:pageId` under v1 routing),
  * governed by `INTERNAL_PATH_RE` — containing it would forbid a plugin page from
  * linking to its own sibling page. `cooldownButton.cooldownAction` is the middle
@@ -130,6 +131,15 @@ function viewActions(view: ViewNode): string[] {
         // The prefill source fetches on mount exactly like `table.source`,
         // so it is contained the same way. Absent on forms without prefill.
         if (node.valuesSource !== undefined) actions.push(node.valuesSource);
+        break;
+      case "keyValueSource":
+      case "meterSource":
+        // Both fetch on mount exactly like `table.source`, so both are
+        // contained the same way. They fell through to `default` until the
+        // core-view-pages cluster (2026-09-18), which is how an uncontained
+        // read could boot clean — the gap was invisible because no shipped
+        // page had ever pointed one of them outside its own basePaths.
+        actions.push(node.source);
         break;
       case "table":
         actions.push(node.source);

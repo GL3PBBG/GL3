@@ -54,7 +54,10 @@ describe("TableBlock row-action disabledKey / cooldownKey", () => {
       { id: "a", name: "The Docks", cannotTravel: "", cooldownUntil: new Date(Date.now() + 90_000).toISOString() },
     ]);
     mount();
-    const button = await screen.findByRole("button", { name: "1m 30s" });
+    // A regex, not the exact "1m 30s": the deadline is 90s from the stub call
+    // and the first tick can land a second later on a loaded box, which made
+    // the exact label a load-dependent flake rather than a real assertion.
+    const button = await screen.findByRole("button", { name: /^1m (29|30)s$/ });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "Travel" })).toBeNull();
   });

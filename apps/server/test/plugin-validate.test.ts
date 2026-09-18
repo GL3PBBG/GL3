@@ -219,6 +219,55 @@ describe("validatePlugins view-action containment", () => {
     expect(() => validatePlugins([manifest])).toThrow(/GET \/api\/bank\/accounts/);
   });
 
+  // `keyValueSource.source` and `meterSource.source` fetch on mount exactly like
+  // `table.source`. Both fell through `viewActions`' `default` arm until the
+  // core-view-pages cluster, so a plugin could declare a read of any endpoint in
+  // the app and boot clean — attribution silently broken through two of the
+  // fifteen node kinds rather than through the kinds anyone was watching.
+  it("accepts a keyValueSource's source inside the plugin's basePaths", () => {
+    const manifest = withPage({
+      kind: "keyValueSource",
+      source: "GET /api/hello/summary",
+      entries: [{ label: "A", key: "a" }],
+    });
+    expect(() => validatePlugins([manifest])).not.toThrow();
+  });
+
+  it("rejects a keyValueSource's out-of-scope source, naming the source", () => {
+    const manifest = withPage({
+      kind: "keyValueSource",
+      source: "GET /api/bank/accounts",
+      entries: [{ label: "A", key: "a" }],
+    });
+    expect(() => validatePlugins([manifest])).toThrow(
+      /plugin "hello".*page "hello\.index".*GET \/api\/bank\/accounts.*outside/s,
+    );
+  });
+
+  it("accepts a meterSource's source inside the plugin's basePaths", () => {
+    const manifest = withPage({
+      kind: "meterSource",
+      label: "Energy",
+      source: "GET /api/hello/pools",
+      valueKey: "energy",
+      maxKey: "energyMax",
+    });
+    expect(() => validatePlugins([manifest])).not.toThrow();
+  });
+
+  it("rejects a meterSource's out-of-scope source, naming the source", () => {
+    const manifest = withPage({
+      kind: "meterSource",
+      label: "Energy",
+      source: "GET /api/bank/accounts",
+      valueKey: "energy",
+      maxKey: "energyMax",
+    });
+    expect(() => validatePlugins([manifest])).toThrow(
+      /plugin "hello".*page "hello\.index".*GET \/api\/bank\/accounts.*outside/s,
+    );
+  });
+
   // `link.to` is an app-internal client route (`/plugins/:pageId`), not an HTTP
   // endpoint, so it is deliberately outside containment — `INTERNAL_PATH_RE` is
   // the rule that applies to it. Containing it would forbid the one link the
