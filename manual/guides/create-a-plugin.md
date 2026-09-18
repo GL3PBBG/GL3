@@ -118,6 +118,11 @@ Beyond exported helpers, the SDK offers declared extension points:
   to the plugin id; collected into every plugin's `ctx.propertyTypes`),
   `providesAttributes` (`ctx.attributePools`), `providesAssets`
   (`ctx.assetSlots`), and `requires` for boot-enforced dependency edges.
+- **`worldHooks`** (`ctx.worldHooks`): a building or NPC in every city for the
+  Godot presence client. `page` must be one of your own player pages,
+  `signageSlot` one of your own singleton asset slots. Core places every
+  hook along one street deterministically and serves them from
+  `GET /api/world/scene`; you declare nothing spatial.
 - **Ctx utilities** — `tx.timers` (per-player timers), `tx.attributes`
   (pools/trained stats; the caller must already hold the player row via
   `tx.locks.player`), `ctx.installedPluginIds`, `ctx.cooldown`.
