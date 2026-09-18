@@ -70,6 +70,27 @@ const travelled = (actorId: string, toLocationId: string): GameEvent => ({
 });
 const isTick = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.tick" }> =>
   f.kind === "presence.tick";
+
+/**
+ * Every tick a socket receives over `withinMs`, not just the first.
+ *
+ * A burst bigger than one 200 ms flush window straddles a flush, so the
+ * FIRST tick after it can carry a partial result — which reads exactly like
+ * a rate-limit drop, and passes even when the limiter has been deleted.
+ * Draining the whole burst is what makes these assertions mean what they say.
+ */
+async function drainTicks(
+  socket: WebSocket, withinMs: number,
+): Promise<Extract<ServerFrame, { kind: "presence.tick" }>[]> {
+  const ticks: Extract<ServerFrame, { kind: "presence.tick" }>[] = [];
+  const deadline = Date.now() + withinMs;
+  for (let left = withinMs; left > 0; left = deadline - Date.now()) {
+    let frame: ServerFrame;
+    try { frame = await nextFrame(socket, left); } catch { break; }
+    if (isTick(frame)) ticks.push(frame);
+  }
+  return ticks;
+}
 const isSnapshot = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.snapshot" }> =>
   f.kind === "presence.snapshot";
 const isError = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.error" }> =>
@@ -165,15 +186,23 @@ describe("presence.move", () => {
     await frameOfKind(b.socket, "presence.snapshot");
     await frameOfKind(a.socket, "presence.tick");
     const { x: sx, y: sy } = snap.room.spawn;
+    const started = Date.now();
     move(b.socket, 1, sx, sy);
     await frameOfKind(a.socket, "presence.tick");
     await new Promise((r) => setTimeout(r, 100));
     move(b.socket, 2, sx + 30, sy);
     const tick = await frameOfKind(a.socket, "presence.tick");
+    const elapsed = Date.now() - started;
     const dx = tick.moved[0]!.x - sx;
-    // dt is ~100 ms from the server clock: 6 m/s × 0.1 s = 0.6 m, with slack for scheduling; never the 30 m asked for.
+    // The server clamps to 6 m/s × dt on ITS clock. This window strictly
+    // contains that dt, so `6 × (elapsed + slack)` is a sound upper bound
+    // however badly the box is scheduling — a fixed 6 m was not, and a
+    // second of contention on a loaded gate would have failed it.
     expect(dx).toBeGreaterThan(0.3);
-    expect(dx).toBeLessThan(6);
+    expect(dx).toBeLessThanOrEqual(6 * (elapsed / 1000 + 0.25));
+    // What the test actually proves: the 30 m jump was rubber-banded, not
+    // granted, and not rejected outright either.
+    expect(dx).toBeLessThan(30);
     expect(tick.moved[0]!.y).toBeCloseTo(sy, 5);
   });
 
@@ -202,13 +231,18 @@ describe("presence.move", () => {
     const b = await joined(chicago);
     await frameOfKind(b.socket, "presence.snapshot");
     await frameOfKind(a.socket, "presence.tick");
-    // bucketSize is 10 and refill is 10/s, so ten back-to-back moves leave
-    // the bucket empty for the millisecond the emote behind them needs.
-    for (let seq = 1; seq <= 10; seq += 1) move(b.socket, seq, 0, -15);
+    // Forty back-to-back moves against a ten-token bucket refilling at
+    // 10/s: the bucket is empty long before the burst ends, so it is still
+    // empty for the emote behind it however fast or slow the burst lands.
+    for (let seq = 1; seq <= 40; seq += 1) move(b.socket, seq, 0, -15);
     sendFrame(b.socket, { kind: "presence.emote", emote: "wave" });
-    const tick = await frameOfKind(a.socket, "presence.tick");
-    expect(tick.moved).toHaveLength(1); // the burst did land, so the bucket did drain
-    expect(tick.emoted).toEqual([]);
+
+    // Every tick the burst produced, not just the first: reading one tick
+    // would pass whenever a flush fell before the emote arrived, whether
+    // or not the emote was forwarded a tick later.
+    const ticks = await drainTicks(a.socket, 900);
+    expect(ticks.flatMap((t) => t.moved).length).toBeGreaterThan(0); // the burst did land
+    expect(ticks.flatMap((t) => t.emoted)).toEqual([]);
     // Dropped, not refused: an over-budget frame is silent until dropLimit.
     expect(await receivedFrameOfKind(b.socket, "presence.error", 400)).toBe(false);
   });
@@ -384,17 +418,30 @@ describe("travel moves a present player between rooms", () => {
 });
 
 describe("rate limiting", () => {
-  it("drops the eleventh move in a burst without an error", async () => {
+  it("drops a burst that outruns the bucket, without an error", async () => {
     const a = await joined(chicago);
     const snap = await frameOfKind(a.socket, "presence.snapshot");
     const b = await joined(chicago);
     await frameOfKind(b.socket, "presence.snapshot");
     await frameOfKind(a.socket, "presence.tick");
     const { x: sx, y: sy } = snap.room.spawn;
-    for (let i = 1; i <= 11; i++) move(b.socket, i, sx + i * 0.01, sy);
-    const tick = await frameOfKind(a.socket, "presence.tick");
-    // Ten accepted (bucket size), the eleventh dropped: the last stored x is the tenth's.
-    expect(tick.moved[0]!.x).toBeCloseTo(sx + 0.1, 3);
+    // `presence.join` spends a token from this same bucket, so give it time
+    // to refill to its cap before the burst: at 10/s a full refill takes at
+    // most one second.
+    await new Promise((r) => setTimeout(r, 1200));
+    for (let i = 1; i <= 40; i++) move(b.socket, i, sx + i * 0.01, sy);
+    const moved = (await drainTicks(a.socket, 900)).flatMap((t) => t.moved);
+    expect(moved.length).toBeGreaterThan(0);
+
+    // Each move targets an absolute `sx + i × 0.01`, so the last position
+    // the burst settled at names the LAST move that bought a token: ten
+    // from the full bucket, plus at most a few refilled while the burst
+    // landed — nothing like the forty asked for, which is the drop being
+    // proven. Read as a count rather than compared as a float, because
+    // `sx + 0.14` is not exact.
+    const lastAccepted = Math.round((moved[moved.length - 1]!.x - sx) / 0.01);
+    expect(lastAccepted).toBeGreaterThanOrEqual(10);
+    expect(lastAccepted).toBeLessThanOrEqual(14);
     expect(await receivedFrameOfKind(b.socket, "presence.error", 300)).toBe(false);
   });
 
@@ -520,6 +567,62 @@ describe("travel racing the traveller's own socket", () => {
     } finally {
       rooms.close();
     }
+  });
+});
+
+describe("join racing the socket's own close", () => {
+  it("bails out when the socket closes during the join lookup", async () => {
+    const p = await playerIn(chicago);
+    const sent: ServerFrame[] = [];
+    const rooms = createRooms({
+      db, redis,
+      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      send: (_socket, frame) => { sent.push(frame); },
+    });
+    try {
+      // join suspends on its first await, so closing synchronously after
+      // the call produces exactly the interleaving the gateway can produce
+      // — it dispatches join un-awaited. Deterministic, not raced.
+      const joining = rooms.join(p.playerId, p.socket, null);
+      p.socket.close();
+      rooms.socketClosed(p.socket);
+      await joining;
+      expect(sent).toEqual([]);
+
+      // Without the liveness re-read, join resumes and inserts a member
+      // holding one dead socket. `detach` already ran and found no member
+      // to remove, and nothing will ever fire a close for that socket
+      // again, so the ghost is listed to every later arrival forever.
+      const q = await playerIn(chicago);
+      sent.length = 0;
+      await rooms.join(q.playerId, q.socket, null);
+      const snapshots = sent.filter(isSnapshot);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]!.players).toEqual([]);
+    } finally {
+      rooms.close();
+    }
+  });
+});
+
+describe("join is bucketed", () => {
+  it("drops the eleventh join in a burst, silently", async () => {
+    const a = await playerIn(chicago);
+    // Sent in one loop so all eleven token spends land back to back: join
+    // takes its token before the lookup, so the bucket cannot refill
+    // between them however slow the database is.
+    for (let i = 0; i < 11; i++) sendFrame(a.socket, { kind: "presence.join", client: "web" });
+    for (let i = 0; i < 10; i++) {
+      expect((await frameOfKind(a.socket, "presence.snapshot")).you.playerId).toBe(a.playerId);
+    }
+    // No eleventh snapshot, and no error either: an over-budget frame is
+    // silent until dropLimit. `nextFrame` timing out covers both, where
+    // `receivedFrameOfKind` would have discarded an error on its way past.
+    await expect(nextFrame(a.socket, 400)).rejects.toThrow(/no frame within/);
+
+    // A single join is untouched by any of this.
+    const b = await joined(chicago);
+    expect((await frameOfKind(b.socket, "presence.snapshot")).you.playerId).toBe(b.playerId);
   });
 });
 

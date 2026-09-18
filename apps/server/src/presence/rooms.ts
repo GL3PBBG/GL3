@@ -93,6 +93,28 @@ export function createRooms(deps: RoomsDeps): Rooms {
   const memberRoom = new Map<string, string>();
 
   const stateOf = (socket: WebSocket): SocketState | undefined => socketStates.get(socket);
+  /** `ws` moves `readyState` off OPEN synchronously on close, so this is a live read. */
+  const isOpen = (socket: WebSocket): boolean => socket.readyState === socket.OPEN;
+
+  /**
+   * The socket's frame budget, created on first use rather than on join, so
+   * that `presence.join` — three round trips, two Redis writes and a full
+   * snapshot, the most expensive frame there is — is bucketed like every
+   * other frame instead of being the one way to flood the server for free.
+   * A socket that has not joined carries `roomId: null`, which `move`,
+   * `emote` and `detach` already read as not-joined.
+   */
+  const bucketFor = (socket: WebSocket, playerId: string, t: number): SocketState => {
+    let s = socketStates.get(socket);
+    if (s === undefined) {
+      s = {
+        playerId, roomId: null, lastSeq: -1,
+        tokens: PRESENCE.bucketSize, tokensAt: t, drops: 0, dropsWindowStart: t,
+      };
+      socketStates.set(socket, s);
+    }
+    return s;
+  };
   const error = (socket: WebSocket, code: "not_joined" | "no_location" | "rate_limited" | "superseded"): void =>
     deps.send(socket, { kind: "presence.error", code });
 
@@ -159,7 +181,20 @@ export function createRooms(deps: RoomsDeps): Rooms {
   };
 
   const join = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
+    const t0 = now();
+    const s = bucketFor(socket, playerId, t0);
+    if (!spendOrDrop(s, socket, t0)) return;
+
     const target = await joinTarget(playerId);
+    // `join` is dispatched un-awaited, so the socket can close while the
+    // lookup is in flight — and at that moment `detach` finds `roomId:
+    // null` and correctly does nothing, because there is no member yet.
+    // Resuming into an insert here would therefore leave a member holding
+    // one dead socket that no close, leave or travel will ever fire for
+    // again: a ghost in every future snapshot and tick for the life of the
+    // process. Nothing is inserted and nothing is sent to a socket that has
+    // already gone.
+    if (!isOpen(socket)) return;
     if (!target.ok) { error(socket, target.code); return; }
     const { room } = target;
 
@@ -197,12 +232,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
       }
     }
 
-    const existing = stateOf(socket);
-    socketStates.set(socket, {
-      playerId, roomId: room.descriptor.locationId, lastSeq: -1,
-      tokens: existing?.tokens ?? PRESENCE.bucketSize, tokensAt: existing?.tokensAt ?? t,
-      drops: existing?.drops ?? 0, dropsWindowStart: existing?.dropsWindowStart ?? t,
-    });
+    // Mutated, not replaced: the budget and its drop window carry across a
+    // re-join, which is the whole point of the bucket. A new room is a new
+    // sequence space, so `lastSeq` resets.
+    s.roomId = room.descriptor.locationId;
+    s.lastSeq = -1;
 
     // Every join is a heartbeat, not only the first: /api/online reads this
     // ZSET, and a client that reconnects and re-joins is present now. The
@@ -220,6 +254,10 @@ export function createRooms(deps: RoomsDeps): Rooms {
     } catch (err) {
       console.error({ err, playerId }, "presence: touch failed");
     }
+    // Same window, second await: the member is in the room by now, so a
+    // close that lands here IS seen by `detach` and cleaned up. Only the
+    // snapshot needs suppressing.
+    if (!isOpen(socket)) return;
     deps.send(socket, snapshotFor(room, member));
   };
 
