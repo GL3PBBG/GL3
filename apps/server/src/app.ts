@@ -31,6 +31,8 @@ import { requestLogSerializer } from "./logging.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { registerThemeRoutes } from "./theme/routes.js";
 import { registerLegalRoutes } from "./legal/routes.js";
+import { registerWorldRoutes } from "./world/routes.js";
+import { createSceneService } from "./world/scene.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
@@ -205,6 +207,9 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerProfileRoutes(app, deps.db, deps.redis, requireAuth, loaded.coreFilters, deps.rateLimitPrefix, config.clientIpHeader);
   registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
   registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
+  // After plugins load: the scene service places `loaded.worldHooks`, which
+  // only exists once every manifest has been validated and collected.
+  registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks }), requireAuth);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests, loadedSettings);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an

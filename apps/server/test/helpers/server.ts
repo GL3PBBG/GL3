@@ -61,9 +61,20 @@ export async function bootTestServer(
   // backstop this still leaves for tests that call buildApp() directly).
   const rateLimitPrefix = `ratelimit-test-${randomUUID()}`;
 
-  await rebuildLeaderboards(db, redis, leaderboardPrefix);
+  // Boot can throw before anything owns these two clients: validatePlugins
+  // rejects a bad manifest set from inside loadPlugins, long before there is
+  // an app to hang an onClose hook on. A file that deliberately asserts a
+  // boot failure (world-hooks.test.ts) would otherwise leak a Postgres pool
+  // and a Redis connection per rejected boot, for the lifetime of the file.
+  const onBootFailure = async (err: unknown): Promise<never> => {
+    await sql.end();
+    redis.disconnect();
+    throw err;
+  };
 
-  const loadedTestSettings = await loadSettings(db);
+  await rebuildLeaderboards(db, redis, leaderboardPrefix).catch(onBootFailure);
+
+  const loadedTestSettings = await loadSettings(db).catch(onBootFailure);
 
   // Always run the full boot sequence (validate → migrate → queues/workers)
   // the same way production does, so a test exercises the real loader path.
@@ -96,11 +107,11 @@ export async function bootTestServer(
       : bundledPlugins(options?.profile ?? "gl3", options?.plugins ?? []),
     `plugin-test-${randomUUID()}-`,
     config.profile,
-  );
+  ).catch(onBootFailure);
 
   const app = await buildApp(config, {
     db, redis, leaderboardPrefix, rateLimitPrefix, plugins: loadedPlugins, assetDriver,
-  });
+  }).catch(onBootFailure);
 
   // `attachGateway` only needs `app.server`, which exists before `app.listen` is
   // called — the WS test's own `beforeAll` performs the actual `listen`.

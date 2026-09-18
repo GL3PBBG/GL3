@@ -13,6 +13,9 @@ export const RESERVED_BASE_PATHS = [
   // caller's own snapshot — a plugin claiming one of these bases would shadow
   // that read rather than contribute to it via the filter point.
   "/api/hud", "/api/menu", "/api/dashboard",
+  // Scene descriptors (world/routes.ts) — core owns the world; a plugin
+  // contributes to it through worldHooks, not by claiming the path.
+  "/api/world",
   // "/api/rounds" is deliberately NOT reserved: it is a gameplay path, and a
   // plugin replacing one is the strangler seam working as designed. A plugin
   // that claims it anyway does not shadow core — an exact duplicate is
