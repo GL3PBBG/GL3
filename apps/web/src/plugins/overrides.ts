@@ -1,6 +1,7 @@
 import { AdminInventory } from "../pages/AdminInventory.js";
 import type { ComponentType } from "react";
 import { AdminEconomy } from "../pages/AdminEconomy.js";
+import { Bank } from "../pages/Bank.js";
 import { Bounties } from "../pages/Bounties.js";
 import { Bullets } from "../pages/Bullets.js";
 import { Casino } from "../pages/Casino.js";
@@ -40,6 +41,7 @@ export const PAGE_OVERRIDES: ReadonlyMap<string, ComponentType> = new Map([
   ["theft.garage", Garage],
   ["bullets.index", Bullets],
   ["travel.index", Travel],
+  ["bank.index", Bank],
   ["jail", Jail],
   ["hospital", Hospital],
 ]);

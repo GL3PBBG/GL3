@@ -708,6 +708,8 @@ export default definePlugin({
   }],
   routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
+  // The way out of a city is a building in it (spec 2026-09-17 §2.4).
+  worldHooks: [{ id: "station", kind: "building", label: "Station", page: "travel.index", model: "station", footprint: { w: 12, d: 9 }, order: 10 }],
   filters: [declareBenefit],
   // `locationsListed` predates this list and shipped undeclared; declaring all
   // three now costs nothing and gives validate.ts its prefix check.

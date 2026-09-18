@@ -151,6 +151,11 @@ describe("GET /api/plugins", () => {
         // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
         // only in the top-level `menu` array, not duplicated onto each page.
         pages: [
+          // bank.index is a menu-less stub (apps/web renders the hand-written
+          // Bank page for it via PAGE_OVERRIDES); it carries no `menu` entry
+          // so it never joins the array above, but a page needs no menu entry
+          // to appear here (see "still describes a menu-less page" above).
+          { pluginId: "bank", id: "bank.index", path: "/bank", view: { kind: "list", items: [] } },
           // The loader stamps every slotImage/assetBinder with the declaring
           // plugin's scope, so the expected view is the STAMPED one — the raw
           // manifest view differs by exactly that field.

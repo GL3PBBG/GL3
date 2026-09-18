@@ -903,6 +903,7 @@ export default definePlugin({
   jobs: { commit: commitJob },
   provides: [jailOdds],
   filters: [declareBenefit, dashboardWidget],
+  worldHooks: [{ id: "corner", kind: "npc", label: "The corner", page: "crimes.index", model: "npc-coat", order: 20 }],
   // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
   // no-arg boot answers GET /api/plugins with exactly
   // { menu: [], pages: [], events: [] }.

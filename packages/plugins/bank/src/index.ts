@@ -150,4 +150,12 @@ export default definePlugin({
   apiVersion: 1,
   basePaths: ["/api/bank"],
   routes: [bankRoute("deposit"), bankRoute("withdraw"), openRoute],
+  pages: [{
+    id: "bank.index",
+    path: "/bank",
+    // Stub view: apps/web PAGE_OVERRIDES renders the hand-written Bank page
+    // for this id; the declaration exists so a world hook can open it.
+    view: { kind: "list", items: [] },
+  }],
+  worldHooks: [{ id: "bank", kind: "building", label: "Bank", page: "bank.index", model: "bank", footprint: { w: 12, d: 9 }, order: 30 }],
 });

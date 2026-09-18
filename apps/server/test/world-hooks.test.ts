@@ -136,3 +136,30 @@ describe("worldHooks boot validation", () => {
     await expect(bootTestServer({ plugins: [squatter], profile: "v2" })).rejects.toThrow(/reserved to core/);
   });
 });
+
+describe("PoC hooks on the gl3 profile", () => {
+  let gl3App: FastifyInstance; let gl3Redis: Redis; let closeGl3: () => Promise<void>;
+  beforeAll(async () => { ({ app: gl3App, redis: gl3Redis, close: closeGl3 } = await bootTestServer()); });
+  afterAll(async () => { await closeGl3(); });
+
+  it("places travel's station, crimes' corner and bank's bank, each opening its own page", async () => {
+    await seedLocations(db);
+    const { token, playerId } = await registerVerifiedPlayer({ app: gl3App, redis: gl3Redis });
+    const ny = await townId("New York");
+    await db.update(playerStats).set({ locationId: ny }).where(eq(playerStats.playerId, playerId));
+    const res = await gl3App.inject({ method: "GET", url: "/api/world/scene", headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(200);
+    const room = RoomDescriptorSchema.parse(res.json());
+    const byId = new Map(room.hooks.map((h) => [h.id, h]));
+    expect(byId.get("travel.station")).toMatchObject({ kind: "building", model: "station", href: "/plugins/travel.index", footprint: { w: 12, d: 9 } });
+    expect(byId.get("crimes.corner")).toMatchObject({ kind: "npc", model: "npc-coat", href: "/plugins/crimes.index" });
+    expect(byId.get("bank.bank")).toMatchObject({ kind: "building", model: "bank", href: "/plugins/bank.index", footprint: { w: 12, d: 9 } });
+    // Order along the street is the declared order: station (10), corner (20), bank (30).
+    expect(room.hooks.map((h) => h.id).filter((id) => byId.has(id)).slice(0, 3)).toEqual(["travel.station", "crimes.corner", "bank.bank"]);
+    // Nobody stands inside a building: the spawn lot is clear.
+    for (const h of room.hooks.filter((h) => h.kind === "building")) {
+      const inside = Math.abs(room.spawn.x - h.position.x) < h.footprint.w / 2 && Math.abs(room.spawn.y - h.position.y) < h.footprint.d / 2;
+      expect(inside, h.id).toBe(false);
+    }
+  });
+});
