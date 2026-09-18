@@ -67,7 +67,9 @@ export async function bootTestServer(
   // boot failure (world-hooks.test.ts) would otherwise leak a Postgres pool
   // and a Redis connection per rejected boot, for the lifetime of the file.
   const onBootFailure = async (err: unknown): Promise<never> => {
-    await sql.end();
+    // Swallow a cleanup failure: rethrowing it here would mask the boot error
+    // the caller is actually asserting on.
+    await sql.end().catch(() => undefined);
     redis.disconnect();
     throw err;
   };
