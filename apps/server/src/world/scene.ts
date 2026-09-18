@@ -61,25 +61,38 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
       const spawn = row ? SceneSpawnSchema.parse(row.spawn) : DEFAULT_SCENE_SPAWN;
       const sceneKey = row?.sceneKey ?? DEFAULT_SCENE_KEY;
 
-      const hooks: PlacedHook[] = [];
-      for (const g of layoutFor(bounds, spawn)) {
-        const signageUrl = g.hook.signageSlot === undefined
-          ? null
-          : await resolveSingletonAsset(deps.db, deps.assetDriver, g.hook.pluginId, g.hook.signageSlot);
-        hooks.push({
-          id: `${g.hook.pluginId}.${g.hook.id}`,
-          pluginId: g.hook.pluginId,
-          hookId: g.hook.id,
-          kind: g.hook.kind,
-          label: g.hook.label,
-          model: g.hook.model,
-          footprint: g.footprint,
-          position: g.position,
-          facing: g.facing,
-          href: `/plugins/${g.hook.page}`,
-          signageUrl,
-        });
-      }
+      // Concurrent, not sequential: spec §B.10 asks for one resolution per
+      // hook, and each is an independent `(scope, slot)` pair. A hook whose
+      // signage cannot be read renders unsigned rather than taking the whole
+      // street down with it — the malformed-jsonb parse above deliberately
+      // still throws, because a room the client cannot place is not a room.
+      const placed = layoutFor(bounds, spawn);
+      const signage = await Promise.all(placed.map(async ({ hook }) => {
+        if (hook.signageSlot === undefined) return null;
+        try {
+          return await resolveSingletonAsset(deps.db, deps.assetDriver, hook.pluginId, hook.signageSlot);
+        } catch (err) {
+          console.error(
+            { err, pluginId: hook.pluginId, slot: hook.signageSlot },
+            "world: signage resolution failed",
+          );
+          return null;
+        }
+      }));
+
+      const hooks: PlacedHook[] = placed.map((g, i) => ({
+        id: `${g.hook.pluginId}.${g.hook.id}`,
+        pluginId: g.hook.pluginId,
+        hookId: g.hook.id,
+        kind: g.hook.kind,
+        label: g.hook.label,
+        model: g.hook.model,
+        footprint: g.footprint,
+        position: g.position,
+        facing: g.facing,
+        href: `/plugins/${g.hook.page}`,
+        signageUrl: signage[i] ?? null,
+      }));
 
       return {
         locationId: town.id,

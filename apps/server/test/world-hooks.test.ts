@@ -1,11 +1,14 @@
-import { definePlugin } from "@gl3/plugin-sdk";
+import { definePlugin, SINGLETON_ENTITY_ID } from "@gl3/plugin-sdk";
 import { DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN, RoomDescriptorSchema } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { FilesystemDriver } from "../src/assets/fs-driver.js";
+import { bindAsset, resolveSingletonAsset, storeAsset } from "../src/assets/service.js";
 import { locations, locationScenes, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
+import { makePng } from "./helpers/assets.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -25,12 +28,13 @@ const fixture = definePlugin({
 
 let app: FastifyInstance;
 let redis: Redis;
+let assetDriver: FilesystemDriver;
 let closeServer: () => Promise<void>;
 
 beforeAll(async () => {
   // v2 profile: withCorePlugins merges the fixture with the core set, and the
   // v2 set is smaller, so the fixture's hooks are easy to find among them.
-  ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [fixture], profile: "v2" }));
+  ({ app, close: closeServer, redis, assetDriver } = await bootTestServer({ plugins: [fixture], profile: "v2" }));
 });
 beforeEach(async () => { await resetDb(db); await seedLocations(db); });
 afterAll(async () => { await closeServer(); await conn.end(); });
@@ -66,6 +70,29 @@ describe("GET /api/world/scene", () => {
     expect(hall).toMatchObject({ pluginId: "worldfix", hookId: "hall", kind: "building", href: "/plugins/worldfix.index", signageUrl: null, footprint: { w: 12, d: 9 } });
     expect(tout).toMatchObject({ kind: "npc", href: "/plugins/worldfix.other", position: { x: hall!.position.x, y: expect.any(Number) } });
     expect(Math.abs(tout!.position.y)).toBe(7.5);
+  });
+
+  it("serves the bound signage image for the hook that declares a slot", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const chicago = await townId("Chicago");
+    await db.update(playerStats).set({ locationId: chicago }).where(eq(playerStats.playerId, playerId));
+
+    // Through the real asset service, so a wrong scope or slot name fails here
+    // rather than passing on a null the unbound case would also produce.
+    const stored = await storeAsset(db, assetDriver, {
+      bytes: makePng(16, 16), declaredMime: "image/png", uploadedBy: null,
+      maxBytes: 524_288, maxDimension: 2048,
+    });
+    await bindAsset(db, {
+      scope: "worldfix", entityId: SINGLETON_ENTITY_ID, slot: "sign", assetId: stored.id,
+    });
+    const expected = await resolveSingletonAsset(db, assetDriver, "worldfix", "sign");
+    expect(expected).not.toBeNull();
+
+    const room = RoomDescriptorSchema.parse((await get("/api/world/scene", token)).json());
+    expect(room.hooks.find((h) => h.id === "worldfix.hall")?.signageUrl).toBe(expected);
+    // The NPC declares no signageSlot, so it stays null even now one is bound.
+    expect(room.hooks.find((h) => h.id === "worldfix.tout")?.signageUrl).toBeNull();
   });
 
   it("reads a location_scenes row when one exists", async () => {
