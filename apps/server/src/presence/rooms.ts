@@ -1,4 +1,4 @@
-import type { AvatarBody, Emote, GameEvent, PresenceMoved, PresenceState, RoomDescriptor, ServerFrame } from "@gl3/shared";
+import type { AvatarBody, Emote, GameEvent, PresenceMoved, PresenceState, RoomDescriptor, Sentence, ServerFrame } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import type { WebSocket } from "ws";
@@ -71,7 +71,7 @@ interface SocketState {
 
 /** What `joinTarget` resolved: a room to join, or the code to answer with. */
 type JoinTarget =
-  | { ok: true; gangId: string | null; username: string; room: Room }
+  | { ok: true; gangId: string | null; username: string; sentence: Sentence; room: Room }
   | { ok: false; code: "not_joined" | "no_location" };
 
 const AVATARS: readonly AvatarBody[] = ["suit-dark", "suit-light", "coat", "dress"];
@@ -81,6 +81,20 @@ export function avatarFor(playerId: string): AvatarBody {
   let h = 0;
   for (let i = 0; i < playerId.length; i++) h = (h * 31 + playerId.charCodeAt(i)) >>> 0;
   return AVATARS[h % AVATARS.length]!;
+}
+
+/** The two columns every sentence read selects. */
+interface SentenceRow { jailedUntil: Date | null; hospitalUntil: Date | null }
+
+/**
+ * Where a player is confined (spec 2026-09-18 §3). Pure. `jail` wins when
+ * both columns are set, matching the sentence sweeper's own precedence; a
+ * null column, or one already elapsed, is no sentence at all.
+ */
+export function sentenceOf(row: SentenceRow, now: number): Sentence {
+  if (row.jailedUntil !== null && row.jailedUntil.getTime() > now) return "jail";
+  if (row.hospitalUntil !== null && row.hospitalUntil.getTime() > now) return "hospital";
+  return null;
 }
 
 const emptyDirty = (): Room["dirty"] => ({ joined: new Map(), moved: new Map(), emoted: [], left: new Set() });
@@ -165,7 +179,10 @@ export function createRooms(deps: RoomsDeps): Rooms {
   const joinTarget = async (playerId: string): Promise<JoinTarget> => {
     try {
       const [row] = await deps.db
-        .select({ locationId: playerStats.locationId, gangId: playerStats.gangId, username: players.username })
+        .select({
+          locationId: playerStats.locationId, gangId: playerStats.gangId, username: players.username,
+          jailedUntil: playerStats.jailedUntil, hospitalUntil: playerStats.hospitalUntil,
+        })
         .from(playerStats)
         .innerJoin(players, eq(players.id, playerStats.playerId))
         .where(eq(playerStats.playerId, playerId));
@@ -173,7 +190,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
       if (!row.locationId) return { ok: false, code: "no_location" };
       const room = await roomFor(row.locationId);
       if (!room) return { ok: false, code: "no_location" };
-      return { ok: true, gangId: row.gangId, username: row.username, room };
+      return { ok: true, gangId: row.gangId, username: row.username, sentence: sentenceOf(row, now()), room };
     } catch (err) {
       console.error({ err, playerId }, "presence: join lookup failed");
       return { ok: false, code: "not_joined" };
@@ -213,7 +230,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
         state: {
           playerId, username: target.username, gangId: target.gangId,
           x: room.descriptor.spawn.x, y: room.descriptor.spawn.y, facing: room.descriptor.spawn.facing,
-          avatar: { body: avatarFor(playerId) }, since: t,
+          avatar: { body: avatarFor(playerId) }, since: t, sentence: target.sentence,
         },
         sockets: new Set([socket]), controller: socket, lastMoveAt: t, zsetTouchedAt: t, ip,
       };
@@ -404,7 +421,65 @@ export function createRooms(deps: RoomsDeps): Rooms {
   const timer = setInterval(flush, PRESENCE.tickMs);
   timer.unref?.();
 
+  /**
+   * One SELECT of the two sentence columns. `undefined` means the row is
+   * gone or the read failed — deliberately NOT `null`, which is itself an
+   * answer ("no sentence"): a failed read must leave a jailed member jailed
+   * rather than quietly freeing them on every client in the room.
+   */
+  const readSentence = async (playerId: string): Promise<Sentence | undefined> => {
+    try {
+      const [row] = await deps.db
+        .select({ jailedUntil: playerStats.jailedUntil, hospitalUntil: playerStats.hospitalUntil })
+        .from(playerStats)
+        .where(eq(playerStats.playerId, playerId));
+      return row ? sentenceOf(row, now()) : undefined;
+    } catch (err) {
+      console.error({ err, playerId }, "presence: sentence lookup failed");
+      return undefined;
+    }
+  };
+
+  /**
+   * Re-read the row rather than trust the event (spec §3): a released player
+   * may still be hospitalised, and only the row knows which. A member whose
+   * value changed is put back on `dirty.joined` — a RE-ANNOUNCE, not a
+   * second join: the client upserts on `joined`, so this needs no new tick
+   * field and no client change. A concealed room stores it and broadcasts
+   * nothing, exactly as it does for every other dirty entry.
+   */
+  const refreshSentence = async (playerId: string): Promise<void> => {
+    // Cheap pre-check: a jail event for one of the thousands of players who
+    // are not in any room must not cost a query.
+    if (!memberRoom.has(playerId)) return;
+    const sentence = await readSentence(playerId);
+    if (sentence === undefined) return;
+
+    // Re-read after the await, for onEvent's own reason below: the member
+    // can have left, closed its last socket or travelled while the row was
+    // in flight.
+    const roomId = memberRoom.get(playerId);
+    if (roomId === undefined) return;
+    const room = rooms.get(roomId);
+    const member = room?.members.get(playerId);
+    if (!room || !member) return;
+    if ((member.state.sentence ?? null) === sentence) return;
+    member.state = { ...member.state, sentence };
+    room.dirty.joined.set(playerId, member.state);
+  };
+
   const onEvent = async (event: GameEvent): Promise<void> => {
+    // A sentence changed hands: the actor was jailed, released or
+    // discharged, or — for a kill — the VICTIM is the one hospitalised.
+    if (event.type === "player.jailed" || event.type === "player.released" || event.type === "player.discharged") {
+      await refreshSentence(event.actorId);
+      return;
+    }
+    if (event.type === "player.killed") {
+      await refreshSentence(event.victimId);
+      return;
+    }
+
     // Only travel moves a player between rooms. `actorId` is the traveller
     // (the travel plugin is the sole publisher), and the event is published
     // after the transaction committed — the outbox guarantees it — so the
@@ -429,6 +504,16 @@ export function createRooms(deps: RoomsDeps): Rooms {
     } catch (err) {
       console.error({ err, playerId, toLocationId: event.toLocationId }, "presence: travel lookup failed");
       failure = "not_joined";
+    }
+
+    // Re-read rather than carried forward: the row is the truth, and a
+    // sentence can have changed since the join. Only when there is a room to
+    // arrive in — a failed destination lookup has nothing to announce. A
+    // failed read keeps the value the member already carried.
+    let sentence: Sentence = member.state.sentence ?? null;
+    if (to !== null) {
+      const read = await readSentence(playerId);
+      if (read !== undefined) sentence = read;
     }
 
     // Everything above was read BEFORE that await, and the gateway fires
@@ -462,6 +547,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
       state: {
         ...member.state,
         x: to.descriptor.spawn.x, y: to.descriptor.spawn.y, facing: to.descriptor.spawn.facing, since: t,
+        sentence,
       },
       lastMoveAt: t,
     };

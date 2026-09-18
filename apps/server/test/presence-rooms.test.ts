@@ -11,6 +11,7 @@ import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
 import { locations, locationScenes, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
+import { publishEvent } from "../src/bus/publish.js";
 import { createRooms } from "../src/presence/rooms.js";
 import { createRedis } from "../src/redis.js";
 import { createSceneService } from "../src/world/scene.js";
@@ -414,6 +415,93 @@ describe("travel moves a present player between rooms", () => {
     expect((await app.inject({ method: "POST", url: `/api/travel/${miami}`, headers: { authorization: `Bearer ${b.token}` } })).statusCode).toBe(200);
     expect(await receivedFrameOfKind(a.socket, "presence.tick", 700)).toBe(false);
     expect(await receivedFrameOfKind(b.socket, "presence.snapshot", 300)).toBe(false);
+  });
+});
+
+describe("sentence on presence state", () => {
+  const soon = () => new Date(Date.now() + 60_000);
+
+  /** The envelope the bus delivers, built the way `base` in events.ts requires. */
+  const sentenceEvent = (
+    type: "player.jailed" | "player.released" | "player.discharged",
+    actorId: string,
+  ): GameEvent =>
+    type === "player.jailed"
+      ? {
+          id: uuidv7(), type, at: new Date().toISOString(), actorId, actorName: "convict",
+          audience: { kind: "player", playerId: actorId }, until: soon().toISOString(), reason: "test",
+        }
+      : {
+          id: uuidv7(), type, at: new Date().toISOString(), actorId, actorName: "convict",
+          audience: { kind: "player", playerId: actorId },
+        };
+
+  it("carries jail to the sentenced player and to the room that sees them arrive", async () => {
+    const a = await joined(chicago, "Watcher");
+    await frameOfKind(a.socket, "presence.snapshot");
+
+    const b = await playerIn(chicago, "Convict");
+    await db.update(playerStats).set({ jailedUntil: soon() }).where(eq(playerStats.playerId, b.playerId));
+    sendFrame(b.socket, { kind: "presence.join", client: "godot-desktop" });
+
+    expect((await frameOfKind(b.socket, "presence.snapshot")).you.sentence).toBe("jail");
+    const tick = await frameOfKind(a.socket, "presence.tick");
+    expect(tick.joined.map((p) => p.playerId)).toEqual([b.playerId]);
+    expect(tick.joined[0]!.sentence).toBe("jail");
+  });
+
+  it("carries hospital, and jail wins when both are set", async () => {
+    const b = await playerIn(chicago, "Patient");
+    await db.update(playerStats).set({ hospitalUntil: soon() }).where(eq(playerStats.playerId, b.playerId));
+    sendFrame(b.socket, { kind: "presence.join", client: "godot-desktop" });
+    expect((await frameOfKind(b.socket, "presence.snapshot")).you.sentence).toBe("hospital");
+
+    const c = await playerIn(chicago, "Both");
+    await db.update(playerStats).set({ jailedUntil: soon(), hospitalUntil: soon() }).where(eq(playerStats.playerId, c.playerId));
+    sendFrame(c.socket, { kind: "presence.join", client: "godot-desktop" });
+    expect((await frameOfKind(c.socket, "presence.snapshot")).you.sentence).toBe("jail");
+  });
+
+  it("is null for a free player, and for one whose sentence has already elapsed", async () => {
+    const a = await joined(chicago, "Free");
+    expect((await frameOfKind(a.socket, "presence.snapshot")).you.sentence).toBeNull();
+
+    const b = await playerIn(chicago, "Served");
+    await db.update(playerStats)
+      .set({ jailedUntil: new Date(Date.now() - 60_000), hospitalUntil: new Date(Date.now() - 60_000) })
+      .where(eq(playerStats.playerId, b.playerId));
+    sendFrame(b.socket, { kind: "presence.join", client: "godot-desktop" });
+    expect((await frameOfKind(b.socket, "presence.snapshot")).you.sentence).toBeNull();
+  });
+
+  it("re-announces a released member through tick.joined", async () => {
+    const a = await joined(chicago, "Witness");
+    await frameOfKind(a.socket, "presence.snapshot");
+
+    const b = await playerIn(chicago, "Released");
+    await db.update(playerStats).set({ jailedUntil: soon() }).where(eq(playerStats.playerId, b.playerId));
+    sendFrame(b.socket, { kind: "presence.join", client: "godot-desktop" });
+    await frameOfKind(b.socket, "presence.snapshot");
+    expect((await frameOfKind(a.socket, "presence.tick")).joined[0]!.sentence).toBe("jail");
+
+    // The row is the truth, not the event: clear it, then tell the bus.
+    await db.update(playerStats).set({ jailedUntil: null }).where(eq(playerStats.playerId, b.playerId));
+    await publishEvent(redis, sentenceEvent("player.released", b.playerId));
+
+    const tick = await frameOfKind(a.socket, "presence.tick");
+    const announced = tick.joined.find((p) => p.playerId === b.playerId);
+    expect(announced, "the released member is re-announced").toBeDefined();
+    expect(announced!.sentence).toBeNull();
+  });
+
+  it("ignores a sentence event for a player who is in no room", async () => {
+    const a = await joined(chicago, "Alone");
+    await frameOfKind(a.socket, "presence.snapshot");
+    const b = await playerIn(chicago, "Absent"); // socket open, never joined
+    await db.update(playerStats).set({ jailedUntil: soon() }).where(eq(playerStats.playerId, b.playerId));
+
+    await publishEvent(redis, sentenceEvent("player.jailed", b.playerId));
+    expect(await receivedFrameOfKind(a.socket, "presence.tick", 400)).toBe(false);
   });
 });
 
