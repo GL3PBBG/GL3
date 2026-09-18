@@ -186,17 +186,6 @@ export function createRooms(deps: RoomsDeps): Rooms {
       memberRoom.set(playerId, room.descriptor.locationId);
       room.dirty.left.delete(playerId);
       room.dirty.joined.set(playerId, member.state);
-      // The ZSET touch is a nicety: it is what makes a socket-only session
-      // show up in /api/online. Join must not depend on it. A throwable
-      // await between the member insert above and the socket-state set
-      // below would strand the member — the socket would have no
-      // SocketState, so `detach` would return early on close and leave a
-      // phantom in the room forever.
-      try {
-        await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
-      } catch (err) {
-        console.error({ err, playerId }, "presence: touch failed");
-      }
     } else {
       // Most recent join owns the avatar; the previous controller is told
       // once and keeps receiving ticks (spec §1.2).
@@ -214,6 +203,21 @@ export function createRooms(deps: RoomsDeps): Rooms {
       tokens: existing?.tokens ?? PRESENCE.bucketSize, tokensAt: existing?.tokensAt ?? t,
       drops: existing?.drops ?? 0, dropsWindowStart: existing?.dropsWindowStart ?? t,
     });
+
+    // Every join is a heartbeat, not only the first: /api/online reads this
+    // ZSET, and a client that reconnects and re-joins is present now. The
+    // touch is a nicety, though — it is what makes a socket-only session
+    // visible there — so join must not depend on it, and it sits AFTER the
+    // socket-state set above for that reason. A throwable await between the
+    // member insert and that set would strand the member: its socket would
+    // have no SocketState, so `detach` would return early on close and
+    // leave a phantom in the room forever.
+    member.zsetTouchedAt = t;
+    try {
+      await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
+    } catch (err) {
+      console.error({ err, playerId }, "presence: touch failed");
+    }
     deps.send(socket, snapshotFor(room, member));
   };
 
@@ -361,8 +365,64 @@ export function createRooms(deps: RoomsDeps): Rooms {
   timer.unref?.();
 
   const onEvent = async (event: GameEvent): Promise<void> => {
+    // Only travel moves a player between rooms. `actorId` is the traveller
+    // (the travel plugin is the sole publisher), and the event is published
+    // after the transaction committed — the outbox guarantees it — so the
+    // scene read below sees the new town.
     if (event.type !== "player.travelled") return;
-    // Task 8 fills this in.
+    const playerId = event.actorId;
+    const fromId = memberRoom.get(playerId);
+    if (fromId === undefined) return; // not present anywhere: nothing to move
+    if (fromId === event.toLocationId) return;
+    const from = rooms.get(fromId);
+    const member = from?.members.get(playerId);
+    if (!from || !member) return;
+
+    // Resolve the destination BEFORE detaching, so the one await sits
+    // outside the hand-over. Every outcome still answers the traveller:
+    // `joinTarget`'s rule, for `joinTarget`'s reason — a silent drop would
+    // leave a client standing in a town the server no longer has it in.
+    let to: Room | null = null;
+    let failure: "no_location" | "not_joined" = "no_location";
+    try {
+      to = await roomFor(event.toLocationId);
+    } catch (err) {
+      console.error({ err, playerId, toLocationId: event.toLocationId }, "presence: travel lookup failed");
+      failure = "not_joined";
+    }
+
+    // The traveller has left the old town whatever happens next, so the old
+    // room is told `left` either way.
+    removeMember(from, playerId);
+    if (to === null) {
+      for (const socket of member.sockets) {
+        const s = stateOf(socket);
+        if (s) s.roomId = null;
+        error(socket, failure);
+      }
+      return;
+    }
+
+    const t = now();
+    const moved: Member = {
+      ...member,
+      state: {
+        ...member.state,
+        x: to.descriptor.spawn.x, y: to.descriptor.spawn.y, facing: to.descriptor.spawn.facing, since: t,
+      },
+      lastMoveAt: t,
+    };
+    to.members.set(playerId, moved);
+    memberRoom.set(playerId, to.descriptor.locationId);
+    to.dirty.left.delete(playerId);
+    to.dirty.joined.set(playerId, moved.state);
+    for (const socket of moved.sockets) {
+      // The new room is a new sequence space: a seq the client had already
+      // spent in the old town must not silence its first move in this one.
+      const s = stateOf(socket);
+      if (s) { s.roomId = to.descriptor.locationId; s.lastSeq = -1; }
+      deps.send(socket, snapshotFor(to, moved));
+    }
   };
 
   return {

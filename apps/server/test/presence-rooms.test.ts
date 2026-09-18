@@ -1,8 +1,9 @@
 import type { AddressInfo } from "node:net";
-import type { ServerFrame } from "@gl3/shared";
+import type { GameEvent, ServerFrame } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
 import type WebSocket from "ws";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FilesystemDriver } from "../src/assets/fs-driver.js";
@@ -334,3 +335,149 @@ describe("a failing join lookup", () => {
     }
   });
 });
+
+describe("travel moves a present player between rooms", () => {
+  it("old room sees left, the traveller gets a new snapshot, the new room sees joined", async () => {
+    const a = await joined(chicago);
+    await frameOfKind(a.socket, "presence.snapshot");
+    const b = await joined(chicago);
+    await frameOfKind(b.socket, "presence.snapshot");
+    await frameOfKind(a.socket, "presence.tick");
+    const c = await joined(miami);
+    await frameOfKind(c.socket, "presence.snapshot");
+
+    // Miami costs 250 and Chicago's cooldown is 60 s; a fresh player has no
+    // cooldown. Fund the fare directly — this test is about rooms, not fares.
+    await db.update(playerStats).set({ cash: 10_000n }).where(eq(playerStats.playerId, b.playerId));
+    const res = await app.inject({ method: "POST", url: `/api/travel/${miami}`, headers: { authorization: `Bearer ${b.token}` } });
+    expect(res.statusCode).toBe(200);
+
+    expect((await frameOfKind(a.socket, "presence.tick")).left).toEqual([b.playerId]);
+    const snap = await frameOfKind(b.socket, "presence.snapshot");
+    expect(snap.room.locationId).toBe(miami);
+    expect(snap.players.map((p) => p.playerId)).toEqual([c.playerId]);
+    expect((await frameOfKind(c.socket, "presence.tick")).joined.map((p) => p.playerId)).toEqual([b.playerId]);
+  });
+
+  it("ignores a travelled event for a player who is not in any room", async () => {
+    const a = await joined(chicago);
+    await frameOfKind(a.socket, "presence.snapshot");
+    const b = await playerIn(chicago); // socket open, never joined
+    await db.update(playerStats).set({ cash: 10_000n }).where(eq(playerStats.playerId, b.playerId));
+    expect((await app.inject({ method: "POST", url: `/api/travel/${miami}`, headers: { authorization: `Bearer ${b.token}` } })).statusCode).toBe(200);
+    expect(await receivedFrameOfKind(a.socket, "presence.tick", 700)).toBe(false);
+    expect(await receivedFrameOfKind(b.socket, "presence.snapshot", 300)).toBe(false);
+  });
+});
+
+describe("rate limiting", () => {
+  it("drops the eleventh move in a burst without an error", async () => {
+    const a = await joined(chicago);
+    const snap = await frameOfKind(a.socket, "presence.snapshot");
+    const b = await joined(chicago);
+    await frameOfKind(b.socket, "presence.snapshot");
+    await frameOfKind(a.socket, "presence.tick");
+    const { x: sx, y: sy } = snap.room.spawn;
+    for (let i = 1; i <= 11; i++) move(b.socket, i, sx + i * 0.01, sy);
+    const tick = await frameOfKind(a.socket, "presence.tick");
+    // Ten accepted (bucket size), the eleventh dropped: the last stored x is the tenth's.
+    expect(tick.moved[0]!.x).toBeCloseTo(sx + 0.1, 3);
+    expect(await receivedFrameOfKind(b.socket, "presence.error", 300)).toBe(false);
+  });
+
+  it("closes a sustained flood with rate_limited", async () => {
+    const b = await joined(chicago);
+    await frameOfKind(b.socket, "presence.snapshot");
+    const closed = new Promise<void>((resolve) => b.socket.once("close", () => resolve()));
+    for (let i = 1; i <= 260; i++) move(b.socket, i, 0, 0);
+    expect(await frameOfKind(b.socket, "presence.error")).toEqual({ kind: "presence.error", code: "rate_limited" });
+    await closed;
+  });
+});
+
+describe("presence ZSET", () => {
+  it("a socket-only session shows in /api/online with its town, concealed when underground", async () => {
+    const a = await joined(chicago);
+    await frameOfKind(a.socket, "presence.snapshot");
+    await redis.zrem("presence", a.playerId); // forget the HTTP touches registration made
+    sendFrame(a.socket, { kind: "presence.join", client: "godot-desktop" });
+    await frameOfKind(a.socket, "presence.snapshot");
+    expect(await redis.zscore("presence", a.playerId)).not.toBeNull();
+
+    const viewer = await registerVerifiedPlayer({ app, redis });
+    const online = await app.inject({ method: "GET", url: "/api/online", headers: { authorization: `Bearer ${viewer.token}` } });
+    const me = (online.json() as { onlineNow: { playerId: string; locationName: string | null }[] }).onlineNow.find((e) => e.playerId === a.playerId);
+    expect(me?.locationName).toBe("Chicago");
+
+    await db.update(locations).set({ combatMode: "underground" }).where(eq(locations.id, chicago));
+    const again = await app.inject({ method: "GET", url: "/api/online", headers: { authorization: `Bearer ${viewer.token}` } });
+    expect((again.json() as { onlineNow: { playerId: string; locationName: string | null }[] }).onlineNow.find((e) => e.playerId === a.playerId)?.locationName).toBeNull();
+  });
+});
+
+describe("travel to a town the server cannot resolve", () => {
+  /** A `player.travelled` straight onto `onEvent`, the way the bus delivers one. */
+  const travelled = (actorId: string, toLocationId: string): GameEvent => ({
+    id: uuidv7(), type: "player.travelled", at: new Date().toISOString(),
+    actorId, actorName: "traveller", audience: { kind: "player", playerId: actorId },
+    fromLocationId: null, toLocationId, cost: "0",
+  });
+  const isTick = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.tick" }> =>
+    f.kind === "presence.tick";
+
+  it("answers no_location for an unknown town, and the old room still sees left", async () => {
+    const p = await playerIn(chicago);
+    const q = await playerIn(chicago);
+    const sent: { socket: WebSocket; frame: ServerFrame }[] = [];
+    const rooms = createRooms({
+      db, redis,
+      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      send: (socket, frame) => { sent.push({ socket, frame }); },
+    });
+    try {
+      await rooms.join(p.playerId, p.socket, null);
+      await rooms.join(q.playerId, q.socket, null);
+      sent.length = 0;
+      await rooms.onEvent(travelled(p.playerId, uuidv7())); // a town that does not exist
+
+      // The traveller is answered rather than dropped in silence...
+      expect(sent.map((e) => e.frame)).toEqual([{ kind: "presence.error", code: "no_location" }]);
+      expect(sent[0]!.socket).toBe(p.socket);
+
+      // ...and the room it left still hears about the departure.
+      await new Promise((r) => setTimeout(r, 400));
+      expect(sent.map((e) => e.frame).filter(isTick).flatMap((t) => t.left)).toEqual([p.playerId]);
+    } finally {
+      rooms.close();
+    }
+  });
+
+  it("answers not_joined when the destination lookup throws", async () => {
+    const p = await playerIn(chicago);
+    // Joined against a live connection, then the connection is ended under
+    // it: the destination read inside onEvent is what fails, not the join.
+    const dying = createDb(loadConfig(process.env).databaseUrl);
+    const frames: ServerFrame[] = [];
+    const rooms = createRooms({
+      db: dying.db, redis,
+      scenes: createSceneService({ db: dying.db, assetDriver, hooks: [] }),
+      send: (_socket, frame) => { frames.push(frame); },
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await rooms.join(p.playerId, p.socket, null);
+      expect(frames.map((f) => f.kind)).toEqual(["presence.snapshot"]);
+      await dying.sql.end();
+
+      await rooms.onEvent(travelled(p.playerId, miami));
+      expect(frames[1]).toEqual({ kind: "presence.error", code: "not_joined" });
+      expect(errors).toHaveBeenCalledWith(
+        expect.objectContaining({ playerId: p.playerId }), "presence: travel lookup failed",
+      );
+    } finally {
+      errors.mockRestore();
+      rooms.close();
+    }
+  });
+});
+
