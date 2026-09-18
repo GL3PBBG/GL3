@@ -121,6 +121,7 @@ export async function bootTestServer(
   const gateway = await attachGateway(app.server, {
     db, redis, subscriber: gatewaySubscriber, corsOrigins: config.corsOrigins,
     worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
+    coreHooks: config.profile !== "framework",
   });
 
   return {

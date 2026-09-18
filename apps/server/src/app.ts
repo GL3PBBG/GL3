@@ -209,7 +209,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
   // After plugins load: the scene service places `loaded.worldHooks`, which
   // only exists once every manifest has been validated and collected.
-  registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks }), requireAuth);
+  registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks, coreHooks: config.profile !== "framework" }), requireAuth);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests, loadedSettings);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an

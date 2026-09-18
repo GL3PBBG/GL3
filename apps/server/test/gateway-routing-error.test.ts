@@ -55,7 +55,7 @@ describe("WS gateway: routing errors don't crash the process", () => {
       // Presence is not what this test drives: no plugin is loaded, so there
       // are no world hooks, and the asset driver is only ever reached through
       // a scene lookup a join would make.
-      worldHooks: [], assetDriver: testAssetDriver(), clientIpHeader: config.clientIpHeader,
+      worldHooks: [], assetDriver: testAssetDriver(), clientIpHeader: config.clientIpHeader, coreHooks: true,
     });
 
     // Deterministically fail every subsequent query on this connection —

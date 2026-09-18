@@ -10,7 +10,7 @@ import type { StorageDriver } from "../assets/driver.js";
 import { resolveSingletonAsset } from "../assets/service.js";
 import type { Db } from "../db/client.js";
 import { locations, locationScenes } from "../db/schema/index.js";
-import { placeHooks, type PlacedGeometry } from "./layout.js";
+import { placeCoreHooks, placeHooks, type PlacedCore, type PlacedGeometry } from "./layout.js";
 
 export interface SceneService {
   /** The room descriptor for a town, or null when no such location exists. */
@@ -22,6 +22,12 @@ export interface SceneServiceDeps {
   assetDriver: StorageDriver;
   /** `LoadedPlugins.worldHooks` — boot-static, already in layout order. */
   hooks: readonly WorldHook[];
+  /**
+   * Whether to append the core jail and hospital hooks (spec 2026-09-18 §1).
+   * `config.profile !== "framework"` at every call site: a framework boot
+   * registers neither route nor page, so its scenes carry no core hooks.
+   */
+  coreHooks: boolean;
 }
 
 /**
@@ -35,15 +41,30 @@ export interface SceneServiceDeps {
  * a different `(scope, slot)` pair that `resolveAssets` cannot batch anyway.
  */
 export function createSceneService(deps: SceneServiceDeps): SceneService {
-  const layouts = new Map<string, PlacedGeometry[]>();
-  const layoutFor = (bounds: SceneBounds, spawn: SceneSpawn): PlacedGeometry[] => {
+  /** Plugin geometry and the core placement derived from it share one cache entry. */
+  interface Layout { placed: PlacedGeometry[]; core: PlacedCore[] }
+  const layouts = new Map<string, Layout>();
+  const layoutFor = (bounds: SceneBounds, spawn: SceneSpawn): Layout => {
     const key = JSON.stringify([bounds, spawn]);
-    let placed = layouts.get(key);
-    if (placed === undefined) {
-      placed = placeHooks(deps.hooks, bounds, spawn);
-      layouts.set(key, placed);
+    let layout = layouts.get(key);
+    if (layout === undefined) {
+      const placed = placeHooks(deps.hooks, bounds, spawn);
+      const core = deps.coreHooks ? placeCoreHooks(placed, bounds) : [];
+      // Overflow is served as computed, exactly as plugin-hook overflow is
+      // (spec §1) — but it is worth saying once per distinct layout, which
+      // is what this memo makes "once" mean.
+      for (const g of core) {
+        if (g.yard.x > bounds.maxX) {
+          console.warn(
+            { hookId: g.hook.id, x: g.position.x, yardX: g.yard.x, maxX: bounds.maxX },
+            "world: core hook overflows the street",
+          );
+        }
+      }
+      layout = { placed, core };
+      layouts.set(key, layout);
     }
-    return placed;
+    return layout;
   };
 
   return {
@@ -66,7 +87,7 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
       // signage cannot be read renders unsigned rather than taking the whole
       // street down with it — the malformed-jsonb parse above deliberately
       // still throws, because a room the client cannot place is not a room.
-      const placed = layoutFor(bounds, spawn);
+      const { placed, core } = layoutFor(bounds, spawn);
       const signage = await Promise.all(placed.map(async ({ hook }) => {
         if (hook.signageSlot === undefined) return null;
         try {
@@ -93,6 +114,26 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
         href: `/plugins/${g.hook.page}`,
         signageUrl: signage[i] ?? null,
       }));
+
+      // AFTER every plugin hook, in jail-then-hospital order (spec §1). Core
+      // pages carry no signage slot and no plugin manifest, so `signageUrl`
+      // is a constant null and `yard` is the one field only these two have.
+      for (const g of core) {
+        hooks.push({
+          id: `${g.hook.pluginId}.${g.hook.id}`,
+          pluginId: g.hook.pluginId,
+          hookId: g.hook.id,
+          kind: g.hook.kind,
+          label: g.hook.label,
+          model: g.hook.model,
+          footprint: g.footprint,
+          position: g.position,
+          facing: g.facing,
+          href: `/plugins/${g.hook.page}`,
+          signageUrl: null,
+          yard: g.yard,
+        });
+      }
 
       return {
         locationId: town.id,

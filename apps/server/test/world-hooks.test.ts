@@ -72,6 +72,40 @@ describe("GET /api/world/scene", () => {
     expect(Math.abs(tout!.position.y)).toBe(7.5);
   });
 
+  it("appends core.jail then core.hospital after every plugin hook", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const chicago = await townId("Chicago");
+    await db.update(playerStats).set({ locationId: chicago }).where(eq(playerStats.playerId, playerId));
+
+    const room = RoomDescriptorSchema.parse((await get("/api/world/scene", token)).json());
+    expect(room.hooks.map((h) => h.id).slice(-2)).toEqual(["core.jail", "core.hospital"]);
+    const jail = room.hooks.at(-2)!;
+    const hospital = room.hooks.at(-1)!;
+    expect(jail).toMatchObject({
+      pluginId: "core", hookId: "jail", kind: "building", label: "Jail", model: "jail",
+      footprint: { w: 12, d: 9 }, facing: Math.PI, href: "/plugins/jail", signageUrl: null,
+    });
+    expect(jail.position.y).toBe(15);
+    expect(jail.yard).toEqual({ x: jail.position.x + 9, y: 15 });
+    expect(hospital).toMatchObject({
+      pluginId: "core", hookId: "hospital", kind: "building", label: "Hospital", model: "hospital",
+      footprint: { w: 12, d: 9 }, facing: 0, href: "/plugins/hospital", signageUrl: null,
+    });
+    expect(hospital.position.y).toBe(-15);
+    expect(hospital.yard).toEqual({ x: hospital.position.x + 9, y: -15 });
+
+    // The yard is core-only: no plugin hook carries one.
+    for (const h of room.hooks.filter((h) => h.pluginId !== "core")) expect(h.yard).toBeUndefined();
+
+    // And neither core building stands inside a plugin building on its side.
+    for (const core of [jail, hospital]) {
+      for (const h of room.hooks.filter((h) => h.kind === "building" && h.pluginId !== "core" && Math.sign(h.position.y) === Math.sign(core.position.y))) {
+        const overlaps = Math.abs(h.position.x - core.position.x) < h.footprint.w / 2 + core.footprint.w / 2;
+        expect(overlaps, `${h.id} vs ${core.id}`).toBe(false);
+      }
+    }
+  });
+
   it("serves the bound signage image for the hook that declares a slot", async () => {
     const { token, playerId } = await registerVerifiedPlayer({ app, redis });
     const chicago = await townId("Chicago");
@@ -156,10 +190,35 @@ describe("PoC hooks on the gl3 profile", () => {
     expect(byId.get("bank.bank")).toMatchObject({ kind: "building", model: "bank", href: "/plugins/bank.index", footprint: { w: 12, d: 9 } });
     // Order along the street is the declared order: station (10), corner (20), bank (30).
     expect(room.hooks.map((h) => h.id).filter((id) => byId.has(id)).slice(0, 3)).toEqual(["travel.station", "crimes.corner", "bank.bank"]);
+    // Core jail and hospital close the street, after every plugin hook.
+    expect(room.hooks.map((h) => h.id).slice(-2)).toEqual(["core.jail", "core.hospital"]);
+    expect(room.hooks.at(-2)).toMatchObject({ pluginId: "core", hookId: "jail", href: "/plugins/jail", model: "jail", facing: Math.PI, signageUrl: null });
+    expect(room.hooks.at(-1)).toMatchObject({ pluginId: "core", hookId: "hospital", href: "/plugins/hospital", model: "hospital", facing: 0, signageUrl: null });
+    expect(room.hooks.at(-2)!.yard).toEqual({ x: room.hooks.at(-2)!.position.x + 9, y: 15 });
+    expect(room.hooks.at(-1)!.yard).toEqual({ x: room.hooks.at(-1)!.position.x + 9, y: -15 });
+
     // Nobody stands inside a building: the spawn lot is clear.
     for (const h of room.hooks.filter((h) => h.kind === "building")) {
       const inside = Math.abs(room.spawn.x - h.position.x) < h.footprint.w / 2 && Math.abs(room.spawn.y - h.position.y) < h.footprint.d / 2;
       expect(inside, h.id).toBe(false);
     }
+  });
+});
+
+describe("the framework profile has no core hooks", () => {
+  let fwApp: FastifyInstance; let fwRedis: Redis; let closeFw: () => Promise<void>;
+  beforeAll(async () => { ({ app: fwApp, redis: fwRedis, close: closeFw } = await bootTestServer({ profile: "framework" })); });
+  afterAll(async () => { await closeFw(); });
+
+  it("serves a scene carrying plugin hooks only — jail and hospital do not exist there", async () => {
+    await seedLocations(db);
+    const { token, playerId } = await registerVerifiedPlayer({ app: fwApp, redis: fwRedis });
+    const chicago = await townId("Chicago");
+    await db.update(playerStats).set({ locationId: chicago }).where(eq(playerStats.playerId, playerId));
+    const res = await fwApp.inject({ method: "GET", url: "/api/world/scene", headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(200);
+    const room = RoomDescriptorSchema.parse(res.json());
+    expect(room.hooks.every((h) => h.pluginId !== "core")).toBe(true);
+    expect(room.hooks.every((h) => h.yard === undefined)).toBe(true);
   });
 });

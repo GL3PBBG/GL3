@@ -331,7 +331,7 @@ describe("a failing presence touch", () => {
     const frames: ServerFrame[] = [];
     const rooms = createRooms({
       db, redis: dead,
-      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db, assetDriver, hooks: [], coreHooks: true }),
       send: (_socket, frame) => { frames.push(frame); },
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -366,7 +366,7 @@ describe("a failing join lookup", () => {
     const frames: ServerFrame[] = [];
     const rooms = createRooms({
       db: dead.db, redis,
-      scenes: createSceneService({ db: dead.db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db: dead.db, assetDriver, hooks: [], coreHooks: true }),
       send: (_socket, frame) => { frames.push(frame); },
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -482,7 +482,7 @@ describe("travel to a town the server cannot resolve", () => {
     const sent: { socket: WebSocket; frame: ServerFrame }[] = [];
     const rooms = createRooms({
       db, redis,
-      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db, assetDriver, hooks: [], coreHooks: true }),
       send: (socket, frame) => { sent.push({ socket, frame }); },
     });
     try {
@@ -513,7 +513,7 @@ describe("travel to a town the server cannot resolve", () => {
     const frames: ServerFrame[] = [];
     const rooms = createRooms({
       db: dying.db, redis,
-      scenes: createSceneService({ db: dying.db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db: dying.db, assetDriver, hooks: [], coreHooks: true }),
       send: (_socket, frame) => { frames.push(frame); },
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -540,7 +540,7 @@ describe("travel racing the traveller's own socket", () => {
     const sent: ServerFrame[] = [];
     const rooms = createRooms({
       db, redis,
-      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db, assetDriver, hooks: [], coreHooks: true }),
       send: (_socket, frame) => { sent.push(frame); },
     });
     try {
@@ -576,7 +576,7 @@ describe("join racing the socket's own close", () => {
     const sent: ServerFrame[] = [];
     const rooms = createRooms({
       db, redis,
-      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      scenes: createSceneService({ db, assetDriver, hooks: [], coreHooks: true }),
       send: (_socket, frame) => { sent.push(frame); },
     });
     try {

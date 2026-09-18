@@ -146,6 +146,7 @@ await app.listen({ port: config.port, host: "0.0.0.0" });
 await attachGateway(app.server, {
   db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins,
   worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
+  coreHooks: config.profile !== "framework",
 });
 
 // Deliberately here and NOT in buildApp, for the sentence sweeper's and the
