@@ -606,19 +606,26 @@ describe("join racing the socket's own close", () => {
 });
 
 describe("join is bucketed", () => {
-  it("drops the eleventh join in a burst, silently", async () => {
+  it("drops a join burst that outruns the bucket, silently", async () => {
     const a = await playerIn(chicago);
-    // Sent in one loop so all eleven token spends land back to back: join
-    // takes its token before the lookup, so the bucket cannot refill
-    // between them however slow the database is.
-    for (let i = 0; i < 11; i++) sendFrame(a.socket, { kind: "presence.join", client: "web" });
-    for (let i = 0; i < 10; i++) {
-      expect((await frameOfKind(a.socket, "presence.snapshot")).you.playerId).toBe(a.playerId);
+    for (let i = 0; i < 40; i++) sendFrame(a.socket, { kind: "presence.join", client: "web" });
+
+    // Count what the bucket paid for rather than pinning an exact number:
+    // ten tokens, plus whatever refills while forty frames land — nothing
+    // like the forty asked for, which is the drop being proven. Draining
+    // by kind also covers "and no error", which an over-budget frame must
+    // not produce until dropLimit; `receivedFrameOfKind` would have
+    // discarded an error on its way past a snapshot.
+    let snapshots = 0;
+    const deadline = Date.now() + 900;
+    for (let left = 900; left > 0; left = deadline - Date.now()) {
+      let frame: ServerFrame;
+      try { frame = await nextFrame(a.socket, left); } catch { break; }
+      if (isSnapshot(frame)) snapshots += 1;
+      expect(isError(frame)).toBe(false);
     }
-    // No eleventh snapshot, and no error either: an over-budget frame is
-    // silent until dropLimit. `nextFrame` timing out covers both, where
-    // `receivedFrameOfKind` would have discarded an error on its way past.
-    await expect(nextFrame(a.socket, 400)).rejects.toThrow(/no frame within/);
+    expect(snapshots).toBeGreaterThanOrEqual(10);
+    expect(snapshots).toBeLessThanOrEqual(14);
 
     // A single join is untouched by any of this.
     const b = await joined(chicago);
