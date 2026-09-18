@@ -12,6 +12,7 @@ import { collectAssetSlots } from "./asset-slots.js";
 import { collectAttributePools } from "./attribute-pools.js";
 import { collectExpRouters } from "./exp-routers.js";
 import { collectPropertyTypes } from "./property-types.js";
+import { collectWorldHooks } from "./world-hooks.js";
 
 export function registerPluginRoutes(
   app: FastifyInstance,
@@ -87,6 +88,7 @@ export function registerPluginRoutes(
             expRouter: collectExpRouters(manifests),
             installedPluginIds: new Set(manifests.map((m) => m.id)),
             assetSlots: collectAssetSlots(manifests),
+            worldHooks: collectWorldHooks(manifests),
           });
 
           try {

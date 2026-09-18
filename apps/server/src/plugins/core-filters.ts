@@ -6,6 +6,7 @@ import { collectAttributePools } from "./attribute-pools.js";
 import { collectPropertyTypes } from "./property-types.js";
 import { collectExpRouters } from "./exp-routers.js";
 import { collectFilters } from "./routes.js";
+import { collectWorldHooks } from "./world-hooks.js";
 
 export interface CoreFilters {
   apply<T>(point: FilterPoint<T>, player: PlayerSnapshot | null, value: T): Promise<T>;
@@ -30,6 +31,7 @@ export function buildCoreFilters(deps: PluginCtxDeps, manifests: readonly Plugin
   const attributePools = collectAttributePools(manifests);
   const installedPluginIds = new Set(manifests.map((m) => m.id));
   const assetSlots = collectAssetSlots(manifests);
+  const worldHooks = collectWorldHooks(manifests);
   // No router is handed to a filter ctx (below), so the model is named here
   // or every applier would read "exp" on a routed boot.
   const progression = collectExpRouters(manifests) !== null ? "level" as const : "exp" as const;
@@ -55,6 +57,7 @@ export function buildCoreFilters(deps: PluginCtxDeps, manifests: readonly Plugin
             progression,
             installedPluginIds,
             assetSlots,
+            worldHooks,
           });
           ctxCache.set(ownerId, ctx);
         }

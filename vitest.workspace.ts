@@ -290,6 +290,7 @@ export default defineWorkspace([
         "test/asset-driver-contract.test.ts",
         "test/asset-image-parse.test.ts",
         "test/asset-slots.test.ts",
+        "test/world-hooks-collect.test.ts",
         "test/legal-render.test.ts",
       ],
     },

@@ -269,6 +269,31 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
         );
       }
     }
+
+    // A world hook is the plugin's own door (spec 2026-09-17 §2.1): the page
+    // it opens must be one of ITS player pages — never another plugin's, and
+    // never an admin section, which a door in the street must not open — and
+    // its signage must be one of its own singleton slots, since a per-row slot
+    // has no single image to hang on a sign.
+    const playerPageIds = new Set(manifest.pages.map((p) => p.id));
+    const singletonSlots = new Set(manifest.providesAssets.filter((s) => s.singleton === true).map((s) => s.slot));
+    const seenHooks = new Set<string>();
+    for (const hook of manifest.worldHooks) {
+      if (seenHooks.has(hook.id)) {
+        fail(`plugin "${manifest.id}" world hook "${hook.id}" is declared more than once`);
+      }
+      seenHooks.add(hook.id);
+      if (!playerPageIds.has(hook.page)) {
+        fail(
+          `plugin "${manifest.id}" world hook "${hook.id}" opens page "${hook.page}", which is not one of its own player pages`,
+        );
+      }
+      if (hook.signageSlot !== undefined && !singletonSlots.has(hook.signageSlot)) {
+        fail(
+          `plugin "${manifest.id}" world hook "${hook.id}" declares signageSlot "${hook.signageSlot}", which is not one of its own singleton asset slots`,
+        );
+      }
+    }
   }
 
   // Cross-plugin requirements run after the id sweep above: the full boot set

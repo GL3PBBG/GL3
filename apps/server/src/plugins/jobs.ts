@@ -8,6 +8,7 @@ import { collectAssetSlots } from "./asset-slots.js";
 import { collectAttributePools } from "./attribute-pools.js";
 import { collectExpRouters } from "./exp-routers.js";
 import { collectPropertyTypes } from "./property-types.js";
+import { collectWorldHooks } from "./world-hooks.js";
 
 /**
  * The function shape a plugin's job handler must satisfy. `manifest.jobs` is
@@ -117,6 +118,10 @@ export async function runPluginJob(
     // job diverts exp to the progression plugin's claimant. Every other
     // registry above stays narrowed on purpose (their comments rule).
     expRouter: collectExpRouters(allManifests),
+    // NOT narrowed either, for a different reason: a world hook is a fact
+    // about the shared city, not about the declaring plugin, so a job that
+    // asks what stands on the street must see every plugin's doors.
+    worldHooks: collectWorldHooks(allManifests),
   });
 
   try {

@@ -1,10 +1,11 @@
-import type { PluginManifest } from "@gl3/plugin-sdk";
+import type { PluginManifest, WorldHook } from "@gl3/plugin-sdk";
 import type { Queue, Worker } from "bullmq";
 import { buildCoreFilters, type CoreFilters } from "./core-filters.js";
 import { buildPluginsPayload, type Gl3Profile, type PluginsPayload } from "./manifest-endpoint.js";
 import { createPluginQueues, createPluginWorkers } from "./jobs.js";
 import { runPluginMigrations } from "./migrate.js";
 import { validatePlugins } from "./validate.js";
+import { collectWorldHooks } from "./world-hooks.js";
 import type { PluginCtxDeps } from "./ctx.js";
 
 export interface LoadedPlugins {
@@ -16,6 +17,9 @@ export interface LoadedPlugins {
    *  (`core.profileView`, `core.dashboard`, `core.hud`, `core.menuBadges`,
    *  `core.moneyFormat`) — Tasks 7-8 call it; a plugin route never sees it. */
   coreFilters: CoreFilters;
+  /** Sorted layout order; served placed per scene by `/api/world/scene`,
+   *  never on `/api/plugins`. */
+  worldHooks: readonly WorldHook[];
 }
 
 /**
@@ -40,6 +44,7 @@ export async function loadPlugins(
   profile: Gl3Profile = "v2",
 ): Promise<LoadedPlugins> {
   validatePlugins(manifests);
+  const worldHooks = collectWorldHooks(manifests);
   await runPluginMigrations(deps.db, manifests);
   const queues = createPluginQueues(deps.redis, manifests, queuePrefix);
   const workers = createPluginWorkers(
@@ -56,5 +61,7 @@ export async function loadPlugins(
   // through to decide the synthetic core pages (jail/hospital) — see
   // `buildPluginsPayload`.
   const coreFilters = buildCoreFilters({ ...deps, queues }, manifests);
-  return { manifests, payload: buildPluginsPayload(manifests, profile), queues, workers, coreFilters };
+  return {
+    manifests, payload: buildPluginsPayload(manifests, profile), queues, workers, coreFilters, worldHooks,
+  };
 }
