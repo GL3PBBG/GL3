@@ -160,7 +160,17 @@ export function createRooms(deps: RoomsDeps): Rooms {
       memberRoom.set(playerId, room.descriptor.locationId);
       room.dirty.left.delete(playerId);
       room.dirty.joined.set(playerId, member.state);
-      await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
+      // The ZSET touch is a nicety: it is what makes a socket-only session
+      // show up in /api/online. Join must not depend on it. A throwable
+      // await between the member insert above and the socket-state set
+      // below would strand the member — the socket would have no
+      // SocketState, so `detach` would return early on close and leave a
+      // phantom in the room forever.
+      try {
+        await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
+      } catch (err) {
+        console.error({ err, playerId }, "presence: touch failed");
+      }
     } else {
       // Most recent join owns the avatar; the previous controller is told
       // once and keeps receiving ticks (spec §1.2).
@@ -269,18 +279,42 @@ export function createRooms(deps: RoomsDeps): Rooms {
     return { kind: "presence.tick", locationId, joined, moved, emoted: d.emoted, left };
   };
 
+  const flushRoom = (locationId: string, room: Room): void => {
+    const d = room.dirty;
+    const dirty = d.joined.size > 0 || d.moved.size > 0 || d.emoted.length > 0 || d.left.size > 0;
+    if (!dirty) return;
+    room.dirty = emptyDirty();
+    if (room.members.size === 0) { rooms.delete(locationId); return; }
+    if (room.concealed) return; // stored, never broadcast (spec §1.3)
+    for (const [playerId, member] of room.members) {
+      const frame = tickFor(playerId, locationId, d);
+      if (frame === null) continue;
+      for (const socket of member.sockets) {
+        // One socket cannot cost the rest of the room its tick: a socket
+        // that closed since this tick began, or a frame `send` refuses to
+        // serialise, drops here and the loop carries on.
+        try {
+          deps.send(socket, frame);
+        } catch (err) {
+          console.error({ err, locationId, playerId }, "presence: tick send failed");
+        }
+      }
+    }
+  };
+
+  /**
+   * The tick runs on a timer, outside every per-frame `guarded` call, so it
+   * is the one path with no caller to catch for it: an uncaught throw here
+   * would take the whole process down rather than drop one room's tick.
+   * Guarding per room rather than per tick also keeps one bad room from
+   * silencing every other room in the same pass.
+   */
   const flush = (): void => {
     for (const [locationId, room] of rooms) {
-      const d = room.dirty;
-      const dirty = d.joined.size > 0 || d.moved.size > 0 || d.emoted.length > 0 || d.left.size > 0;
-      if (!dirty) continue;
-      room.dirty = emptyDirty();
-      if (room.members.size === 0) { rooms.delete(locationId); continue; }
-      if (room.concealed) continue; // stored, never broadcast (spec §1.3)
-      for (const [playerId, member] of room.members) {
-        const frame = tickFor(playerId, locationId, d);
-        if (frame === null) continue;
-        for (const socket of member.sockets) deps.send(socket, frame);
+      try {
+        flushRoom(locationId, room);
+      } catch (err) {
+        console.error({ err, locationId }, "presence: tick failed");
       }
     }
   };

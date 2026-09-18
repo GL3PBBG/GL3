@@ -1,11 +1,17 @@
 import type { AddressInfo } from "node:net";
+import type { ServerFrame } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import type WebSocket from "ws";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FilesystemDriver } from "../src/assets/fs-driver.js";
+import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
+import { createRooms } from "../src/presence/rooms.js";
+import { createRedis } from "../src/redis.js";
+import { createSceneService } from "../src/world/scene.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
@@ -16,12 +22,13 @@ let app: FastifyInstance;
 let redis: Redis;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
+let assetDriver: FilesystemDriver;
 let chicago: string;
 let miami: string;
 const opened: WebSocket[] = [];
 
 beforeAll(async () => {
-  ({ app, close: closeServer, redis } = await bootTestServer());
+  ({ app, close: closeServer, redis, assetDriver } = await bootTestServer());
   await app.listen({ port: 0, host: "127.0.0.1" });
   const { port } = app.server.address() as AddressInfo;
   baseUrl = `ws://127.0.0.1:${port}/ws`;
@@ -229,5 +236,41 @@ describe("concealed rooms", () => {
     move(b.socket, 1, 1, 1);
     sendFrame(b.socket, { kind: "presence.emote", emote: "wave" });
     expect(await receivedFrameOfKind(a.socket, "presence.tick", 700)).toBe(false);
+  });
+});
+
+describe("a failing presence touch", () => {
+  it("joins anyway, and leaves the socket able to detach", async () => {
+    const p = await playerIn(chicago);
+    // A REAL ioredis client, genuinely closed — the same shape as
+    // gateway-routing-error.test.ts closing its Postgres connection. Every
+    // command on it rejects immediately, so the ZSET touch inside join
+    // fails deterministically rather than by a race, and no mock is
+    // involved. Driving createRooms directly is what makes the broken
+    // client injectable; the socket is a real one, opened by playerIn.
+    const dead = createRedis(loadConfig({ ...process.env, NODE_ENV: "test" }).redisUrl);
+    dead.disconnect();
+    const frames: ServerFrame[] = [];
+    const rooms = createRooms({
+      db, redis: dead,
+      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      send: (_socket, frame) => { frames.push(frame); },
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await rooms.join(p.playerId, p.socket, null);
+      expect(frames.map((f) => f.kind)).toEqual(["presence.snapshot"]);
+      expect(errors).toHaveBeenCalledWith(
+        expect.objectContaining({ playerId: p.playerId }), "presence: touch failed",
+      );
+
+      // The member is not stranded: the socket did get its state, so a
+      // leave detaches it instead of answering `not_joined`.
+      rooms.leave(p.socket);
+      expect(frames.map((f) => f.kind)).toEqual(["presence.snapshot"]);
+    } finally {
+      errors.mockRestore();
+      rooms.close();
+    }
   });
 });
