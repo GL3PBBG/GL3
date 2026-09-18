@@ -143,7 +143,10 @@ if (seeds.family) await seedFamilyContent(db, manifests.map((m) => m.id));
 const app = await buildApp(config, { db, redis, plugins: loadedPlugins, assetDriver });
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
-await attachGateway(app.server, { db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins });
+await attachGateway(app.server, {
+  db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins,
+  worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
+});
 
 // Deliberately here and NOT in buildApp, for the sentence sweeper's and the
 // outbox dispatcher's reason: every integration test builds its server

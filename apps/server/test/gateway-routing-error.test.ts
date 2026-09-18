@@ -7,6 +7,7 @@ import { loadConfig } from "../src/config.js";
 import { createDb } from "../src/db/client.js";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { attachGateway, type GatewayHandle } from "../src/ws/gateway.js";
+import { testAssetDriver } from "./helpers/assets.js";
 
 /**
  * gateway.ts's `route` (the "gang" branch) queries Postgres. Before this
@@ -49,7 +50,13 @@ describe("WS gateway: routing errors don't crash the process", () => {
       server.close();
     };
 
-    gateway = await attachGateway(server, { db, redis, subscriber, corsOrigins: [] });
+    gateway = await attachGateway(server, {
+      db, redis, subscriber, corsOrigins: [],
+      // Presence is not what this test drives: no plugin is loaded, so there
+      // are no world hooks, and the asset driver is only ever reached through
+      // a scene lookup a join would make.
+      worldHooks: [], assetDriver: testAssetDriver(), clientIpHeader: config.clientIpHeader,
+    });
 
     // Deterministically fail every subsequent query on this connection —
     // the same shape as a query killed during teardown (isolated-db.setup.ts

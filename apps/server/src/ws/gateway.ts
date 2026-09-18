@@ -1,14 +1,26 @@
 import type { Server } from "node:http";
+import type { WorldHook } from "@gl3/plugin-sdk";
 import { ServerFrameSchema, ClientFrameSchema, type GameEvent, type ServerFrame } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { WebSocketServer, type WebSocket } from "ws";
+import type { StorageDriver } from "../assets/driver.js";
+import { clientIp } from "../auth/rate-limit.js";
 import { consumeTicket } from "../auth/session.js";
 import { subscribeToEvents } from "../bus/subscribe.js";
 import type { Db } from "../db/client.js";
 import { gangMembers } from "../db/schema/index.js";
+import { createRooms } from "../presence/rooms.js";
+import { createSceneService } from "../world/scene.js";
 
-export interface GatewayDeps { db: Db; redis: Redis; subscriber: Redis; corsOrigins: string[] }
+export interface GatewayDeps {
+  db: Db; redis: Redis; subscriber: Redis; corsOrigins: string[];
+  /** Presence rooms build scene descriptors from these (spec 2026-09-17 §1.4). */
+  worldHooks: readonly WorldHook[];
+  assetDriver: StorageDriver;
+  /** `config.clientIpHeader` — the presence ZSET touch records the real client address behind a proxy. */
+  clientIpHeader: string | null;
+}
 export interface GatewayHandle { close(): Promise<void>; connectionCount(): number }
 
 export async function attachGateway(server: Server, deps: GatewayDeps): Promise<GatewayHandle> {
@@ -22,6 +34,20 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
 
   const sendToPlayer = (playerId: string, frame: ServerFrame): void => {
     for (const socket of sockets.get(playerId) ?? []) send(socket, frame);
+  };
+
+  const rooms = createRooms({
+    db: deps.db, redis: deps.redis, send,
+    scenes: createSceneService({ db: deps.db, assetDriver: deps.assetDriver, hooks: deps.worldHooks }),
+  });
+  /** Same posture as route(): a throw in one frame's handler logs and drops that frame, never the process. */
+  const guarded = (what: string, fn: () => void | Promise<void>): void => {
+    try {
+      const result = fn();
+      if (result instanceof Promise) result.catch((err: unknown) => console.error({ err, what }, "presence: handler failed"));
+    } catch (err) {
+      console.error({ err, what }, "presence: handler failed");
+    }
   };
 
   server.on("upgrade", (request, socket, head) => {
@@ -57,6 +83,7 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
         socket.destroy();
         return;
       }
+      const ip = clientIp({ ip: request.socket.remoteAddress ?? "", headers: request.headers }, deps.clientIpHeader);
       wss.handleUpgrade(request, socket, head, (ws) => {
         const existing = sockets.get(playerId) ?? new Set<WebSocket>();
         existing.add(ws);
@@ -65,10 +92,20 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
         ws.on("message", (raw) => {
           const parsed = ClientFrameSchema.safeParse(JSON.parse(raw.toString()));
           if (!parsed.success) { send(ws, { kind: "error", message: "invalid_frame" }); return; }
-          if (parsed.data.kind === "ping") send(ws, { kind: "pong" });
+          const frame = parsed.data;
+          switch (frame.kind) {
+            case "ping": send(ws, { kind: "pong" }); return;
+            // The gateway dispatches presence frames and knows nothing else
+            // about them — every rule lives in presence/rooms.ts.
+            case "presence.join": guarded("join", () => rooms.join(playerId, ws, ip || null)); return;
+            case "presence.move": guarded("move", () => rooms.move(ws, frame)); return;
+            case "presence.emote": guarded("emote", () => rooms.emote(ws, frame.emote)); return;
+            case "presence.leave": guarded("leave", () => rooms.leave(ws)); return;
+          }
         });
 
         ws.on("close", () => {
+          guarded("close", () => rooms.socketClosed(ws));
           const set = sockets.get(playerId);
           set?.delete(ws);
           if (set && set.size === 0) sockets.delete(playerId);
@@ -106,11 +143,15 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
     route(event).catch((err: unknown) => {
       console.error({ err, eventType: event.type, audienceKind: event.audience.kind }, "gateway: failed to route event");
     });
+    rooms.onEvent(event).catch((err: unknown) => {
+      console.error({ err, eventType: event.type }, "presence: failed to apply event");
+    });
   });
 
   return {
     connectionCount: () => [...sockets.values()].reduce((n, set) => n + set.size, 0),
     close: async () => {
+      rooms.close();
       for (const set of sockets.values()) for (const socket of set) socket.close();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
     },

@@ -120,6 +120,7 @@ export async function bootTestServer(
   const gatewaySubscriber = createSubscriber(config.redisUrl);
   const gateway = await attachGateway(app.server, {
     db, redis, subscriber: gatewaySubscriber, corsOrigins: config.corsOrigins,
+    worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
   });
 
   return {
