@@ -181,27 +181,34 @@ function listedFare(
   };
 }
 
-const listRoute = route({
-  method: "GET",
-  path: "/api/locations",
-  // No jail gate: core's route had none. Listing is not an action.
-  handler: async (ctx) => {
-    const player = ctx.player;
-    if (player === null) throw new PluginError("unauthorized", 401);
+/**
+ * The town board behind BOTH `GET /api/locations` (the JSON DTO the web
+ * client reads) and `GET /api/travel/destinations` (the view-node table a
+ * vocabulary-rendering client reads). Extracted so the two can never drift
+ * (spec 2026-09-18 §3.2) — the DTO array it returns is exactly what the
+ * listing route has always returned, field for field.
+ *
+ * `level` rides out alongside it because the destinations table's `Locked`
+ * state needs it and the `player_stats` read is already here: one read, both
+ * facts, rather than a second SELECT in the new route.
+ */
+async function listDestinations(ctx: PluginCtx, player: PlayerSnapshot) {
+  const cooldownRemaining = await ctx.cooldown.peek("travel", player.id);
 
-    const cooldownRemaining = await ctx.cooldown.peek("travel", player.id);
-
-    const { rows, currentLocationId, member } = await ctx.transaction(async (tx) => {
-      const [stats] = await tx.db
-        .select({ locationId: playerStats.locationId })
-        .from(playerStats)
-        .where(eq(playerStats.playerId, player.id));
-      return {
-        rows: await tx.db.select().from(locations),
-        currentLocationId: stats?.locationId ?? null,
-        member: await isMember(tx, player.id),
-      };
-    });
+  const { rows, currentLocationId, member, level } = await ctx.transaction(async (tx) => {
+    const [stats] = await tx.db
+      .select({ locationId: playerStats.locationId, level: playerStats.level })
+      .from(playerStats)
+      .where(eq(playerStats.playerId, player.id));
+    return {
+      rows: await tx.db.select().from(locations),
+      currentLocationId: stats?.locationId ?? null,
+      // Same fallback travelRoute's own level read uses, for the same reason:
+      // a player row is always there, and 1 is the column's default.
+      level: stats?.level ?? 1,
+      member: await isMember(tx, player.id),
+    };
+  });
 
     // Filters run outside any transaction (spec: Filters) — a subscriber that
     // needs the database opens its own read, as bullets' price quote does.
@@ -236,24 +243,82 @@ const listRoute = route({
       }),
     });
 
-    return {
-      status: 200,
-      body: {
-        locations: listed.map((l) => ({
-          id: l.id,
-          name: l.name,
-          ...listedFare(quoted, l.id, memberFare(l.travelCost, member)),
-          travelCooldownSeconds: l.travelCooldownSeconds,
-          bulletCost: l.bulletCost.toString(),
-          bulletStock: l.bulletStock,
-          combatMode: l.combatMode,
-          minLevel: l.minLevel,
-          current: l.id === currentLocationId,
-          cooldownRemaining,
-          ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
-        })),
-      },
-    };
+  return {
+    level,
+    locations: listed.map((l) => ({
+      id: l.id,
+      name: l.name,
+      ...listedFare(quoted, l.id, memberFare(l.travelCost, member)),
+      travelCooldownSeconds: l.travelCooldownSeconds,
+      bulletCost: l.bulletCost.toString(),
+      bulletStock: l.bulletStock,
+      combatMode: l.combatMode,
+      minLevel: l.minLevel,
+      current: l.id === currentLocationId,
+      cooldownRemaining,
+      ...(art.has(l.id) ? { imageUrl: art.get(l.id) as string } : {}),
+    })),
+  };
+}
+
+const listRoute = route({
+  method: "GET",
+  path: "/api/locations",
+  // No jail gate: core's route had none. Listing is not an action.
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    return { status: 200, body: { locations: (await listDestinations(ctx, player)).locations } };
+  },
+});
+
+/**
+ * `travel.index`'s table source (spec 2026-09-18 §3.2). Every cell is a
+ * string and none is ever null — `TableRowsResponseSchema`'s contract, and
+ * what the renderer needs to put a value in a cell at all.
+ *
+ * `state` has a fixed precedence: standing here beats a level lock, which
+ * beats the travel cooldown. `cannotTravel` is the flat refusal (`Here` and
+ * `Locked` are not going to change on their own) and feeds `disabledKey`;
+ * the cooldown is NOT flat, so it rides `cooldownKey` instead and the button
+ * counts down in place. `cooldownRemaining` is one per-player figure, not
+ * per town, so every travellable row shares the same deadline.
+ */
+const destinationsRoute = route({
+  method: "GET",
+  path: "/api/travel/destinations",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const { locations: listed, level } = await listDestinations(ctx, player);
+    const nowMs = Date.now();
+
+    const rows = listed.map((l) => {
+      const locked = l.minLevel > 0 && l.minLevel > level;
+      const state = l.current
+        ? "Here"
+        : locked
+          ? `Locked · level ${l.minLevel}`
+          : l.cooldownRemaining > 0 ? "On cooldown" : "Ready";
+      return {
+        id: l.id,
+        image: l.imageUrl ?? "",
+        name: l.name,
+        travelCost: l.travelCost,
+        baseFare: l.baseFare ?? "",
+        fareLabel: l.fareLabel ?? "",
+        minLevel: String(l.minLevel),
+        combatMode: l.combatMode,
+        state,
+        cannotTravel: l.current || locked ? "true" : "false",
+        cooldownUntil: !l.current && !locked && l.cooldownRemaining > 0
+          ? new Date(nowMs + l.cooldownRemaining * 1000).toISOString()
+          : "",
+      };
+    });
+
+    return { status: 200, body: { rows } };
   },
 });
 
@@ -701,12 +766,36 @@ export default definePlugin({
     id: "travel.index",
     path: "/travel",
     menu: { label: "Travel", order: 36, category: "town" },
-    // Stub view: the client renders a hand-written override (apps/web
-    // PAGE_OVERRIDES) for this id; the schema view exists because a
-    // page declaration requires one.
-    view: { kind: "list", items: [] },
+    // A real view-node page (spec 2026-09-18 §3.2), for clients that render
+    // the vocabulary — the Godot client does. apps/web is unaffected: its
+    // PluginPage checks PAGE_OVERRIDES before it ever looks at a view, so the
+    // hand-written Travel page still wins there.
+    //
+    // The action's `:id` is the ROW's field, substituted by the renderer —
+    // the route's own param is `:locationId`, and the two need not agree
+    // because what reaches the server is the substituted path.
+    view: {
+      kind: "panel",
+      title: "Travel",
+      children: [{
+        kind: "table",
+        source: "GET /api/travel/destinations",
+        columns: [
+          { key: "image", label: "", render: "image", imageSize: "sm" },
+          { key: "name", label: "Town" },
+          { key: "travelCost", label: "Fare" },
+          { key: "minLevel", label: "Level" },
+          { key: "combatMode", label: "Mode" },
+          { key: "state", label: "Status" },
+        ],
+        rowActions: [{
+          label: "Travel", action: "POST /api/travel/:id",
+          disabledKey: "cannotTravel", cooldownKey: "cooldownUntil",
+        }],
+      }],
+    },
   }],
-  routes: [listRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
+  routes: [listRoute, destinationsRoute, travelRoute, adminListRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute, adminModesRoute],
   adminPages: [adminPage],
   // The way out of a city is a building in it (spec 2026-09-17 §2.4).
   worldHooks: [{ id: "station", kind: "building", label: "Station", page: "travel.index", model: "station", footprint: { w: 12, d: 9 }, order: 10 }],

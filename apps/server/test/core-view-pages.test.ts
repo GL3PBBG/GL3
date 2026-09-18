@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { playerStats } from "../src/db/schema/index.js";
+import { locations, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
@@ -50,5 +50,40 @@ describe("bank.index", () => {
     expect((await post("/api/bank/deposit", token, { amount: "500" })).statusCode).toBe(200);
     const after = FormValuesResponseSchema.parse((await get("/api/bank/summary", token)).json());
     expect(after.values).toMatchObject({ cash: "1000", bank: "750" });
+  });
+});
+
+describe("travel.index", () => {
+  it("serves destination rows with state, cannotTravel and cooldownUntil", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const towns = await db.select({ id: locations.id, name: locations.name }).from(locations);
+    const ny = towns.find((t) => t.name === "New York")!.id;
+    const chicago = towns.find((t) => t.name === "Chicago")!.id;
+    const miami = towns.find((t) => t.name === "Miami")!.id;
+    await db.update(playerStats).set({ locationId: ny, cash: 10_000n }).where(eq(playerStats.playerId, playerId));
+    await db.update(locations).set({ minLevel: 99 }).where(eq(locations.id, miami));
+
+    const page = PluginsPayloadSchema.parse((await get("/api/plugins", token)).json())
+      .pages.find((p) => p.id === "travel.index")!;
+    expect(JSON.stringify(page.view)).toContain("GET /api/travel/destinations");
+    expect(JSON.stringify(page.view)).toContain("POST /api/travel/:id");
+
+    let rows = TableRowsResponseSchema.parse((await get("/api/travel/destinations", token)).json()).rows;
+    const by = (id: string) => rows.find((r) => r.id === id)!;
+    expect(by(ny)).toMatchObject({ state: "Here", cannotTravel: "true", cooldownUntil: "" });
+    expect(by(miami)).toMatchObject({ state: "Locked · level 99", cannotTravel: "true" });
+    expect(by(chicago)).toMatchObject({
+      state: "Ready", cannotTravel: "false", cooldownUntil: "", travelCost: "100", combatMode: "open",
+    });
+    for (const r of rows) for (const v of Object.values(r)) expect(typeof v).toBe("string");
+
+    expect((await post(`/api/travel/${chicago}`, token)).statusCode).toBe(200);
+    rows = TableRowsResponseSchema.parse((await get("/api/travel/destinations", token)).json()).rows;
+    expect(by(chicago).state).toBe("Here");
+    expect(by(ny).state).toBe("On cooldown");
+    expect(Date.parse(by(ny).cooldownUntil!)).toBeGreaterThan(Date.now());
+    // The cooldown gates through cooldownKey, not disabledKey: the button
+    // counts down in place rather than rendering flatly disabled.
+    expect(by(ny).cannotTravel).toBe("false");
   });
 });
