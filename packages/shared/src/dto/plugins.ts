@@ -268,6 +268,11 @@ const leafOptions = [
           label: z.string().min(1),
           action: z.string().regex(VIEW_ACTION_RE, "action must be `METHOD /absolute/path`"),
           confirm: z.string().min(1).optional(),
+          /** Row field name; the button renders disabled when the row's value is the string "true". */
+          disabledKey: z.string().min(1).optional(),
+          /** Row field name holding an ISO timestamp or "": until it passes the button is disabled
+           *  and shows a live countdown, and the table refetches once when it reaches zero. */
+          cooldownKey: z.string().min(1).optional(),
         }).strict(),
       ).optional(),
     })

@@ -18,7 +18,10 @@ beforeEach(() => {
 const tableInst: RenderInstruction[] = [{
   kind: "table", source: "GET /api/x/rows",
   columns: [{ key: "name", label: "Name", render: null, imageSize: "md" }],
-  rowActions: [{ label: "Claim", action: "POST /api/x/claim/:id", confirm: "Spend the fee?" }],
+  rowActions: [{
+    label: "Claim", action: "POST /api/x/claim/:id", confirm: "Spend the fee?",
+    disabledKey: null, cooldownKey: null,
+  }],
 }];
 
 function mount(): void {

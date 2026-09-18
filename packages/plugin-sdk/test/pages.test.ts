@@ -451,6 +451,30 @@ describe("table node", () => {
       kind: "table", source: "GET /api/x", columns: [], rows: [] ,
     })).success).toBe(false);
   });
+
+  it("accepts disabledKey and cooldownKey on a row action and still refuses an unknown key", () => {
+    const table = {
+      kind: "table" as const,
+      source: "GET /api/x/rows",
+      columns: [{ key: "name", label: "Name" }],
+    };
+    expect(ViewNodeSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", disabledKey: "busy", cooldownKey: "until" }],
+    }).success).toBe(true);
+    // The typo case: `.strict()` on the row-action object is what keeps a
+    // mis-spelled field from silently doing nothing on every client.
+    expect(ViewNodeSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", disabledkey: "busy" }],
+    }).success).toBe(false);
+    // Empty strings name no row field, so they are refused at authoring time
+    // rather than resolving to `row[""]` at render.
+    expect(ViewNodeSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", disabledKey: "" }],
+    }).success).toBe(false);
+  });
 });
 
 describe("meter, meterSource and keyValueSource nodes", () => {

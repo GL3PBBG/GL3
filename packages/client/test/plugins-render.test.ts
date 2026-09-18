@@ -227,8 +227,39 @@ describe("renderNode", () => {
       kind: "table", source: "GET /api/admin/travel/locations",
       columns: [{ key: "name", label: "Name", render: null, imageSize: "sm" }],
       rowActions: [
-        { label: "Delete", action: "DELETE /api/admin/travel/locations/:id", confirm: "Delete this town?" },
-        { label: "Poke", action: "POST /api/admin/travel/locations/:id/poke", confirm: null },
+        {
+          label: "Delete", action: "DELETE /api/admin/travel/locations/:id",
+          confirm: "Delete this town?", disabledKey: null, cooldownKey: null,
+        },
+        {
+          label: "Poke", action: "POST /api/admin/travel/locations/:id/poke",
+          confirm: null, disabledKey: null, cooldownKey: null,
+        },
+      ],
+    }]);
+  });
+
+  it("carries disabledKey and cooldownKey through, normalising absent ones to null", () => {
+    const out = renderNode({
+      kind: "table", source: "GET /api/travel/destinations",
+      columns: [{ key: "name", label: "Name" }],
+      rowActions: [
+        { label: "Travel", action: "POST /api/travel/:id", disabledKey: "busy", cooldownKey: "until" },
+        { label: "Peek", action: "POST /api/travel/:id/peek" },
+      ],
+    }, {});
+    expect(out).toEqual<RenderInstruction[]>([{
+      kind: "table", source: "GET /api/travel/destinations",
+      columns: [{ key: "name", label: "Name", render: null, imageSize: "sm" }],
+      rowActions: [
+        {
+          label: "Travel", action: "POST /api/travel/:id", confirm: null,
+          disabledKey: "busy", cooldownKey: "until",
+        },
+        {
+          label: "Peek", action: "POST /api/travel/:id/peek", confirm: null,
+          disabledKey: null, cooldownKey: null,
+        },
       ],
     }]);
   });

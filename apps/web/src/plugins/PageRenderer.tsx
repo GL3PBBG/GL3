@@ -115,6 +115,59 @@ function CountdownCell({ value, onDue }: { value: string; onDue: () => void }): 
 }
 
 /**
+ * A row-action button that may be gated by `disabledKey` / `cooldownKey`.
+ *
+ * `until` is an ISO deadline (or "" for none) and is read the same way
+ * `CountdownCell` reads a cell: an absolute target, re-derived from
+ * `Date.now()` on every render, so a throttled or suspended tab costs display
+ * latency and never correctness (lib/countdown.ts has the full reasoning).
+ * While it has not passed, the button is disabled and shows the remaining time
+ * INSTEAD of its label; when a deadline that was live at mount passes, `onDue`
+ * fires once so the table refetches — the same bump the countdown cell uses,
+ * and the same never-for-an-already-past deadline rule, which is what keeps a
+ * server that keeps answering a stale timestamp from looping refetches.
+ */
+function RowActionButton({ label, blocked, until, busy, onDue, onClick }: {
+  label: string;
+  blocked: boolean;
+  until: string;
+  busy: boolean;
+  onDue: () => void;
+  onClick: () => void;
+}): JSX.Element {
+  const target = Date.parse(until);
+  const live = Number.isFinite(target);
+  const [now, setNow] = useState(() => Date.now());
+  const onDueRef = useRef(onDue);
+  onDueRef.current = onDue;
+
+  useEffect(() => {
+    if (!live || target <= Date.now()) return;
+    const tick = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= target) {
+        window.clearInterval(tick);
+        onDueRef.current();
+      }
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, [live, target]);
+
+  const remaining = live ? Math.ceil((target - now) / 1000) : 0;
+  const counting = remaining > 0;
+  return (
+    <button
+      type="button"
+      disabled={busy || blocked || counting}
+      onClick={onClick}
+    >
+      {counting ? formatRemaining(remaining) : label}
+    </button>
+  );
+}
+
+/**
  * Fetches rows for a `table` instruction. Re-fetches whenever `refetchSignal`
  * increments (i.e. after any successful `runAction` on the same page), so
  * mutation-then-view stays consistent without a full page reload.
@@ -130,7 +183,13 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
     readonly render: "image" | "countdown" | null;
     readonly imageSize: "sm" | "md" | "lg";
   }[];
-  rowActions: readonly { readonly label: string; readonly action: string; readonly confirm: string | null }[];
+  rowActions: readonly {
+    readonly label: string;
+    readonly action: string;
+    readonly confirm: string | null;
+    readonly disabledKey: string | null;
+    readonly cooldownKey: string | null;
+  }[];
   /** Fires the resolved action; resolves true on success so the arm state can clear either way. */
   onRowAction: (action: string) => Promise<boolean>;
   refetchSignal: number;
@@ -259,18 +318,27 @@ function TableBlock({ source, columns, rowActions, onRowAction, refetchSignal }:
                       </span>
                     );
                   }
+                  // `disabledKey` first, then `cooldownKey` — the spec's
+                  // precedence: a row that says "not for you" never shows a
+                  // clock that would imply it becomes available.
+                  const blocked = rowAction.disabledKey !== null
+                    && row[rowAction.disabledKey] === "true";
+                  const until = rowAction.cooldownKey !== null
+                    ? row[rowAction.cooldownKey] ?? ""
+                    : "";
                   return (
-                    <button
+                    <RowActionButton
                       key={actionIndex}
-                      type="button"
-                      disabled={busy !== null}
+                      label={rowAction.label}
+                      blocked={blocked}
+                      until={blocked ? "" : until}
+                      busy={busy !== null}
+                      onDue={() => setDueBump((n) => n + 1)}
                       onClick={() => {
                         if (rowAction.confirm !== null) setArmed(key);
                         else void fire(key, resolved);
                       }}
-                    >
-                      {rowAction.label}
-                    </button>
+                    />
                   );
                 })}
               </td>

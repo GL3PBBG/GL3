@@ -40,7 +40,15 @@ export type RenderInstruction =
       kind: "table";
       source: string;
       columns: { key: string; label: string; render: "image" | "countdown" | null; imageSize: "sm" | "md" | "lg" }[];
-      rowActions: { label: string; action: string; confirm: string | null }[];
+      rowActions: {
+        label: string;
+        action: string;
+        confirm: string | null;
+        /** Row field name; the button is disabled when the row's value is the string "true". */
+        disabledKey: string | null;
+        /** Row field name holding an ISO deadline (or ""); the button counts down to it. */
+        cooldownKey: string | null;
+      }[];
     }
   | { kind: "cards"; cards: string[]; size: "sm" | "md" | "lg"; caption: string | null }
   | { kind: "panelHeader"; title: string; layout: "row" | null; collapsed: boolean | null };
@@ -267,6 +275,11 @@ export function renderNode(node: unknown, _handlers: Record<string, (action: str
             label: String(a.label),
             action: String(a.action),
             confirm: a.confirm === undefined ? null : String(a.confirm),
+            // Same normalisation as `confirm`: absent → null, so a renderer
+            // never re-derives the DTO's optionality at the point of drawing
+            // a button.
+            disabledKey: typeof a.disabledKey === "string" ? a.disabledKey : null,
+            cooldownKey: typeof a.cooldownKey === "string" ? a.cooldownKey : null,
           }]
         : [],
     );

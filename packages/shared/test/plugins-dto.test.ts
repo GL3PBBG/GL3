@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MONEY_FORMAT, MAX_VIEW_DEPTH, MAX_VIEW_NODES, PluginsPayloadSchema } from "../src/index.js";
+import {
+  DEFAULT_MONEY_FORMAT, MAX_VIEW_DEPTH, MAX_VIEW_NODES, PluginsPayloadSchema, ViewNodeDtoSchema,
+} from "../src/index.js";
 
 describe("PluginsPayloadSchema", () => {
   it("accepts a well-formed payload with one page, menu entry and event", () => {
@@ -247,5 +249,34 @@ describe("PluginsPayloadSchema view size bounds", () => {
   it("rejects a pathologically wide view without overflowing the stack", () => {
     expect(() => PluginsPayloadSchema.parse(pageWithView(fanOut(200_000))))
       .toThrow(new RegExp(`view has more than ${MAX_VIEW_NODES} nodes`));
+  });
+});
+
+/**
+ * The DTO is `.strict()`, so a row-action field that exists in the SDK and not
+ * here rejects the WHOLE `/api/plugins` payload in the browser — not just the
+ * page that used it. The two schemas therefore move together, and this is the
+ * shared side's pin on that.
+ */
+describe("table rowAction keys", () => {
+  const table = {
+    kind: "table" as const,
+    source: "GET /api/x/rows",
+    columns: [{ key: "name", label: "Name" }],
+  };
+
+  it("accepts disabledKey and cooldownKey on a row action and still refuses an unknown key", () => {
+    expect(ViewNodeDtoSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", disabledKey: "busy", cooldownKey: "until" }],
+    }).success).toBe(true);
+    expect(ViewNodeDtoSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", disabledkey: "busy" }],
+    }).success).toBe(false);
+    expect(ViewNodeDtoSchema.safeParse({
+      ...table,
+      rowActions: [{ label: "Go", action: "POST /api/x/:id", cooldownKey: "" }],
+    }).success).toBe(false);
   });
 });
