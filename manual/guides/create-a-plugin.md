@@ -187,3 +187,10 @@ Select fields may opt into `presentation: "list"` for visible radio choices.
 in the existing options response; the web renderer crosses out the original price.
 These are display fields only and do not change the selected value submitted to
 the action. This requires shared 1.0.19, SDK 1.0.11 and a web image with list support.
+
+A `table` row action may name two row fields that gate its button: `disabledKey`
+disables it whenever that row's value is the string `"true"`, and `cooldownKey`
+names a row field holding an ISO timestamp (or `""`) until which the button shows
+a live countdown instead of its label, refetching the table once it passes —
+`disabledKey` is checked first, and a row action naming neither renders exactly as
+before. This requires shared 1.0.21 and SDK 1.0.13.
