@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { bigint, index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import type { SceneBounds, SceneSpawn } from "@gl3/shared";
 
 export const crimes = pgTable("crimes", {
   id: uuid("id").primaryKey(),
@@ -64,6 +65,20 @@ export const locations = pgTable("locations", {
   combatMode: text("combat_mode").notNull().default("open"),
   /** Travel gate from MCCodes `cities.cityminlevel`; 0 = no gate. */
   minLevel: integer("min_level").notNull().default(0),
+});
+
+/**
+ * Scene descriptor per town for the presence layer (spec 2026-09-17 §1.4).
+ * No row → defaults (`DEFAULT_SCENE_*` in @gl3/shared). Read by
+ * `world/scene.ts` only; there is no writer yet (admin editing is §8).
+ */
+export const locationScenes = pgTable("location_scenes", {
+  locationId: uuid("location_id").primaryKey().references(() => locations.id, { onDelete: "cascade" }),
+  sceneKey: text("scene_key").notNull().default("default"),
+  bounds: jsonb("bounds").$type<SceneBounds>().notNull()
+    .default(sql`'{"minX":-40,"minY":-20,"maxX":40,"maxY":20}'::jsonb`),
+  spawn: jsonb("spawn").$type<SceneSpawn>().notNull()
+    .default(sql`'{"x":0,"y":-15,"facing":0}'::jsonb`),
 });
 
 export const weapons = pgTable("weapons", {

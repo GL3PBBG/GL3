@@ -41,7 +41,7 @@ describe("core schema", () => {
       // equivalent of this assertion.
       "mail_messages", "notifications",
       "game_news", "ranks", "money_ranks", "roles", "role_module_access", "rounds",
-      "settings", "crime_log", "id_map",
+      "settings", "crime_log", "id_map", "location_scenes",
     ]) {
       expect(names, `missing table ${expected}`).toContain(expected);
     }
@@ -166,8 +166,15 @@ describe("core schema", () => {
     // and leaving them would point a live Expo token at a dead account.
     // Totals move 38->39 and cascade 24->25; set-null is untouched at 14.
     // Restated here in the same commit, never loosened.
-    expect(totalForeignKeys).toBe(39);
-    expect(byRule["c"]).toBe(25); // ON DELETE CASCADE
+    // 0026_location_scenes adds ONE cascade FK: location_scenes.location_id
+    // -> locations(id), also its primary key. A scene row describes a town
+    // and has no meaning without it. Read outside admin writes only and
+    // never inserted inside a player transaction, so no lock-graph edge on
+    // the travel path (spec 2026-09-17 §7.7). Totals move 39->40 and
+    // cascade 25->26; set-null is untouched at 14. Restated here in the
+    // same commit, never loosened.
+    expect(totalForeignKeys).toBe(40);
+    expect(byRule["c"]).toBe(26); // ON DELETE CASCADE
     expect(byRule["n"]).toBe(14); // ON DELETE SET NULL
 
     const [cascadeSample] = await db.execute<{ confdeltype: string }>(sql`
@@ -228,6 +235,7 @@ describe("core schema", () => {
     // push_devices_player_idx. The second is load-bearing: the subscriber's
     // only query is "enabled devices for player X", run once per pushed
     // event, and the player-row cascade delete scans the same column.
+    // 0026_location_scenes adds none beyond its primary key (33 stays 33).
     expect(Number(count)).toBe(33);
 
     const [leaderboardIndex] = await db.execute<{ indexdef: string }>(sql`

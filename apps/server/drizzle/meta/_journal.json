@@ -183,6 +183,13 @@
       "when": 1788998400000,
       "tag": "0025_round_prizes",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789084800000,
+      "tag": "0026_location_scenes",
+      "breakpoints": true
     }
   ]
 }
