@@ -1,6 +1,12 @@
 import type { WorldHook } from "@gl3/plugin-sdk";
 import type { Footprint, SceneBounds, SceneSpawn } from "@gl3/shared";
 
+/** Core-owned jail/hospital hooks (spec 2026-09-18 §1): synthetic core pages, no plugin manifest, appended after every plugin hook. */
+export const CORE_HOOKS: readonly WorldHook[] = [
+  { pluginId: "core", id: "jail", kind: "building", label: "Jail", page: "jail", model: "jail", footprint: { w: 12, d: 9 }, order: Number.MAX_SAFE_INTEGER },
+  { pluginId: "core", id: "hospital", kind: "building", label: "Hospital", page: "hospital", model: "hospital", footprint: { w: 12, d: 9 }, order: Number.MAX_SAFE_INTEGER },
+];
+
 /**
  * Street geometry the Godot client's `default` city is built around (spec
  * 2026-09-17 §A). One straight street along x at y = 0: road |y| ≤ 7.5,
@@ -73,4 +79,36 @@ export function placeHooks(hooks: readonly WorldHook[], bounds: SceneBounds, spa
     }
   }
   return out;
+}
+
+export interface PlacedCore extends PlacedGeometry {
+  yard: { x: number; y: number };
+}
+
+/**
+ * Pins jail (north) and hospital (south) to the east end of the street
+ * (spec 2026-09-18 §1). Pure, deterministic: given the same already-placed
+ * plugin geometry and bounds, every client agrees where they stand.
+ *
+ * Each starts at `bounds.maxX - 16` on its side and slides east past any
+ * already-placed BUILDING on the same side whose footprint overlaps the
+ * `[x - 6, x + 6]` slot, repeating until clear — the same rule the Godot
+ * client used to invent itself. The yard is the building's east-adjacent
+ * centre, `(x + 9, y)`.
+ */
+export function placeCoreHooks(placed: readonly PlacedGeometry[], bounds: SceneBounds): PlacedCore[] {
+  const half = 6;
+  const d = 9;
+  const place = (hook: WorldHook, side: Side): PlacedCore => {
+    let x = bounds.maxX - 16;
+    const sameSide = placed.filter((p) => p.hook.kind === "building" && Math.sign(p.position.y) === side);
+    for (;;) {
+      const other = sameSide.find((p) => p.position.x + p.footprint.w / 2 > x - half && p.position.x - p.footprint.w / 2 < x + half);
+      if (!other) break;
+      x = other.position.x + other.footprint.w / 2 + 4 + half;
+    }
+    const y = side * (LAYOUT.buildingLine + d / 2);
+    return { hook, footprint: { w: 12, d }, position: { x, y }, facing: facingToward(side), yard: { x: x + 9, y } };
+  };
+  return [place(CORE_HOOKS[0]!, 1), place(CORE_HOOKS[1]!, -1)];
 }

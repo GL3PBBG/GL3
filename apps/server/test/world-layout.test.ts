@@ -1,7 +1,7 @@
 import type { WorldHook } from "@gl3/plugin-sdk";
 import { DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
-import { LAYOUT, placeHooks } from "../src/world/layout.js";
+import { LAYOUT, placeCoreHooks, placeHooks, type PlacedGeometry } from "../src/world/layout.js";
 
 const hook = (pluginId: string, id: string, kind: "building" | "npc", order: number, footprint?: { w: number; d: number }): WorldHook => ({
   pluginId, id, kind, order, label: id, page: `${pluginId}.index`, model: kind === "npc" ? "npc-coat" : id,
@@ -92,5 +92,41 @@ describe("placeHooks", () => {
     const [b, n] = placeHooks([hook("p", "b", "building", 1), hook("p", "n", "npc", 2)], DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
     expect(b!.footprint).toEqual({ w: 12, d: 9 });
     expect(n!.footprint).toEqual({ w: 1, d: 1 });
+  });
+});
+
+describe("placeCoreHooks", () => {
+  it("pins jail north and hospital south at maxX - 16 on an empty street, with yards at +9", () => {
+    const core = placeCoreHooks([], DEFAULT_SCENE_BOUNDS);
+    expect(core.map((c) => c.hook.id)).toEqual(["jail", "hospital"]);
+    expect(core[0]).toMatchObject({ position: { x: 24, y: 15 }, facing: Math.PI, yard: { x: 33, y: 15 } });
+    expect(core[1]).toMatchObject({ position: { x: 24, y: -15 }, facing: 0, yard: { x: 33, y: -15 } });
+  });
+
+  it("slides east past a plugin building that overlaps its slot, on that side only", () => {
+    const north: PlacedGeometry = {
+      hook: hook("p", "b", "building", 1, { w: 12, d: 9 }),
+      footprint: { w: 12, d: 9 },
+      position: { x: 22, y: 15 },
+      facing: Math.PI,
+    };
+    const [jail, hospital] = placeCoreHooks([north], DEFAULT_SCENE_BOUNDS);
+    expect(jail!.position.x).toBe(22 + 6 + 10); // other.x + w/2 + 4 + 6
+    expect(hospital!.position.x).toBe(24); // south side untouched
+  });
+
+  it("is deterministic and never overlaps the plugin building it slid past", () => {
+    const north: PlacedGeometry = {
+      hook: hook("p", "b", "building", 1, { w: 12, d: 9 }),
+      footprint: { w: 12, d: 9 },
+      position: { x: 22, y: 15 },
+      facing: Math.PI,
+    };
+    const a = placeCoreHooks([north], DEFAULT_SCENE_BOUNDS);
+    const b = placeCoreHooks([north], DEFAULT_SCENE_BOUNDS);
+    expect(a).toEqual(b);
+    const jailRect = rect(a[0]!);
+    const otherRect = rect(north);
+    expect(overlaps(jailRect, otherRect)).toBe(false);
   });
 });

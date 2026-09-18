@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ClientFrameSchema, ServerFrameSchema, PresenceStateSchema, RoomDescriptorSchema,
+  ClientFrameSchema, ServerFrameSchema, PresenceStateSchema, RoomDescriptorSchema, PlacedHookSchema,
   DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN,
 } from "../src/index.js";
 
@@ -57,5 +57,20 @@ describe("presence server frames", () => {
   it("rejects a room whose bounds are inverted and a state with an unknown avatar", () => {
     expect(RoomDescriptorSchema.safeParse({ ...room, bounds: { minX: 10, minY: 0, maxX: -10, maxY: 1 } }).success).toBe(false);
     expect(PresenceStateSchema.safeParse({ ...state, avatar: { body: "tuxedo" } }).success).toBe(false);
+  });
+});
+
+describe("core-hook yard and presence sentence", () => {
+  it("accepts an optional yard on a placed hook, and still parses with it absent", () => {
+    const hookWithYard = { ...room.hooks[0], yard: { x: 1, y: 2 } };
+    expect(PlacedHookSchema.parse(hookWithYard).yard).toEqual({ x: 1, y: 2 });
+    expect(PlacedHookSchema.parse(room.hooks[0]).yard).toBeUndefined();
+  });
+  it("accepts an optional sentence on presence state — jail, hospital, null or absent — and rejects an unknown value", () => {
+    expect(PresenceStateSchema.parse({ ...state, sentence: "jail" }).sentence).toBe("jail");
+    expect(PresenceStateSchema.parse({ ...state, sentence: "hospital" }).sentence).toBe("hospital");
+    expect(PresenceStateSchema.parse({ ...state, sentence: null }).sentence).toBeNull();
+    expect(PresenceStateSchema.parse(state).sentence).toBeUndefined();
+    expect(PresenceStateSchema.safeParse({ ...state, sentence: "prison" }).success).toBe(false);
   });
 });

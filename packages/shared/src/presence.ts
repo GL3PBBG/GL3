@@ -56,6 +56,8 @@ export const PlacedHookSchema = z.object({
   /** App-internal path the client opens on interact: `/plugins/<pageId>`. */
   href: z.string().min(1),
   signageUrl: z.string().nullable(),
+  /** Core-only: the explicit confinement spot for a sentenced player (spec 2026-09-18 §2). Plugin hooks never carry it. */
+  yard: z.object({ x: finite, y: finite }).optional(),
 });
 export type PlacedHook = z.infer<typeof PlacedHookSchema>;
 
@@ -70,6 +72,10 @@ export const RoomDescriptorSchema = z.object({
 });
 export type RoomDescriptor = z.infer<typeof RoomDescriptorSchema>;
 
+/** Where a player is confined, derived from `player_stats.jailed_until` / `hospital_until` (spec 2026-09-18 §3). `jail` wins when both are set. */
+export const SentenceSchema = z.enum(["jail", "hospital"]).nullable();
+export type Sentence = z.infer<typeof SentenceSchema>;
+
 export const PresenceStateSchema = z.object({
   playerId: IdSchema,
   username: z.string(),
@@ -80,6 +86,8 @@ export const PresenceStateSchema = z.object({
   avatar: z.object({ body: AvatarBodySchema }),
   /** ms epoch of join. */
   since: z.number().int().nonnegative(),
+  /** Derived display fact, not read by any server decision — see `SentenceSchema`. */
+  sentence: SentenceSchema.optional(),
 });
 export type PresenceState = z.infer<typeof PresenceStateSchema>;
 
