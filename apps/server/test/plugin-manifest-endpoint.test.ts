@@ -151,11 +151,43 @@ describe("GET /api/plugins", () => {
         // Mirrors `buildPluginsPayload`'s own `PagePayload` shape: `menu` lives
         // only in the top-level `menu` array, not duplicated onto each page.
         pages: [
-          // bank.index is a menu-less stub (apps/web renders the hand-written
-          // Bank page for it via PAGE_OVERRIDES); it carries no `menu` entry
-          // so it never joins the array above, but a page needs no menu entry
-          // to appear here (see "still describes a menu-less page" above).
-          { pluginId: "bank", id: "bank.index", path: "/bank", view: { kind: "list", items: [] } },
+          // bank.index is menu-less (apps/web renders the hand-written Bank
+          // page for it via PAGE_OVERRIDES); it carries no `menu` entry so it
+          // never joins the array above, but a page needs no menu entry to
+          // appear here (see "still describes a menu-less page" above).
+          //
+          // The view is restated rather than imported from the plugin on
+          // purpose: pinned here, an accidental edit to the manifest's view
+          // fails this census instead of silently reshaping what every
+          // view-rendering client draws behind the Bank door.
+          {
+            pluginId: "bank", id: "bank.index", path: "/bank",
+            view: {
+              kind: "panel",
+              title: "Bank",
+              children: [
+                {
+                  kind: "keyValueSource",
+                  source: "GET /api/bank/summary",
+                  emptyText: "Sign in to see your balances",
+                  entries: [
+                    { label: "Cash", key: "cash" },
+                    { label: "In the bank", key: "bank" },
+                    { label: "Account", key: "account" },
+                  ],
+                },
+                {
+                  kind: "form", action: "POST /api/bank/deposit", submitLabel: "Deposit",
+                  fields: [{ name: "amount", label: "Amount", type: "money" }],
+                },
+                {
+                  kind: "form", action: "POST /api/bank/withdraw", submitLabel: "Withdraw",
+                  fields: [{ name: "amount", label: "Amount", type: "money" }],
+                },
+                { kind: "button", label: "Open an account", action: "POST /api/bank/open" },
+              ],
+            },
+          },
           // The loader stamps every slotImage/assetBinder with the declaring
           // plugin's scope, so the expected view is the STAMPED one — the raw
           // manifest view differs by exactly that field.

@@ -543,6 +543,7 @@ export default defineWorkspace([
         "test/travel-lock-order.test.ts",
         "test/travel.test.ts",
         "test/world-hooks.test.ts",
+        "test/core-view-pages.test.ts",
         "test/presence-rooms.test.ts",
         "test/ws.test.ts",
         "test/acceptance/**/*.test.ts",

@@ -144,18 +144,89 @@ const openRoute = route({
   },
 });
 
+/**
+ * The read behind `bank.index`'s `keyValueSource` (spec 2026-09-18 §3.1).
+ *
+ * No `player_stats` SELECT and no `schema.ts` mirror: `ctx.player` IS a fresh
+ * read of that row — `plugins/routes.ts:80` calls `loadSnapshot` per request,
+ * and `cash`/`bank` come straight off `player_stats` there. Keeping it that
+ * way preserves this package's documented property (see the header above)
+ * that bank is the one port needing no mirror of a core-owned table.
+ *
+ * The transaction is opened only when a fee is configured, because the
+ * `bank.opened` timer is the one fact `ctx.player` cannot carry. A zero-fee
+ * game — the default — serves this route with no database round trip beyond
+ * the snapshot every plugin route already takes.
+ */
+const summaryRoute = route({
+  method: "GET",
+  path: "/api/bank/summary",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    const openFee = Number(ctx.settings.get("open_fee") ?? "0");
+    const opened = openFee === 0
+      ? true
+      : await ctx.transaction(async (tx) => (await tx.timers.get(player.id, "bank.opened")) !== null);
+
+    return {
+      status: 200,
+      body: {
+        values: {
+          cash: player.cash.toString(),
+          bank: player.bank.toString(),
+          account: opened ? "open" : `closed — fee $${openFee}`,
+        },
+      },
+    };
+  },
+});
+
 export default definePlugin({
   id: "bank",
   version: "1.0.0",
   apiVersion: 1,
   basePaths: ["/api/bank"],
-  routes: [bankRoute("deposit"), bankRoute("withdraw"), openRoute],
+  routes: [bankRoute("deposit"), bankRoute("withdraw"), openRoute, summaryRoute],
   pages: [{
     id: "bank.index",
     path: "/bank",
-    // Stub view: apps/web PAGE_OVERRIDES renders the hand-written Bank page
-    // for this id; the declaration exists so a world hook can open it.
-    view: { kind: "list", items: [] },
+    // A real view-node page (spec 2026-09-18 §3.1), for clients that render
+    // the vocabulary — the Godot client does. apps/web still shows the
+    // hand-written Bank page for this id: PluginPage.tsx checks
+    // PAGE_OVERRIDES before it ever looks at a view.
+    //
+    // Two forms rather than one with a direction field, because bank has two
+    // routes and this page adds no mutation route of its own. The open button
+    // is unconditional: the route answers { opened: true, fee: "0" } when the
+    // account is already open or no fee is configured, so a second click is
+    // harmless.
+    view: {
+      kind: "panel",
+      title: "Bank",
+      children: [
+        {
+          kind: "keyValueSource",
+          source: "GET /api/bank/summary",
+          emptyText: "Sign in to see your balances",
+          entries: [
+            { label: "Cash", key: "cash" },
+            { label: "In the bank", key: "bank" },
+            { label: "Account", key: "account" },
+          ],
+        },
+        {
+          kind: "form", action: "POST /api/bank/deposit", submitLabel: "Deposit",
+          fields: [{ name: "amount", label: "Amount", type: "money" }],
+        },
+        {
+          kind: "form", action: "POST /api/bank/withdraw", submitLabel: "Withdraw",
+          fields: [{ name: "amount", label: "Amount", type: "money" }],
+        },
+        { kind: "button", label: "Open an account", action: "POST /api/bank/open" },
+      ],
+    },
   }],
   worldHooks: [{ id: "bank", kind: "building", label: "Bank", page: "bank.index", model: "bank", footprint: { w: 12, d: 9 }, order: 30 }],
 });
