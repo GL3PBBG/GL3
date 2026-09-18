@@ -133,7 +133,9 @@ describe("crimes.index", () => {
     expect(event.type).toBe("crime.resolved");
 
     rows = TableRowsResponseSchema.parse((await get("/api/crimes/rows", token)).json()).rows;
-    expect(rows[0]).toMatchObject({ cannotCommit: "true" });
+    // The cooldown gates through cooldownKey, not disabledKey — travel's
+    // shape: the button counts down in place rather than flat-disabling.
+    expect(rows[0]).toMatchObject({ cannotCommit: "false" });
     expect(Date.parse(rows[0]!.cooldownUntil!)).toBeGreaterThan(Date.now());
     expect(rows[0]!.cooldown).toBe(rows[0]!.cooldownUntil);
 

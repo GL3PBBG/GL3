@@ -165,7 +165,11 @@ const summaryRoute = route({
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
 
-    const openFee = Number(ctx.settings.get("open_fee") ?? "0");
+    // A junk setting must not print "closed — fee $NaN" at a player. Anything
+    // that is not a real number means no fee is configured, which is the
+    // default and the state openRoute itself treats as already-open.
+    const configured = Number(ctx.settings.get("open_fee") ?? "0");
+    const openFee = Number.isFinite(configured) ? configured : 0;
     const opened = openFee === 0
       ? true
       : await ctx.transaction(async (tx) => (await tx.timers.get(player.id, "bank.opened")) !== null);

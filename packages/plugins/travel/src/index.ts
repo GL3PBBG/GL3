@@ -210,38 +210,38 @@ async function listDestinations(ctx: PluginCtx, player: PlayerSnapshot) {
     };
   });
 
-    // Filters run outside any transaction (spec: Filters) — a subscriber that
-    // needs the database opens its own read, as bullets' price quote does.
-    const listed = await ctx.filters.apply(
-      locationsListed,
-      rows.map((l) => ({
-        id: l.id,
-        name: l.name,
-        travelCost: l.travelCost,
-        travelCooldownSeconds: l.travelCooldownSeconds,
-        bulletCost: l.bulletCost,
-        bulletStock: l.bulletStock,
-        combatMode: l.combatMode === "underground" ? "underground" as const : "open" as const,
-        minLevel: l.minLevel,
-      })),
-    );
+  // Filters run outside any transaction (spec: Filters) — a subscriber that
+  // needs the database opens its own read, as bullets' price quote does.
+  const listed = await ctx.filters.apply(
+    locationsListed,
+    rows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      travelCost: l.travelCost,
+      travelCooldownSeconds: l.travelCooldownSeconds,
+      bulletCost: l.bulletCost,
+      bulletStock: l.bulletStock,
+      combatMode: l.combatMode === "underground" ? "underground" as const : "open" as const,
+      minLevel: l.minLevel,
+    })),
+  );
 
-    // `locations` is a CORE table, so its art lives under the `core` scope
-    // even though travel is what renders it. One lookup for every town on the
-    // page, not one per row.
-    const art = await ctx.assets.resolve("core", listed.map((l) => l.id), "location");
+  // `locations` is a CORE table, so its art lives under the `core` scope
+  // even though travel is what renders it. One lookup for every town on the
+  // page, not one per row.
+  const art = await ctx.assets.resolve("core", listed.map((l) => l.id), "location");
 
-    // The fare chain runs on top of memberFare, once for the whole board.
-    // The DTO shows the clamped figure so the board never quotes a number
-    // travelRoute would not charge.
-    const quoted = await ctx.filters.apply(fares, {
-      playerId: player.id,
-      fromLocationId: currentLocationId,
-      quotes: listed.map((l) => {
-        const base = memberFare(l.travelCost, member);
-        return { toLocationId: l.id, baseFare: base, fare: base };
-      }),
-    });
+  // The fare chain runs on top of memberFare, once for the whole board.
+  // The DTO shows the clamped figure so the board never quotes a number
+  // travelRoute would not charge.
+  const quoted = await ctx.filters.apply(fares, {
+    playerId: player.id,
+    fromLocationId: currentLocationId,
+    quotes: listed.map((l) => {
+      const base = memberFare(l.travelCost, member);
+      return { toLocationId: l.id, baseFare: base, fare: base };
+    }),
+  });
 
   return {
     level,
@@ -781,7 +781,7 @@ export default definePlugin({
         kind: "table",
         source: "GET /api/travel/destinations",
         columns: [
-          { key: "image", label: "", render: "image", imageSize: "sm" },
+          { key: "image", label: "Art", render: "image", imageSize: "sm" },
           { key: "name", label: "Town" },
           { key: "travelCost", label: "Fare" },
           { key: "minLevel", label: "Level" },

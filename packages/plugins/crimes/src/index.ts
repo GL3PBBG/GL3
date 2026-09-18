@@ -221,7 +221,14 @@ const listRoute = route({
  * column renders it as a live countdown (`render: "countdown"`) and the row
  * action disables its button against it (`cooldownKey`). The crime cooldown
  * is one per-player figure rather than per crime, so every row shares the
- * deadline — which is also why `cannotCommit` is the same for all of them.
+ * deadline.
+ *
+ * `cannotCommit` is therefore always `"false"`: the cooldown gates through
+ * `cooldownKey`, so the button counts down in place rather than rendering
+ * flatly disabled — travel's shape, and what the spec's §3.3 amendment asks
+ * for. The field stays on the row (and `disabledKey` stays on the action) for
+ * a future block that is NOT a countdown; `disabledKey` is checked first, so
+ * setting it would win over the timer.
  */
 const rowsRoute = route({
   method: "GET",
@@ -251,7 +258,7 @@ const rowsRoute = route({
             payout: `${c.minPayout}–${c.maxPayout}`,
             cooldown: until,
             cooldownUntil: until,
-            cannotCommit: c.cooldownRemaining > 0 ? "true" : "false",
+            cannotCommit: "false",
           };
         }),
       },
@@ -1027,6 +1034,10 @@ export default definePlugin({
             { key: "payout", label: "Payout" },
             { key: "cooldown", label: "Cooldown", render: "countdown" },
           ],
+          // `cooldownKey` is what gates a crime on its timer — the button counts
+          // down in place. `disabledKey` is declared for a future non-timed
+          // block (the row's `cannotCommit` is always "false" today) and wins
+          // over the countdown when it is ever set.
           rowActions: [{
             label: "Commit", action: "POST /api/crimes/:id/commit",
             disabledKey: "cannotCommit", cooldownKey: "cooldownUntil",
