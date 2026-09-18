@@ -7,7 +7,8 @@ import type WebSocket from "ws";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FilesystemDriver } from "../src/assets/fs-driver.js";
 import { loadConfig } from "../src/config.js";
-import { locations, playerStats } from "../src/db/schema/index.js";
+import { createDb } from "../src/db/client.js";
+import { locations, locationScenes, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
 import { createRooms } from "../src/presence/rooms.js";
 import { createRedis } from "../src/redis.js";
@@ -118,17 +119,29 @@ describe("presence.move", () => {
   });
 
   it("clamps an out-of-bounds position to the room bounds", async () => {
+    // A 4x4 room, so the BOUNDS are demonstrably what bind this move. The
+    // default room is 80x40, where the speed clamp alone already holds a
+    // far-away target inside the bounds and the assertion would pass with
+    // the bounds clamp deleted. Here the clamped corner is 2.83 m from
+    // spawn while the wait below buys ~7 m of travel, so the speed clamp
+    // cannot reach — the exact landing position is the bounds and nothing
+    // else.
+    await db.insert(locationScenes).values({
+      locationId: chicago, sceneKey: "tight",
+      bounds: { minX: -2, minY: -2, maxX: 2, maxY: 2 },
+      spawn: { x: 0, y: 0, facing: 0 },
+    });
     const a = await joined(chicago);
-    const snap = await frameOfKind(a.socket, "presence.snapshot");
+    await frameOfKind(a.socket, "presence.snapshot");
     const b = await joined(chicago);
     await frameOfKind(b.socket, "presence.snapshot");
     await frameOfKind(a.socket, "presence.tick");
-    // Wait past the 50 ms dt floor so the speed clamp cannot be what bounds this.
+    // Past the 50 ms dt floor, so the speed clamp has slack to spare.
     await new Promise((r) => setTimeout(r, 1200));
-    move(b.socket, 1, snap.room.bounds.maxX + 500, snap.room.bounds.minY - 500);
+    move(b.socket, 1, 100, -100);
     const tick = await frameOfKind(a.socket, "presence.tick");
-    expect(tick.moved[0]!.x).toBeLessThanOrEqual(snap.room.bounds.maxX);
-    expect(tick.moved[0]!.y).toBeGreaterThanOrEqual(snap.room.bounds.minY);
+    expect(tick.moved[0]!.x).toBe(2);
+    expect(tick.moved[0]!.y).toBe(-2);
   });
 
   it("rubber-bands a jump to maxSpeed × dt from the previous accepted position", async () => {
@@ -167,6 +180,23 @@ describe("presence.move", () => {
     const a = await joined(chicago);
     await frameOfKind(a.socket, "presence.snapshot");
     expect(await receivedFrameOfKind(a.socket, "presence.tick", 600)).toBe(false);
+  });
+
+  it("spends a move token on an emote, so a move burst silences one", async () => {
+    const a = await joined(chicago);
+    await frameOfKind(a.socket, "presence.snapshot");
+    const b = await joined(chicago);
+    await frameOfKind(b.socket, "presence.snapshot");
+    await frameOfKind(a.socket, "presence.tick");
+    // bucketSize is 10 and refill is 10/s, so ten back-to-back moves leave
+    // the bucket empty for the millisecond the emote behind them needs.
+    for (let seq = 1; seq <= 10; seq += 1) move(b.socket, seq, 0, -15);
+    sendFrame(b.socket, { kind: "presence.emote", emote: "wave" });
+    const tick = await frameOfKind(a.socket, "presence.tick");
+    expect(tick.moved).toHaveLength(1); // the burst did land, so the bucket did drain
+    expect(tick.emoted).toEqual([]);
+    // Dropped, not refused: an over-budget frame is silent until dropLimit.
+    expect(await receivedFrameOfKind(b.socket, "presence.error", 400)).toBe(false);
   });
 
   it("forwards an emote in the tick", async () => {
@@ -248,7 +278,7 @@ describe("a failing presence touch", () => {
     // fails deterministically rather than by a race, and no mock is
     // involved. Driving createRooms directly is what makes the broken
     // client injectable; the socket is a real one, opened by playerIn.
-    const dead = createRedis(loadConfig({ ...process.env, NODE_ENV: "test" }).redisUrl);
+    const dead = createRedis(loadConfig(process.env).redisUrl);
     dead.disconnect();
     const frames: ServerFrame[] = [];
     const rooms = createRooms({
@@ -268,6 +298,36 @@ describe("a failing presence touch", () => {
       // leave detaches it instead of answering `not_joined`.
       rooms.leave(p.socket);
       expect(frames.map((f) => f.kind)).toEqual(["presence.snapshot"]);
+    } finally {
+      errors.mockRestore();
+      rooms.close();
+    }
+  });
+});
+
+
+describe("a failing join lookup", () => {
+  it("answers not_joined rather than leaving the client waiting", async () => {
+    const p = await playerIn(chicago);
+    // A REAL Postgres client, genuinely ended — the shape
+    // gateway-routing-error.test.ts uses, and the shape of the dead-Redis
+    // test above. Every query on it rejects, so the select inside join
+    // fails deterministically and no mock is involved.
+    const dead = createDb(loadConfig(process.env).databaseUrl);
+    await dead.sql.end();
+    const frames: ServerFrame[] = [];
+    const rooms = createRooms({
+      db: dead.db, redis,
+      scenes: createSceneService({ db: dead.db, assetDriver, hooks: [] }),
+      send: (_socket, frame) => { frames.push(frame); },
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await rooms.join(p.playerId, p.socket, null);
+      expect(frames).toEqual([{ kind: "presence.error", code: "not_joined" }]);
+      expect(errors).toHaveBeenCalledWith(
+        expect.objectContaining({ playerId: p.playerId }), "presence: join lookup failed",
+      );
     } finally {
       errors.mockRestore();
       rooms.close();

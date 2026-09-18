@@ -69,6 +69,11 @@ interface SocketState {
   dropsWindowStart: number;
 }
 
+/** What `joinTarget` resolved: a room to join, or the code to answer with. */
+type JoinTarget =
+  | { ok: true; gangId: string | null; username: string; room: Room }
+  | { ok: false; code: "not_joined" | "no_location" };
+
 const AVATARS: readonly AvatarBody[] = ["suit-dark", "suit-light", "coat", "dress"];
 
 /** v1 avatar: a stable function of the id, so every client draws the same body (spec §1.1). */
@@ -126,16 +131,37 @@ export function createRooms(deps: RoomsDeps): Rooms {
     concealed: room.concealed,
   });
 
+  /**
+   * The joining player's row and the room for the town they stand in.
+   *
+   * Every failure is an answer, never a throw. A rejected query here would
+   * propagate to the gateway's `guarded`, which logs it and drops the
+   * frame — and the client, having asked to join, would wait forever for a
+   * snapshot that never comes. A DB failure answers `not_joined`, which is
+   * the code a client already has to handle and can retry from.
+   */
+  const joinTarget = async (playerId: string): Promise<JoinTarget> => {
+    try {
+      const [row] = await deps.db
+        .select({ locationId: playerStats.locationId, gangId: playerStats.gangId, username: players.username })
+        .from(playerStats)
+        .innerJoin(players, eq(players.id, playerStats.playerId))
+        .where(eq(playerStats.playerId, playerId));
+      if (!row) return { ok: false, code: "not_joined" };
+      if (!row.locationId) return { ok: false, code: "no_location" };
+      const room = await roomFor(row.locationId);
+      if (!room) return { ok: false, code: "no_location" };
+      return { ok: true, gangId: row.gangId, username: row.username, room };
+    } catch (err) {
+      console.error({ err, playerId }, "presence: join lookup failed");
+      return { ok: false, code: "not_joined" };
+    }
+  };
+
   const join = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
-    const [row] = await deps.db
-      .select({ locationId: playerStats.locationId, gangId: playerStats.gangId, username: players.username })
-      .from(playerStats)
-      .innerJoin(players, eq(players.id, playerStats.playerId))
-      .where(eq(playerStats.playerId, playerId));
-    if (!row) { error(socket, "not_joined"); return; }
-    if (!row.locationId) { error(socket, "no_location"); return; }
-    const room = await roomFor(row.locationId);
-    if (!room) { error(socket, "no_location"); return; }
+    const target = await joinTarget(playerId);
+    if (!target.ok) { error(socket, target.code); return; }
+    const { room } = target;
 
     // Leaving a previous room (a stale join after travel the bus never told
     // us about) is a plain leave; the common case is no previous room.
@@ -150,7 +176,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if (member === undefined) {
       member = {
         state: {
-          playerId, username: row.username, gangId: row.gangId,
+          playerId, username: target.username, gangId: target.gangId,
           x: room.descriptor.spawn.x, y: room.descriptor.spawn.y, facing: room.descriptor.spawn.facing,
           avatar: { body: avatarFor(playerId) }, since: t,
         },
@@ -199,6 +225,19 @@ export function createRooms(deps: RoomsDeps): Rooms {
     return false;
   };
 
+  /**
+   * One token buys one frame. A frame over budget is dropped silently and
+   * counted; a socket that keeps spending past `dropLimit` inside
+   * `dropWindowMs` is told `rate_limited` and closed.
+   */
+  const spendOrDrop = (s: SocketState, socket: WebSocket, t: number): boolean => {
+    if (takeToken(s, t)) return true;
+    if (t - s.dropsWindowStart >= PRESENCE.dropWindowMs) { s.drops = 0; s.dropsWindowStart = t; }
+    s.drops += 1;
+    if (s.drops >= PRESENCE.dropLimit) { error(socket, "rate_limited"); socket.close(); }
+    return false;
+  };
+
   const move = (socket: WebSocket, frame: { seq: number; x: number; y: number; facing: number }): void => {
     const s = stateOf(socket);
     if (!s || s.roomId === null) { error(socket, "not_joined"); return; }
@@ -207,12 +246,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if (!room || !member) { error(socket, "not_joined"); return; }
     const t = now();
 
-    if (!takeToken(s, t)) {
-      if (t - s.dropsWindowStart >= PRESENCE.dropWindowMs) { s.drops = 0; s.dropsWindowStart = t; }
-      s.drops += 1;
-      if (s.drops >= PRESENCE.dropLimit) { error(socket, "rate_limited"); socket.close(); }
-      return;
-    }
+    if (!spendOrDrop(s, socket, t)) return;
     if (frame.seq <= s.lastSeq) return;
     s.lastSeq = frame.seq;
     if (member.controller !== socket) return; // a superseded socket's moves are ignored, silently
@@ -247,6 +281,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if (!s || s.roomId === null) { error(socket, "not_joined"); return; }
     const room = rooms.get(s.roomId);
     if (!room || !room.members.has(s.playerId)) { error(socket, "not_joined"); return; }
+    // An emote costs a move token. One bucket covers every frame a client
+    // can spam at the room, so an emote burst cannot slip past the budget a
+    // move burst is already held to, and an over-budget emote is counted
+    // toward the same `rate_limited` close rather than a second one.
+    if (!spendOrDrop(s, socket, now())) return;
     room.dirty.emoted.push({ playerId: s.playerId, emote: e });
   };
 
