@@ -3,9 +3,13 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
+import { loadConfig } from "../src/config.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
-import { seedLocations } from "../src/db/seed.js";
+import { seedCrimes, seedLocations } from "../src/db/seed.js";
+import { createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
 
@@ -21,10 +25,20 @@ const { db, sql: conn } = testDb();
 let app: FastifyInstance;
 let redis: Redis;
 let closeServer: () => Promise<void>;
+const subscriber = createSubscriber(loadConfig(process.env).redisUrl);
 
-beforeAll(async () => { ({ app, close: closeServer, redis } = await bootTestServer()); });
-beforeEach(async () => { await resetDb(db); await seedLocations(db); });
-afterAll(async () => { await closeServer(); await conn.end(); });
+beforeAll(async () => {
+  ({ app, close: closeServer, redis } = await bootTestServer());
+  await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+});
+beforeEach(async () => {
+  await resetDb(db);
+  await seedLocations(db);
+  // The gl3 union is what bootTestServer() boots, so seed ITS crime set —
+  // eight blended brave+cooldown+formula crimes, not the historical v2 three.
+  await seedCrimes(db, "gl3");
+});
+afterAll(async () => { await closeServer(); await conn.end(); subscriber.disconnect(); });
 
 const get = (url: string, token: string) =>
   app.inject({ method: "GET", url, headers: { authorization: `Bearer ${token}` } });
@@ -85,5 +99,48 @@ describe("travel.index", () => {
     // The cooldown gates through cooldownKey, not disabledKey: the button
     // counts down in place rather than rendering flatly disabled.
     expect(by(ny).cannotTravel).toBe("false");
+  });
+});
+
+describe("crimes.index", () => {
+  it("serves crime rows and the last outcome", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const page = PluginsPayloadSchema.parse((await get("/api/plugins", token)).json())
+      .pages.find((p) => p.id === "crimes.index")!;
+    expect(JSON.stringify(page.view)).toContain("GET /api/crimes/rows");
+    expect(JSON.stringify(page.view)).toContain("GET /api/crimes/last");
+    expect(JSON.stringify(page.view)).toContain("POST /api/crimes/:id/commit");
+
+    const empty = await get("/api/crimes/last", token);
+    expect(empty.statusCode).toBe(404);
+    expect(empty.json()).toEqual({ error: "no_crimes" });
+
+    let rows = TableRowsResponseSchema.parse((await get("/api/crimes/rows", token)).json()).rows;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      for (const v of Object.values(r)) expect(typeof v).toBe("string");
+      expect(r.chance).toMatch(/^(\d+(\.\d+)?%|formula)$/);
+      expect(r.payout).toMatch(/^\d+–\d+$/);
+      expect(r).toMatchObject({ cooldown: "", cooldownUntil: "", cannotCommit: "false" });
+    }
+
+    const first = rows[0]!;
+    // The commit is 202 and a BullMQ job resolves it; the socket event is the
+    // authoritative "it happened", so wait for it before reading back.
+    const resolved = awaitOwnEvent(subscriber, playerId);
+    expect((await post(`/api/crimes/${first.id}/commit`, token)).statusCode).toBe(202);
+    const event = await resolved;
+    expect(event.type).toBe("crime.resolved");
+
+    rows = TableRowsResponseSchema.parse((await get("/api/crimes/rows", token)).json()).rows;
+    expect(rows[0]).toMatchObject({ cannotCommit: "true" });
+    expect(Date.parse(rows[0]!.cooldownUntil!)).toBeGreaterThan(Date.now());
+    expect(rows[0]!.cooldown).toBe(rows[0]!.cooldownUntil);
+
+    const last = FormValuesResponseSchema.parse((await get("/api/crimes/last", token)).json());
+    expect(last.values.crime).toBe(first.name);
+    expect(["success", "failed"]).toContain(last.values.outcome);
+    expect(last.values.payout).toMatch(/^\d+$/);
+    expect(Date.parse(last.values.at!)).toBeGreaterThan(0);
   });
 });

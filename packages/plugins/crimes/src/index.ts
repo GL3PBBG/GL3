@@ -1,6 +1,6 @@
 import {
   coreActionCost, coreDashboard, definePlugin, filterPoint, on, PluginError, route,
-  type PageSchema, type PluginCtx, type Pool, type RankUpResult,
+  type PageSchema, type PlayerSnapshot, type PluginCtx, type Pool, type RankUpResult,
 } from "@gl3/plugin-sdk";
 
 /**
@@ -151,60 +151,161 @@ function previewFormulaChance(
   }
 }
 
+/**
+ * The crime board behind BOTH `GET /api/crimes` (the JSON DTO the web client
+ * reads) and `GET /api/crimes/rows` (the view-node table a vocabulary-
+ * rendering client reads). Extracted so the two can never drift (spec
+ * 2026-09-18 §3.3) — the DTO array it returns is exactly what the listing
+ * route has always returned, field for field.
+ */
+async function listCrimes(ctx: PluginCtx, player: PlayerSnapshot) {
+  const cooldownRemaining = await ctx.cooldown.peek("crime", player.id);
+
+  return ctx.transaction(async (tx) => {
+    const [me] = await tx.db.select({
+      level: playerStats.level, crimeExp: playerStats.crimeExp,
+      exp: playerStats.exp, will: playerStats.will, iq: playerStats.iq,
+    })
+      .from(playerStats).where(eq(playerStats.playerId, player.id));
+    // V2's listing gate (crimes.inc: `WHERE C_level <= US_rank`), on GL3's
+    // level axis — a crime above the player's level is not listed at all,
+    // exactly as in V2, so there is nothing under-level to even attempt.
+    const rows = await tx.db.select().from(crimes)
+      .where(lte(crimes.minLevel, me?.level ?? 1))
+      .orderBy(asc(crimes.sort));
+    const skills = await tx.db.select().from(playerCrimeSkill)
+      .where(eq(playerCrimeSkill.playerId, player.id));
+    const skillByCrime = new Map(skills.map((s) => [s.crimeId, s.chance]));
+    const member = await isMember(tx, player.id);
+    // `crimes` is a CORE table, so its art is core-scoped even though this
+    // plugin renders it — the same cross-scope read inventory, travel and
+    // ranks all make.
+    const art = await ctx.assets.resolve("core", rows.map((c) => c.id), "crime");
+
+    return rows.map((crime) => ({
+      id: crime.id,
+      name: crime.name,
+      description: crime.description,
+      cooldownSeconds: memberCooldown(crime.cooldownSeconds, member),
+      minPayout: crime.minPayout.toString(),
+      maxPayout: crime.maxPayout.toString(),
+      // A formula crime previews its chance evaluated against the
+      // CALLER's stats — the same figure the commit job would roll
+      // against right now. Unlocked point-in-time preview (detectives'
+      // list precedent); a parse or eval fault previews null and the
+      // web renders "chance by stats" for it.
+      chance: crime.successFormula === null
+        ? (skillByCrime.get(crime.id) ?? DEFAULT_CRIME_CHANCE)
+        : previewFormulaChance(crime.successFormula, me, skillByCrime.get(crime.id)),
+      cooldownRemaining,
+      ...(art.has(crime.id) ? { imageUrl: art.get(crime.id) as string } : {}),
+    }));
+  });
+}
+
 const listRoute = route({
   method: "GET",
   path: "/api/crimes",
   handler: async (ctx) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
+    return { status: 200, body: { crimes: await listCrimes(ctx, player) } };
+  },
+});
 
-    const cooldownRemaining = await ctx.cooldown.peek("crime", player.id);
+/**
+ * `crimes.index`'s table source (spec 2026-09-18 §3.3). Every cell is a
+ * string and none is ever null — `TableRowsResponseSchema`'s contract.
+ *
+ * `cooldown` and `cooldownUntil` carry the same ISO instant on purpose: the
+ * column renders it as a live countdown (`render: "countdown"`) and the row
+ * action disables its button against it (`cooldownKey`). The crime cooldown
+ * is one per-player figure rather than per crime, so every row shares the
+ * deadline — which is also why `cannotCommit` is the same for all of them.
+ */
+const rowsRoute = route({
+  method: "GET",
+  path: "/api/crimes/rows",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
 
-    return ctx.transaction(async (tx) => {
-      const [me] = await tx.db.select({
-        level: playerStats.level, crimeExp: playerStats.crimeExp,
-        exp: playerStats.exp, will: playerStats.will, iq: playerStats.iq,
+    const listed = await listCrimes(ctx, player);
+    const nowMs = Date.now();
+
+    return {
+      status: 200,
+      body: {
+        rows: listed.map((c) => {
+          const until = c.cooldownRemaining > 0
+            ? new Date(nowMs + c.cooldownRemaining * 1000).toISOString()
+            : "";
+          return {
+            id: c.id,
+            image: c.imageUrl ?? "",
+            name: c.name,
+            // `chance` is null only when a formula crime's preview faulted
+            // (parse or eval); the figure itself, when there is one, is the
+            // per-attempt chance either model produced.
+            chance: c.chance === null ? "formula" : `${c.chance}%`,
+            payout: `${c.minPayout}–${c.maxPayout}`,
+            cooldown: until,
+            cooldownUntil: until,
+            cannotCommit: c.cooldownRemaining > 0 ? "true" : "false",
+          };
+        }),
+      },
+    };
+  },
+});
+
+/**
+ * `crimes.index`'s `keyValueSource` (spec 2026-09-18 §3.3): the caller's most
+ * recent attempt, for a client with no socket. 404 `no_crimes` when there has
+ * never been one — the renderer draws `emptyText` for a 404, so absence is a
+ * state rather than an error to show.
+ *
+ * The commit route is 202 and its outcome lands moments later, so a client
+ * that reads this straight after a commit may still see the PREVIOUS attempt.
+ * `at` is what lets it tell; `crime.resolved` over the socket remains the
+ * authoritative signal.
+ */
+const lastRoute = route({
+  method: "GET",
+  path: "/api/crimes/last",
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+
+    // There is no non-transactional read accessor on PluginCtx, so this one
+    // SELECT runs in its own transaction like every other plugin read.
+    const row = await ctx.transaction(async (tx) => {
+      const [found] = await tx.db.select({
+        name: crimes.name,
+        success: crimeLog.success,
+        payout: crimeLog.payout,
+        at: crimeLog.createdAt,
       })
-        .from(playerStats).where(eq(playerStats.playerId, player.id));
-      // V2's listing gate (crimes.inc: `WHERE C_level <= US_rank`), on GL3's
-      // level axis — a crime above the player's level is not listed at all,
-      // exactly as in V2, so there is nothing under-level to even attempt.
-      const rows = await tx.db.select().from(crimes)
-        .where(lte(crimes.minLevel, me?.level ?? 1))
-        .orderBy(asc(crimes.sort));
-      const skills = await tx.db.select().from(playerCrimeSkill)
-        .where(eq(playerCrimeSkill.playerId, player.id));
-      const skillByCrime = new Map(skills.map((s) => [s.crimeId, s.chance]));
-      const member = await isMember(tx, player.id);
-      // `crimes` is a CORE table, so its art is core-scoped even though this
-      // plugin renders it — the same cross-scope read inventory, travel and
-      // ranks all make.
-      const art = await ctx.assets.resolve("core", rows.map((c) => c.id), "crime");
-
-      return {
-        status: 200,
-        body: {
-          crimes: rows.map((crime) => ({
-            id: crime.id,
-            name: crime.name,
-            description: crime.description,
-            cooldownSeconds: memberCooldown(crime.cooldownSeconds, member),
-            minPayout: crime.minPayout.toString(),
-            maxPayout: crime.maxPayout.toString(),
-            // A formula crime previews its chance evaluated against the
-            // CALLER's stats — the same figure the commit job would roll
-            // against right now. Unlocked point-in-time preview (detectives'
-            // list precedent); a parse or eval fault previews null and the
-            // web renders "chance by stats" for it.
-            chance: crime.successFormula === null
-              ? (skillByCrime.get(crime.id) ?? DEFAULT_CRIME_CHANCE)
-              : previewFormulaChance(crime.successFormula, me, skillByCrime.get(crime.id)),
-            cooldownRemaining,
-            ...(art.has(crime.id) ? { imageUrl: art.get(crime.id) as string } : {}),
-          })),
-        },
-      };
+        .from(crimeLog)
+        .innerJoin(crimes, eq(crimes.id, crimeLog.crimeId))
+        .where(eq(crimeLog.playerId, player.id))
+        .orderBy(desc(crimeLog.createdAt))
+        .limit(1);
+      return found ?? null;
     });
+    if (row === null) throw new PluginError("no_crimes", 404);
+
+    return {
+      status: 200,
+      body: {
+        values: {
+          crime: row.name,
+          outcome: row.success ? "success" : "failed",
+          payout: row.payout.toString(),
+          at: row.at.toISOString(),
+        },
+      },
+    };
   },
 });
 
@@ -893,18 +994,53 @@ export default definePlugin({
     id: "crimes.index",
     path: "/crimes",
     menu: { label: "Crimes", order: 10, category: "crimes" },
-    // Stub view: the client renders a hand-written override (apps/web
-    // PAGE_OVERRIDES) for this id; the schema view exists because a
-    // page declaration requires one.
-    view: { kind: "list", items: [] },
+    // A real view-node page (spec 2026-09-18 §3.3), for clients that render
+    // the vocabulary — the Godot client does. apps/web is unaffected: its
+    // PluginPage checks PAGE_OVERRIDES before it ever looks at a view, so the
+    // hand-written Crimes page still wins there.
+    //
+    // The action's `:id` is the ROW's field, substituted by the renderer —
+    // the route's own param is `:crimeId`, and the two need not agree because
+    // what reaches the server is the substituted path.
+    view: {
+      kind: "panel",
+      title: "Crimes",
+      children: [
+        {
+          kind: "keyValueSource",
+          source: "GET /api/crimes/last",
+          emptyText: "No crimes committed yet",
+          entries: [
+            { label: "Crime", key: "crime" },
+            { label: "Outcome", key: "outcome" },
+            { label: "Payout", key: "payout" },
+            { label: "When", key: "at" },
+          ],
+        },
+        {
+          kind: "table",
+          source: "GET /api/crimes/rows",
+          columns: [
+            { key: "image", label: "Art", render: "image", imageSize: "sm" },
+            { key: "name", label: "Crime" },
+            { key: "chance", label: "Chance" },
+            { key: "payout", label: "Payout" },
+            { key: "cooldown", label: "Cooldown", render: "countdown" },
+          ],
+          rowActions: [{
+            label: "Commit", action: "POST /api/crimes/:id/commit",
+            disabledKey: "cannotCommit", cooldownKey: "cooldownUntil",
+          }],
+        },
+      ],
+    },
   }],
-  routes: [listRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
+  routes: [listRoute, rowsRoute, lastRoute, commitRoute, adminCrimesListRoute, adminCrimesCreateRoute, adminCrimesUpdateRoute, adminCrimesDeleteRoute],
   adminPages: [adminCrimesPage],
   jobs: { commit: commitJob },
   provides: [jailOdds],
   filters: [declareBenefit, dashboardWidget],
   worldHooks: [{ id: "corner", kind: "npc", label: "The corner", page: "crimes.index", model: "npc-coat", order: 20 }],
-  // No menu, pages or events: plugin-manifest-endpoint.test.ts asserts a
-  // no-arg boot answers GET /api/plugins with exactly
-  // { menu: [], pages: [], events: [] }.
+  // No `events`: the crime outcome reaches the client as core's own
+  // `crime.resolved`, published by the commit job, not as a plugin envelope.
 });
