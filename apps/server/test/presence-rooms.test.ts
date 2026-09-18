@@ -62,6 +62,19 @@ async function joined(locationId: string | null, username?: string) {
 const move = (socket: WebSocket, seq: number, x: number, y: number, facing = 0) =>
   sendFrame(socket, { kind: "presence.move", seq, x, y, facing });
 
+/** A `player.travelled` straight onto `onEvent`, the way the bus delivers one. */
+const travelled = (actorId: string, toLocationId: string): GameEvent => ({
+  id: uuidv7(), type: "player.travelled", at: new Date().toISOString(),
+  actorId, actorName: "traveller", audience: { kind: "player", playerId: actorId },
+  fromLocationId: null, toLocationId, cost: "0",
+});
+const isTick = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.tick" }> =>
+  f.kind === "presence.tick";
+const isSnapshot = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.snapshot" }> =>
+  f.kind === "presence.snapshot";
+const isError = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.error" }> =>
+  f.kind === "presence.error";
+
 describe("presence.join", () => {
   it("answers with a snapshot of the room, and tells the room about the joiner", async () => {
     const a = await joined(chicago, "Vito");
@@ -416,15 +429,6 @@ describe("presence ZSET", () => {
 });
 
 describe("travel to a town the server cannot resolve", () => {
-  /** A `player.travelled` straight onto `onEvent`, the way the bus delivers one. */
-  const travelled = (actorId: string, toLocationId: string): GameEvent => ({
-    id: uuidv7(), type: "player.travelled", at: new Date().toISOString(),
-    actorId, actorName: "traveller", audience: { kind: "player", playerId: actorId },
-    fromLocationId: null, toLocationId, cost: "0",
-  });
-  const isTick = (f: ServerFrame): f is Extract<ServerFrame, { kind: "presence.tick" }> =>
-    f.kind === "presence.tick";
-
   it("answers no_location for an unknown town, and the old room still sees left", async () => {
     const p = await playerIn(chicago);
     const q = await playerIn(chicago);
@@ -440,9 +444,11 @@ describe("travel to a town the server cannot resolve", () => {
       sent.length = 0;
       await rooms.onEvent(travelled(p.playerId, uuidv7())); // a town that does not exist
 
-      // The traveller is answered rather than dropped in silence...
-      expect(sent.map((e) => e.frame)).toEqual([{ kind: "presence.error", code: "no_location" }]);
-      expect(sent[0]!.socket).toBe(p.socket);
+      // The traveller is answered rather than dropped in silence. Filtered
+      // to errors first: a 200 ms tick can land in `sent` alongside them.
+      const errorFrames = sent.filter((e) => isError(e.frame));
+      expect(errorFrames.map((e) => e.frame)).toEqual([{ kind: "presence.error", code: "no_location" }]);
+      expect(errorFrames[0]!.socket).toBe(p.socket);
 
       // ...and the room it left still hears about the departure.
       await new Promise((r) => setTimeout(r, 400));
@@ -466,16 +472,52 @@ describe("travel to a town the server cannot resolve", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       await rooms.join(p.playerId, p.socket, null);
-      expect(frames.map((f) => f.kind)).toEqual(["presence.snapshot"]);
+      expect(frames.filter(isSnapshot)).toHaveLength(1);
       await dying.sql.end();
 
       await rooms.onEvent(travelled(p.playerId, miami));
-      expect(frames[1]).toEqual({ kind: "presence.error", code: "not_joined" });
+      expect(frames.filter(isError)).toEqual([{ kind: "presence.error", code: "not_joined" }]);
       expect(errors).toHaveBeenCalledWith(
         expect.objectContaining({ playerId: p.playerId }), "presence: travel lookup failed",
       );
     } finally {
       errors.mockRestore();
+      rooms.close();
+    }
+  });
+});
+
+describe("travel racing the traveller's own socket", () => {
+  it("bails out when the last socket closes during the destination lookup", async () => {
+    const p = await playerIn(chicago);
+    const sent: ServerFrame[] = [];
+    const rooms = createRooms({
+      db, redis,
+      scenes: createSceneService({ db, assetDriver, hooks: [] }),
+      send: (_socket, frame) => { sent.push(frame); },
+    });
+    try {
+      await rooms.join(p.playerId, p.socket, null);
+
+      // The gateway fires onEvent without awaiting it, so a close CAN land
+      // while the destination read is still in flight. Drive exactly that
+      // interleaving rather than race it: onEvent suspends on its first
+      // await, the close then runs to completion synchronously.
+      const travelling = rooms.onEvent(travelled(p.playerId, miami));
+      rooms.socketClosed(p.socket);
+      await travelling;
+
+      // Nobody arrived in Miami. Without the re-read, the stale member
+      // captured before the await lands there holding an empty socket Set
+      // — a ghost no close, leave or travel can ever remove, because
+      // nothing is left to fire one.
+      const q = await playerIn(miami);
+      sent.length = 0;
+      await rooms.join(q.playerId, q.socket, null);
+      const snapshots = sent.filter(isSnapshot);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]!.players).toEqual([]);
+    } finally {
       rooms.close();
     }
   });

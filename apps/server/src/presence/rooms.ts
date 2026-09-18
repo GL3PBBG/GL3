@@ -212,9 +212,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // member insert and that set would strand the member: its socket would
     // have no SocketState, so `detach` would return early on close and
     // leave a phantom in the room forever.
-    member.zsetTouchedAt = t;
     try {
       await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
+      // Stamped only on success: a failed touch must leave the move path's
+      // 60 s throttle open to retry, not suppress it for a minute.
+      member.zsetTouchedAt = t;
     } catch (err) {
       console.error({ err, playerId }, "presence: touch failed");
     }
@@ -390,6 +392,19 @@ export function createRooms(deps: RoomsDeps): Rooms {
       console.error({ err, playerId, toLocationId: event.toLocationId }, "presence: travel lookup failed");
       failure = "not_joined";
     }
+
+    // Everything above was read BEFORE that await, and the gateway fires
+    // onEvent without awaiting it, so the room state can have moved on
+    // underneath: the traveller's last socket can close (which empties the
+    // `sockets` Set this member shares, and inserting it now would leave a
+    // member nothing can ever remove), a fresh presence.join can replace
+    // the member, or a second travelled event can re-room the player again.
+    // Re-read before touching anything. Whoever changed it owns the truth
+    // and has already answered the traveller, so bailing here is silence by
+    // design rather than the dropped answer the branch below guards against.
+    if (memberRoom.get(playerId) !== fromId) return;
+    if (from.members.get(playerId) !== member) return;
+    if (member.sockets.size === 0) return;
 
     // The traveller has left the old town whatever happens next, so the old
     // room is told `left` either way.
