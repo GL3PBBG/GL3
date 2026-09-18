@@ -1,7 +1,7 @@
 import type {
   AssetSlot, AttributePoolDecl, BoundFilterSubscription, CoreEventInput, ExpApplier, JobContext,
   PlayerAttributes, PlayerSnapshot, PluginCtx, PluginEventInput, PluginTx, Pool,
-  PropertyTypeDecl, TrainedAttr,
+  PropertyTypeDecl, TrainedAttr, WorldHook,
 } from "@gl3/plugin-sdk";
 import {
   InsufficientFundsError as SdkInsufficientFundsError,
@@ -80,6 +80,12 @@ export interface PluginCtxOptions {
   installedPluginIds: ReadonlySet<string>;
   /** Keyed `<scope>:<slot>` by `slotKey`, from `collectAssetSlots`. */
   assetSlots: ReadonlyMap<string, AssetSlot>;
+  /**
+   * Optional with the `progression?` precedent — a dozen test call sites
+   * build a ctx and none needs a hook list; production sites pass the
+   * loader's.
+   */
+  worldHooks?: readonly WorldHook[];
 }
 
 /**
@@ -666,6 +672,9 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
     assetSlots: {
       get: (scope, slot) => options.assetSlots.get(slotKey(scope, slot)) ?? null,
       list: () => [...options.assetSlots.values()],
+    },
+    worldHooks: {
+      list: () => options.worldHooks ?? [],
     },
     assets: {
       resolve: (scope, entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, scope, entityIds, slot),

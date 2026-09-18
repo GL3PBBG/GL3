@@ -62,6 +62,8 @@ export {
   type PropertyTypeDecl,
   type AssetSlotDecl,
   type AssetSlot,
+  type WorldHookDecl,
+  type WorldHook,
   SINGLETON_ENTITY_ID,
 } from "./manifest.js";
 export { route, type PluginRoute, type RouteDef, type RouteResult, type RouteTransport } from "./route.js";

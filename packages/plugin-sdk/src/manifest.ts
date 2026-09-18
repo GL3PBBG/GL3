@@ -134,6 +134,57 @@ const AssetSlotDeclSchema = z
   });
 
 /**
+ * A building or NPC this plugin places in every city (spec
+ * 2026-09-17 §2.1). Interacting with it opens `page`, which MUST be one of
+ * this plugin's own player pages — a hook is the plugin's own door, never
+ * another plugin's, and never an admin section. The loader checks `page`
+ * and `signageSlot` against the rest of the manifest; this schema checks
+ * only what a single declaration can know about itself.
+ *
+ * Positions are not declared: core lays every hook out deterministically
+ * along a street (`apps/server/src/world/layout.ts`) so every client agrees
+ * where the garage stands without an asset or an admin.
+ */
+export interface WorldHookDecl {
+  /** Unique within the plugin. Kebab-case, matches `PLUGIN_ID_PATTERN`. */
+  id: string;
+  kind: "building" | "npc";
+  /** Sign text or name tag, 1–24 chars. Author-written, never player text. */
+  label: string;
+  /** Id of one of THIS plugin's `pages`. */
+  page: string;
+  /** Client asset-kit key (`garage`, `bank`, `station`, `newsstand`, `npc-suit`, `npc-coat`, …); unknown → client fallback by `kind`. */
+  model: string;
+  /** Metres. Default building {w:12,d:9}, npc {w:1,d:1} — the client kit is 3 m-grid. */
+  footprint?: { w: number; d: number } | undefined;
+  /** Layout order along the street; ties broken by pluginId, then id. */
+  order: number;
+  /** One of this plugin's `providesAssets` slots with `singleton: true`; its bound image is the signage texture. */
+  signageSlot?: string | undefined;
+}
+
+/** A declaration once the loader has stamped the owning plugin on it — what `ctx.worldHooks` serves. */
+export interface WorldHook extends WorldHookDecl {
+  pluginId: string;
+}
+
+const WorldHookDeclSchema = z
+  .object({
+    id: z.string().regex(PLUGIN_ID_PATTERN, "world hook id must be lowercase kebab-case"),
+    kind: z.enum(["building", "npc"]),
+    label: z.string().min(1).max(24),
+    page: z.string().min(1),
+    model: z.string().min(1),
+    footprint: z
+      .object({ w: z.number().min(1).max(30), d: z.number().min(1).max(30) })
+      .strict()
+      .optional(),
+    order: z.number().int(),
+    signageSlot: z.string().regex(PLUGIN_ID_PATTERN).optional(),
+  })
+  .strict();
+
+/**
  * The `entity_id` a singleton slot binds against: the nil UUID, which no
  * uuidv7 can ever collide with.
  *
@@ -182,6 +233,7 @@ export interface PluginManifestInput {
   providesProperties?: PropertyTypeDecl[];
   providesAssets?: AssetSlotDecl[];
   providesAttributes?: AttributePoolDecl[];
+  worldHooks?: WorldHookDecl[];
   /**
    * Claim exp routing for this plugin (C spec §1.2): when present, every
    * `tx.economy.applyExpAndRankUp` call in the boot diverts to this handler
@@ -227,6 +279,7 @@ export interface PluginManifest {
   providesProperties: PropertyTypeDecl[];
   providesAssets: AssetSlotDecl[];
   providesAttributes: AttributePoolDecl[];
+  worldHooks: WorldHookDecl[];
   applyExp: ExpApplier | null;
   filters: FilterSubscription[];
 }
@@ -318,6 +371,7 @@ const InputSchema = z
         }),
       )
       .optional(),
+    worldHooks: z.array(WorldHookDeclSchema).optional(),
     // Function-bearing, so a z.custom placeholder like routes — the type is
     // enforced by `PluginManifestInput`, the runtime shape by the loader.
     applyExp: z.custom<ExpApplier>().optional(),
@@ -471,6 +525,7 @@ export function parsePluginManifest(input: unknown): PluginManifest {
     providesProperties: parsed.providesProperties ?? [],
     providesAssets: parsed.providesAssets ?? [],
     providesAttributes: parsed.providesAttributes ?? [],
+    worldHooks: parsed.worldHooks ?? [],
     applyExp: parsed.applyExp ?? null,
     filters: parsed.filters ?? [],
   };

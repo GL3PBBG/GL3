@@ -117,6 +117,37 @@ describe("definePlugin", () => {
   it("still reports an invalid manifest when id is present but not a string", () => {
     expect(() => definePlugin({ ...valid, id: 7 })).toThrow(/invalid plugin manifest/);
   });
+
+  it("normalises worldHooks to [] when absent", () => {
+    expect(definePlugin(valid).worldHooks).toEqual([]);
+  });
+
+  it("accepts a world hook and keeps it verbatim", () => {
+    const hook = {
+      id: "station", kind: "building" as const, label: "Station", page: "travel.index",
+      model: "station", footprint: { w: 12, d: 9 }, order: 10, signageSlot: "sign",
+    };
+    const manifest = definePlugin({
+      ...valid,
+      pages: [{ id: "travel.index", path: "/travel", view: { kind: "list", items: [] } }],
+      providesAssets: [{ slot: "sign", label: "Sign", singleton: true }],
+      worldHooks: [hook],
+    });
+    expect(manifest.worldHooks).toEqual([hook]);
+  });
+
+  it("rejects a world hook label outside 1..24 chars", () => {
+    const base = { id: "corner", kind: "npc" as const, page: "p", model: "npc-coat", order: 1 };
+    expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, label: "" }] })).toThrow(/worldHooks\.0\.label/);
+    expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, label: "x".repeat(25) }] })).toThrow(/worldHooks\.0\.label/);
+  });
+
+  it("rejects a world hook id that is not kebab-case and a footprint out of range", () => {
+    const base = { kind: "building" as const, label: "Bank", page: "p", model: "bank", order: 1 };
+    expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, id: "Bank" }] })).toThrow(/worldHooks\.0\.id/);
+    expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, id: "bank", footprint: { w: 0, d: 5 } }] })).toThrow(/footprint/);
+    expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, id: "bank", footprint: { w: 31, d: 5 } }] })).toThrow(/footprint/);
+  });
 });
 
 describe("apiVersion", () => {

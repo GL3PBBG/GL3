@@ -3,7 +3,7 @@ import type { TablesRelationalConfig } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { AttributePoolDecl, PlayerAttributes, Pool, TrainedAttr } from "./attributes.js";
 import type { FilterPoint } from "./filters.js";
-import type { AssetSlot, PropertyTypeDecl } from "./manifest.js";
+import type { AssetSlot, PropertyTypeDecl, WorldHook } from "./manifest.js";
 
 /**
  * The transaction handle a plugin sees. `query` is omitted, so
@@ -341,6 +341,14 @@ export interface PluginCtx {
     get(scope: string, slot: string): AssetSlot | null;
     list(): readonly AssetSlot[];
   };
+  /**
+   * Every world hook declared by any installed plugin, stamped with its
+   * owner and sorted in layout order — the same read-only manifest-data
+   * shape as `assetSlots`. Positions are not here: they are a per-scene
+   * fact core serves from `GET /api/world/scene`. Enough for a plugin to
+   * say "the garage is on Main Street", not enough to move anyone.
+   */
+  readonly worldHooks: { list(): readonly WorldHook[] };
   /**
    * Image URLs for entities, keyed by entity id.
    *
