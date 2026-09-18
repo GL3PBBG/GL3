@@ -674,7 +674,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       list: () => [...options.assetSlots.values()],
     },
     worldHooks: {
-      list: () => options.worldHooks ?? [],
+      list: () => [...(options.worldHooks ?? [])],
     },
     assets: {
       resolve: (scope, entityIds, slot) => resolveAssets(deps.db, deps.assetDriver, scope, entityIds, slot),

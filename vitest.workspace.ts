@@ -291,6 +291,7 @@ export default defineWorkspace([
         "test/asset-image-parse.test.ts",
         "test/asset-slots.test.ts",
         "test/world-hooks-collect.test.ts",
+        "test/world-layout.test.ts",
         "test/legal-render.test.ts",
       ],
     },
