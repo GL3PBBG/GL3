@@ -469,9 +469,13 @@ export function createRooms(deps: RoomsDeps): Rooms {
   };
 
   const onEvent = async (event: GameEvent): Promise<void> => {
-    // A sentence changed hands: the actor was jailed, released or
-    // discharged, or — for a kill — the VICTIM is the one hospitalised.
-    if (event.type === "player.jailed" || event.type === "player.released" || event.type === "player.discharged") {
+    // A sentence changed hands: the actor was jailed, released, discharged
+    // or hospitalised by their own backfiring gun — or, for a kill, the
+    // VICTIM is the one hospitalised and the actor is the killer.
+    if (
+      event.type === "player.jailed" || event.type === "player.released"
+      || event.type === "player.discharged" || event.type === "player.backfired"
+    ) {
       await refreshSentence(event.actorId);
       return;
     }

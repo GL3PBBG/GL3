@@ -423,18 +423,18 @@ describe("sentence on presence state", () => {
 
   /** The envelope the bus delivers, built the way `base` in events.ts requires. */
   const sentenceEvent = (
-    type: "player.jailed" | "player.released" | "player.discharged",
+    type: "player.jailed" | "player.released" | "player.discharged" | "player.backfired",
     actorId: string,
-  ): GameEvent =>
-    type === "player.jailed"
-      ? {
-          id: uuidv7(), type, at: new Date().toISOString(), actorId, actorName: "convict",
-          audience: { kind: "player", playerId: actorId }, until: soon().toISOString(), reason: "test",
-        }
-      : {
-          id: uuidv7(), type, at: new Date().toISOString(), actorId, actorName: "convict",
-          audience: { kind: "player", playerId: actorId },
-        };
+  ): GameEvent => {
+    const envelope = {
+      id: uuidv7(), at: new Date().toISOString(), actorId, actorName: "convict",
+      audience: { kind: "player" as const, playerId: actorId },
+    };
+    if (type === "player.jailed") return { ...envelope, type, until: soon().toISOString(), reason: "test" };
+    // A backfire hospitalises the SHOOTER, so the actor is the one confined.
+    if (type === "player.backfired") return { ...envelope, type, selfDamage: 10, hospitalised: true };
+    return { ...envelope, type };
+  };
 
   it("carries jail to the sentenced player and to the room that sees them arrive", async () => {
     const a = await joined(chicago, "Watcher");
@@ -492,6 +492,25 @@ describe("sentence on presence state", () => {
     const announced = tick.joined.find((p) => p.playerId === b.playerId);
     expect(announced, "the released member is re-announced").toBeDefined();
     expect(announced!.sentence).toBeNull();
+  });
+
+  it("re-announces a backfired shooter as hospitalised", async () => {
+    const a = await joined(chicago, "Bystander");
+    await frameOfKind(a.socket, "presence.snapshot");
+
+    const b = await joined(chicago, "Shooter");
+    await frameOfKind(b.socket, "presence.snapshot");
+    expect((await frameOfKind(a.socket, "presence.tick")).joined[0]!.sentence).toBeNull();
+
+    // The gun jams: combat hospitalises the shooter and publishes
+    // player.backfired with the SHOOTER as actor — there is no player.killed.
+    await db.update(playerStats).set({ hospitalUntil: soon() }).where(eq(playerStats.playerId, b.playerId));
+    await publishEvent(redis, sentenceEvent("player.backfired", b.playerId));
+
+    const tick = await frameOfKind(a.socket, "presence.tick");
+    const announced = tick.joined.find((p) => p.playerId === b.playerId);
+    expect(announced, "the backfired shooter is re-announced").toBeDefined();
+    expect(announced!.sentence).toBe("hospital");
   });
 
   it("ignores a sentence event for a player who is in no room", async () => {

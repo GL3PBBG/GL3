@@ -52,11 +52,14 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
       const core = deps.coreHooks ? placeCoreHooks(placed, bounds) : [];
       // Overflow is served as computed, exactly as plugin-hook overflow is
       // (spec §1) — but it is worth saying once per distinct layout, which
-      // is what this memo makes "once" mean.
+      // is what this memo makes "once" mean. The test is the yard's east
+      // EDGE, not its centre: the yard spans `x + 6 … x + 12` around a
+      // centre of `x + 9`, so it has already run off the street three
+      // metres before its centre does.
       for (const g of core) {
-        if (g.yard.x > bounds.maxX) {
+        if (g.yard.x + 3 > bounds.maxX) {
           console.warn(
-            { hookId: g.hook.id, x: g.position.x, yardX: g.yard.x, maxX: bounds.maxX },
+            { hookId: g.hook.id, x: g.position.x, yardEastX: g.yard.x + 3, maxX: bounds.maxX },
             "world: core hook overflows the street",
           );
         }
