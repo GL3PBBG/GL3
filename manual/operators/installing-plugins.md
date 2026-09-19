@@ -284,6 +284,12 @@ At boot, for each specifier in `PLUGIN_PACKAGES`, the loader:
    `parsePluginManifest`). Routes, pages, events, migrations, settings — the
    whole declared surface is checked against the SDK schema that shipped in
    the running server.
+4. Checks **containment**: every endpoint a page's view reaches — a button
+   or form `action`, a `table.source`, a select's `optionsSource`, and since
+   `@gl3/plugin-sdk` 1.0.13 a `keyValueSource.source` and `meterSource.source`
+   too — must sit under the plugin's own `basePaths`. Before 1.0.13 those two
+   kinds slipped through, so a plugin that pointed one at another plugin's or
+   core's route used to boot; it now fails boot with the endpoint named.
 
 What it does **not** check: the plugin's behaviour. A manifest that validates
 can still do anything the SDK allows at runtime — including publishing core

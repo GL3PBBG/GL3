@@ -122,7 +122,8 @@ Beyond exported helpers, the SDK offers declared extension points:
   Godot presence client. `page` must be one of your own player pages,
   `signageSlot` one of your own singleton asset slots. Core places every
   hook along one street deterministically and serves them from
-  `GET /api/world/scene`; you declare nothing spatial.
+  `GET /api/world/scene`; you declare nothing spatial. What a client does
+  with a hook is in [Build a world client](/guides/build-a-world-client).
 - **Ctx utilities** — `tx.timers` (per-player timers), `tx.attributes`
   (pools/trained stats; the caller must already hold the player row via
   `tx.locks.player`), `ctx.installedPluginIds`, `ctx.cooldown`.

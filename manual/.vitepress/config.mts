@@ -32,6 +32,7 @@ export default defineConfig({
           { text: 'Review a plugin', link: '/guides/review-a-plugin' },
           { text: 'Add a migration', link: '/guides/add-a-migration' },
           { text: 'Testing conventions', link: '/guides/testing-conventions' },
+          { text: 'Build a world client', link: '/guides/build-a-world-client' },
         ],
       },
       {
