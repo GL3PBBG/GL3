@@ -10,7 +10,8 @@ import { IdSchema } from "./primitives.js";
  */
 const finite = z.number().finite();
 
-export const ClientKindSchema = z.enum(["godot-desktop", "godot-web", "web"]);
+/** Informational only — the server never branches on it. `android`/`ios` are the Expo shell. */
+export const ClientKindSchema = z.enum(["godot-desktop", "godot-web", "web", "android", "ios"]);
 export type ClientKind = z.infer<typeof ClientKindSchema>;
 
 export const EmoteSchema = z.enum(["wave", "point", "smoke"]);

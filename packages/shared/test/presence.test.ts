@@ -22,6 +22,9 @@ const room = {
 describe("presence client frames", () => {
   it("accepts the four presence frames", () => {
     expect(ClientFrameSchema.parse({ kind: "presence.join", client: "godot-desktop" }).kind).toBe("presence.join");
+    for (const client of ["godot-web", "web", "android", "ios"]) {
+      expect(ClientFrameSchema.parse({ kind: "presence.join", client }).kind).toBe("presence.join");
+    }
     expect(ClientFrameSchema.parse({ kind: "presence.move", seq: 0, x: 1, y: 2, facing: -3 }).kind).toBe("presence.move");
     expect(ClientFrameSchema.parse({ kind: "presence.emote", emote: "wave" }).kind).toBe("presence.emote");
     expect(ClientFrameSchema.parse({ kind: "presence.leave" }).kind).toBe("presence.leave");
