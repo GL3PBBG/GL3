@@ -218,6 +218,9 @@ describe("the framework profile has no core hooks", () => {
     const res = await fwApp.inject({ method: "GET", url: "/api/world/scene", headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(200);
     const room = RoomDescriptorSchema.parse(res.json());
+    // `every` over an empty array is vacuously true, so prove the scene
+    // really did serve hooks before asserting on what is missing from them.
+    expect(room.hooks.map((h) => h.id)).toContain("bank.bank");
     expect(room.hooks.every((h) => h.pluginId !== "core")).toBe(true);
     expect(room.hooks.every((h) => h.yard === undefined)).toBe(true);
   });

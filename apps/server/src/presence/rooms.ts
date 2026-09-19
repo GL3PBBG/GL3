@@ -520,7 +520,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
       if (read !== undefined) sentence = read;
     }
 
-    // Everything above was read BEFORE that await, and the gateway fires
+    // Everything above was read BEFORE those awaits, and the gateway fires
     // onEvent without awaiting it, so the room state can have moved on
     // underneath: the traveller's last socket can close (which empties the
     // `sockets` Set this member shares, and inserting it now would leave a

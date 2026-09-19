@@ -97,9 +97,12 @@ export interface PlacedCore extends PlacedGeometry {
  * centre, `(x + 9, y)`.
  */
 export function placeCoreHooks(placed: readonly PlacedGeometry[], bounds: SceneBounds): PlacedCore[] {
-  const half = 6;
-  const d = 9;
   const place = (hook: WorldHook, side: Side): PlacedCore => {
+    // Derived from the entry's own declaration, never restated: editing a
+    // CORE_HOOKS footprint has to move the building and its yard with it.
+    const footprint: Footprint = hook.footprint ?? LAYOUT.defaultFootprint[hook.kind];
+    const half = footprint.w / 2;
+    const d = footprint.d;
     let x = bounds.maxX - 16;
     const sameSide = placed.filter((p) => p.hook.kind === "building" && Math.sign(p.position.y) === side);
     for (;;) {
@@ -108,7 +111,9 @@ export function placeCoreHooks(placed: readonly PlacedGeometry[], bounds: SceneB
       x = other.position.x + other.footprint.w / 2 + 4 + half;
     }
     const y = side * (LAYOUT.buildingLine + d / 2);
-    return { hook, footprint: { w: 12, d }, position: { x, y }, facing: facingToward(side), yard: { x: x + 9, y } };
+    // The yard is the building's east-adjacent lot, same width as the gap
+    // rule leaves it: its near edge is `x + half`, its centre `x + half + 3`.
+    return { hook, footprint, position: { x, y }, facing: facingToward(side), yard: { x: x + half + 3, y } };
   };
   return [place(CORE_HOOKS[0]!, 1), place(CORE_HOOKS[1]!, -1)];
 }

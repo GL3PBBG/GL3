@@ -16,6 +16,7 @@ import { runPluginMigrations } from "../src/plugins/migrate.js";
 import ocPlugin from "@gl3/plugin-oc";
 import { createRedis, createSubscriber } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
+import { awaitOwnEvent } from "./helpers/events.js";
 
 /**
  * Mirror table definitions for plugin-owned tables — same pattern as oc.test.ts.
@@ -208,6 +209,34 @@ describe("oc resolve job — failure", () => {
     // All member rows released
     const members = await db.select().from(ocMembers).where(eq(ocMembers.heistId, heistId));
     for (const m of members) expect(m.released).toBe(true);
+  });
+
+  it("publishes player.jailed per jailed member, so presence can refresh", async () => {
+    await subscriber.subscribe(GAME_EVENTS_CHANNEL);
+    // A NON-leader member: every oc.resolved names the LEADER as its actor,
+    // so an actorId filter on a crew member can only ever match the sentence
+    // event this test is about (rule 4 — filter by your own actor).
+    const crew = memberIds[1]!;
+    const own = awaitOwnEvent(subscriber, crew);
+
+    await runPluginJob(
+      deps({ "oc.success_chance": "0" }),
+      ocPlugin,
+      "resolve",
+      { id: "oc-fail-jailed-1", data: { heistId, seed: "fixed-seed-oc-fail" } },
+    );
+
+    const event = await own;
+    expect(event.type).toBe("player.jailed");
+    if (event.type !== "player.jailed") throw new Error("unreachable");
+    expect(event.actorId).toBe(crew);
+    expect(event.audience).toEqual({ kind: "player", playerId: crew });
+    expect(event.reason).toBe("oc.failed");
+    // `until` is the row's own value, not a recomputed one: sendToJail can
+    // extend a sentence, so only the row knows what it ended up being.
+    const [stats] = await db.select({ jailedUntil: playerStats.jailedUntil })
+      .from(playerStats).where(eq(playerStats.playerId, crew));
+    expect(event.until).toBe(stats!.jailedUntil!.toISOString());
   });
 });
 

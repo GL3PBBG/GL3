@@ -713,6 +713,25 @@ async function resolveJob(ctx: PluginCtx, data: Record<string, unknown>): Promis
       for (const m of members) {
         if (!alive.has(m.playerId)) continue;
         await tx.jail.sendToJail(m.playerId, jailSeconds);
+        // Crimes' envelope, verbatim (crimes/src/index.ts's failed-crime
+        // branch): every other jailing path in the game publishes this, and
+        // presence's sentence refresh listens for exactly it — without it a
+        // heist crew's sentence never reaches anyone else's client. The
+        // `until` is RE-READ in-tx rather than computed from `jailSeconds`,
+        // because sendToJail extends an existing sentence rather than
+        // replacing it, so only the row knows what it ended up being.
+        const [jailed] = await tx.db.select({ jailedUntil: playerStats.jailedUntil })
+          .from(playerStats).where(eq(playerStats.playerId, m.playerId));
+        if (jailed?.jailedUntil) {
+          await tx.events.publishCore({
+            type: "player.jailed",
+            actorId: m.playerId,
+            actorName: nameById.get(m.playerId) ?? "unknown",
+            audience: { kind: "player", playerId: m.playerId },
+            until: jailed.jailedUntil.toISOString(),
+            reason: "oc.failed",
+          });
+        }
       }
     }
 
