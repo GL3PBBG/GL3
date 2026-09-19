@@ -89,6 +89,13 @@ export const PresenceStateSchema = z.object({
   since: z.number().int().nonnegative(),
   /** Derived display fact, not read by any server decision — see `SentenceSchema`. */
   sentence: SentenceSchema.optional(),
+  /**
+   * True while NO socket of this player has sent `presence.join` (spec
+   * 2026-09-19 §1): the server put them in the room itself, nobody is
+   * driving the avatar and it never moves. Absent means false, so a client
+   * written before this field reads every member as live, exactly as it did.
+   */
+  static: z.boolean().optional(),
 });
 export type PresenceState = z.infer<typeof PresenceStateSchema>;
 

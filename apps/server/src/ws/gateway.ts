@@ -41,6 +41,9 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
   const rooms = createRooms({
     db: deps.db, redis: deps.redis, send,
     scenes: createSceneService({ db: deps.db, assetDriver: deps.assetDriver, hooks: deps.worldHooks, coreHooks: deps.coreHooks }),
+    // The gateway owns the socket map; presence borrows a read of it to
+    // auto-join a player whose location only arrives with their first travel.
+    socketsOf: (playerId) => sockets.get(playerId) ?? [],
   });
   /** Same posture as route(): a throw in one frame's handler logs and drops that frame, never the process. */
   const guarded = (what: string, fn: () => void | Promise<void>): void => {
@@ -114,6 +117,12 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
         });
 
         send(ws, { kind: "ready", playerId });
+        // Every authenticated socket is put in its player's town without
+        // being asked (spec 2026-09-19 §2), so a web or Android player
+        // standing there is visible to a 3D client instead of invisible
+        // until they run one. Nothing is sent to this socket as a result —
+        // `autoJoin` leaves it unsubscribed — and every failure is silence.
+        guarded("autojoin", () => rooms.autoJoin(playerId, ws, ip || null));
       });
     })();
   });

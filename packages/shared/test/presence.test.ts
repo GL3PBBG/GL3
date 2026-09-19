@@ -69,6 +69,19 @@ describe("core-hook yard and presence sentence", () => {
     expect(PlacedHookSchema.parse(hookWithYard).yard).toEqual({ x: 1, y: 2 });
     expect(PlacedHookSchema.parse(room.hooks[0]).yard).toBeUndefined();
   });
+  it("accepts an optional static flag on presence state, and still parses with it absent", () => {
+    expect(PresenceStateSchema.parse({ ...state, static: true }).static).toBe(true);
+    expect(PresenceStateSchema.parse({ ...state, static: false }).static).toBe(false);
+    expect(PresenceStateSchema.parse(state).static).toBeUndefined();
+    expect(PresenceStateSchema.safeParse({ ...state, static: "yes" }).success).toBe(false);
+    // It rides every frame that carries a PresenceState, not just the snapshot.
+    const frame = ServerFrameSchema.parse({
+      kind: "presence.tick", locationId: id, joined: [{ ...state, static: true }],
+      moved: [], emoted: [], left: [],
+    });
+    expect(frame.kind === "presence.tick" && frame.joined[0]!.static).toBe(true);
+  });
+
   it("accepts an optional sentence on presence state — jail, hospital, null or absent — and rejects an unknown value", () => {
     expect(PresenceStateSchema.parse({ ...state, sentence: "jail" }).sentence).toBe("jail");
     expect(PresenceStateSchema.parse({ ...state, sentence: "hospital" }).sentence).toBe("hospital");

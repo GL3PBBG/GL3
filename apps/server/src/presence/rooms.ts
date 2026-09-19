@@ -24,11 +24,19 @@ export interface RoomsDeps {
   redis: Redis;
   scenes: SceneService;
   send(socket: WebSocket, frame: ServerFrame): void;
+  /**
+   * Every open socket of one player — the gateway's own map (spec 2026-09-19
+   * §2 "Late location"). Required rather than defaulted, the `coreHooks`
+   * discipline: an absent implementation would silently cost a fresh account
+   * its first auto-join instead of failing loudly at the call site.
+   */
+  socketsOf(playerId: string): Iterable<WebSocket>;
   now?: () => number;
 }
 
 export interface Rooms {
   join(playerId: string, socket: WebSocket, ip: string | null): Promise<void>;
+  autoJoin(playerId: string, socket: WebSocket, ip: string | null): Promise<void>;
   move(socket: WebSocket, frame: { seq: number; x: number; y: number; facing: number }): void;
   emote(socket: WebSocket, emote: Emote): void;
   leave(socket: WebSocket): void;
@@ -40,8 +48,12 @@ export interface Rooms {
 interface Member {
   state: PresenceState;
   sockets: Set<WebSocket>;
-  /** The socket whose moves drive the avatar — the most recent joiner. */
-  controller: WebSocket;
+  /**
+   * The socket whose moves drive the avatar — the most recent joiner, or
+   * `null` when nobody has asked to drive. `null` IS `state.static`: one
+   * fact in two places, kept in step by `demote` and by `join`'s take-over.
+   */
+  controller: WebSocket | null;
   lastMoveAt: number;
   zsetTouchedAt: number;
   ip: string | null;
@@ -61,6 +73,13 @@ interface Room {
 
 interface SocketState {
   playerId: string;
+  ip: string | null;
+  /**
+   * This socket sent `presence.join` and is therefore owed presence frames.
+   * An auto-joined socket asked for nothing, so it is left `false` and the
+   * room never writes to it (spec 2026-09-19 §2 "Recipients").
+   */
+  subscribed: boolean;
   roomId: string | null;
   lastSeq: number;
   tokens: number;
@@ -76,11 +95,40 @@ type JoinTarget =
 
 const AVATARS: readonly AvatarBody[] = ["suit-dark", "suit-light", "coat", "dress"];
 
-/** v1 avatar: a stable function of the id, so every client draws the same body (spec §1.1). */
-export function avatarFor(playerId: string): AvatarBody {
+/** The one hash fold both derived-from-the-id facts below share. */
+function fold(playerId: string): number {
   let h = 0;
   for (let i = 0; i < playerId.length; i++) h = (h * 31 + playerId.charCodeAt(i)) >>> 0;
-  return AVATARS[h % AVATARS.length]!;
+  return h;
+}
+
+/** v1 avatar: a stable function of the id, so every client draws the same body (spec §1.1). */
+export function avatarFor(playerId: string): AvatarBody {
+  return AVATARS[fold(playerId) % AVATARS.length]!;
+}
+
+/**
+ * Where a player stands while nobody is driving them (spec 2026-09-19 §2).
+ *
+ * Pure and deterministic, so every client in the town draws the same avatar
+ * in the same spot: the spawn's side of the street, on the pavement between
+ * the road edge (7.5 m) and the building line (10.5 m), spread across the
+ * spawn lot `[spawn.x − 8, spawn.x + 8]` by the same fold `avatarFor` uses.
+ * `spawn.y === 0` counts as the north side.
+ *
+ * Clamped to the scene bounds, which the formula alone does not guarantee: a
+ * scene smaller than those offsets would otherwise stand its static members
+ * outside their own room, and the first move any of them made would be
+ * rubber-banded in from out there.
+ */
+export function staticSpotFor(playerId: string, descriptor: RoomDescriptor): { x: number; y: number } {
+  const b = descriptor.bounds;
+  const x = descriptor.spawn.x + (fold(playerId) % 17) - 8;
+  const y = descriptor.spawn.y < 0 ? -9 : 9;
+  return {
+    x: Math.min(b.maxX, Math.max(b.minX, x)),
+    y: Math.min(b.maxY, Math.max(b.minY, y)),
+  };
 }
 
 /** The two columns every sentence read selects. */
@@ -115,20 +163,24 @@ export function createRooms(deps: RoomsDeps): Rooms {
    * that `presence.join` — three round trips, two Redis writes and a full
    * snapshot, the most expensive frame there is — is bucketed like every
    * other frame instead of being the one way to flood the server for free.
-   * A socket that has not joined carries `roomId: null`, which `move`,
-   * `emote` and `detach` already read as not-joined.
+   * A socket that has not joined carries `roomId: null` and `subscribed:
+   * false`, which `move` and `emote` read as not-joined and which `detach`
+   * reads as nothing to give up on an explicit `presence.leave`. Auto-join
+   * creates the state too, and leaves both of those exactly as they are.
    */
-  const bucketFor = (socket: WebSocket, playerId: string, t: number): SocketState => {
+  const bucketFor = (socket: WebSocket, playerId: string, ip: string | null, t: number): SocketState => {
     let s = socketStates.get(socket);
     if (s === undefined) {
       s = {
-        playerId, roomId: null, lastSeq: -1,
+        playerId, ip, subscribed: false, roomId: null, lastSeq: -1,
         tokens: PRESENCE.bucketSize, tokensAt: t, drops: 0, dropsWindowStart: t,
       };
       socketStates.set(socket, s);
     }
     return s;
   };
+  /** Only a socket that asked for presence is ever written to (spec 2026-09-19 §2). */
+  const subscribed = (socket: WebSocket): boolean => socketStates.get(socket)?.subscribed === true;
   const error = (socket: WebSocket, code: "not_joined" | "no_location" | "rate_limited" | "superseded"): void =>
     deps.send(socket, { kind: "presence.error", code });
 
@@ -197,9 +249,39 @@ export function createRooms(deps: RoomsDeps): Rooms {
     }
   };
 
+  /**
+   * Every (auto-)join is a heartbeat, not only the first: /api/online reads
+   * this ZSET, and a client that reconnects is present now. The touch is a
+   * nicety, though — it is what makes a socket-only session visible there —
+   * so no caller may depend on it, which is why every failure is swallowed
+   * here. `zsetTouchedAt` is stamped only on success: a failed touch must
+   * leave the move path's 60 s throttle open to retry, not suppress it for
+   * a minute.
+   */
+  const touch = async (member: Member, playerId: string, ip: string | null, t: number): Promise<void> => {
+    try {
+      await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
+      member.zsetTouchedAt = t;
+    } catch (err) {
+      console.error({ err, playerId }, "presence: touch failed");
+    }
+  };
+
+  /**
+   * A member nobody drives any more: it stops where it was left (no teleport
+   * to the static spot) and the flip is re-announced so every client in the
+   * room stops interpolating it — a RE-ANNOUNCE through `dirty.joined`, which
+   * the client upserts, not a second join.
+   */
+  const demote = (room: Room, playerId: string, member: Member): void => {
+    member.controller = null;
+    member.state = { ...member.state, static: true };
+    room.dirty.joined.set(playerId, member.state);
+  };
+
   const join = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
     const t0 = now();
-    const s = bucketFor(socket, playerId, t0);
+    const s = bucketFor(socket, playerId, ip, t0);
     if (!spendOrDrop(s, socket, t0)) return;
 
     const target = await joinTarget(playerId);
@@ -226,11 +308,19 @@ export function createRooms(deps: RoomsDeps): Rooms {
     const t = now();
     let member = room.members.get(playerId);
     if (member === undefined) {
+      // The static spot, not spawn — and deliberately so even though this
+      // member is live from birth. Auto-join has a full round trip's head
+      // start on any `presence.join`, so it normally creates the member and
+      // this branch is the loser of that race; landing the two paths on the
+      // same position is what stops a player's starting point depending on
+      // which one won.
+      const spot = staticSpotFor(playerId, room.descriptor);
       member = {
         state: {
           playerId, username: target.username, gangId: target.gangId,
-          x: room.descriptor.spawn.x, y: room.descriptor.spawn.y, facing: room.descriptor.spawn.facing,
+          x: spot.x, y: spot.y, facing: room.descriptor.spawn.facing,
           avatar: { body: avatarFor(playerId) }, since: t, sentence: target.sentence,
+          static: false,
         },
         sockets: new Set([socket]), controller: socket, lastMoveAt: t, zsetTouchedAt: t, ip,
       };
@@ -245,37 +335,117 @@ export function createRooms(deps: RoomsDeps): Rooms {
       if (member.controller !== socket) {
         const previous = member.controller;
         member.controller = socket;
-        if (member.sockets.has(previous)) error(previous, "superseded");
+        // A static member has no previous driver to supersede: nobody was
+        // holding the wheel, so nobody is told they lost it.
+        if (previous !== null && member.sockets.has(previous)) error(previous, "superseded");
+      }
+      // `joinTarget` just re-read the row, so this is the freshest view of
+      // every fact the state carries. Taking the avatar over never moves it
+      // (spec 2026-09-19 §2) — the client walks away from the static spot
+      // rather than teleporting to spawn — so position is NOT touched here.
+      const next: PresenceState = {
+        ...member.state,
+        username: target.username, gangId: target.gangId, sentence: target.sentence, static: false,
+      };
+      const changed = next.username !== member.state.username
+        || next.gangId !== member.state.gangId
+        || (next.sentence ?? null) !== (member.state.sentence ?? null)
+        || (member.state.static ?? false);
+      if (changed) {
+        member.state = next;
+        room.dirty.joined.set(playerId, next);
       }
     }
 
     // Mutated, not replaced: the budget and its drop window carry across a
     // re-join, which is the whole point of the bucket. A new room is a new
     // sequence space, so `lastSeq` resets.
+    s.subscribed = true;
     s.roomId = room.descriptor.locationId;
     s.lastSeq = -1;
 
-    // Every join is a heartbeat, not only the first: /api/online reads this
-    // ZSET, and a client that reconnects and re-joins is present now. The
-    // touch is a nicety, though — it is what makes a socket-only session
-    // visible there — so join must not depend on it, and it sits AFTER the
-    // socket-state set above for that reason. A throwable await between the
-    // member insert and that set would strand the member: its socket would
-    // have no SocketState, so `detach` would return early on close and
-    // leave a phantom in the room forever.
-    try {
-      await touchPresence(deps.redis, deps.db, playerId, ip, new Date(t));
-      // Stamped only on success: a failed touch must leave the move path's
-      // 60 s throttle open to retry, not suppress it for a minute.
-      member.zsetTouchedAt = t;
-    } catch (err) {
-      console.error({ err, playerId }, "presence: touch failed");
-    }
+    // The touch sits AFTER the socket-state set above: a throwable await
+    // between the member insert and that set would strand the member — its
+    // socket would have no room recorded, so `detach` would find nothing to
+    // remove and leave a phantom in the room forever.
+    await touch(member, playerId, ip, t);
     // Same window, second await: the member is in the room by now, so a
     // close that lands here IS seen by `detach` and cleaned up. Only the
     // snapshot needs suppressing.
     if (!isOpen(socket)) return;
     deps.send(socket, snapshotFor(room, member));
+  };
+
+  /**
+   * Put an authenticated socket in its player's town without being asked
+   * (spec 2026-09-19 §2), so a web or Android player standing in the town is
+   * visible to a 3D client rather than invisible until they run one.
+   *
+   * Three differences from `join`, each of them because the client did not
+   * ask for any of this: the socket is left UNSUBSCRIBED, so no presence
+   * frame is ever sent to it; the member never becomes controller, so
+   * nothing is superseded; and every failure is silence, because there is no
+   * client waiting on an answer to drop. It spends no token either — this is
+   * server-initiated traffic, and charging a client for it would let the
+   * gateway empty its own budget before it sends a single frame.
+   */
+  const autoJoin = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
+    // Called for its side effect: the socket gets its budget, its player id
+    // and its ip now, so whatever it sends later is bucketed and so that the
+    // late auto-join in `onEvent` can recover the ip. `subscribed` and
+    // `roomId` are left exactly as `bucketFor` creates them — see below.
+    bucketFor(socket, playerId, ip, now());
+    const target = await joinTarget(playerId);
+    // `join`'s rule, for `join`'s reason: resuming into an insert for a
+    // socket that has already gone leaves a member holding one dead socket
+    // that no close, leave or travel will ever fire for again.
+    if (!isOpen(socket)) return;
+    // A null location is not an error, and `joinTarget` has already logged
+    // any throw. Either way the client hears nothing.
+    if (!target.ok) return;
+    const { room } = target;
+
+    // A `presence.join` on this same socket can win the race to `joinTarget`
+    // — two reads started moments apart — so the member may already exist
+    // and already be driven. Adding the socket is all that is ever safe
+    // here: taking the wheel would demote a client that DID ask for it.
+    const existing = room.members.get(playerId);
+    if (existing !== undefined) {
+      existing.sockets.add(socket);
+      await touch(existing, playerId, ip, now());
+      return;
+    }
+
+    // A stale membership of a DIFFERENT room (travel the bus never told us
+    // about) is a plain leave — `join`'s rule again.
+    const previousId = memberRoom.get(playerId);
+    if (previousId !== undefined && previousId !== room.descriptor.locationId) {
+      const previous = rooms.get(previousId);
+      if (previous) removeMember(previous, playerId);
+    }
+
+    const t = now();
+    const spot = staticSpotFor(playerId, room.descriptor);
+    const member: Member = {
+      state: {
+        playerId, username: target.username, gangId: target.gangId,
+        x: spot.x, y: spot.y, facing: room.descriptor.spawn.facing,
+        avatar: { body: avatarFor(playerId) }, since: t, sentence: target.sentence,
+        static: true,
+      },
+      sockets: new Set([socket]), controller: null, lastMoveAt: t, zsetTouchedAt: t, ip,
+    };
+    room.members.set(playerId, member);
+    memberRoom.set(playerId, room.descriptor.locationId);
+    room.dirty.left.delete(playerId);
+    room.dirty.joined.set(playerId, member.state);
+
+    // The socket's `roomId` and `subscribed` are deliberately left alone:
+    // this socket has not joined, so `move`, `emote` and `presence.leave`
+    // must keep answering it `not_joined`, and nothing may be sent to it.
+    // `detach` finds the member through `memberRoom` instead, which is what
+    // still cleans this member up when the socket closes.
+    await touch(member, playerId, ip, t);
   };
 
   const takeToken = (s: SocketState, t: number): boolean => {
@@ -353,14 +523,27 @@ export function createRooms(deps: RoomsDeps): Rooms {
   const detach = (socket: WebSocket, explicit: boolean): void => {
     const s = stateOf(socket);
     if (!s) { if (explicit) error(socket, "not_joined"); return; }
-    if (s.roomId === null) { if (explicit) error(socket, "not_joined"); return; }
-    const room = rooms.get(s.roomId);
-    const member = room?.members.get(s.playerId);
+    // `presence.leave` from a socket that never joined is `not_joined`,
+    // exactly as it was before auto-join existed: this socket asked for
+    // nothing and holds nothing to give up. Its PLAYER may nonetheless be a
+    // static member of a room, which a CLOSE still has to clean up — so the
+    // refusal is scoped to the explicit frame, and the close below finds the
+    // member through `memberRoom` rather than through `s.roomId`, which an
+    // auto-joined socket never carries.
+    if (explicit && !s.subscribed) { error(socket, "not_joined"); return; }
+    s.subscribed = false;
     s.roomId = null;
+    const roomId = memberRoom.get(s.playerId);
+    const room = roomId === undefined ? undefined : rooms.get(roomId);
+    const member = room?.members.get(s.playerId);
     if (!room || !member) return;
-    member.sockets.delete(socket);
+    if (!member.sockets.delete(socket)) return;
     if (member.sockets.size === 0) { removeMember(room, s.playerId); return; }
-    if (member.controller === socket) member.controller = [...member.sockets][0]!;
+    // Sockets remain, so the player is still here — but the driver is gone,
+    // and the avatar goes back to standing still where it was left (spec
+    // 2026-09-19 §2 "Falling back"). A remaining socket that wants the wheel
+    // asks for it with its own `presence.join`.
+    if (member.controller === socket) demote(room, s.playerId, member);
   };
 
   /**
@@ -390,6 +573,10 @@ export function createRooms(deps: RoomsDeps): Rooms {
       const frame = tickFor(playerId, locationId, d);
       if (frame === null) continue;
       for (const socket of member.sockets) {
+        // A socket that never asked for presence is never written to: a web
+        // tab that only holds the event feed costs the room nothing on the
+        // wire (spec 2026-09-19 §2 "Recipients").
+        if (!subscribed(socket)) continue;
         // One socket cannot cost the rest of the room its tick: a socket
         // that closed since this tick began, or a frame `send` refuses to
         // serialise, drops here and the loop carries on.
@@ -491,7 +678,18 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if (event.type !== "player.travelled") return;
     const playerId = event.actorId;
     const fromId = memberRoom.get(playerId);
-    if (fromId === undefined) return; // not present anywhere: nothing to move
+    if (fromId === undefined) {
+      // Not present anywhere — but a socket of theirs may be open and have
+      // simply had no town to be put in at connect: a fresh account whose
+      // first travel is what sets `location_id` (spec 2026-09-19 §2 "Late
+      // location"). Auto-join it now. For the thousands of players with no
+      // socket at all this is one empty iteration and no query.
+      for (const socket of deps.socketsOf(playerId)) {
+        if (!isOpen(socket)) continue;
+        await autoJoin(playerId, socket, stateOf(socket)?.ip ?? null);
+      }
+      return;
+    }
     if (fromId === event.toLocationId) return;
     const from = rooms.get(fromId);
     const member = from?.members.get(playerId);
@@ -539,18 +737,26 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if (to === null) {
       for (const socket of member.sockets) {
         const s = stateOf(socket);
-        if (s) s.roomId = null;
-        error(socket, failure);
+        const asked = s?.subscribed === true;
+        if (s) { s.roomId = null; s.subscribed = false; }
+        // Only a socket that asked is answered: an auto-joined one never
+        // knew it was in a room, so it is not told it has left one.
+        if (asked) error(socket, failure);
       }
       return;
     }
 
     const t = now();
+    // A static member arrives at the new town's static spot; a driven one
+    // arrives at spawn, where its client expects to resume from.
+    const arrival = member.controller === null
+      ? staticSpotFor(playerId, to.descriptor)
+      : { x: to.descriptor.spawn.x, y: to.descriptor.spawn.y };
     const moved: Member = {
       ...member,
       state: {
         ...member.state,
-        x: to.descriptor.spawn.x, y: to.descriptor.spawn.y, facing: to.descriptor.spawn.facing, since: t,
+        x: arrival.x, y: arrival.y, facing: to.descriptor.spawn.facing, since: t,
         sentence,
       },
       lastMoveAt: t,
@@ -562,14 +768,18 @@ export function createRooms(deps: RoomsDeps): Rooms {
     for (const socket of moved.sockets) {
       // The new room is a new sequence space: a seq the client had already
       // spent in the old town must not silence its first move in this one.
+      // An auto-joined socket carries no room and gets no snapshot — it
+      // never asked to be told where it is standing.
       const s = stateOf(socket);
-      if (s) { s.roomId = to.descriptor.locationId; s.lastSeq = -1; }
+      if (s?.subscribed !== true) continue;
+      s.roomId = to.descriptor.locationId;
+      s.lastSeq = -1;
       deps.send(socket, snapshotFor(to, moved));
     }
   };
 
   return {
-    join, move, emote,
+    join, autoJoin, move, emote,
     leave: (socket) => detach(socket, true),
     socketClosed: (socket) => detach(socket, false),
     onEvent,
