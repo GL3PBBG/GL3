@@ -31,7 +31,12 @@ afterAll(async () => {
 const deadRedis = (): Redis => new Redis("redis://127.0.0.1:1", {
   enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: 100,
   retryStrategy: () => null, lazyConnect: true,
-});
+  // The refusal is the point of this client, so it is not news. Without a
+  // listener ioredis prints "[ioredis] Unhandled error event: connect
+  // ECONNREFUSED 127.0.0.1:1" into the run log, where it reads like a real
+  // fault in whichever file happens to be running — it cost a debugging
+  // session once already. Nothing here fails: the run stays green with it.
+}).on("error", () => undefined);
 
 /** Rule 4: filter the global channel by THIS test's own freshly-minted actor. */
 function watchOwnEvents(actorId: string): { seen: unknown[]; settled: Promise<void> } {

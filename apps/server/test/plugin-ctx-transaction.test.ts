@@ -274,10 +274,14 @@ describe("ctx.transaction", () => {
     // Constructed directly because createRedis deliberately sets
     // maxRetriesPerRequest: null (buffer forever), the opposite of what a
     // failing fast client needs.
+    // The `error` listener is not optional housekeeping: without it ioredis
+    // prints "[ioredis] Unhandled error event: connect ECONNREFUSED
+    // 127.0.0.1:1" into the run log, attributed to whichever test is running,
+    // which reads like a real fault. The refusal is what this client is for.
     const deadRedis = new Redis("redis://127.0.0.1:1", {
       enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: 100,
       retryStrategy: () => null, lazyConnect: true,
-    });
+    }).on("error", () => undefined);
     const ctx = createPluginCtx(
       { db, redis: deadRedis, queues: new Map(), settings: {}, leaderboardPrefix },
       opts,

@@ -70,6 +70,11 @@ export async function bootTestServer(
     // Swallow a cleanup failure: rethrowing it here would mask the boot error
     // the caller is actually asserting on.
     await sql.end().catch(() => undefined);
+    // Same drain, same reason, as `close()` below: a boot that failed AFTER
+    // `loadPlugins` built its queues leaves their shared-connection `init()`
+    // in flight, and destroying the client under it raises an unhandled
+    // rejection that fails the run without failing a test.
+    await redis.ping().catch(() => undefined);
     redis.disconnect();
     throw err;
   };
@@ -143,6 +148,24 @@ export async function bootTestServer(
       await app.close();
       gatewaySubscriber.disconnect();
       await sql.end();
+      // Drain before destroying: closing a BullMQ Worker or Queue that was
+      // given a SHARED ioredis client leaves that connection's own `init()`
+      // in flight. `RedisConnection.close()` awaits `initializing` only when
+      // its status is already `ready`, and suppresses a pending one only on a
+      // connection it owns (bullmq redis-connection.js:422-439) — so under a
+      // loaded Redis, where the boot's `INFO` lags, a boot-then-immediately-
+      // close test leaves that command queued. `disconnect()` then flushes it
+      // with "Connection is closed.", and bullmq re-emits that on a connection
+      // whose listeners its own `finally` has already removed: an EventEmitter
+      // throw inside a `.catch`, i.e. an unhandled rejection that fails the
+      // whole vitest run with every test still passing.
+      //
+      // One round trip is enough. Redis answers a connection's commands in
+      // order, so a PING that has come back proves every command queued before
+      // it has too, and `disconnect()` then finds an empty queue. A failing
+      // PING means the connection is already gone, which is the case this is
+      // protecting against anyway.
+      await redis.ping().catch(() => undefined);
       redis.disconnect();
     },
   };
