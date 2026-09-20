@@ -121,7 +121,7 @@ const BuySchema = z.object({
  * The purchase, in the caller's transaction. LOCATION FIRST, and that line
  * must stay first: `applyBalanceChange` acquires `player_stats` internally,
  * so no explicit player lock appears here to hint at the ordering (rule 6).
- * Shared by `POST /api/shop/buy` (body) and `POST /api/shop/buy/:itemId`
+ * Shared by `POST /api/shop/buy` (body) and `POST /api/shop/buy/:id`
  * (one unit) so the two cannot drift.
  */
 async function buyFromShop(
@@ -242,7 +242,7 @@ export const shopBuyRoute = route({
 
 /**
  * The shop as a view-node table (spec 2026-09-18-core-view-pages §1): one
- * string per cell, the row's `id` feeding `POST /api/shop/buy/:itemId`, and
+ * string per cell, the row's `id` feeding `POST /api/shop/buy/:id`, and
  * `cannotBuy` riding `disabledKey`. The same read as `GET /api/shop`, through
  * `readShopStock`, so the two listings cannot disagree.
  */
@@ -277,13 +277,13 @@ export const shopRowsRoute = route({
 /** One unit, by path token — a table row action carries no body. Same gates and refusals as `buy`. */
 export const shopBuyOneRoute = route({
   method: "POST",
-  path: "/api/shop/buy/:itemId",
+  path: "/api/shop/buy/:id",
   accessInJail: false,
   accessInHospital: false,
-  params: z.object({ itemId: z.string().uuid() }),
+  params: z.object({ id: z.string().uuid() }),
   handler: async (ctx, { params }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
-    return ctx.transaction(async (tx) => ({ status: 200, body: await buyFromShop(tx, player, params.itemId, 1) }));
+    return ctx.transaction(async (tx) => ({ status: 200, body: await buyFromShop(tx, player, params.id, 1) }));
   },
 });
