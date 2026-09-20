@@ -107,6 +107,7 @@ export const casinoTables = pgTable("p_casino_tables", {
   state: jsonb("state"),
   seed: text("seed").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  station: smallint("station"),
 });
 
 /** Mirrors `packages/plugins/casino/src/migrations.ts` `0004_seats`. */

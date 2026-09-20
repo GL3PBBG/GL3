@@ -47,6 +47,7 @@ describe("street descriptors carry space and door interiors", () => {
     const byId = new Map(scene.hooks.map((h) => [h.id, h]));
     expect(byId.get("ifix.hall")?.interior).toEqual({ sceneKey: "ifix-floor" });
     expect(byId.get("ifix.shed")?.interior).toBeUndefined();
+    expect(byId.get("casino.casino")?.interior).toEqual({ sceneKey: "casino-floor-v1" });
     expect(byId.get("core.jail")?.interior).toBeUndefined();
     expect(scene.points).toBeUndefined();
   });

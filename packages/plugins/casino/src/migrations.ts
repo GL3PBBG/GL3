@@ -95,4 +95,11 @@ export const CASINO_MIGRATIONS: { name: string; sql: string }[] = [
     ON p_casino_machines (player_id) WHERE status = 'open'` },
   { name: "0009_table_credits", sql: `ALTER TABLE p_casino_seats
     ADD COLUMN credits bigint CHECK (credits >= 0)` },
+  // A table's place on the casino floor (spec 2026-09-20 casino-interior
+  // §5.2). NULL = off-floor: rows from before this column, and any table
+  // opened when every declared station of its game is live. The partial
+  // unique index is the backstop under the location lock every sit holds.
+  { name: "0010_table_station", sql: `ALTER TABLE p_casino_tables ADD COLUMN station smallint CHECK (station >= 0)` },
+  { name: "0011_table_station_unique", sql: `CREATE UNIQUE INDEX p_casino_tables_station
+    ON p_casino_tables (location_id, game_id, station) WHERE station IS NOT NULL` },
 ];

@@ -21,6 +21,7 @@ import {
   type GameMove,
   type TableGameDef,
 } from "./games.js";
+import { CASINO_FLOOR } from "./floor.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { casinoSeats, casinoSessions, casinoTables, locations, players, playerStats } from "./schema.js";
@@ -34,6 +35,7 @@ import { tableRoutes } from "./table-routes.js";
 import { machineRoutes } from "./machine-routes.js";
 
 export { casinoSeats, casinoSessions, casinoTables } from "./schema.js";
+export { CASINO_FLOOR, stationsFor, tableSeats } from "./floor.js";
 // Lives in `engine.ts` (with `notifyTakeover`, its only caller besides the
 // table path) and is re-exported here so the plugin's public surface is
 // unchanged by that move.
@@ -978,5 +980,5 @@ export default definePlugin({
   // kind, so the building draws as a plain box until the kit lands. No
   // signageSlot: casino owns no asset slot (blackjack owns the table art, and a
   // hook may only name its OWN plugin's singleton slots).
-  worldHooks: [{ id: "casino", kind: "building", label: "Casino", page: "casino.index", model: "casino", footprint: { w: 12, d: 9 }, order: 40 }],
+  worldHooks: [{ id: "casino", kind: "building", label: "Casino", page: "casino.index", model: "casino", footprint: { w: 12, d: 9 }, order: 40, interior: CASINO_FLOOR }],
 });

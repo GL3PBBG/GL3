@@ -47,6 +47,7 @@ export const casinoTables = pgTable("p_casino_tables", {
   state: jsonb("state"),
   seed: text("seed").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  station: smallint("station"),
 });
 
 /** The third table this plugin OWNS, kept in step with `migrations.ts` by
