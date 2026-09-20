@@ -86,11 +86,7 @@ describe("GET /api/world/interior/:hookId", () => {
     expect((await get("/api/world/interior/Not-A-Ref", token)).statusCode).toBe(400);
     expect((await app.inject({ method: "GET", url: "/api/world/interior/ifix.hall" })).statusCode).toBe(401);
   });
-  it("treats a door the template dropped as unknown", async () => {
-    // The corner template has 25 building slots; fill them so ifix.hall (order 5,
-    // ahead of every bundled hook) still fits but a LATER fixture would not —
-    // simpler: point the town at the template and assert the door that IS
-    // placed resolves, then remove the row and assert the default street too.
+  it("serves a template town's placed door and answers no_interior for a core facility", async () => {
     const ny = await townId("New York");
     await db.insert(locationScenes).values({ locationId: ny, sceneKey: "district-corner-v1" });
     const { token } = await playerIn("New York");

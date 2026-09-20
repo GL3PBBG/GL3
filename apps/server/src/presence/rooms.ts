@@ -558,10 +558,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
     const target = await interiorRoomFor(room.descriptor.locationId, hookRef);
     if (!isOpen(socket)) return;
     if (!target.ok) { error(socket, target.code); return; }
-    // The ROW, not `member.state.sentence`: state is a display fact refreshed
-    // by events, and a stale one must not open a door to a jailed player. An
-    // `undefined` read is a failure, never "no sentence" — it must leave a
-    // confined player confined, so it refuses too.
+    // BOTH the row and the state, because neither alone is enough. The ROW
+    // catches a sentence no event has announced yet — state is a display
+    // fact refreshed by events, and a stale one must not open a door to a
+    // jailed player. An `undefined` read is a failure, never "no sentence"
+    // — it must leave a confined player confined, so it refuses too.
     const sentence = await readSentence(s.playerId);
     if (!isOpen(socket)) return;
     if (sentence === undefined) { error(socket, "not_joined"); return; }
@@ -570,7 +571,13 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // touching anything. Whoever moved this member owns the truth.
     if (memberRoom.get(s.playerId) !== room.key || room.members.get(s.playerId) !== member) return;
     if (member.sockets.size === 0 || member.controller !== socket) return;
-    relocate(member, s.playerId, room, target.room, target.room.descriptor.spawn, { sentence });
+    // And the STATE, because the read above can have STARTED before a jail
+    // transaction committed and resolved after `refreshSentence` already
+    // wrote "jail" here. By construction `member.state.sentence` is never
+    // the staler of the two, so it decides — and nothing patches it back
+    // onto the moved member: `refreshSentence` owns that field alone.
+    if (member.state.sentence !== null && member.state.sentence !== undefined) { error(socket, "sentenced"); return; }
+    relocate(member, s.playerId, room, target.room, target.room.descriptor.spawn);
   };
 
   /**

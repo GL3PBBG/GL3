@@ -180,6 +180,11 @@ describe("POST /api/casino/table/sit with a station (spec §5.3)", () => {
       const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
       expect((await sit(p.token, "blackjack", st)).statusCode).toBe(200);
     }
+    // A NAMED station whose table is full is a refusal, not a new table.
+    const overflow = await register(); await placePlayer(overflow.playerId, locationId, 1_000_000n);
+    const full = await sit(overflow.token, "blackjack", 3);
+    expect(full.statusCode).toBe(409);
+    expect(full.json()).toEqual({ error: "table_full" });
     const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
     expect(CasinoSitResponseSchema.parse((await sit(p.token)).json()).station).toBe(2);
     for (let k = 0; k < 4; k += 1) { const q = await register(); await placePlayer(q.playerId, locationId, 1_000_000n); await sit(q.token, "blackjack", 2); }

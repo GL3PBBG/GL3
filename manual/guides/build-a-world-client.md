@@ -162,7 +162,9 @@ GET /api/world/interior/:hookId               the descriptor, for preloading (40
 Refusals arrive as `presence.error`: `wrong_space` (exit on the street, enter while
 inside another building), `unknown_hook`, `no_interior`, `sentenced` (jail or
 hospital — a sentence acquired inside walks you out automatically), `superseded`
-(only the driving socket may transition), `not_joined`. `presence.tick` carries
+(only the driving socket may transition), `not_joined`. A `presence.enter` for the
+door you are already inside is a silent no-op — no snapshot, no error — so never
+block waiting on an answer to one. `presence.tick` carries
 `space` so you can drop a tick for a room you have left. An underground town
 conceals its interiors exactly as its street. Travel always lands on the destination
 street.

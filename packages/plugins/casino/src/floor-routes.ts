@@ -46,7 +46,14 @@ export const floorRoute = route({
         .sort((a, b) => a.binding!.station - b.binding!.station)
         .map((p) => {
           const { gameId, station } = p.binding!;
-          const table = tables.find((t) => t.gameId === gameId && t.station === station) ?? null;
+          // Gated on the game being REGISTERED (spec §5.3): with blackjack
+          // uninstalled the station still lists, but with `tableId: null`
+          // and `available: false` — and so `phase`, `seatsFilled` and
+          // `seats` fall out null/0/[] rather than advertising a table
+          // nothing can be played at.
+          const table = registry.has(gameId)
+            ? (tables.find((t) => t.gameId === gameId && t.station === station) ?? null)
+            : null;
           const mine = table === null ? [] : seats.filter((s) => s.tableId === table.id);
           return {
             station, gameId, gameName: registry.get(gameId)?.name ?? gameId, available: registry.has(gameId),
