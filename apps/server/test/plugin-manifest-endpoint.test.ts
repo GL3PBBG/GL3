@@ -188,6 +188,29 @@ describe("GET /api/plugins", () => {
               ],
             },
           },
+          {
+            pluginId: "inventory", id: "inventory.shop", path: "/shop",
+            view: {
+              kind: "panel",
+              title: "Shop",
+              children: [
+                { kind: "text", value: "Stock at this town. Prices are per unit; a row you cannot afford is greyed out." },
+                {
+                  kind: "table",
+                  source: "GET /api/shop/rows",
+                  columns: [
+                    { key: "image", label: "", render: "image" },
+                    { key: "name", label: "Item" },
+                    { key: "itemType", label: "Type" },
+                    { key: "effects", label: "Effects" },
+                    { key: "price", label: "Price" },
+                    { key: "stock", label: "Stock" },
+                  ],
+                  rowActions: [{ label: "Buy one", action: "POST /api/shop/buy/:id", disabledKey: "cannotBuy" }],
+                },
+              ],
+            },
+          },
           // The loader stamps every slotImage/assetBinder with the declaring
           // plugin's scope, so the expected view is the STAMPED one — the raw
           // manifest view differs by exactly that field.

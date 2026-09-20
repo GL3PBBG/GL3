@@ -1237,10 +1237,40 @@ export default definePlugin({
   ],
   events: [purchasedEvent],
   provides: [itemActions, itemEffects],
-  // No `menu`, `pages` or `jobs`: plugin-manifest-endpoint.test.ts:87 asserts
-  // a no-arg boot answers GET /api/plugins with exactly
-  // { menu: [], pages: [], events: [] }, and buildApp throws at boot if a
-  // core plugin declares jobs. `adminPages` is not `pages` — it is served
-  // separately by GET /api/admin/plugins and never reaches that payload.
+  // `inventory.shop` is the shop's DOOR (presence spec 2026-09-17 §2.1): a
+  // world hook may only open one of its own plugin's player pages, and until
+  // this page existed the shop had none — apps/web serves `/shop` as a bare
+  // React route. Menu-less on purpose: the web nav already links /shop, and
+  // apps/web renders the hand-written Shop component for this id through
+  // PAGE_OVERRIDES; the view below is what a view-node client (the Godot
+  // client) draws behind the building.
+  //
+  // No `menu` on the page and no `jobs`: buildApp throws at boot if a core
+  // plugin declares jobs. `adminPages` is not `pages` — it is served
+  // separately by GET /api/admin/plugins and never reaches /api/plugins.
+  pages: [{
+    id: "inventory.shop",
+    path: "/shop",
+    view: {
+      kind: "panel",
+      title: "Shop",
+      children: [
+        { kind: "text", value: "Stock at this town. Prices are per unit; a row you cannot afford is greyed out." },
+        {
+          kind: "table",
+          source: "GET /api/shop/rows",
+          columns: [
+            { key: "image", label: "", render: "image" },
+            { key: "name", label: "Item" },
+            { key: "itemType", label: "Type" },
+            { key: "effects", label: "Effects" },
+            { key: "price", label: "Price" },
+            { key: "stock", label: "Stock" },
+          ],
+          rowActions: [{ label: "Buy one", action: "POST /api/shop/buy/:id", disabledKey: "cannotBuy" }],
+        },
+      ],
+    },
+  }],
   adminPages: [adminPage],
 });

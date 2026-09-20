@@ -13,6 +13,7 @@ import { Garage } from "../pages/Garage.js";
 import { Hospital } from "../pages/Hospital.js";
 import { Jail } from "../pages/Jail.js";
 import { OrganizedCrime } from "../pages/OrganizedCrime.js";
+import { Shop } from "../pages/Shop.js";
 import { Travel } from "../pages/Travel.js";
 
 /**
@@ -40,6 +41,7 @@ export const PAGE_OVERRIDES: ReadonlyMap<string, ComponentType> = new Map([
   ["gangs.index", Gang],
   ["theft.garage", Garage],
   ["bullets.index", Bullets],
+  ["inventory.shop", Shop],
   ["travel.index", Travel],
   ["bank.index", Bank],
   ["jail", Jail],

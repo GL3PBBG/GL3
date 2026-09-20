@@ -156,6 +156,12 @@ describe("crimes.index", () => {
 describe("inventory.shop rows", () => {
   it("serves string rows with cannotBuy, and buy-one decrements stock", async () => {
     const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const page = PluginsPayloadSchema.parse((await get("/api/plugins", token)).json())
+      .pages.find((p) => p.id === "inventory.shop")!;
+    expect(page.path).toBe("/shop");
+    expect(JSON.stringify(page.view)).toContain("GET /api/shop/rows");
+    expect(JSON.stringify(page.view)).toContain("POST /api/shop/buy/:id");
+
     const towns = await db.select({ id: locations.id, name: locations.name }).from(locations);
     const ny = towns.find((t) => t.name === "New York")!.id;
     await db.update(playerStats).set({ locationId: ny, cash: 100n }).where(eq(playerStats.playerId, playerId));
