@@ -414,6 +414,7 @@ export default defineWorkspace([
         "test/casino-table-lock-order.test.ts",
         "test/casino-table-events.test.ts",
         "test/casino-floor.test.ts",
+        "test/casino-interior-acceptance.test.ts",
         "test/combat-action-cost.test.ts",
         "test/combat-backfire.test.ts",
         "test/combat-concurrency.test.ts",
