@@ -326,18 +326,22 @@ describe("bus events and lifecycle inside an interior (spec §4.3)", () => {
     const second = await openSocket(`${baseUrl}?ticket=${await mintTicket(app, a.token)}`);
     opened.push(second);
     expect((await nextFrame(second)).kind).toBe("ready");
-    // `ready` is sent BEFORE the gateway dispatches the un-awaited auto-join
-    // (`ws/gateway.ts`), so the second socket is not yet a socket of the
-    // member when this line runs — closing A's now would remove the member
-    // outright instead of demoting it. A's OWN socket is drained to wait,
-    // because it is closed on the next line and never read again; draining
-    // B would eat the tick waited on below.
-    await drainTicks(a.socket, 600);
-    a.socket.close();
+    // The SECOND socket takes the wheel, and is the one closed below. That
+    // is what makes this deterministic rather than timed: `ready` is sent
+    // before the gateway dispatches its un-awaited auto-join
+    // (`ws/gateway.ts`), and adding a static socket to an existing member
+    // produces no frame to wait on — but `join` adds the socket AND answers
+    // it with a snapshot in the one call, so that snapshot is a hard
+    // barrier. A re-join never moves the avatar and a member already inside
+    // re-joins into its interior room, so A stays at its interior spawn.
+    sendFrame(second, { kind: "presence.join", client: "web" });
+    expect((await frameOfKind(second, "presence.snapshot")).room.space?.kind).toBe("interior");
+    // A's first socket is told `superseded` here; nothing reads it again.
+    second.close();
     // `static: true` identifies the demote announce exactly: A entered the
     // interior driven, so the arrival tick already queued on B carries
-    // `static: false` and cannot satisfy this. No drain, for the reason
-    // above — B is waited on here.
+    // `static: false` and cannot satisfy this — which is why B needs no
+    // draining, and must not be drained, since it is waited on here.
     const t = await tickWhere(b.socket, (f) =>
       f.joined.some((p) => p.playerId === a.playerId && p.static === true));
     // A never moved, so its interior spawn IS "in place".
@@ -347,14 +351,16 @@ describe("bus events and lifecycle inside an interior (spec §4.3)", () => {
   });
 
   it("closing the only socket inside tells the interior left, and the street nothing", async () => {
-    const b = await joinedInside(chicago, "bystander");
-    const a = await joinedInside(chicago, "alice");
-    // The watcher joins the street only AFTER both are inside, so nothing
-    // about A's departure from the street is ever queued on it — the
-    // negative below then reads only what the close produced, without the
-    // frame-eating drain that clearing a contaminated queue would need.
     const watcher = await joined(chicago, "watcher");
     await frameOfKind(watcher.socket, "presence.snapshot");
+    const b = await joinedInside(chicago, "bystander");
+    const a = await joinedInside(chicago, "alice");
+    // A positive barrier, not a drain: both players' departures from the
+    // street must be consumed before the negative below, and a timed-out
+    // drain would leave its resolver armed and eat that read's first frame.
+    // B entered first, so its `left` is in this tick or an earlier one this
+    // skips — either way both are behind us when it returns.
+    await tickWhere(watcher.socket, (t) => t.left.includes(a.playerId));
     a.socket.close();
     await tickWhere(b.socket, (t) => t.left.includes(a.playerId));
     expect((await drainTicks(watcher.socket, 500)).some((t) => t.left.includes(a.playerId))).toBe(false);

@@ -903,7 +903,12 @@ export function createRooms(deps: RoomsDeps): Rooms {
       console.error({ err, playerId }, "presence: forced-exit lookup failed");
       return;
     }
-    if (street === null) return;
+    if (street === null) {
+      // Best-effort, and therefore observable: the sentence re-announce
+      // above stands, so the member stays inside rather than losing it.
+      console.error({ playerId, locationId: space.locationId }, "presence: forced-exit street missing");
+      return;
+    }
     // A third await has passed: revalidate the way `onEvent` and `enter` do.
     // Whoever moved this member owns the truth, and a member whose last
     // socket closed must not be inserted into a room nothing can remove it
