@@ -48,6 +48,9 @@ presence.join { client }          → { kind: "presence.snapshot", room, you, pl
                                     you now DRIVE the avatar
 presence.move { seq, x, y, facing }  ≤ 10 Hz, only when moved > 0.05 m or turned > 0.05 rad
                                   ← { kind: "presence.tick", … } every 200 ms while anything changed
+presence.enter { hookId }         → a fresh presence.snapshot for the interior, if the door has one
+presence.exit                     → a fresh presence.snapshot back on the street
+presence.join { client, interior } reconnect straight inside: the street snapshot, then the interior one
 POST /api/travel/:id              ← a fresh presence.snapshot for the new town
 socket close / presence.leave     the room is told left
 ```
@@ -140,6 +143,57 @@ opens a plugin page, and every core plugin's pages render from the view-node
 vocabulary (see [Create a plugin](/guides/create-a-plugin)), so a client that
 renders those nodes needs no per-plugin code.
 
+## Interiors
+
+A door can be ENTERED. A `PlacedHook` that carries `interior: { sceneKey }` is such a
+door; `href` still opens its page, so an older client keeps working. Inside, the
+player is in a second **space** of the same town — combat, travel and every route
+still see the same `location_id` — with its own room, bounds, spawn and interaction
+`points[]`. The server owns every transition:
+
+```
+presence.enter { hookId: "casino.casino" }   → presence.snapshot (room.space.kind = "interior", room.points)
+                                               the street is told left, the interior joined
+presence.exit                                 → presence.snapshot (street; you stand at room.space.exit)
+presence.join { client, interior: "casino.casino" }   reconnect straight inside (street snapshot, then interior)
+GET /api/world/interior/:hookId               the descriptor, for preloading (404 no_location | unknown_hook | no_interior)
+```
+
+Refusals arrive as `presence.error`: `wrong_space` (exit on the street, enter while
+inside another building), `unknown_hook`, `no_interior`, `sentenced` (jail or
+hospital — a sentence acquired inside walks you out automatically), `superseded`
+(only the driving socket may transition), `not_joined`. `presence.tick` carries
+`space` so you can drop a tick for a room you have left. An underground town
+conceals its interiors exactly as its street. Travel always lands on the destination
+street.
+
+### The casino floor (`casino-floor-v1`)
+
+Bounds `{ minX: -12, minY: -9, maxX: 12, maxY: 9 }`, entrance spawn `(0, −7.5, facing 0)`,
+exit 3 m in front of the door on the street. Four `table` points, model
+`blackjack-table`, dealer facing π (south), centres `(−6, 3)`, `(6, 3)`, `(−6, −3)`,
+`(6, −3)`, each bound to `{ gameId: "blackjack", station: 0..3 }` with five `seats`
+on the south arc (offsets `(−1.8, −0.9)`, `(−1.0, −1.7)`, `(0, −2)`, `(1, −1.7)`,
+`(1.8, −0.9)`, each facing the centre). Seat index = seat number at the table.
+
+Playing is the existing casino contract, unchanged:
+
+| Need | Route |
+|---|---|
+| Who is at which table right now | `GET /api/casino/floor` → one row per station: `tableId`, `phase`, `seatsFilled`, `seats[{ seat, playerId, username }]` (names only in open towns). Poll on entry and every 15 s. |
+| Sit at the table you walked up to | `POST /api/casino/table/sit { gameId: "blackjack", station }` → `{ tableId, seat, station }`; 400 `unknown_station`, 409 `table_full` / `already_seated` |
+| Your hand, turn, legal moves | `GET /api/casino/table` → `{ table: { station, mySeat, phase, turnSeat, deadlineAt, view, moves, seats } }`; `view` is scoped to the viewer (the dealer's hole card is hidden while any seat acts) |
+| Bet / act | `POST /api/casino/table/bet { wager }`, `POST /api/casino/table/act { action: "hit" \| "stand" \| "double" }` |
+| Resume after a reconnect | `GET /api/casino/table` — the hand never depended on your socket |
+| Stand up | `POST /api/casino/table/leave` → `{ left, deferred }`; call it BEFORE `presence.exit` and honour `deferred` (a stake in hand plays out, auto-standing on your turns) |
+
+Walking out, disconnecting, travelling or being sentenced never touches your seat: the
+table's own rules (turn clock, idle kick, `leaving`) apply. Positions stay cosmetic —
+move your avatar to the seat spot after `sit` succeeds; the server never checks it.
+Hand information is never in a presence frame; the `table` silent event still tells a
+seated client the table moved. Combat is unchanged: eligibility is by town, so a player
+inside the casino is attackable from the street and vice versa.
+
 ## Declaring a hook (plugin authors)
 
 A plugin puts itself in the world with one manifest field:
@@ -154,6 +208,7 @@ worldHooks: [{
   footprint: { w: 12, d: 9 },
   order: 10,                // layout order along the street
   signageSlot: "sign",      // optional: one of this plugin's singleton providesAssets
+  interior: { sceneKey, bounds, spawn, points },  // optional: makes the door enterable — see Interiors
 }]
 ```
 
