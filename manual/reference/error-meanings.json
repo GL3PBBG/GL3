@@ -102,6 +102,7 @@
  "core:invalid_kind": "The requested leaderboard/standings kind is not a recognized board kind.",
  "core:invalid_preset": "The submitted theme preset name is not one of the known presets.",
  "core:invalid_request": "The request's body, URL parameters, or query string failed schema validation.",
+ "core:invalid_scene_key": "The scene key is neither default nor a registered template",
  "core:invalid_scope": "The leaderboard scope query must be \"round\" or \"all\".",
  "core:invalid_token": "The password reset token is wrong, expired, or already used.",
  "core:invalid_window": "The round's end time must be after its start time.",

@@ -31,6 +31,7 @@ import { requestLogSerializer } from "./logging.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { registerThemeRoutes } from "./theme/routes.js";
 import { registerLegalRoutes } from "./legal/routes.js";
+import { registerWorldAdminRoutes } from "./world/admin-routes.js";
 import { registerWorldRoutes } from "./world/routes.js";
 import { createSceneService } from "./world/scene.js";
 import { assertTemplatesValid } from "./world/templates/index.js";
@@ -119,6 +120,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerStatsRoutes(app, deps.db, deps.redis, requireAuth);
   registerThemeRoutes(app, deps.db, assetDriver);
   registerLegalRoutes(app, deps.db);
+  registerWorldAdminRoutes(app, deps.db);
   registerWsRoutes(app, deps.redis, requireAuth);
 
   // Strangler seam: plugin routes register on the same Fastify instance while

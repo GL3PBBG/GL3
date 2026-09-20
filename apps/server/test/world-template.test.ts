@@ -66,3 +66,35 @@ describe("a town on district-corner-v1", () => {
     expect(dflt.hooks.some((h) => h.id === "tfix.lot")).toBe(true);
   });
 });
+
+describe("core world admin", () => {
+  it("lists towns and templates, switches a town, refuses a bad key and a plain player", async () => {
+    const admin = await registerVerifiedPlayer({ app, redis });
+    const plain = await registerVerifiedPlayer({ app, redis });
+    const ny = await townId("New York");
+    const put = (token: string, id: string, sceneKey: string) =>
+      app.inject({ method: "PUT", url: "/api/admin/world/scene", headers: { authorization: `Bearer ${token}` }, payload: { locationId: id, sceneKey } });
+
+    expect((await get("/api/admin/world/templates", admin.token)).json().rows).toEqual([
+      { id: "default", name: "default" }, { id: "district-corner-v1", name: "district-corner-v1" },
+    ]);
+    let rows = (await get("/api/admin/world/scenes", admin.token)).json().rows as { id: string; name: string; sceneKey: string }[];
+    expect(rows.find((r) => r.id === ny)).toEqual({ id: ny, name: "New York", sceneKey: "default" });
+
+    expect((await put(admin.token, ny, "district-corner-v1")).statusCode).toBe(200);
+    rows = (await get("/api/admin/world/scenes", admin.token)).json().rows;
+    expect(rows.find((r) => r.id === ny)!.sceneKey).toBe("district-corner-v1");
+    expect(RoomDescriptorSchema.parse((await get(`/api/world/scene/${ny}`, admin.token)).json()).sceneKey).toBe("district-corner-v1");
+    // Back to default: the row stays, the key flips.
+    expect((await put(admin.token, ny, "default")).statusCode).toBe(200);
+    expect(RoomDescriptorSchema.parse((await get(`/api/world/scene/${ny}`, admin.token)).json()).sceneKey).toBe("default");
+
+    expect((await put(admin.token, ny, "nope")).json()).toEqual({ error: "invalid_scene_key" });
+    expect((await put(admin.token, "00000000-0000-0000-0000-000000000000", "default")).json()).toEqual({ error: "unknown_location" });
+    expect((await put(plain.token, ny, "default")).statusCode).toBe(403);
+    expect((await get("/api/admin/world/scenes", plain.token)).statusCode).toBe(403);
+
+    const sections = (await get("/api/admin/plugins", admin.token)).json().sections as { pluginId: string }[];
+    expect(sections.some((s) => s.pluginId === "world")).toBe(true);
+  });
+});

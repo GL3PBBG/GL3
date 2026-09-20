@@ -33,6 +33,7 @@ import { roundsPage } from "./rounds-page.js";
 import { RoundPayoutInputSchema, roundPayoutPoints } from "../game/rounds/settings.js";
 import { themePage } from "../theme/page.js";
 import { legalPage } from "../legal/page.js";
+import { worldPage } from "./world-page.js";
 
 const AssignBodySchema = z.object({
   username: z.string().min(1),
@@ -128,6 +129,7 @@ function moduleKeysOf(manifests: readonly PluginManifest[]): { id: string; name:
     { id: "anti-bot", name: "anti-bot (detection & challenges)" },
     { id: "theme", name: "theme" },
     { id: "legal", name: "legal (terms & privacy)" },
+    { id: "world", name: "world (scene keys)" },
     ...pluginIds.map((id) => ({ id, name: id })),
   ];
 }
@@ -230,6 +232,12 @@ export function registerAdminRoutes(
       sections.push({
         pluginId: "legal",
         pages: [{ pluginId: "legal", id: legalPage.id, path: legalPage.path, view: legalPage.view }],
+      });
+    }
+    if (hasPermission(grants, "world")) {
+      sections.push({
+        pluginId: "world",
+        pages: [{ pluginId: "world", id: worldPage.id, path: worldPage.path, view: worldPage.view }],
       });
     }
     if (sections.length === 0) return reply.code(403).send({ error: "forbidden" });

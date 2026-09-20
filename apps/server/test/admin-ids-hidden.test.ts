@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { legalPage } from "../src/legal/page.js";
+import { worldPage } from "../src/admin/world-page.js";
 import { playersPage } from "../src/admin/players-page.js";
 import { rolesPage } from "../src/admin/roles-page.js";
 import { roundsPage } from "../src/admin/rounds-page.js";
@@ -50,6 +51,7 @@ describe("admin tables never display an id column", () => {
     { label: `core:${roundsPage.id}`, view: roundsPage.view },
     { label: `core:${playersPage.id}`, view: playersPage.view },
     { label: `core:${legalPage.id}`, view: legalPage.view },
+    { label: `core:${worldPage.id}`, view: worldPage.view },
   ];
 
   it("covers every core admin page that has one", () => {
@@ -70,8 +72,8 @@ describe("admin tables never display an id column", () => {
     // family (houses' `houses-admin`, education's `education-admin`, jobs'
     // `jobs-admin` — gym, temple, mccodes-attributes and progression
     // declare none) = 18, + combat's `combat-admin` (settings panel) = 19,
-    // + core's legal page = 20.
-    expect(sections.length).toBe(20);
+    // + core's legal page = 20, + core's world page (scene keys) = 21.
+    expect(sections.length).toBe(21);
   });
 
   for (const section of sections) {
