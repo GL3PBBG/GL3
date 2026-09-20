@@ -20,7 +20,11 @@ export type Emote = z.infer<typeof EmoteSchema>;
 export const AvatarBodySchema = z.enum(["suit-dark", "suit-light", "coat", "dress"]);
 export type AvatarBody = z.infer<typeof AvatarBodySchema>;
 
-export const PresenceErrorCodeSchema = z.enum(["not_joined", "no_location", "rate_limited", "superseded"]);
+export const PresenceErrorCodeSchema = z.enum([
+  "not_joined", "no_location", "rate_limited", "superseded",
+  // Interior transitions (spec 2026-09-20 casino-interior §4.3).
+  "unknown_hook", "no_interior", "wrong_space", "sentenced",
+]);
 export type PresenceErrorCode = z.infer<typeof PresenceErrorCodeSchema>;
 
 export const HookKindSchema = z.enum(["building", "npc", "prop"]);
@@ -37,6 +41,56 @@ export type SceneSpawn = z.infer<typeof SceneSpawnSchema>;
 
 export const FootprintSchema = z.object({ w: z.number().min(1).max(30), d: z.number().min(1).max(30) });
 export type Footprint = z.infer<typeof FootprintSchema>;
+
+/** `"<pluginId>.<hookId>"` — the wire id of a placed hook (`PlacedHook.id`). */
+export const HookRefSchema = z.string().regex(/^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/, "hook ref must be <pluginId>.<hookId>").max(80);
+export type HookRef = z.infer<typeof HookRefSchema>;
+
+/**
+ * Where an avatar is (spec 2026-09-20 casino-interior §1): the town's street
+ * or one of its interiors. The player's `location_id` is the same in both —
+ * an interior changes what the client draws, never what the game scopes.
+ */
+export const SpaceRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("street"), locationId: IdSchema }),
+  z.object({
+    kind: z.literal("interior"), locationId: IdSchema, hookId: HookRefSchema,
+    /** Where the player stands on the street after exiting: in front of the door. */
+    exit: SceneSpawnSchema,
+  }),
+]);
+export type SpaceRef = z.infer<typeof SpaceRefSchema>;
+
+export const InteriorPointKindSchema = z.enum(["table", "machine", "npc"]);
+export type InteriorPointKind = z.infer<typeof InteriorPointKindSchema>;
+/** Ties a point to a game station; the owning plugin serves the live row behind it. */
+export const InteriorBindingSchema = z.object({ gameId: z.string().min(1).max(80), station: z.number().int().min(0).max(99) });
+export type InteriorBinding = z.infer<typeof InteriorBindingSchema>;
+/** An interaction spot inside an interior. Absolute interior coordinates; `facing` is the dealer's for a table. */
+export const InteriorPointSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/, "point id must be lowercase kebab-case").max(40),
+  kind: InteriorPointKindSchema,
+  label: z.string().min(1).max(24),
+  model: z.string().min(1),
+  position: z.object({ x: finite, y: finite }),
+  facing: finite,
+  /** Index = seat number. Absolute, facing the point. */
+  seats: z.array(SceneSpawnSchema).max(5).optional(),
+  binding: InteriorBindingSchema.optional(),
+});
+export type InteriorPoint = z.infer<typeof InteriorPointSchema>;
+
+/** What a door hook declares (spec §3); the SDK reuses this schema verbatim. */
+export const InteriorDeclSchema = z.object({
+  sceneKey: z.string().regex(/^[a-z][a-z0-9-]*$/, "sceneKey must be a lowercase tag").max(64),
+  bounds: SceneBoundsSchema,
+  /** Entrance, INSIDE. */
+  spawn: SceneSpawnSchema,
+  /** OUTSIDE, absolute street coordinates. Default: 3 m in front of the door (spec §4.2). */
+  exit: SceneSpawnSchema.optional(),
+  points: z.array(InteriorPointSchema),
+});
+export type InteriorDecl = z.infer<typeof InteriorDeclSchema>;
 
 /** Lowercase tag a template slot carries and a hook may ask for (spec 2026-09-20 §1). */
 export const ZoneSchema = z.string().regex(/^[a-z][a-z0-9-]*$/, "zone must be a lowercase tag").max(24);
@@ -97,6 +151,8 @@ export const PlacedHookSchema = z.object({
   signageUrl: z.string().nullable(),
   /** Core-only: the explicit confinement spot for a sentenced player (spec 2026-09-18 §2). Plugin hooks never carry it. */
   yard: z.object({ x: finite, y: finite }).optional(),
+  /** Present on a door that can be ENTERED (spec 2026-09-20 casino-interior §2); `href` still opens the page. */
+  interior: z.object({ sceneKey: z.string().min(1) }).optional(),
 });
 export type PlacedHook = z.infer<typeof PlacedHookSchema>;
 
@@ -108,6 +164,10 @@ export const RoomDescriptorSchema = z.object({
   bounds: SceneBoundsSchema,
   spawn: SceneSpawnSchema,
   hooks: z.array(PlacedHookSchema),
+  /** Absent = street, so a client written before interiors reads every room as one. */
+  space: SpaceRefSchema.optional(),
+  /** Interior rooms only. */
+  points: z.array(InteriorPointSchema).optional(),
 });
 export type RoomDescriptor = z.infer<typeof RoomDescriptorSchema>;
 

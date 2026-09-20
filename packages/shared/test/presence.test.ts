@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClientFrameSchema, ServerFrameSchema, PresenceStateSchema, RoomDescriptorSchema, PlacedHookSchema,
   DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN, HookKindSchema, SceneTemplateSchema,
+  SpaceRefSchema, InteriorDeclSchema,
 } from "../src/index.js";
 
 const id = "0192a1b2-0000-7000-8000-000000000001";
@@ -107,5 +108,51 @@ describe("hook kinds and scene templates", () => {
     };
     expect(SceneTemplateSchema.parse(t).slots[0]!.zone).toBe("main");
     expect(SceneTemplateSchema.safeParse({ ...t, slots: [{ ...t.slots[0], zone: "Main Street" }] }).success).toBe(false);
+  });
+});
+
+describe("interior spaces (spec 2026-09-20 casino-interior §2)", () => {
+  const exit = { x: -30, y: 7.5, facing: Math.PI };
+  it("accepts enter, exit and a join with an interior hint", () => {
+    expect(ClientFrameSchema.parse({ kind: "presence.enter", hookId: "casino.casino" }).kind).toBe("presence.enter");
+    expect(ClientFrameSchema.parse({ kind: "presence.exit" }).kind).toBe("presence.exit");
+    expect(ClientFrameSchema.parse({ kind: "presence.join", client: "godot-desktop", interior: "casino.casino" }).kind).toBe("presence.join");
+    expect(ClientFrameSchema.safeParse({ kind: "presence.enter", hookId: "casino" }).success).toBe(false);
+    expect(ClientFrameSchema.safeParse({ kind: "presence.enter", hookId: "Casino.Floor" }).success).toBe(false);
+  });
+  it("accepts a street and an interior space ref, and a tick carrying one", () => {
+    expect(SpaceRefSchema.parse({ kind: "street", locationId: id }).kind).toBe("street");
+    expect(SpaceRefSchema.parse({ kind: "interior", locationId: id, hookId: "casino.casino", exit }).kind).toBe("interior");
+    expect(ServerFrameSchema.parse({
+      kind: "presence.tick", locationId: id, space: { kind: "interior", locationId: id, hookId: "casino.casino", exit },
+      joined: [], moved: [], emoted: [], left: [],
+    }).kind).toBe("presence.tick");
+  });
+  it("accepts an interior room descriptor with points, and a door with interior on the street", () => {
+    const point = {
+      id: "blackjack-1", kind: "table", label: "Blackjack 1", model: "blackjack-table",
+      position: { x: -6, y: 3 }, facing: Math.PI,
+      seats: [{ x: -6, y: 1, facing: 0 }], binding: { gameId: "blackjack", station: 0 },
+    };
+    const interior = RoomDescriptorSchema.parse({
+      ...room, sceneKey: "casino-floor-v1", bounds: { minX: -12, minY: -9, maxX: 12, maxY: 9 },
+      spawn: { x: 0, y: -7.5, facing: 0 }, hooks: [],
+      space: { kind: "interior", locationId: id, hookId: "casino.casino", exit }, points: [point],
+    });
+    expect(interior.points?.[0]?.binding?.station).toBe(0);
+    expect(RoomDescriptorSchema.parse(room).space).toBeUndefined();
+    expect(PlacedHookSchema.parse({ ...room.hooks[0], interior: { sceneKey: "casino-floor-v1" } }).interior?.sceneKey).toBe("casino-floor-v1");
+    expect(PlacedHookSchema.parse(room.hooks[0]).interior).toBeUndefined();
+  });
+  it("validates an interior declaration", () => {
+    const decl = { sceneKey: "casino-floor-v1", bounds: { minX: -12, minY: -9, maxX: 12, maxY: 9 }, spawn: { x: 0, y: -7.5, facing: 0 }, points: [] };
+    expect(InteriorDeclSchema.parse(decl).sceneKey).toBe("casino-floor-v1");
+    expect(InteriorDeclSchema.safeParse({ ...decl, sceneKey: "Casino Floor" }).success).toBe(false);
+    expect(InteriorDeclSchema.safeParse({ ...decl, points: [{ id: "t", kind: "table", label: "T", model: "m", position: { x: 0, y: 0 }, facing: 0, seats: new Array(6).fill({ x: 0, y: 0, facing: 0 }) }] }).success).toBe(false);
+  });
+  it("accepts the four new presence error codes", () => {
+    for (const code of ["unknown_hook", "no_interior", "wrong_space", "sentenced"]) {
+      expect(ServerFrameSchema.parse({ kind: "presence.error", code }).kind).toBe("presence.error");
+    }
   });
 });

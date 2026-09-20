@@ -75,6 +75,8 @@ export const CasinoTableSummarySchema = z.object({
   seatsFilled: z.number().int(),
   maxSeats: z.number().int(),
   phase: z.enum(["betting", "acting"]),
+  /** Floor station (spec 2026-09-20 casino-interior §5); null = off-floor. */
+  station: z.number().int().nullable().optional(),
 });
 export type CasinoTableSummary = z.infer<typeof CasinoTableSummarySchema>;
 
@@ -201,6 +203,8 @@ export const CasinoTableViewSchema = z.object({
   gameName: z.string(),
   locationId: IdSchema,
   locationName: z.string(),
+  /** Floor station (spec 2026-09-20 casino-interior §5); null = off-floor. */
+  station: z.number().int().nullable().optional(),
   phase: z.enum(["betting", "acting"]),
   handNo: z.number().int(),
   deadlineAt: TimestampSchema.nullable(),
@@ -223,7 +227,7 @@ export const CasinoTableResponseSchema = z.object({ table: CasinoTableViewSchema
 export type CasinoTableResponse = z.infer<typeof CasinoTableResponseSchema>;
 
 /** `POST /api/casino/table/sit`. */
-export const CasinoSitResponseSchema = z.object({ tableId: IdSchema, seat: z.number().int() });
+export const CasinoSitResponseSchema = z.object({ tableId: IdSchema, seat: z.number().int(), station: z.number().int().nullable().optional() });
 export type CasinoSitResponse = z.infer<typeof CasinoSitResponseSchema>;
 
 /**
@@ -233,3 +237,23 @@ export type CasinoSitResponse = z.infer<typeof CasinoSitResponseSchema>;
  */
 export const CasinoLeaveResponseSchema = z.object({ left: z.literal(true), deferred: z.boolean() });
 export type CasinoLeaveResponse = z.infer<typeof CasinoLeaveResponseSchema>;
+
+/** One station row of `GET /api/casino/floor` (spec 2026-09-20 casino-interior §5.3). */
+export const CasinoFloorStationSchema = z.object({
+  station: z.number().int(),
+  gameId: z.string(),
+  gameName: z.string(),
+  available: z.boolean(),
+  tableId: IdSchema.nullable(),
+  phase: z.enum(["betting", "acting"]).nullable(),
+  seatsFilled: z.number().int(),
+  maxSeats: z.number().int(),
+  /** `[]` in an underground town — counts only, the `/api/online` rule. */
+  seats: z.array(z.object({ seat: z.number().int(), playerId: IdSchema, username: z.string() })),
+});
+export type CasinoFloorStation = z.infer<typeof CasinoFloorStationSchema>;
+export const CasinoFloorResponseSchema = z.object({
+  locationId: IdSchema, locationName: z.string(), combatMode: z.enum(["open", "underground"]),
+  stations: z.array(CasinoFloorStationSchema),
+});
+export type CasinoFloorResponse = z.infer<typeof CasinoFloorResponseSchema>;

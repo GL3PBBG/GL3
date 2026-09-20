@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { GameEventSchema } from "./events.js";
 import {
-  ClientKindSchema, EmoteSchema, PresenceErrorCodeSchema, PresenceMovedSchema,
-  PresenceStateSchema, RoomDescriptorSchema,
+  ClientKindSchema, EmoteSchema, HookRefSchema, PresenceErrorCodeSchema, PresenceMovedSchema,
+  PresenceStateSchema, RoomDescriptorSchema, SpaceRefSchema,
 } from "./presence.js";
 import { IdSchema } from "./primitives.js";
 
@@ -24,6 +24,7 @@ export const ServerFrameSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("presence.tick"),
     locationId: IdSchema,
+    space: SpaceRefSchema.optional(),
     joined: z.array(PresenceStateSchema),
     moved: z.array(PresenceMovedSchema),
     emoted: z.array(z.object({ playerId: IdSchema, emote: EmoteSchema })),
@@ -35,7 +36,9 @@ export type ServerFrame = z.infer<typeof ServerFrameSchema>;
 
 export const ClientFrameSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ping") }),
-  z.object({ kind: z.literal("presence.join"), client: ClientKindSchema }),
+  z.object({ kind: z.literal("presence.join"), client: ClientKindSchema, interior: HookRefSchema.optional() }),
+  z.object({ kind: z.literal("presence.enter"), hookId: HookRefSchema }),
+  z.object({ kind: z.literal("presence.exit") }),
   // `seq` is monotonic per socket; the server drops a stale one. Coordinates
   // are validated finite here and CLAMPED (never rejected) to the room's
   // bounds by the server — a rejected frame under lag is a stuck avatar.
