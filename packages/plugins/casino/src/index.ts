@@ -909,10 +909,54 @@ export default definePlugin({
     id: "casino.index",
     path: "/casino",
     menu: { label: "Casino", order: 33, category: "town" },
-    // Stub view: the client renders a hand-written override (apps/web
-    // PAGE_OVERRIDES) for this id; the schema view exists because a
-    // page declaration requires one.
-    view: { kind: "list", items: [] },
+    // A real view (spec 2026-09-18-core-view-pages §5) for clients that render
+    // the vocabulary — the Godot client behind the casino door. apps/web still
+    // shows the hand-written Casino page for this id via PAGE_OVERRIDES.
+    //
+    // Lobby ONLY — no Play, no Sit. `POST /api/casino/play` opens a hand that
+    // needs `act` to finish, and a view-node client cannot act; an unacted hand
+    // expires to a forfeit, which would lose a wager to a page limitation.
+    // The link hands the player to the full casino instead.
+    view: {
+      kind: "panel",
+      title: "Casino",
+      children: [
+        {
+          kind: "keyValueSource",
+          source: "GET /api/casino/summary",
+          emptyText: "Sign in to see the floor",
+          entries: [
+            { label: "Town", key: "town" },
+            { label: "Minimum bet", key: "minBet" },
+            { label: "Cash on hand", key: "cash" },
+            { label: "Open hand", key: "openHand" },
+          ],
+        },
+        {
+          kind: "table",
+          source: "GET /api/casino/tables/rows",
+          columns: [
+            { key: "name", label: "Table game" },
+            { key: "house", label: "House" },
+            { key: "maxBet", label: "Max bet" },
+            { key: "tables", label: "Tables open" },
+            { key: "seated", label: "Seated" },
+            { key: "maxSeats", label: "Seats" },
+          ],
+        },
+        {
+          kind: "table",
+          source: "GET /api/casino/games/rows",
+          columns: [
+            { key: "name", label: "Game" },
+            { key: "kind", label: "Kind" },
+            { key: "house", label: "House" },
+            { key: "maxBet", label: "Max bet" },
+          ],
+        },
+        { kind: "link", label: "Take a seat in the full casino", to: "/casino" },
+      ],
+    },
   }],
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats", machines: "p_casino_machines" },

@@ -194,3 +194,25 @@ describe("inventory.shop rows", () => {
     expect((await post(`/api/shop/buy/${cheap}`, token)).json()).toMatchObject({ error: "insufficient_stock" });
   });
 });
+
+describe("casino.index", () => {
+  it("declares a lobby view whose sources are served", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const [ny] = await db.select({ id: locations.id }).from(locations).where(eq(locations.name, "New York"));
+    await db.update(playerStats).set({ locationId: ny!.id }).where(eq(playerStats.playerId, playerId));
+    const page = PluginsPayloadSchema.parse((await get("/api/plugins", token)).json())
+      .pages.find((p) => p.id === "casino.index")!;
+    const view = JSON.stringify(page.view);
+    expect(view).toContain("GET /api/casino/summary");
+    expect(view).toContain("GET /api/casino/games/rows");
+    expect(view).toContain("GET /api/casino/tables/rows");
+    // Deliberately NO play/sit action: a view-node client cannot act on a hand,
+    // and an unacted hand expires to a forfeit.
+    expect(view).not.toContain("POST /api/casino");
+    expect(FormValuesResponseSchema.parse((await get("/api/casino/summary", token)).json()).values.openHand).toBe("none");
+    for (const url of ["/api/casino/games/rows", "/api/casino/tables/rows"]) {
+      const rows = TableRowsResponseSchema.parse((await get(url, token)).json()).rows;
+      for (const r of rows) for (const v of Object.values(r)) expect(typeof v).toBe("string");
+    }
+  });
+});
