@@ -120,6 +120,19 @@ and a template town may add more. The last two hooks are always core's `core.jai
 at the east end of the street with an extra `yard {x, y}` — the confinement
 spot for a sentenced player.
 
+### Scene templates
+
+A town may run on an authored template instead of the auto-laid starter street. Its
+`sceneKey` names one; fetch the geometry with `GET /api/world/template/:sceneKey` (404
+`unknown_template`): `bounds`, `spawn`, `roads[]` (`from`, `to`, `halfWidth`, `pavement`),
+`slots[]` (`id`, `accepts` building | npc | prop, `zone`, `position`, `facing`, `max {w, d}`)
+and `facilities.jail` / `.hospital` (building slots with an explicit `yard`). The engine
+assigns hooks to slots — zone-first, any zone for buildings and npcs, parking bays only for
+props — and the room's `hooks[]` carries the result exactly as on the default street, so a
+client renders the same `PlacedHook` shape; only the road scene changes. A `prop` hook is an
+interactive object (a parked car: `model` is a vehicle key, no sign), never sent for a
+`default` town. Build the road scene from the template endpoint, not from a local copy.
+
 Interacting with a hook means opening `href`. Nothing is sent to the server:
 a hook is declarative, and the page already knows what to do. The reference
 client opens the app in a browser; a web embed routes inside the shell. A hook
