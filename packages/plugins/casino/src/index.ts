@@ -916,7 +916,7 @@ export default definePlugin({
     // Lobby ONLY — no Play, no Sit. `POST /api/casino/play` opens a hand that
     // needs `act` to finish, and a view-node client cannot act; an unacted hand
     // expires to a forfeit, which would lose a wager to a page limitation.
-    // The link hands the player to the full casino instead.
+    // The web override in apps/web is where a player plays.
     view: {
       kind: "panel",
       title: "Casino",
@@ -954,7 +954,6 @@ export default definePlugin({
             { key: "maxBet", label: "Max bet" },
           ],
         },
-        { kind: "link", label: "Take a seat in the full casino", to: "/casino" },
       ],
     },
   }],
