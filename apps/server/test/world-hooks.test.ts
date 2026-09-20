@@ -176,7 +176,7 @@ describe("PoC hooks on the gl3 profile", () => {
   beforeAll(async () => { ({ app: gl3App, redis: gl3Redis, close: closeGl3 } = await bootTestServer()); });
   afterAll(async () => { await closeGl3(); });
 
-  it("places travel's station, crimes' corner and bank's bank, each opening its own page", async () => {
+  it("places the five core-plugin hooks in declared order and keeps the core yards on the street", async () => {
     await seedLocations(db);
     const { token, playerId } = await registerVerifiedPlayer({ app: gl3App, redis: gl3Redis });
     const ny = await townId("New York");
@@ -188,14 +188,26 @@ describe("PoC hooks on the gl3 profile", () => {
     expect(byId.get("travel.station")).toMatchObject({ kind: "building", model: "station", href: "/plugins/travel.index", footprint: { w: 12, d: 9 } });
     expect(byId.get("crimes.corner")).toMatchObject({ kind: "npc", model: "npc-coat", href: "/plugins/crimes.index" });
     expect(byId.get("bank.bank")).toMatchObject({ kind: "building", model: "bank", href: "/plugins/bank.index", footprint: { w: 12, d: 9 } });
-    // Order along the street is the declared order: station (10), corner (20), bank (30).
-    expect(room.hooks.map((h) => h.id).filter((id) => byId.has(id)).slice(0, 3)).toEqual(["travel.station", "crimes.corner", "bank.bank"]);
+    expect(byId.get("casino.casino")).toMatchObject({ kind: "building", model: "casino", href: "/plugins/casino.index", footprint: { w: 12, d: 9 } });
+    expect(byId.get("inventory.shop")).toMatchObject({ kind: "building", model: "shop", href: "/plugins/inventory.shop", footprint: { w: 6, d: 6 } });
+    // Order along the street is the declared order: station (10), corner (20), bank (30), casino (40), shop (50).
+    expect(room.hooks.map((h) => h.id).filter((id) => byId.has(id)).slice(0, 5))
+      .toEqual(["travel.station", "crimes.corner", "bank.bank", "casino.casino", "inventory.shop"]);
     // Core jail and hospital close the street, after every plugin hook.
     expect(room.hooks.map((h) => h.id).slice(-2)).toEqual(["core.jail", "core.hospital"]);
     expect(room.hooks.at(-2)).toMatchObject({ pluginId: "core", hookId: "jail", href: "/plugins/jail", model: "jail", facing: Math.PI, signageUrl: null });
     expect(room.hooks.at(-1)).toMatchObject({ pluginId: "core", hookId: "hospital", href: "/plugins/hospital", model: "hospital", facing: 0, signageUrl: null });
     expect(room.hooks.at(-2)!.yard).toEqual({ x: room.hooks.at(-2)!.position.x + 9, y: 15 });
     expect(room.hooks.at(-1)!.yard).toEqual({ x: room.hooks.at(-1)!.position.x + 9, y: -15 });
+
+    // The street is full at five: a 12-wide shop would slide the hospital to
+    // x = 34 and push its yard past maxX (scene.ts warns "overflows the street").
+    // Every building and both yards must sit inside the bounds.
+    for (const h of room.hooks.filter((h) => h.kind === "building")) {
+      expect(h.position.x + h.footprint.w / 2, h.id).toBeLessThanOrEqual(room.bounds.maxX);
+      expect(h.position.x - h.footprint.w / 2, h.id).toBeGreaterThanOrEqual(room.bounds.minX);
+    }
+    for (const h of room.hooks.slice(-2)) expect(h.yard!.x + 3, h.id).toBeLessThanOrEqual(room.bounds.maxX);
 
     // Nobody stands inside a building: the spawn lot is clear.
     for (const h of room.hooks.filter((h) => h.kind === "building")) {

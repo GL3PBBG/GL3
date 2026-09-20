@@ -974,4 +974,10 @@ export default definePlugin({
   // reads `PluginManifest.provides` today, but this is the point a game
   // subscribes to via `on(games, ...)` or `on(tableGames, ...)`.
   provides: [games, tableGames],
+  // The casino's door on the presence street (spec 2026-09-17 §2.4). `casino`
+  // is a kit key the Godot client does not ship yet; unknown keys fall back by
+  // kind, so the building draws as a plain box until the kit lands. No
+  // signageSlot: casino owns no asset slot (blackjack owns the table art, and a
+  // hook may only name its OWN plugin's singleton slots).
+  worldHooks: [{ id: "casino", kind: "building", label: "Casino", page: "casino.index", model: "casino", footprint: { w: 12, d: 9 }, order: 40 }],
 });

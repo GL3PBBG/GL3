@@ -1273,4 +1273,9 @@ export default definePlugin({
     },
   }],
   adminPages: [adminPage],
+  // 6×6 on purpose: the default ±40 street holds station, bank, casino and one
+  // more 12-wide lot before the hospital's yard runs past maxX (world-hooks
+  // test, "keeps the core yards on the street"). A corner store fits the
+  // remaining south lot; a warehouse would not.
+  worldHooks: [{ id: "shop", kind: "building", label: "Shop", page: "inventory.shop", model: "shop", footprint: { w: 6, d: 6 }, order: 50 }],
 });
