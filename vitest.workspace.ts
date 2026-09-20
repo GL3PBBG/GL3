@@ -551,6 +551,7 @@ export default defineWorkspace([
         "test/world-interior.test.ts",
         "test/core-view-pages.test.ts",
         "test/presence-rooms.test.ts",
+        "test/presence-interior.test.ts",
         "test/ws.test.ts",
         "test/acceptance/**/*.test.ts",
       ],

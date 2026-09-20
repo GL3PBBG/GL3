@@ -102,7 +102,9 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
             case "ping": send(ws, { kind: "pong" }); return;
             // The gateway dispatches presence frames and knows nothing else
             // about them — every rule lives in presence/rooms.ts.
-            case "presence.join": guarded("join", () => rooms.join(playerId, ws, ip || null)); return;
+            case "presence.join": guarded("join", () => rooms.join(playerId, ws, ip || null, frame.interior)); return;
+            case "presence.enter": guarded("enter", () => rooms.enter(ws, frame.hookId)); return;
+            case "presence.exit": guarded("exit", () => rooms.exit(ws)); return;
             case "presence.move": guarded("move", () => rooms.move(ws, frame)); return;
             case "presence.emote": guarded("emote", () => rooms.emote(ws, frame.emote)); return;
             case "presence.leave": guarded("leave", () => rooms.leave(ws)); return;

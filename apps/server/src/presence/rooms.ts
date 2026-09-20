@@ -1,4 +1,7 @@
-import type { AvatarBody, Emote, GameEvent, PresenceMoved, PresenceState, RoomDescriptor, Sentence, ServerFrame } from "@gl3/shared";
+import type {
+  AvatarBody, Emote, GameEvent, PresenceErrorCode, PresenceMoved, PresenceState,
+  RoomDescriptor, Sentence, ServerFrame,
+} from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import type { WebSocket } from "ws";
@@ -35,8 +38,18 @@ export interface RoomsDeps {
 }
 
 export interface Rooms {
-  join(playerId: string, socket: WebSocket, ip: string | null): Promise<void>;
+  /**
+   * `interior` is the reconnect hint (spec 2026-09-20 casino-interior §4.3):
+   * the join answers with the street snapshot and then walks the player
+   * through that door, so a client that was inside when it dropped lands
+   * back inside in one round trip.
+   */
+  join(playerId: string, socket: WebSocket, ip: string | null, interior?: string): Promise<void>;
   autoJoin(playerId: string, socket: WebSocket, ip: string | null): Promise<void>;
+  /** Walk the caller's avatar through a door of the room it stands in. */
+  enter(socket: WebSocket, hookRef: string): Promise<void>;
+  /** Walk the caller's avatar back out onto the street, in front of the door. */
+  exit(socket: WebSocket): Promise<void>;
   move(socket: WebSocket, frame: { seq: number; x: number; y: number; facing: number }): void;
   emote(socket: WebSocket, emote: Emote): void;
   leave(socket: WebSocket): void;
@@ -190,7 +203,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
   };
   /** Only a socket that asked for presence is ever written to (spec 2026-09-19 §2). */
   const subscribed = (socket: WebSocket): boolean => socketStates.get(socket)?.subscribed === true;
-  const error = (socket: WebSocket, code: "not_joined" | "no_location" | "rate_limited" | "superseded"): void =>
+  const error = (socket: WebSocket, code: PresenceErrorCode): void =>
     deps.send(socket, { kind: "presence.error", code });
 
   const roomFor = async (locationId: string): Promise<Room | null> => {
@@ -208,6 +221,41 @@ export function createRooms(deps: RoomsDeps): Rooms {
       room.concealed = concealed;
     }
     return room;
+  };
+
+  /** A resolved interior room, or the code to answer the caller with. */
+  type InteriorRoom = { ok: true; room: Room } | { ok: false; code: "unknown_hook" | "no_interior" | "not_joined" };
+
+  /**
+   * The interior room for one door in one town, created on first use; its
+   * concealment is the town's, re-read here exactly as `roomFor` re-reads a
+   * street's, so an admin flipping a live town's combat mode reaches its
+   * interiors too.
+   *
+   * `no_location` folds into `unknown_hook`: every caller already stands in a
+   * room of that town, so a town the scene service cannot find is a hook this
+   * caller cannot name, not a missing location the client could act on.
+   */
+  const interiorRoomFor = async (locationId: string, hookRef: string): Promise<InteriorRoom> => {
+    let found: Awaited<ReturnType<SceneService["forInterior"]>>;
+    try {
+      found = await deps.scenes.forInterior(locationId, hookRef);
+    } catch (err) {
+      console.error({ err, locationId, hookRef }, "presence: interior lookup failed");
+      return { ok: false, code: "not_joined" };
+    }
+    if (!found.ok) return { ok: false, code: found.code === "no_location" ? "unknown_hook" : found.code };
+    const key = `${locationId}|${hookRef}`;
+    const concealed = found.room.combatMode === "underground";
+    let room = rooms.get(key);
+    if (room === undefined) {
+      room = { key, descriptor: found.room, concealed, members: new Map(), dirty: emptyDirty() };
+      rooms.set(key, room);
+    } else {
+      room.descriptor = found.room;
+      room.concealed = concealed;
+    }
+    return { ok: true, room };
   };
 
   const removeMember = (room: Room, playerId: string): void => {
@@ -313,6 +361,15 @@ export function createRooms(deps: RoomsDeps): Rooms {
     arrival: { x: number; y: number; facing: number }, patch: Partial<PresenceState> = {},
   ): Member => {
     const t = now();
+    // Every caller resolved `to` before at least one await (travel reads a
+    // sentence after `roomFor`; `enter` reads one after `interiorRoomFor`),
+    // and an EMPTY room is reclaimed by the tick — so the object in hand can
+    // already be out of `rooms`. Inserting the member into it would leave a
+    // member no lookup could find and `detach` could never remove. Adopt
+    // whichever room is live under the key, or put this one back.
+    const live = rooms.get(to.key);
+    if (live === undefined) rooms.set(to.key, to);
+    else to = live;
     removeMember(from, playerId);
     const moved: Member = {
       ...member,
@@ -337,7 +394,9 @@ export function createRooms(deps: RoomsDeps): Rooms {
     return moved;
   };
 
-  const join = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
+  const join = async (
+    playerId: string, socket: WebSocket, ip: string | null, interior?: string,
+  ): Promise<void> => {
     const t0 = now();
     const s = bucketFor(socket, playerId, ip, t0);
     if (!spendOrDrop(s, socket, t0)) return;
@@ -364,6 +423,19 @@ export function createRooms(deps: RoomsDeps): Rooms {
         // Same town, different space: they are inside one of its buildings.
         // A (re-)join attaches there; only `presence.exit` brings them out.
         room = previous;
+        // Refreshed the way `roomFor` refreshes a street (spec §1.3): an
+        // admin flipping a live town's combat mode must reach its interiors
+        // as it already reaches its street. A failed refresh keeps the room
+        // exactly as it is — a stale descriptor is a far smaller fault than
+        // refusing the re-join outright.
+        const space = previous.descriptor.space;
+        if (space?.kind === "interior") {
+          const refreshed = await interiorRoomFor(space.locationId, space.hookId);
+          // `join`'s rule, for `join`'s reason: nothing is inserted for, or
+          // sent to, a socket that closed while this lookup was in flight.
+          if (!isOpen(socket)) return;
+          if (refreshed.ok) room = refreshed.room;
+        }
       } else if (previous !== undefined) {
         removeMember(previous, playerId);   // stale membership of another town
       }
@@ -438,6 +510,92 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // snapshot needs suppressing.
     if (!isOpen(socket)) return;
     deps.send(socket, snapshotFor(room, member));
+
+    // The reconnect hint, answered AFTER the street snapshot so a client that
+    // cannot be let in still learns where it is standing (spec §4.3). It
+    // spends a second token and treats "already inside this door" as a
+    // no-op, both by design: the hint is an ordinary `presence.enter` the
+    // client did not have to send.
+    if (interior !== undefined) await enter(socket, interior);
+  };
+
+  /**
+   * The socket's member and the room it stands in, or the code to answer
+   * with. Shared by `enter` and `exit`, so one door and one doorway agree on
+   * who may walk through: only the CONTROLLER, the socket that holds the
+   * wheel. A superseded socket still receives every frame of the room, and
+   * is told why its own transition was refused rather than dropped.
+   */
+  const controlled = (
+    socket: WebSocket,
+  ): { ok: true; s: SocketState; room: Room; member: Member } | { ok: false; code: "not_joined" | "superseded" } => {
+    const s = stateOf(socket);
+    if (!s || s.roomId === null) return { ok: false, code: "not_joined" };
+    const room = rooms.get(s.roomId);
+    const member = room?.members.get(s.playerId);
+    if (!room || !member) return { ok: false, code: "not_joined" };
+    if (member.controller !== socket) return { ok: false, code: "superseded" };
+    return { ok: true, s, room, member };
+  };
+
+  /**
+   * Walk the caller through a door of the room it is standing in (spec
+   * 2026-09-20 casino-interior §4.3). Interiors are rooms like any other, so
+   * this is a `relocate` with a lookup and two refusals in front of it.
+   */
+  const enter = async (socket: WebSocket, hookRef: string): Promise<void> => {
+    const c = controlled(socket);
+    if (!c.ok) { error(socket, c.code); return; }
+    const { s, room, member } = c;
+    if (!spendOrDrop(s, socket, now())) return;
+    if (room.descriptor.space?.kind === "interior") {
+      // Already inside THIS door: a join hint or a repeated enter is a
+      // silent no-op. Any OTHER door is a transition an interior cannot
+      // make — a player walks out before walking in somewhere else.
+      if (room.descriptor.space.hookId !== hookRef) error(socket, "wrong_space");
+      return;
+    }
+    const target = await interiorRoomFor(room.descriptor.locationId, hookRef);
+    if (!isOpen(socket)) return;
+    if (!target.ok) { error(socket, target.code); return; }
+    // The ROW, not `member.state.sentence`: state is a display fact refreshed
+    // by events, and a stale one must not open a door to a jailed player. An
+    // `undefined` read is a failure, never "no sentence" — it must leave a
+    // confined player confined, so it refuses too.
+    const sentence = await readSentence(s.playerId);
+    if (!isOpen(socket)) return;
+    if (sentence === undefined) { error(socket, "not_joined"); return; }
+    if (sentence !== null) { error(socket, "sentenced"); return; }
+    // Two awaits have passed: revalidate the way `onEvent` does before
+    // touching anything. Whoever moved this member owns the truth.
+    if (memberRoom.get(s.playerId) !== room.key || room.members.get(s.playerId) !== member) return;
+    if (member.sockets.size === 0 || member.controller !== socket) return;
+    relocate(member, s.playerId, room, target.room, target.room.descriptor.spawn, { sentence });
+  };
+
+  /**
+   * Walk the caller back out onto the street, at the door's own exit spot
+   * (spec §4.2). No sentence check: leaving a building is never refused —
+   * only entering one is.
+   */
+  const exit = async (socket: WebSocket): Promise<void> => {
+    const c = controlled(socket);
+    if (!c.ok) { error(socket, c.code); return; }
+    const { s, room, member } = c;
+    if (!spendOrDrop(s, socket, now())) return;
+    const space = room.descriptor.space;
+    if (space?.kind !== "interior") { error(socket, "wrong_space"); return; }
+    let street: Room | null = null;
+    try {
+      street = await roomFor(space.locationId);
+    } catch (err) {
+      console.error({ err, playerId: s.playerId }, "presence: exit lookup failed");
+    }
+    if (!isOpen(socket)) return;
+    if (street === null) { error(socket, "not_joined"); return; }
+    if (memberRoom.get(s.playerId) !== room.key || room.members.get(s.playerId) !== member) return;
+    if (member.sockets.size === 0 || member.controller !== socket) return;
+    relocate(member, s.playerId, room, street, space.exit);
   };
 
   /**
@@ -632,11 +790,16 @@ export function createRooms(deps: RoomsDeps): Rooms {
   };
 
   const flushRoom = (key: string, room: Room): void => {
+    // Reclaimed BEFORE the dirty check, not only when dirty: a same-town
+    // re-attach and an auto-join that finds its member already present both
+    // leave behind a street room `roomFor` created and nobody ever joined,
+    // and an empty room that is never dirty would otherwise live for the
+    // life of the process. `relocate` re-registers a room it still holds.
+    if (room.members.size === 0) { rooms.delete(key); return; }
     const d = room.dirty;
     const dirty = d.joined.size > 0 || d.moved.size > 0 || d.emoted.length > 0 || d.left.size > 0;
     if (!dirty) return;
     room.dirty = emptyDirty();
-    if (room.members.size === 0) { rooms.delete(key); return; }
     if (room.concealed) return; // stored, never broadcast (spec §1.3)
     for (const [playerId, member] of room.members) {
       const frame = tickFor(playerId, room.descriptor.locationId, room.descriptor.space, d);
@@ -827,7 +990,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
   };
 
   return {
-    join, autoJoin, move, emote,
+    join, autoJoin, enter, exit, move, emote,
     leave: (socket) => detach(socket, true),
     socketClosed: (socket) => detach(socket, false),
     onEvent,
