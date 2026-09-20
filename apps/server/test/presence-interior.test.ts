@@ -1,10 +1,12 @@
 import type { AddressInfo } from "node:net";
-import type { ServerFrame } from "@gl3/shared";
+import type { GameEvent, ServerFrame } from "@gl3/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
 import type WebSocket from "ws";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { publishEvent } from "../src/bus/publish.js";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { seedLocations } from "../src/db/seed.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -18,6 +20,7 @@ let redis: Redis;
 let closeServer: () => Promise<void>;
 let baseUrl: string;
 let chicago: string;
+let miami: string;
 const opened: WebSocket[] = [];
 
 beforeAll(async () => {
@@ -32,6 +35,7 @@ beforeEach(async () => {
   await seedLocations(db);
   const rows = await db.select({ id: locations.id, name: locations.name }).from(locations);
   chicago = rows.find((r) => r.name === "Chicago")!.id;
+  miami = rows.find((r) => r.name === "Miami")!.id;
 });
 afterAll(async () => { for (const s of opened) s.close(); await closeServer(); await conn.end(); });
 
@@ -250,5 +254,109 @@ describe("presence.join with an interior hint (spec §4.3, §7)", () => {
     expect((await frameOfKind(second, "presence.snapshot")).room.space?.kind).toBe("interior");
     sendFrame(a.socket, { kind: "presence.join", client: "godot-desktop" });
     expect((await frameOfKind(a.socket, "presence.snapshot")).room.space?.kind).toBe("interior");
+  });
+});
+
+/** The `player.jailed` the bus delivers, built the way `base` in events.ts requires. */
+const jailed = (actorId: string): GameEvent => ({
+  id: uuidv7(), type: "player.jailed", at: new Date().toISOString(),
+  actorId, actorName: "convict", audience: { kind: "player", playerId: actorId },
+  until: new Date(Date.now() + 60_000).toISOString(), reason: "test",
+});
+
+/** A `player.travelled`, the way the bus delivers one. */
+const travelled = (actorId: string, toLocationId: string): GameEvent => ({
+  id: uuidv7(), type: "player.travelled", at: new Date().toISOString(),
+  actorId, actorName: "traveller", audience: { kind: "player", playerId: actorId },
+  fromLocationId: null, toLocationId, cost: "0",
+});
+
+describe("bus events and lifecycle inside an interior (spec §4.3)", () => {
+  it("a jail event forces the member out to the exit spot and re-announces the sentence", async () => {
+    const watcher = await joined(chicago, "watcher");
+    await frameOfKind(watcher.socket, "presence.snapshot");
+    const a = await joinedInside(chicago, "alice");
+    const space = a.snap.room.space;
+    if (space?.kind !== "interior") throw new Error("expected the casino interior");
+
+    // The row is the truth, not the event — `refreshSentence` re-reads it.
+    await db.update(playerStats).set({ jailedUntil: new Date(Date.now() + 60_000) })
+      .where(eq(playerStats.playerId, a.playerId));
+    await publishEvent(redis, jailed(a.playerId));
+
+    const snap = await frameOfKind(a.socket, "presence.snapshot");
+    expect(snap.room.space).toEqual({ kind: "street", locationId: chicago });
+    expect(snap.you.sentence).toBe("jail");
+    expect(snap.you).toMatchObject({ x: space.exit.x, y: space.exit.y });
+    // Qualified by the ARRIVAL position rather than drained: the watcher's
+    // queue still holds A's original street auto-join, which carries
+    // `joined: [A]` at A's static spot and would satisfy a bare id match. A
+    // drain would be worse than useless here — a timed-out `nextFrame`
+    // leaves its resolver armed, so it would eat the tick waited on next.
+    const t = await tickWhere(watcher.socket, (f) =>
+      f.joined.some((p) => p.playerId === a.playerId && p.x === space.exit.x && p.y === space.exit.y));
+    expect(t.joined.find((p) => p.playerId === a.playerId)?.sentence).toBe("jail");
+  });
+
+  it("travel from inside lands on the destination street", async () => {
+    const a = await joinedInside(chicago);
+    await db.update(playerStats).set({ locationId: miami }).where(eq(playerStats.playerId, a.playerId));
+    await publishEvent(redis, travelled(a.playerId, miami));
+    const snap = await frameOfKind(a.socket, "presence.snapshot");
+    expect(snap.room.locationId).toBe(miami);
+    expect(snap.room.space).toEqual({ kind: "street", locationId: miami });
+  });
+
+  it("an underground town conceals its interior too", async () => {
+    await db.update(locations).set({ combatMode: "underground" }).where(eq(locations.id, chicago));
+    const a = await joinedInside(chicago);
+    expect(a.snap.concealed).toBe(true);
+    expect(a.snap.players).toEqual([]);
+    const b = await joinedInside(chicago);
+    expect(b.snap.concealed).toBe(true);
+    expect(b.snap.players).toEqual([]);
+    move(a.socket, 1, 1, 1);
+    // B is not waited on again, so this drain is safe as the last read.
+    expect((await drainTicks(b.socket, 600)).length).toBe(0);
+  });
+
+  it("closing the driving socket with a second socket open demotes in place, inside", async () => {
+    const b = await joinedInside(chicago, "bystander");
+    const a = await joinedInside(chicago, "alice");
+    const second = await openSocket(`${baseUrl}?ticket=${await mintTicket(app, a.token)}`);
+    opened.push(second);
+    expect((await nextFrame(second)).kind).toBe("ready");
+    // `ready` is sent BEFORE the gateway dispatches the un-awaited auto-join
+    // (`ws/gateway.ts`), so the second socket is not yet a socket of the
+    // member when this line runs — closing A's now would remove the member
+    // outright instead of demoting it. A's OWN socket is drained to wait,
+    // because it is closed on the next line and never read again; draining
+    // B would eat the tick waited on below.
+    await drainTicks(a.socket, 600);
+    a.socket.close();
+    // `static: true` identifies the demote announce exactly: A entered the
+    // interior driven, so the arrival tick already queued on B carries
+    // `static: false` and cannot satisfy this. No drain, for the reason
+    // above — B is waited on here.
+    const t = await tickWhere(b.socket, (f) =>
+      f.joined.some((p) => p.playerId === a.playerId && p.static === true));
+    // A never moved, so its interior spawn IS "in place".
+    expect(t.joined.find((p) => p.playerId === a.playerId))
+      .toMatchObject({ static: true, x: a.snap.you.x, y: a.snap.you.y });
+    expect(t.space?.kind).toBe("interior");
+  });
+
+  it("closing the only socket inside tells the interior left, and the street nothing", async () => {
+    const b = await joinedInside(chicago, "bystander");
+    const a = await joinedInside(chicago, "alice");
+    // The watcher joins the street only AFTER both are inside, so nothing
+    // about A's departure from the street is ever queued on it — the
+    // negative below then reads only what the close produced, without the
+    // frame-eating drain that clearing a contaminated queue would need.
+    const watcher = await joined(chicago, "watcher");
+    await frameOfKind(watcher.socket, "presence.snapshot");
+    a.socket.close();
+    await tickWhere(b.socket, (t) => t.left.includes(a.playerId));
+    expect((await drainTicks(watcher.socket, 500)).some((t) => t.left.includes(a.playerId))).toBe(false);
   });
 });

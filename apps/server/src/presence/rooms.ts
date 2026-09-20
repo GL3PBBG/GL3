@@ -888,6 +888,30 @@ export function createRooms(deps: RoomsDeps): Rooms {
     if ((member.state.sentence ?? null) === sentence) return;
     member.state = { ...member.state, sentence };
     room.dirty.joined.set(playerId, member.state);
+
+    // A sentence acquired INSIDE a building puts the player back on the
+    // street (spec 2026-09-20 casino-interior §4.3): the client confines a
+    // sentenced avatar to a facility yard, and an interior has no yard. The
+    // member already carries the new sentence, so `relocate` announces the
+    // arrival and the confinement in the one `joined` entry.
+    const space = room.descriptor.space;
+    if (sentence === null || space?.kind !== "interior") return;
+    let street: Room | null = null;
+    try {
+      street = await roomFor(space.locationId);
+    } catch (err) {
+      console.error({ err, playerId }, "presence: forced-exit lookup failed");
+      return;
+    }
+    if (street === null) return;
+    // A third await has passed: revalidate the way `onEvent` and `enter` do.
+    // Whoever moved this member owns the truth, and a member whose last
+    // socket closed must not be inserted into a room nothing can remove it
+    // from. The re-announce above is already stored either way.
+    if (memberRoom.get(playerId) !== room.key) return;
+    if (room.members.get(playerId) !== member) return;
+    if (member.sockets.size === 0) return;
+    relocate(member, playerId, room, street, space.exit);
   };
 
   const onEvent = async (event: GameEvent): Promise<void> => {
