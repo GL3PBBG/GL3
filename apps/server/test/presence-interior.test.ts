@@ -162,7 +162,12 @@ describe("presence.enter / presence.exit (spec 2026-09-20 casino-interior §4.3)
       .toMatchObject({ x: door.position.x, y: 7.5, facing: Math.PI });
     expect(snap.you).toMatchObject({ x: door.position.x, y: 7.5, facing: Math.PI });
     await tickWhere(b.socket, (t) => t.left.includes(a.playerId));
-    await tickWhere(watcher.socket, (t) => t.joined.some((p) => p.playerId === a.playerId));
+    // Qualified by the ARRIVAL position, not just the id: the watcher's queue
+    // still holds the tick from A's original street auto-join, which carries
+    // `joined: [A]` at A's static spot and would satisfy a bare id match
+    // whether or not the exit re-announced anything.
+    await tickWhere(watcher.socket, (t) =>
+      t.joined.some((p) => p.playerId === a.playerId && p.x === door.position.x && p.y === 7.5));
   });
 
   it("refuses each bad transition with its code", async () => {

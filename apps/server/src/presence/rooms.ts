@@ -794,8 +794,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // re-attach and an auto-join that finds its member already present both
     // leave behind a street room `roomFor` created and nobody ever joined,
     // and an empty room that is never dirty would otherwise live for the
-    // life of the process. `relocate` re-registers a room it still holds.
-    if (room.members.size === 0) { rooms.delete(key); return; }
+    // life of the process. `relocate` re-registers a room it still holds —
+    // which is why the dirty is cleared as well as the entry: `removeMember`
+    // scrubs `joined` and `moved` but not `emoted` or `left`, so a room that
+    // empties with a queued emote and is then resurrected would replay it.
+    if (room.members.size === 0) { room.dirty = emptyDirty(); rooms.delete(key); return; }
     const d = room.dirty;
     const dirty = d.joined.size > 0 || d.moved.size > 0 || d.emoted.length > 0 || d.left.size > 0;
     if (!dirty) return;
