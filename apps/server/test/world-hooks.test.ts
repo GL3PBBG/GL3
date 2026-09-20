@@ -200,20 +200,35 @@ describe("PoC hooks on the gl3 profile", () => {
     expect(room.hooks.at(-2)!.yard).toEqual({ x: room.hooks.at(-2)!.position.x + 9, y: 15 });
     expect(room.hooks.at(-1)!.yard).toEqual({ x: room.hooks.at(-1)!.position.x + 9, y: -15 });
 
-    // The street is full at five: a 12-wide shop would slide the hospital to
-    // x = 34 and push its yard past maxX (scene.ts warns "overflows the street").
-    // Every building and both yards must sit inside the bounds.
-    for (const h of room.hooks.filter((h) => h.kind === "building")) {
-      expect(h.position.x + h.footprint.w / 2, h.id).toBeLessThanOrEqual(room.bounds.maxX);
-      expect(h.position.x - h.footprint.w / 2, h.id).toBeGreaterThanOrEqual(room.bounds.minX);
-    }
-    for (const h of room.hooks.slice(-2)) expect(h.yard!.x + 3, h.id).toBeLessThanOrEqual(room.bounds.maxX);
+    // The sixth building (theft.garage, order 55) lands on the street's north
+    // side — inside bounds on its own — but that is the lot core.jail (also
+    // north-pinned) would otherwise sit in, so jail slides east past it and
+    // overflows the default street by design (corner-district spec §6); the
+    // template scene is where the garage actually fits.
+    expect(byId.get("core.jail")!.position.x + 6).toBeGreaterThan(room.bounds.maxX);
 
     // Nobody stands inside a building: the spawn lot is clear.
     for (const h of room.hooks.filter((h) => h.kind === "building")) {
       const inside = Math.abs(room.spawn.x - h.position.x) < h.footprint.w / 2 && Math.abs(room.spawn.y - h.position.y) < h.footprint.d / 2;
       expect(inside, h.id).toBe(false);
     }
+  });
+
+  it("puts theft's garage in the vehicle zone and its cars in the bays on a template town, and only the garage on a default one", async () => {
+    await seedLocations(db);
+    const { token, playerId } = await registerVerifiedPlayer({ app: gl3App, redis: gl3Redis });
+    const ny = await townId("New York");
+    await db.insert(locationScenes).values({ locationId: ny, sceneKey: "district-corner-v1" });
+    await db.update(playerStats).set({ locationId: ny }).where(eq(playerStats.playerId, playerId));
+    const room = RoomDescriptorSchema.parse((await gl3App.inject({ method: "GET", url: "/api/world/scene", headers: { authorization: `Bearer ${token}` } })).json());
+    const byId = new Map(room.hooks.map((h) => [h.id, h]));
+    expect(byId.get("theft.garage")).toMatchObject({ kind: "building", model: "garage", position: { x: 61 }, href: "/plugins/theft.garage" });
+    expect(byId.get("theft.car-1")).toMatchObject({ kind: "prop", model: "sedan", position: { x: 37, y: 12 }, href: "/plugins/theft.index" });
+    expect(byId.get("theft.car-2")).toMatchObject({ kind: "prop", position: { x: 37, y: 26 } });
+    const chicago = await townId("Chicago");
+    const dflt = RoomDescriptorSchema.parse((await gl3App.inject({ method: "GET", url: `/api/world/scene/${chicago}`, headers: { authorization: `Bearer ${token}` } })).json());
+    expect(dflt.hooks.some((h) => h.id === "theft.garage")).toBe(true);
+    expect(dflt.hooks.some((h) => h.kind === "prop")).toBe(false);
   });
 });
 

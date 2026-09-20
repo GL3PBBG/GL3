@@ -779,4 +779,13 @@ export default definePlugin({
   ],
   pages: [theftPage, garagePage],
   adminPages: [adminPage],
+  // Spec 2026-09-20 §6. The garage prefers the template's vehicle zone (beside
+  // motorpool); the two cars are props and exist only where a template has
+  // parking bays — the default street skips them. A car opens the tier page;
+  // the reward is tier-selected, never "this car".
+  worldHooks: [
+    { id: "garage", kind: "building", zone: "vehicle", label: "Garage", page: "theft.garage", model: "garage", signageSlot: "page-garage", footprint: { w: 12, d: 9 }, order: 55 },
+    { id: "car-1", kind: "prop", zone: "parking", label: "Parked car", page: "theft.index", model: "sedan", footprint: { w: 4, d: 2 }, order: 60 },
+    { id: "car-2", kind: "prop", zone: "parking", label: "Parked car", page: "theft.index", model: "sedan", footprint: { w: 4, d: 2 }, order: 61 },
+  ],
 });

@@ -12,7 +12,11 @@ import { bootTestServer } from "./helpers/server.js";
 
 const { db, sql: conn } = testDb();
 const stub = { kind: "list" as const, items: [] };
-// Six props against six bays: the seventh is the dropped one.
+// Six bays, nine props wanting one: theft (a real CORE_PLUGINS member, loaded
+// alongside this fixture under the v2 profile) contributes its own two real
+// parking-zone cars at order 60/61, ahead of these seven fixture cars
+// (order 101-107) — so theft's pair claims the first two bays and only four
+// of these seven fit; car-5, car-6 and car-7 are the dropped ones.
 const cars = [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: `car-${i}`, kind: "prop" as const, zone: "parking", label: "Car", page: "tfix.index", model: "sedan", footprint: { w: 4, d: 2 }, order: 100 + i }));
 const fixture = definePlugin({
   id: "tfix", version: "1.0.0", apiVersion: 1, basePaths: ["/api/tfix"],
@@ -55,7 +59,12 @@ describe("a town on district-corner-v1", () => {
     expect(byId.get("tfix.lot")).toMatchObject({ position: { x: 61, y: 18 }, facing: Math.PI / 2 });
     expect(room.hooks.filter((h) => h.kind === "prop").length).toBe(6);
     expect(byId.has("tfix.car-7")).toBe(false);
-    expect(byId.get("tfix.car-1")).toMatchObject({ position: { x: 37, y: 12 }, footprint: { w: 4, d: 2 }, href: "/plugins/tfix.index", signageUrl: null });
+    // theft.car-1 (order 60) and theft.car-2 (order 61) take bays y=12 and
+    // y=26 first; tfix.car-1 (order 101) is the third car in and lands on
+    // the third bay.
+    expect(byId.get("theft.car-1")).toMatchObject({ position: { x: 37, y: 12 } });
+    expect(byId.get("theft.car-2")).toMatchObject({ position: { x: 37, y: 26 } });
+    expect(byId.get("tfix.car-1")).toMatchObject({ position: { x: 37, y: 40 }, footprint: { w: 4, d: 2 }, href: "/plugins/tfix.index", signageUrl: null });
     // Core facilities on their reserved plots, with explicit yards.
     expect(room.hooks.at(-2)).toMatchObject({ id: "core.jail", position: { x: -106, y: 15 }, yard: { x: -115, y: 15 } });
     expect(room.hooks.at(-1)).toMatchObject({ id: "core.hospital", position: { x: -106, y: -15 }, yard: { x: -115, y: -15 } });
