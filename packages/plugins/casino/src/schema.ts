@@ -75,6 +75,7 @@ export const playerStats = pgTable("player_stats", {
 export const locations = pgTable("locations", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),
+  combatMode: text("combat_mode").notNull(),
 });
 
 export const players = pgTable("players", {

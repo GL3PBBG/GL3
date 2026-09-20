@@ -22,6 +22,7 @@ import {
   type TableGameDef,
 } from "./games.js";
 import { CASINO_FLOOR } from "./floor.js";
+import { floorRoute } from "./floor-routes.js";
 import { CASINO_MIGRATIONS } from "./migrations.js";
 import { adminPage } from "./pages.js";
 import { casinoSeats, casinoSessions, casinoTables, locations, players, playerStats } from "./schema.js";
@@ -963,7 +964,7 @@ export default definePlugin({
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats", machines: "p_casino_machines" },
   routes: [
-    lobbyRoute, summaryRoute, gamesRowsRoute, tablesRowsRoute,
+    lobbyRoute, summaryRoute, gamesRowsRoute, tablesRowsRoute, floorRoute,
     playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes, ...machineRoutes,
   ],
   // The hub's only event, and a SILENT one: a table tick is a state signal

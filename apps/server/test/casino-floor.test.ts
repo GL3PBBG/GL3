@@ -5,7 +5,8 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CASINO_FLOOR, stationsFor, tableSeats } from "@gl3/plugin-casino";
 import {
-  CasinoLobbyResponseSchema, CasinoSitResponseSchema, CasinoTableResponseSchema, InteriorDeclSchema,
+  CasinoFloorResponseSchema, CasinoLobbyResponseSchema, CasinoSitResponseSchema, CasinoTableResponseSchema,
+  InteriorDeclSchema,
 } from "@gl3/shared";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -78,6 +79,13 @@ function tableView(token: string) {
 function lobby(token: string) {
   return app.inject({
     method: "GET", url: "/api/casino",
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+
+function floor(token: string) {
+  return app.inject({
+    method: "GET", url: "/api/casino/floor",
     headers: { authorization: `Bearer ${token}` },
   });
 }
@@ -179,5 +187,40 @@ describe("POST /api/casino/table/sit with a station (spec §5.3)", () => {
     expect(CasinoSitResponseSchema.parse((await sit(last.token)).json()).station).toBeNull();
     const lobbyBody = CasinoLobbyResponseSchema.parse((await lobby(last.token)).json());
     expect(lobbyBody.tableGames.find((g) => g.gameId === "blackjack")?.tables.map((t) => t.station).sort()).toEqual([0, 1, 2, 3, null].sort());
+  });
+});
+
+describe("GET /api/casino/floor (spec §5.3)", () => {
+  it("lists every declared station in order with its live table, seats and names", async () => {
+    const locationId = await seedLocation();
+    const a = await register(); await placePlayer(a.playerId, locationId, 1_000_000n);
+    const b = await register(); await placePlayer(b.playerId, locationId, 1_000_000n);
+    const opened = CasinoSitResponseSchema.parse((await sit(a.token, "blackjack", 1)).json());
+    await sit(b.token, "blackjack", 1);
+    const body = CasinoFloorResponseSchema.parse((await floor(a.token)).json());
+    expect(body.locationId).toBe(locationId);
+    expect(body.combatMode).toBe("open");
+    expect(body.stations.map((s) => [s.station, s.gameId, s.available, s.tableId])).toEqual([
+      [0, "blackjack", true, null], [1, "blackjack", true, opened.tableId], [2, "blackjack", true, null], [3, "blackjack", true, null],
+    ]);
+    expect(body.stations[1]).toMatchObject({ phase: "betting", seatsFilled: 2, maxSeats: 5 });
+    expect(body.stations[1]!.seats.map((s) => [s.seat, s.playerId, s.username])).toEqual([[0, a.playerId, a.username], [1, b.playerId, b.username]]);
+  });
+  it("hides names in an underground town", async () => {
+    const locationId = await seedLocation();
+    await db.update(locations).set({ combatMode: "underground" }).where(eq(locations.id, locationId));
+    const a = await register(); await placePlayer(a.playerId, locationId, 1_000_000n);
+    await sit(a.token, "blackjack", 0);
+    const body = CasinoFloorResponseSchema.parse((await floor(a.token)).json());
+    expect(body.combatMode).toBe("underground");
+    expect(body.stations[0]).toMatchObject({ seatsFilled: 1, seats: [] });
+  });
+  it("409s no_location for a player nowhere and is jail-gated", async () => {
+    const a = await register();
+    expect((await floor(a.token)).statusCode).toBe(409);
+    const locationId = await seedLocation();
+    await placePlayer(a.playerId, locationId, 0n);
+    await db.update(playerStats).set({ jailedUntil: new Date(Date.now() + 60_000) }).where(eq(playerStats.playerId, a.playerId));
+    expect((await floor(a.token)).statusCode).toBe(423);
   });
 });
