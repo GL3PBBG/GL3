@@ -60,6 +60,15 @@ interface Member {
 }
 
 interface Room {
+  /**
+   * How this room is keyed in `rooms`, in `memberRoom` and in
+   * `SocketState.roomId`. For a STREET room it is exactly the town's
+   * `locationId`, so every key this file wrote before interiors existed is
+   * unchanged — but a town can hold more than one room now (spec 2026-09-20
+   * casino-interior §4.3), so nothing may key a room by its descriptor's
+   * `locationId` any more.
+   */
+  key: string;
   descriptor: RoomDescriptor;
   concealed: boolean;
   members: Map<string, Member>;
@@ -190,7 +199,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
     const concealed = descriptor.combatMode === "underground";
     let room = rooms.get(locationId);
     if (room === undefined) {
-      room = { descriptor, concealed, members: new Map(), dirty: emptyDirty() };
+      room = { key: locationId, descriptor, concealed, members: new Map(), dirty: emptyDirty() };
       rooms.set(locationId, room);
     } else {
       // Re-read on every join / travel-in (spec §1.3): an admin flipping a
@@ -279,6 +288,55 @@ export function createRooms(deps: RoomsDeps): Rooms {
     room.dirty.joined.set(playerId, member.state);
   };
 
+  /**
+   * Whichever room of this town the player is already in — the street or
+   * one of its interiors. A join or auto-join in a town the member already
+   * stands in must attach to THAT room, never yank them back to the street.
+   */
+  const currentRoomInTown = (playerId: string, locationId: string): Room | undefined => {
+    const key = memberRoom.get(playerId);
+    const room = key === undefined ? undefined : rooms.get(key);
+    return room !== undefined && room.descriptor.locationId === locationId ? room : undefined;
+  };
+
+  /**
+   * Moves a member between rooms (spec 2026-09-20 casino-interior §4.3): the
+   * old room is told `left`, the new one `joined`, and every SUBSCRIBED socket
+   * of the member gets the new room's snapshot with a fresh sequence space. One
+   * helper for travel, enter, exit and the forced exit, so "what a transition
+   * does" is stated once. The member object is REPLACED (spreads share the
+   * socket Set), which is what the post-await identity checks in `onEvent`
+   * and `enter` rely on.
+   */
+  const relocate = (
+    member: Member, playerId: string, from: Room, to: Room,
+    arrival: { x: number; y: number; facing: number }, patch: Partial<PresenceState> = {},
+  ): Member => {
+    const t = now();
+    removeMember(from, playerId);
+    const moved: Member = {
+      ...member,
+      state: { ...member.state, ...patch, x: arrival.x, y: arrival.y, facing: arrival.facing, since: t },
+      lastMoveAt: t,
+    };
+    to.members.set(playerId, moved);
+    memberRoom.set(playerId, to.key);
+    to.dirty.left.delete(playerId);
+    to.dirty.joined.set(playerId, moved.state);
+    for (const socket of moved.sockets) {
+      // The new room is a new sequence space: a seq the client had already
+      // spent in the old room must not silence its first move in this one.
+      // An auto-joined socket carries no room and gets no snapshot — it
+      // never asked to be told where it is standing.
+      const s = stateOf(socket);
+      if (s?.subscribed !== true) continue;
+      s.roomId = to.key;
+      s.lastSeq = -1;
+      deps.send(socket, snapshotFor(to, moved));
+    }
+    return moved;
+  };
+
   const join = async (playerId: string, socket: WebSocket, ip: string | null): Promise<void> => {
     const t0 = now();
     const s = bucketFor(socket, playerId, ip, t0);
@@ -295,14 +353,20 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // already gone.
     if (!isOpen(socket)) return;
     if (!target.ok) { error(socket, target.code); return; }
-    const { room } = target;
+    let room = target.room;
 
     // Leaving a previous room (a stale join after travel the bus never told
     // us about) is a plain leave; the common case is no previous room.
-    const previousId = memberRoom.get(playerId);
-    if (previousId !== undefined && previousId !== room.descriptor.locationId) {
-      const previous = rooms.get(previousId);
-      if (previous) removeMember(previous, playerId);
+    const previousKey = memberRoom.get(playerId);
+    if (previousKey !== undefined && previousKey !== room.key) {
+      const previous = rooms.get(previousKey);
+      if (previous !== undefined && previous.descriptor.locationId === room.descriptor.locationId) {
+        // Same town, different space: they are inside one of its buildings.
+        // A (re-)join attaches there; only `presence.exit` brings them out.
+        room = previous;
+      } else if (previous !== undefined) {
+        removeMember(previous, playerId);   // stale membership of another town
+      }
     }
 
     const t = now();
@@ -325,7 +389,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
         sockets: new Set([socket]), controller: socket, lastMoveAt: t, zsetTouchedAt: t, ip,
       };
       room.members.set(playerId, member);
-      memberRoom.set(playerId, room.descriptor.locationId);
+      memberRoom.set(playerId, room.key);
       room.dirty.left.delete(playerId);
       room.dirty.joined.set(playerId, member.state);
     } else {
@@ -361,7 +425,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // re-join, which is the whole point of the bucket. A new room is a new
     // sequence space, so `lastSeq` resets.
     s.subscribed = true;
-    s.roomId = room.descriptor.locationId;
+    s.roomId = room.key;
     s.lastSeq = -1;
 
     // The touch sits AFTER the socket-state set above: a throwable await
@@ -409,7 +473,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
     // — two reads started moments apart — so the member may already exist
     // and already be driven. Adding the socket is all that is ever safe
     // here: taking the wheel would demote a client that DID ask for it.
-    const existing = room.members.get(playerId);
+    const existing = currentRoomInTown(playerId, room.descriptor.locationId)?.members.get(playerId);
     if (existing !== undefined) {
       existing.sockets.add(socket);
       await touch(existing, playerId, ip, now());
@@ -417,10 +481,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
     }
 
     // A stale membership of a DIFFERENT room (travel the bus never told us
-    // about) is a plain leave — `join`'s rule again.
-    const previousId = memberRoom.get(playerId);
-    if (previousId !== undefined && previousId !== room.descriptor.locationId) {
-      const previous = rooms.get(previousId);
+    // about) is a plain leave — `join`'s rule again. A room of THIS town was
+    // already handled above, so anything left here belongs to another town.
+    const previousKey = memberRoom.get(playerId);
+    if (previousKey !== undefined && previousKey !== room.key) {
+      const previous = rooms.get(previousKey);
       if (previous) removeMember(previous, playerId);
     }
 
@@ -436,7 +501,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
       sockets: new Set([socket]), controller: null, lastMoveAt: t, zsetTouchedAt: t, ip,
     };
     room.members.set(playerId, member);
-    memberRoom.set(playerId, room.descriptor.locationId);
+    memberRoom.set(playerId, room.key);
     room.dirty.left.delete(playerId);
     room.dirty.joined.set(playerId, member.state);
 
@@ -554,23 +619,27 @@ export function createRooms(deps: RoomsDeps): Rooms {
    * someone else walking in. `moved` deliberately still carries the recipient:
    * that is how a client learns the server rubber-banded it.
    */
-  const tickFor = (recipientId: string, locationId: string, d: Room["dirty"]): ServerFrame | null => {
+  const tickFor = (
+    recipientId: string, locationId: string, space: RoomDescriptor["space"], d: Room["dirty"],
+  ): ServerFrame | null => {
     const joined = [...d.joined.values()].filter((p) => p.playerId !== recipientId);
     const moved = [...d.moved.values()];
     const left = [...d.left];
     if (joined.length === 0 && moved.length === 0 && d.emoted.length === 0 && left.length === 0) return null;
-    return { kind: "presence.tick", locationId, joined, moved, emoted: d.emoted, left };
+    // `space` is optional on the wire, so an undefined one (a descriptor from
+    // before interiors) is dropped by JSON and the frame is byte-identical.
+    return { kind: "presence.tick", locationId, space, joined, moved, emoted: d.emoted, left };
   };
 
-  const flushRoom = (locationId: string, room: Room): void => {
+  const flushRoom = (key: string, room: Room): void => {
     const d = room.dirty;
     const dirty = d.joined.size > 0 || d.moved.size > 0 || d.emoted.length > 0 || d.left.size > 0;
     if (!dirty) return;
     room.dirty = emptyDirty();
-    if (room.members.size === 0) { rooms.delete(locationId); return; }
+    if (room.members.size === 0) { rooms.delete(key); return; }
     if (room.concealed) return; // stored, never broadcast (spec §1.3)
     for (const [playerId, member] of room.members) {
-      const frame = tickFor(playerId, locationId, d);
+      const frame = tickFor(playerId, room.descriptor.locationId, room.descriptor.space, d);
       if (frame === null) continue;
       for (const socket of member.sockets) {
         // A socket that never asked for presence is never written to: a web
@@ -583,7 +652,7 @@ export function createRooms(deps: RoomsDeps): Rooms {
         try {
           deps.send(socket, frame);
         } catch (err) {
-          console.error({ err, locationId, playerId }, "presence: tick send failed");
+          console.error({ err, key, playerId }, "presence: tick send failed");
         }
       }
     }
@@ -597,11 +666,11 @@ export function createRooms(deps: RoomsDeps): Rooms {
    * silencing every other room in the same pass.
    */
   const flush = (): void => {
-    for (const [locationId, room] of rooms) {
+    for (const [key, room] of rooms) {
       try {
-        flushRoom(locationId, room);
+        flushRoom(key, room);
       } catch (err) {
-        console.error({ err, locationId }, "presence: tick failed");
+        console.error({ err, key }, "presence: tick failed");
       }
     }
   };
@@ -690,7 +759,10 @@ export function createRooms(deps: RoomsDeps): Rooms {
       }
       return;
     }
-    if (fromId === event.toLocationId) return;
+    // `fromId` is a room KEY, which is the town's id only for a street room:
+    // the traveller may be standing in an interior of it.
+    const fromRoom = rooms.get(fromId);
+    if (fromRoom?.descriptor.locationId === event.toLocationId) return;
     const from = rooms.get(fromId);
     const member = from?.members.get(playerId);
     if (!from || !member) return;
@@ -746,36 +818,12 @@ export function createRooms(deps: RoomsDeps): Rooms {
       return;
     }
 
-    const t = now();
     // A static member arrives at the new town's static spot; a driven one
     // arrives at spawn, where its client expects to resume from.
     const arrival = member.controller === null
-      ? staticSpotFor(playerId, to.descriptor)
-      : { x: to.descriptor.spawn.x, y: to.descriptor.spawn.y };
-    const moved: Member = {
-      ...member,
-      state: {
-        ...member.state,
-        x: arrival.x, y: arrival.y, facing: to.descriptor.spawn.facing, since: t,
-        sentence,
-      },
-      lastMoveAt: t,
-    };
-    to.members.set(playerId, moved);
-    memberRoom.set(playerId, to.descriptor.locationId);
-    to.dirty.left.delete(playerId);
-    to.dirty.joined.set(playerId, moved.state);
-    for (const socket of moved.sockets) {
-      // The new room is a new sequence space: a seq the client had already
-      // spent in the old town must not silence its first move in this one.
-      // An auto-joined socket carries no room and gets no snapshot — it
-      // never asked to be told where it is standing.
-      const s = stateOf(socket);
-      if (s?.subscribed !== true) continue;
-      s.roomId = to.descriptor.locationId;
-      s.lastSeq = -1;
-      deps.send(socket, snapshotFor(to, moved));
-    }
+      ? { ...staticSpotFor(playerId, to.descriptor), facing: to.descriptor.spawn.facing }
+      : { x: to.descriptor.spawn.x, y: to.descriptor.spawn.y, facing: to.descriptor.spawn.facing };
+    relocate(member, playerId, from, to, arrival, { sentence });
   };
 
   return {
