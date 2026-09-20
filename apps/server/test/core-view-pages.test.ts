@@ -1,7 +1,8 @@
 import { FormValuesResponseSchema, PluginsPayloadSchema, TableRowsResponseSchema } from "@gl3/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GAME_EVENTS_CHANNEL } from "../src/bus/publish.js";
 import { loadConfig } from "../src/config.js";
@@ -149,5 +150,41 @@ describe("crimes.index", () => {
     expect(["success", "failed"]).toContain(last.values.outcome);
     expect(last.values.payout).toMatch(/^\d+$/);
     expect(Date.parse(last.values.at!)).toBeGreaterThan(0);
+  });
+});
+
+describe("inventory.shop rows", () => {
+  it("serves string rows with cannotBuy, and buy-one decrements stock", async () => {
+    const { token, playerId } = await registerVerifiedPlayer({ app, redis });
+    const towns = await db.select({ id: locations.id, name: locations.name }).from(locations);
+    const ny = towns.find((t) => t.name === "New York")!.id;
+    await db.update(playerStats).set({ locationId: ny, cash: 100n }).where(eq(playerStats.playerId, playerId));
+    const cheap = uuidv7();
+    const dear = uuidv7();
+    await db.execute(sql`insert into items (id, name, item_type, effects) values
+      (${cheap}, 'Knuckles', 'weapon', ${JSON.stringify({ power: 3 })}::jsonb),
+      (${dear}, 'Vest', 'armor', ${JSON.stringify({ armor: 5 })}::jsonb)`);
+    await db.execute(sql`insert into p_inventory_shop_stock (location_id, item_id, price, stock) values
+      (${ny}, ${cheap}, 40::bigint, 2), (${ny}, ${dear}, 500::bigint, 1)`);
+
+    let rows = TableRowsResponseSchema.parse((await get("/api/shop/rows", token)).json()).rows;
+    const by = (id: string) => rows.find((r) => r.id === id)!;
+    for (const r of rows) for (const v of Object.values(r)) expect(typeof v).toBe("string");
+    expect(by(cheap)).toMatchObject({ name: "Knuckles", itemType: "weapon", price: "40", stock: "2", image: "", cannotBuy: "false" });
+    expect(by(cheap).effects).toBe("power: 3");
+    expect(by(dear)).toMatchObject({ price: "500", cannotBuy: "true" });
+
+    const bought = await post(`/api/shop/buy/${cheap}`, token);
+    expect(bought.statusCode).toBe(200);
+    expect(bought.json()).toMatchObject({ itemId: cheap, qty: 1, stock: 1, cash: "60" });
+
+    rows = TableRowsResponseSchema.parse((await get("/api/shop/rows", token)).json()).rows;
+    expect(by(cheap)).toMatchObject({ stock: "1", cannotBuy: "false" });
+    // 60 left, 40 more: one more buy empties the row and it disappears (stock > 0 filter).
+    expect((await post(`/api/shop/buy/${cheap}`, token)).statusCode).toBe(200);
+    rows = TableRowsResponseSchema.parse((await get("/api/shop/rows", token)).json()).rows;
+    expect(rows.find((r) => r.id === cheap)).toBeUndefined();
+    expect((await post(`/api/shop/buy/${cheap}`, token)).statusCode).toBe(409);
+    expect((await post(`/api/shop/buy/${cheap}`, token)).json()).toMatchObject({ error: "insufficient_stock" });
   });
 });

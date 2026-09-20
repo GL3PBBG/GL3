@@ -31,7 +31,7 @@ import {
 } from "./effect-registry.js";
 import { SHOP_MIGRATIONS } from "./migrations.js";
 import { items, locations, playerItems, playerStats, ranks } from "./schema.js";
-import { purchasedEvent, shopBuyRoute, shopListRoute } from "./shop.js";
+import { purchasedEvent, shopBuyOneRoute, shopBuyRoute, shopListRoute, shopRowsRoute } from "./shop.js";
 import { shopStock } from "./shop-schema.js";
 
 /**
@@ -1230,7 +1230,7 @@ export default definePlugin({
   tables: { shopStock: "p_inventory_shop_stock" },
   migrations: SHOP_MIGRATIONS,
   routes: [
-    listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute,
+    listRoute, equipRoute, useRoute, shopListRoute, shopBuyRoute, shopRowsRoute, shopBuyOneRoute,
     adminItemListRoute, adminItemDetailRoute, adminItemCreateRoute, adminItemUpdateRoute, adminItemDeleteRoute,
     adminShopListRoute, adminShopUpsertRoute, adminShopDeleteRoute,
     adminLocationListRoute,
