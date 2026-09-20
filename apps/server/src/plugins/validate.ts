@@ -306,6 +306,16 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
           `plugin "${manifest.id}" world hook "${hook.id}" declares signageSlot "${hook.signageSlot}", which is not one of its own singleton asset slots`,
         );
       }
+      if (hook.kind === "prop") {
+        // A prop is placed only in a template bay sized by its own footprint
+        // (spec 2026-09-20 §2); without one there is nothing to fit.
+        if (hook.footprint === undefined) {
+          fail(`plugin "${manifest.id}" world hook "${hook.id}" is a prop and must declare a footprint`);
+        }
+        if (hook.signageSlot !== undefined) {
+          fail(`plugin "${manifest.id}" world hook "${hook.id}" is a prop and cannot carry a signageSlot`);
+        }
+      }
     }
   }
 

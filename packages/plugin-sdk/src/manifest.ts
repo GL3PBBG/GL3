@@ -148,19 +148,28 @@ const AssetSlotDeclSchema = z
 export interface WorldHookDecl {
   /** Unique within the plugin. Kebab-case, matches `PLUGIN_ID_PATTERN`. */
   id: string;
-  kind: "building" | "npc";
+  /**
+   * `building` and `npc` are placed by the default street layout (spec
+   * 2026-09-17 §2.1). `prop` is an interactive object — a parked car — with
+   * a required `footprint` and no sign; it is placed only in an authored
+   * template's parking bays (spec 2026-09-20 §2) and the default layout
+   * skips it entirely.
+   */
+  kind: "building" | "npc" | "prop";
   /** Sign text or name tag, 1–24 chars. Author-written, never player text. */
   label: string;
   /** Id of one of THIS plugin's `pages`. */
   page: string;
   /** Client asset-kit key (`garage`, `bank`, `station`, `newsstand`, `npc-suit`, `npc-coat`, …); unknown → client fallback by `kind`. */
   model: string;
-  /** Metres. Default building {w:12,d:9}, npc {w:1,d:1} — the client kit is 3 m-grid. */
+  /** Metres. Default building {w:12,d:9}, npc {w:1,d:1} — the client kit is 3 m-grid. A prop has no default and must declare one. */
   footprint?: { w: number; d: number } | undefined;
   /** Layout order along the street; ties broken by pluginId, then id. */
   order: number;
-  /** One of this plugin's `providesAssets` slots with `singleton: true`; its bound image is the signage texture. */
+  /** One of this plugin's `providesAssets` slots with `singleton: true`; its bound image is the signage texture. A prop cannot carry one. */
   signageSlot?: string | undefined;
+  /** Template zone this hook prefers (spec 2026-09-20 §3); ignored by the default street layout. */
+  zone?: string | undefined;
 }
 
 /** A declaration once the loader has stamped the owning plugin on it — what `ctx.worldHooks` serves. */
@@ -171,7 +180,7 @@ export interface WorldHook extends WorldHookDecl {
 const WorldHookDeclSchema = z
   .object({
     id: z.string().regex(PLUGIN_ID_PATTERN, "world hook id must be lowercase kebab-case"),
-    kind: z.enum(["building", "npc"]),
+    kind: z.enum(["building", "npc", "prop"]),
     label: z.string().min(1).max(24),
     page: z.string().min(1),
     model: z.string().min(1),
@@ -181,6 +190,7 @@ const WorldHookDeclSchema = z
       .optional(),
     order: z.number().int(),
     signageSlot: z.string().regex(PLUGIN_ID_PATTERN).optional(),
+    zone: z.string().regex(/^[a-z][a-z0-9-]*$/, "zone must be a lowercase tag").max(24).optional(),
   })
   .strict();
 

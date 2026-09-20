@@ -19,7 +19,7 @@ export const LAYOUT = {
   npcLine: 7.5,
   /** The spawn's own lot stays free of buildings: `[spawn.x - west, spawn.x + east]` on the spawn's side. */
   spawnLot: { west: 8, east: 10 },
-  defaultFootprint: { building: { w: 12, d: 9 }, npc: { w: 1, d: 1 } } as const satisfies Record<WorldHook["kind"], Footprint>,
+  defaultFootprint: { building: { w: 12, d: 9 }, npc: { w: 1, d: 1 } } as const satisfies Record<"building" | "npc", Footprint>,
 } as const;
 
 export interface PlacedGeometry {
@@ -61,7 +61,8 @@ export function placeHooks(hooks: readonly WorldHook[], bounds: SceneBounds, spa
   const lotMax = spawn.x + LAYOUT.spawnLot.east;
 
   for (const hook of hooks) {
-    const footprint: Footprint = hook.footprint ?? LAYOUT.defaultFootprint[hook.kind];
+    if (hook.kind === "prop") continue; // props exist only in template bays (spec 2026-09-20 §2)
+    const footprint: Footprint = hook.footprint ?? (hook.kind === "npc" ? LAYOUT.defaultFootprint.npc : LAYOUT.defaultFootprint.building);
     if (hook.kind === "building") {
       let side = nextSide;
       const coversLot = cursor < lotMax && cursor + footprint.w > lotMin;
@@ -100,7 +101,7 @@ export function placeCoreHooks(placed: readonly PlacedGeometry[], bounds: SceneB
   const place = (hook: WorldHook, side: Side): PlacedCore => {
     // Derived from the entry's own declaration, never restated: editing a
     // CORE_HOOKS footprint has to move the building and its yard with it.
-    const footprint: Footprint = hook.footprint ?? LAYOUT.defaultFootprint[hook.kind];
+    const footprint: Footprint = hook.footprint ?? (hook.kind === "npc" ? LAYOUT.defaultFootprint.npc : LAYOUT.defaultFootprint.building);
     const half = footprint.w / 2;
     const d = footprint.d;
     let x = bounds.maxX - 16;

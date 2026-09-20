@@ -3,7 +3,7 @@ import { DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
 import { LAYOUT, placeCoreHooks, placeHooks, type PlacedGeometry } from "../src/world/layout.js";
 
-const hook = (pluginId: string, id: string, kind: "building" | "npc", order: number, footprint?: { w: number; d: number }): WorldHook => ({
+const hook = (pluginId: string, id: string, kind: "building" | "npc" | "prop", order: number, footprint?: { w: number; d: number }): WorldHook => ({
   pluginId, id, kind, order, label: id, page: `${pluginId}.index`, model: kind === "npc" ? "npc-coat" : id,
   ...(footprint ? { footprint } : {}),
 });
@@ -92,6 +92,18 @@ describe("placeHooks", () => {
     const [b, n] = placeHooks([hook("p", "b", "building", 1), hook("p", "n", "npc", 2)], DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
     expect(b!.footprint).toEqual({ w: 12, d: 9 });
     expect(n!.footprint).toEqual({ w: 1, d: 1 });
+  });
+
+  it("skips prop hooks and ignores zone in the default layout", () => {
+    const withProp: WorldHook[] = [
+      ...poc,
+      { pluginId: "theft", id: "car-1", kind: "prop", order: 60, label: "Parked car", page: "theft.index", model: "sedan", footprint: { w: 4, d: 2 }, zone: "parking" },
+      { ...hook("gym", "gym", "building", 70, { w: 12, d: 9 }), zone: "main" },
+    ];
+    const placed = placeHooks(withProp, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
+    expect(placed.map((p) => p.hook.id)).toEqual([...poc.map((h) => h.id), "gym"]);
+    // The building/npc placements are byte-identical to a run without the prop.
+    expect(placed.slice(0, poc.length)).toEqual(placeHooks(poc, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN));
   });
 });
 

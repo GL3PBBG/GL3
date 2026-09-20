@@ -148,6 +148,12 @@ describe("definePlugin", () => {
     expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, id: "bank", footprint: { w: 0, d: 5 } }] })).toThrow(/footprint/);
     expect(() => definePlugin({ ...valid, worldHooks: [{ ...base, id: "bank", footprint: { w: 31, d: 5 } }] })).toThrow(/footprint/);
   });
+
+  it("accepts a prop hook with a zone and rejects a zone that is not a lowercase tag", () => {
+    const base = { id: "car", kind: "prop" as const, label: "Parked car", page: "t.index", model: "sedan", footprint: { w: 4, d: 2 }, order: 1 };
+    expect(definePlugin({ id: "t", version: "1.0.0", basePaths: ["/api/t"], pages: [{ id: "t.index", path: "/t", view: { kind: "list", items: [] } }], worldHooks: [{ ...base, zone: "parking" }] }).worldHooks[0]!.zone).toBe("parking");
+    expect(() => definePlugin({ id: "t", version: "1.0.0", basePaths: ["/api/t"], worldHooks: [{ ...base, zone: "Parking Lot" }] })).toThrow();
+  });
 });
 
 describe("apiVersion", () => {

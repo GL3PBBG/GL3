@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientFrameSchema, ServerFrameSchema, PresenceStateSchema, RoomDescriptorSchema, PlacedHookSchema,
-  DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN,
+  DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN, HookKindSchema, SceneTemplateSchema,
 } from "../src/index.js";
 
 const id = "0192a1b2-0000-7000-8000-000000000001";
@@ -88,5 +88,24 @@ describe("core-hook yard and presence sentence", () => {
     expect(PresenceStateSchema.parse({ ...state, sentence: null }).sentence).toBeNull();
     expect(PresenceStateSchema.parse(state).sentence).toBeUndefined();
     expect(PresenceStateSchema.safeParse({ ...state, sentence: "prison" }).success).toBe(false);
+  });
+});
+
+describe("hook kinds and scene templates", () => {
+  it("accepts prop as a hook kind", () => {
+    expect(HookKindSchema.parse("prop")).toBe("prop");
+  });
+  it("parses a minimal template and rejects a bad zone", () => {
+    const t = {
+      key: "t", bounds: { minX: -10, minY: -10, maxX: 10, maxY: 10 }, spawn: { x: 0, y: 0, facing: 0 },
+      roads: [{ from: { x: -10, y: 0 }, to: { x: 10, y: 0 }, halfWidth: 3, pavement: 1 }],
+      slots: [{ id: "a", accepts: "building", zone: "main", position: { x: 0, y: 6 }, facing: Math.PI, max: { w: 4, d: 3 } }],
+      facilities: {
+        jail: { id: "jail", accepts: "building", zone: "core", position: { x: -6, y: 6 }, facing: Math.PI, max: { w: 4, d: 3 }, yard: { x: -9, y: 6 } },
+        hospital: { id: "hospital", accepts: "building", zone: "core", position: { x: -6, y: -6 }, facing: 0, max: { w: 4, d: 3 }, yard: { x: -9, y: -6 } },
+      },
+    };
+    expect(SceneTemplateSchema.parse(t).slots[0]!.zone).toBe("main");
+    expect(SceneTemplateSchema.safeParse({ ...t, slots: [{ ...t.slots[0], zone: "Main Street" }] }).success).toBe(false);
   });
 });

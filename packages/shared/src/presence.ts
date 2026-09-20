@@ -23,7 +23,7 @@ export type AvatarBody = z.infer<typeof AvatarBodySchema>;
 export const PresenceErrorCodeSchema = z.enum(["not_joined", "no_location", "rate_limited", "superseded"]);
 export type PresenceErrorCode = z.infer<typeof PresenceErrorCodeSchema>;
 
-export const HookKindSchema = z.enum(["building", "npc"]);
+export const HookKindSchema = z.enum(["building", "npc", "prop"]);
 export type HookKind = z.infer<typeof HookKindSchema>;
 
 export const SceneBoundsSchema = z
@@ -37,6 +37,44 @@ export type SceneSpawn = z.infer<typeof SceneSpawnSchema>;
 
 export const FootprintSchema = z.object({ w: z.number().min(1).max(30), d: z.number().min(1).max(30) });
 export type Footprint = z.infer<typeof FootprintSchema>;
+
+/** Lowercase tag a template slot carries and a hook may ask for (spec 2026-09-20 §1). */
+export const ZoneSchema = z.string().regex(/^[a-z][a-z0-9-]*$/, "zone must be a lowercase tag").max(24);
+
+/** One place a hook can occupy in an authored template. */
+export const SlotSchema = z.object({
+  id: z.string().min(1),
+  accepts: HookKindSchema,
+  zone: ZoneSchema,
+  position: z.object({ x: finite, y: finite }),
+  facing: finite,
+  max: FootprintSchema,
+});
+export type Slot = z.infer<typeof SlotSchema>;
+
+/** A building slot reserved for core.jail / core.hospital, with its confinement yard. */
+export const FacilitySlotSchema = SlotSchema.extend({ yard: z.object({ x: finite, y: finite }) });
+export type FacilitySlot = z.infer<typeof FacilitySlotSchema>;
+
+/** A straight road segment; `halfWidth` is the carriageway, `pavement` the extra band each side. */
+export const RoadSchema = z.object({
+  from: z.object({ x: finite, y: finite }),
+  to: z.object({ x: finite, y: finite }),
+  halfWidth: z.number().positive(),
+  pavement: z.number().nonnegative(),
+});
+export type Road = z.infer<typeof RoadSchema>;
+
+/** An authored city layout (spec 2026-09-20 §1, §7), served at GET /api/world/template/:sceneKey. */
+export const SceneTemplateSchema = z.object({
+  key: z.string().min(1),
+  bounds: SceneBoundsSchema,
+  spawn: SceneSpawnSchema,
+  roads: z.array(RoadSchema),
+  slots: z.array(SlotSchema),
+  facilities: z.object({ jail: FacilitySlotSchema, hospital: FacilitySlotSchema }),
+});
+export type SceneTemplate = z.infer<typeof SceneTemplateSchema>;
 
 export const DEFAULT_SCENE_KEY = "default";
 export const DEFAULT_SCENE_BOUNDS: SceneBounds = { minX: -40, minY: -20, maxX: 40, maxY: 20 };

@@ -340,3 +340,18 @@ describe("validatePlugins view-action containment", () => {
     expect(() => validatePlugins([manifest])).toThrow(/POST \/api\/hello\/x\/\.\.\/y/);
   });
 });
+
+describe("prop world hooks", () => {
+  const page = { id: "t.index", path: "/t", view: { kind: "list" as const, items: [] } };
+  it("refuses a prop without a footprint", () => {
+    const p = definePlugin({ id: "t", version: "1.0.0", basePaths: ["/api/t"], pages: [page],
+      worldHooks: [{ id: "car", kind: "prop", label: "Car", page: "t.index", model: "sedan", order: 1 }] });
+    expect(() => validatePlugins([p])).toThrow(/prop .* must declare a footprint/);
+  });
+  it("refuses a prop with a signageSlot", () => {
+    const p = definePlugin({ id: "t", version: "1.0.0", basePaths: ["/api/t"], pages: [page],
+      providesAssets: [{ slot: "s", label: "S", singleton: true }],
+      worldHooks: [{ id: "car", kind: "prop", label: "Car", page: "t.index", model: "sedan", footprint: { w: 4, d: 2 }, order: 1, signageSlot: "s" }] });
+    expect(() => validatePlugins([p])).toThrow(/prop .* cannot carry a signageSlot/);
+  });
+});
