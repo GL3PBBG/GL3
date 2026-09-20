@@ -149,29 +149,23 @@ function stepMoves(game: GameDef, gameId: string, state: unknown, done: boolean)
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/casino — the lobby.
+// GET /api/casino — the lobby, and the summary/games/tables row sources built
+// over the same read.
 // ---------------------------------------------------------------------------
 
 /**
  * Every installed game with, for the town the player is standing in, its house
  * owner and its maximum bet; plus the player's own open hand if they have one.
+ * What `GET /api/casino` answers, and the one read behind the three row/
+ * summary sources below it — a view-node client (Task 4) draws the lobby from
+ * those rather than this hand-shaped body.
  *
  * Read-only and lock-free: `resolveHouse` reads through `ownerAt`, which is
  * unlocked by design, and nothing here moves money or writes a row. That is
  * also why the lazy forfeit is NOT here — it settles a session and so belongs
  * in a route that already holds the locks that write takes (`play`).
  */
-const lobbyRoute = route({
-  method: "GET",
-  path: "/api/casino",
-  // Same gates as `play` and `act` (spec §4.2): the lobby is the table's front
-  // door, so a cell closes it and a hospital bed does not.
-  accessInJail: false,
-  accessInHospital: true,
-  handler: async (ctx) => {
-    const player = ctx.player;
-    if (player === null) throw new PluginError("unauthorized", 401);
-
+async function readLobby(ctx: PluginCtx, player: NonNullable<PluginCtx["player"]>) {
     // Request-time and per-request, exactly as `play`/`act` build it — there is
     // deliberately no module-level cache (Task 6: a process-level registry
     // outlives a test's plugin set). The TABLE registry (Task 12) is built the
@@ -331,8 +325,6 @@ const lobbyRoute = route({
       const liveGame = live === null ? undefined : registry.get(live.gameId);
 
       return {
-        status: 200,
-        body: {
           locationId,
           locationName: location?.name ?? "",
           minBet: readMinBet(ctx.settings).toString(),
@@ -354,9 +346,100 @@ const lobbyRoute = route({
             moves: liveGame === undefined ? null : safeMoves(liveGame, fromStorableState(live.state)),
             expiresAt: expiresAt(live.createdAt, expiryMinutes).toISOString(),
           },
+        };
+      });
+}
+
+/** Inferred from `readLobby` rather than restated, for the routes below. */
+type LobbyBody = Awaited<ReturnType<typeof readLobby>>;
+
+const lobbyRoute = route({
+  method: "GET",
+  path: "/api/casino",
+  // Same gates as `play` and `act` (spec §4.2): the lobby is the table's front
+  // door, so a cell closes it and a hospital bed does not.
+  accessInJail: false,
+  accessInHospital: true,
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    return { status: 200, body: await readLobby(ctx, player) };
+  },
+});
+
+const summaryRoute = route({
+  method: "GET",
+  path: "/api/casino/summary",
+  accessInJail: false,
+  accessInHospital: true,
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const lobbyBody: LobbyBody = await readLobby(ctx, player);
+    return {
+      status: 200,
+      body: {
+        values: {
+          town: lobbyBody.locationName,
+          minBet: lobbyBody.minBet,
+          cash: player.cash.toString(),
+          openHand: lobbyBody.session === null ? "none" : lobbyBody.session.gameName,
         },
-      };
-    });
+      },
+    };
+  },
+});
+
+/** The row cell for a house owner: a name, or the house itself when unowned. */
+const houseCell = (ownerName: string | null): string => ownerName ?? "the house";
+
+const gamesRowsRoute = route({
+  method: "GET",
+  path: "/api/casino/games/rows",
+  accessInJail: false,
+  accessInHospital: true,
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const lobbyBody: LobbyBody = await readLobby(ctx, player);
+    return {
+      status: 200,
+      body: {
+        rows: lobbyBody.games.map((game) => ({
+          id: game.gameId,
+          name: game.name,
+          kind: game.machine ? "machine" : "solo",
+          house: houseCell(game.ownerName),
+          maxBet: game.maxBet,
+        })),
+      },
+    };
+  },
+});
+
+const tablesRowsRoute = route({
+  method: "GET",
+  path: "/api/casino/tables/rows",
+  accessInJail: false,
+  accessInHospital: true,
+  handler: async (ctx) => {
+    const player = ctx.player;
+    if (player === null) throw new PluginError("unauthorized", 401);
+    const lobbyBody: LobbyBody = await readLobby(ctx, player);
+    return {
+      status: 200,
+      body: {
+        rows: lobbyBody.tableGames.map((game) => ({
+          id: game.gameId,
+          name: game.name,
+          house: houseCell(game.ownerName),
+          maxBet: game.maxBet,
+          maxSeats: String(game.maxSeats),
+          tables: String(game.tables.length),
+          seated: String(game.tables.reduce((n, t) => n + t.seatsFilled, 0)),
+        })),
+      },
+    };
   },
 });
 
@@ -833,7 +916,10 @@ export default definePlugin({
   }],
   migrations: CASINO_MIGRATIONS,
   tables: { sessions: "p_casino_sessions", tables: "p_casino_tables", seats: "p_casino_seats", machines: "p_casino_machines" },
-  routes: [lobbyRoute, playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes, ...machineRoutes],
+  routes: [
+    lobbyRoute, summaryRoute, gamesRowsRoute, tablesRowsRoute,
+    playRoute, actRoute, adminSettingsRoute, adminSessionsRoute, ...tableRoutes, ...machineRoutes,
+  ],
   // The hub's only event, and a SILENT one: a table tick is a state signal
   // for the seats at that table, never a line in anybody's feed. Solo
   // `play`/`act` publish nothing at all — a solo hand has exactly one

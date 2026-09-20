@@ -418,6 +418,55 @@ describe("GET /api/casino", () => {
   });
 });
 
+describe("lobby rows", () => {
+  it("serves summary values and string game rows from the same read as the lobby", async () => {
+    const punter = await register();
+    const locationId = await seedLocation();
+    await placePlayer(punter.playerId, locationId, 1_000_000n);
+
+    const lobbyRes = await lobby(punter.token);
+    expect(lobbyRes.statusCode).toBe(200);
+    const lobbyBody = lobbyRes.json<{
+      locationName: string; minBet: string;
+      games: { gameId: string }[]; tableGames: { gameId: string }[];
+    }>();
+
+    const summaryRes = await app.inject({
+      method: "GET", url: "/api/casino/summary", headers: auth(punter.token),
+    });
+    expect(summaryRes.statusCode).toBe(200);
+    expect(summaryRes.json<{ values: Record<string, string> }>().values).toEqual({
+      town: lobbyBody.locationName,
+      minBet: lobbyBody.minBet,
+      cash: expect.any(String),
+      openHand: "none",
+    });
+
+    const gamesRes = await app.inject({
+      method: "GET", url: "/api/casino/games/rows", headers: auth(punter.token),
+    });
+    expect(gamesRes.statusCode).toBe(200);
+    const gameRows = gamesRes.json<{ rows: Record<string, string>[] }>().rows;
+    expect(gameRows.map((r) => r.id)).toEqual(lobbyBody.games.map((g) => g.gameId));
+    const faroRow = gameRows.find((r) => r.id === FARO.id);
+    expect(faroRow).toEqual({
+      id: FARO.id, name: FARO.name, kind: "solo", house: "the house", maxBet: expect.any(String),
+    });
+    for (const row of gameRows) for (const value of Object.values(row)) expect(typeof value).toBe("string");
+
+    const tablesRes = await app.inject({
+      method: "GET", url: "/api/casino/tables/rows", headers: auth(punter.token),
+    });
+    expect(tablesRes.statusCode).toBe(200);
+    const tableRows = tablesRes.json<{ rows: Record<string, string>[] }>().rows;
+    expect(tableRows.map((r) => r.id)).toEqual(lobbyBody.tableGames.map((g) => g.gameId));
+    for (const row of tableRows) {
+      for (const value of Object.values(row)) expect(typeof value).toBe("string");
+      expect(row).toMatchObject({ tables: "0", seated: "0" });
+    }
+  });
+});
+
 describe("the lazy forfeit", () => {
   it("forfeits a hand older than session_expiry_minutes on the next play", async () => {
     const punter = await register();
