@@ -114,7 +114,9 @@ key — `garage`, `bank`, `station`, `newsstand`, `npc-suit`, `npc-coat`, … �
 unknown keys fall back by `kind`), `footprint {w, d}` (buildings are 3 m-grid,
 12×9 or 6×6), `position` (footprint centre), `facing`, `href`
 (`/plugins/<pageId>`) and `signageUrl` (an image bound by an admin, or `null`).
-The last two hooks are always core's `core.jail` and `core.hospital`, pinned
+The bundled plugins declare five doors on the default street — `travel.station`,
+`crimes.corner` (an npc), `bank.bank`, `casino.casino` and `inventory.shop` (6×6) —
+and a template town may add more. The last two hooks are always core's `core.jail` and `core.hospital`, pinned
 at the east end of the street with an extra `yard {x, y}` — the confinement
 spot for a sentenced player.
 
