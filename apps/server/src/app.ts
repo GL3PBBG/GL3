@@ -33,6 +33,7 @@ import { registerThemeRoutes } from "./theme/routes.js";
 import { registerLegalRoutes } from "./legal/routes.js";
 import { registerWorldRoutes } from "./world/routes.js";
 import { createSceneService } from "./world/scene.js";
+import { assertTemplatesValid } from "./world/templates/index.js";
 import { registerWsRoutes } from "./ws/routes.js";
 
 export interface AppDeps {
@@ -208,7 +209,10 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerPluginsEndpoint(app, loaded.payload, loaded.coreFilters);
   registerExtensionRoutes(app, pluginCtxDeps, loaded.coreFilters);
   // After plugins load: the scene service places `loaded.worldHooks`, which
-  // only exists once every manifest has been validated and collected.
+  // only exists once every manifest has been validated and collected. A bad
+  // authored template is a build defect, so this throws at boot rather than
+  // letting the first request to hit it 500.
+  assertTemplatesValid();
   registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks, coreHooks: config.profile !== "framework" }), requireAuth);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests, loadedSettings);
   // After the plugins are loaded: the bind route validates a slot against the

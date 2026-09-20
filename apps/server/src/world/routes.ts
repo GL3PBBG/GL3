@@ -5,8 +5,10 @@ import { z } from "zod";
 import type { Db } from "../db/client.js";
 import { playerStats } from "../db/schema/index.js";
 import type { SceneService } from "./scene.js";
+import { SCENE_TEMPLATES } from "./templates/index.js";
 
 const ParamsSchema = z.object({ locationId: IdSchema });
+const TemplateParamsSchema = z.object({ sceneKey: z.string().min(1).max(64) });
 
 /**
  * REST face of the scene descriptor (spec 2026-09-17 §1.4) for a client that
@@ -36,5 +38,13 @@ export function registerWorldRoutes(
     const room = await scenes.forLocation(params.data.locationId);
     if (!room) return reply.code(404).send({ error: "unknown_location" });
     return reply.send(room);
+  });
+
+  app.get("/api/world/template/:sceneKey", { preHandler: requireAuth }, async (request, reply) => {
+    const params = TemplateParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const template = SCENE_TEMPLATES.get(params.data.sceneKey);
+    if (template === undefined) return reply.code(404).send({ error: "unknown_template" });
+    return reply.send(template);
   });
 }

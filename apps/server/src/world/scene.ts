@@ -10,7 +10,9 @@ import type { StorageDriver } from "../assets/driver.js";
 import { resolveSingletonAsset } from "../assets/service.js";
 import type { Db } from "../db/client.js";
 import { locations, locationScenes } from "../db/schema/index.js";
+import { assignHooks } from "./assign.js";
 import { placeCoreHooks, placeHooks, type PlacedCore, type PlacedGeometry } from "./layout.js";
+import { SCENE_TEMPLATES } from "./templates/index.js";
 
 export interface SceneService {
   /** The room descriptor for a town, or null when no such location exists. */
@@ -44,27 +46,42 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
   /** Plugin geometry and the core placement derived from it share one cache entry. */
   interface Layout { placed: PlacedGeometry[]; core: PlacedCore[] }
   const layouts = new Map<string, Layout>();
-  const layoutFor = (bounds: SceneBounds, spawn: SceneSpawn): Layout => {
-    const key = JSON.stringify([bounds, spawn]);
+  const layoutFor = (sceneKey: string, bounds: SceneBounds, spawn: SceneSpawn): Layout => {
+    const key = JSON.stringify([sceneKey, bounds, spawn]);
     let layout = layouts.get(key);
     if (layout === undefined) {
-      const placed = placeHooks(deps.hooks, bounds, spawn);
-      const core = deps.coreHooks ? placeCoreHooks(placed, bounds) : [];
-      // Overflow is served as computed, exactly as plugin-hook overflow is
-      // (spec §1) — but it is worth saying once per distinct layout, which
-      // is what this memo makes "once" mean. The test is the yard's east
-      // EDGE, not its centre: the yard spans `x + 6 … x + 12` around a
-      // centre of `x + 9`, so it has already run off the street three
-      // metres before its centre does.
-      for (const g of core) {
-        if (g.yard.x + 3 > bounds.maxX) {
-          console.warn(
-            { hookId: g.hook.id, x: g.position.x, yardEastX: g.yard.x + 3, maxX: bounds.maxX },
-            "world: core hook overflows the street",
+      const template = SCENE_TEMPLATES.get(sceneKey);
+      if (template !== undefined) {
+        const { placed, core, dropped } = assignHooks(template, deps.hooks, deps.coreHooks);
+        // Once per distinct layout, like the overflow warning below: a dropped
+        // hook is a missing door, and a missing door is an operator's problem
+        // to see, not a player's page to 500.
+        for (const d of dropped) {
+          console.error(
+            { template: template.key, pluginId: d.hook.pluginId, hookId: d.hook.id, kind: d.hook.kind, zone: d.hook.zone ?? null, reason: d.reason },
+            "world: hook dropped — no free slot",
           );
         }
+        layout = { placed, core };
+      } else {
+        const placed = placeHooks(deps.hooks, bounds, spawn);
+        const core = deps.coreHooks ? placeCoreHooks(placed, bounds) : [];
+        // Overflow is served as computed, exactly as plugin-hook overflow is
+        // (spec §1) — but it is worth saying once per distinct layout, which
+        // is what this memo makes "once" mean. The test is the yard's east
+        // EDGE, not its centre: the yard spans `x + 6 … x + 12` around a
+        // centre of `x + 9`, so it has already run off the street three
+        // metres before its centre does.
+        for (const g of core) {
+          if (g.yard.x + 3 > bounds.maxX) {
+            console.warn(
+              { hookId: g.hook.id, x: g.position.x, yardEastX: g.yard.x + 3, maxX: bounds.maxX },
+              "world: core hook overflows the street",
+            );
+          }
+        }
+        layout = { placed, core };
       }
-      layout = { placed, core };
       layouts.set(key, layout);
     }
     return layout;
@@ -78,19 +95,22 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
       if (!town) return null;
 
       const [row] = await deps.db.select().from(locationScenes).where(eq(locationScenes.locationId, locationId));
+      const sceneKey = row?.sceneKey ?? DEFAULT_SCENE_KEY;
+      const template = SCENE_TEMPLATES.get(sceneKey);
       // jsonb columns are validated on the way OUT: there is no writer yet,
       // and a hand-edited row must fail loudly here rather than as a client
-      // that parses the snapshot and refuses to render.
-      const bounds = row ? SceneBoundsSchema.parse(row.bounds) : DEFAULT_SCENE_BOUNDS;
-      const spawn = row ? SceneSpawnSchema.parse(row.spawn) : DEFAULT_SCENE_SPAWN;
-      const sceneKey = row?.sceneKey ?? DEFAULT_SCENE_KEY;
+      // that parses the snapshot and refuses to render. A template's own
+      // bounds/spawn win over the row (spec §3) — they are the authored
+      // contract the client is built to, not an operator-editable field.
+      const bounds = template?.bounds ?? (row ? SceneBoundsSchema.parse(row.bounds) : DEFAULT_SCENE_BOUNDS);
+      const spawn = template?.spawn ?? (row ? SceneSpawnSchema.parse(row.spawn) : DEFAULT_SCENE_SPAWN);
 
       // Concurrent, not sequential: spec §B.10 asks for one resolution per
       // hook, and each is an independent `(scope, slot)` pair. A hook whose
       // signage cannot be read renders unsigned rather than taking the whole
       // street down with it — the malformed-jsonb parse above deliberately
       // still throws, because a room the client cannot place is not a room.
-      const { placed, core } = layoutFor(bounds, spawn);
+      const { placed, core } = layoutFor(sceneKey, bounds, spawn);
       const signage = await Promise.all(placed.map(async ({ hook }) => {
         if (hook.signageSlot === undefined) return null;
         try {

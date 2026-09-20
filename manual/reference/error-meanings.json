@@ -129,6 +129,7 @@
  "core:unknown_location": "No location exists with the requested id",
  "core:unknown_module": "The grant's module key does not match any loaded module, so the grant would silently do nothing.",
  "core:unknown_slot": "The named art slot is not declared by any loaded plugin or core registry (for page-banner fetches, it must also be a singleton slot).",
+ "core:unknown_template": "No scene template is registered under the requested key",
  "core:unsupported_media_type": "The asset upload body was not raw image bytes with a recognized image content type.",
  "core:username_taken": "The requested username is already registered to another account.",
  "core:wrong_answer": "The challenge answer did not match; the stored question is burnt (GETDEL), fetch a fresh one",
