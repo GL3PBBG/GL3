@@ -293,6 +293,7 @@ export default defineWorkspace([
         "test/world-hooks-collect.test.ts",
         "test/world-layout.test.ts",
         "test/world-template-validate.test.ts",
+        "test/world-assign.test.ts",
         "test/legal-render.test.ts",
       ],
     },
