@@ -378,8 +378,10 @@ describe("GET /api/casino table listings", () => {
     // The owner's lever IS the maximum bet (V2 blackjack.inc.php:276).
     expect(blackjackRow?.maxBet).toBe("50000");
     expect(blackjackRow?.maxSeats).toBe(5);
+    // `sit` with no station lands the fresh table on the floor's lowest free
+    // one (station 0 — Task 8, spec §5.3).
     expect(blackjackRow?.tables).toEqual([
-      { tableId, seatsFilled: 2, maxSeats: 5, phase: "betting" },
+      { tableId, seatsFilled: 2, maxSeats: 5, phase: "betting", station: 0 },
     ]);
 
     // A registered table game with NO live table still appears, tables: [].

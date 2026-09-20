@@ -248,17 +248,18 @@ async function readLobby(ctx: PluginCtx, player: NonNullable<PluginCtx["player"]
           tableId: casinoTables.id,
           gameId: casinoTables.gameId,
           phase: casinoTables.phase,
+          station: casinoTables.station,
           seatsFilled: sql<number>`count(${casinoSeats.id})::int`,
         })
         .from(casinoTables)
         .leftJoin(casinoSeats, eq(casinoSeats.tableId, casinoTables.id))
         .where(eq(casinoTables.locationId, locationId))
-        .groupBy(casinoTables.id, casinoTables.gameId, casinoTables.phase);
+        .groupBy(casinoTables.id, casinoTables.gameId, casinoTables.phase, casinoTables.station);
 
-      const tablesByGame = new Map<string, { tableId: string; seatsFilled: number; maxSeats: number; phase: string }[]>();
+      const tablesByGame = new Map<string, { tableId: string; seatsFilled: number; maxSeats: number; phase: string; station: number | null }[]>();
       for (const row of localTableRows) {
         const list = tablesByGame.get(row.gameId) ?? [];
-        list.push({ tableId: row.tableId, seatsFilled: row.seatsFilled, maxSeats, phase: row.phase });
+        list.push({ tableId: row.tableId, seatsFilled: row.seatsFilled, maxSeats, phase: row.phase, station: row.station });
         tablesByGame.set(row.gameId, list);
       }
 

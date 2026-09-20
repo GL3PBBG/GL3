@@ -8,6 +8,7 @@ import {
 import {
   escrow, guardGame, NonNegativeIntegerString, parseAction, resolveHouse,
 } from "./engine.js";
+import { stationsFor } from "./floor.js";
 import { boundMoves, buildTableRegistry, type TableGameDef } from "./games.js";
 import { casinoSeats, casinoTables, locations, players, playerStats } from "./schema.js";
 import { fromStorableState } from "./state.js";
@@ -44,7 +45,10 @@ const sitRoute = route({
   path: "/api/casino/table/sit",
   accessInJail: false,
   accessInHospital: true,
-  body: z.object({ gameId: z.string().min(1).max(80) }).strict(),
+  body: z.object({
+    gameId: z.string().min(1).max(80),
+    station: z.number().int().min(0).max(99).optional(),
+  }).strict(),
   handler: async (ctx, { body }) => {
     const player = ctx.player;
     if (player === null) throw new PluginError("unauthorized", 401);
@@ -52,6 +56,8 @@ const sitRoute = route({
     const game = registry.get(body.gameId);
     if (game === undefined) throw new PluginError("no_such_game", 404);
     const maxSeats = readTableMaxSeats(ctx.settings);
+    const declared = stationsFor(body.gameId);
+    if (body.station !== undefined && !declared.includes(body.station)) throw new PluginError("unknown_station", 400);
 
     return ctx.transaction(async (tx) => {
       // Unlocked pre-read for the clean refusal; the authoritative check is
@@ -70,11 +76,17 @@ const sitRoute = route({
         .where(eq(casinoTables.locationId, locationId))
         .orderBy(asc(casinoTables.createdAt));
       let target: string | null = null;
-      for (const t of tables) {
-        if (t.gameId !== body.gameId) continue;
-        const seats = await tx.db.select({ id: casinoSeats.id }).from(casinoSeats)
-          .where(eq(casinoSeats.tableId, t.id));
-        if (seats.length < maxSeats) { target = t.id; break; }
+      if (body.station !== undefined) {
+        // A named station: THAT table or a fresh one there — never a neighbour.
+        const at = tables.find((t) => t.gameId === body.gameId && t.station === body.station);
+        if (at !== undefined) target = at.id;
+      } else {
+        for (const t of tables) {
+          if (t.gameId !== body.gameId) continue;
+          const seats = await tx.db.select({ id: casinoSeats.id }).from(casinoSeats)
+            .where(eq(casinoSeats.tableId, t.id));
+          if (seats.length < maxSeats) { target = t.id; break; }
+        }
       }
 
       if (target === null) {
@@ -85,9 +97,14 @@ const sitRoute = route({
           ? [player.id] : [player.id, house.ownerId]);
         if (await seatOf(tx, player.id) !== null) throw new PluginError("already_seated", 409);
         const tableId = uuidv7();
+        // The named station if one was given; otherwise the lowest station the
+        // floor declares that no live table of this game already occupies —
+        // `null` once every declared station is taken (or the game has none).
+        const live = new Set(tables.filter((t) => t.gameId === body.gameId && t.station !== null).map((t) => t.station));
+        const station = body.station ?? declared.find((s) => !live.has(s)) ?? null;
         await tx.db.insert(casinoTables).values({
           id: tableId, gameId: body.gameId, locationId,
-          propertyId: house.propertyId, seed: randomBytes(16).toString("hex"),
+          propertyId: house.propertyId, seed: randomBytes(16).toString("hex"), station,
         });
         await tx.db.insert(casinoSeats).values({
           id: uuidv7(), tableId, playerId: player.id, seatNo: 0,
@@ -96,7 +113,7 @@ const sitRoute = route({
         // fires, because it refreshes the LOBBY too (`invalidates: ["casino"]`)
         // and a fresh table is the lobby's most visible change.
         await publishTableTick(tx, ctx, [{ playerId: player.id }], tableId);
-        return { status: 200, body: { tableId, seat: 0 } };
+        return { status: 200, body: { tableId, seat: 0, station } };
       }
 
       const locked = await lockTable(tx, ctx, target, [player.id]);
@@ -135,7 +152,7 @@ const sitRoute = route({
       await publishTableTick(
         tx, ctx, [...before, ...advanced.seats, { playerId: player.id }], target,
       );
-      return { status: 200, body: { tableId: target, seat: seatNo } };
+      return { status: 200, body: { tableId: target, seat: seatNo, station: advanced.table.station } };
     });
   },
 });
@@ -270,6 +287,7 @@ export async function renderTablePayload(
     bankroll: game.bankroll === true || seats.some((s) => s.credits !== null),
     locationId: table.locationId,
     locationName: loc?.name ?? "",
+    station: table.station,
     phase: table.phase,
     handNo: table.handNo,
     deadlineAt: table.deadlineAt === null ? null : table.deadlineAt.toISOString(),

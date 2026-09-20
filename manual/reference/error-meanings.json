@@ -54,6 +54,7 @@
  "casino:session_open": "The caller already has a live, unexpired open hand",
  "casino:table_full": "The table already has the maximum number of seats",
  "casino:unauthorized": "No authenticated player on the request",
+ "casino:unknown_station": "The floor declares no station with that number for the requested game",
  "casino:wager_above_max": "Wager exceeds the house's maximum bet (the owner's lever, or the default when unset)",
  "casino:wager_below_min": "Wager is below the configured minimum bet",
  "casino:wrong_location": "The caller has travelled away from the table's town (bet/act refused; leave still works)",

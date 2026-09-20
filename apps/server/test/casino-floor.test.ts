@@ -4,7 +4,9 @@ import type { Redis } from "ioredis";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CASINO_FLOOR, stationsFor, tableSeats } from "@gl3/plugin-casino";
-import { InteriorDeclSchema } from "@gl3/shared";
+import {
+  CasinoLobbyResponseSchema, CasinoSitResponseSchema, CasinoTableResponseSchema, InteriorDeclSchema,
+} from "@gl3/shared";
 import { locations, playerStats } from "../src/db/schema/index.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoTables } from "./helpers/plugin-tables.js";
@@ -124,5 +126,58 @@ describe("p_casino_tables.station (spec §5.2)", () => {
     // `.cause` (see `helpers/pg-error.ts`).
     const error = await rejectionOf(mk(0));
     expect(pgErrorConstraint(error)).toBe("p_casino_tables_station");
+  });
+});
+
+describe("POST /api/casino/table/sit with a station (spec §5.3)", () => {
+  it("opens a table at the named station and a second sitter joins it", async () => {
+    const locationId = await seedLocation();
+    const a = await register(); await placePlayer(a.playerId, locationId, 1_000_000n);
+    const b = await register(); await placePlayer(b.playerId, locationId, 1_000_000n);
+    const first = CasinoSitResponseSchema.parse((await sit(a.token, "blackjack", 2)).json());
+    expect(first).toMatchObject({ seat: 0, station: 2 });
+    const second = CasinoSitResponseSchema.parse((await sit(b.token, "blackjack", 2)).json());
+    expect(second).toMatchObject({ tableId: first.tableId, seat: 1, station: 2 });
+    const view = CasinoTableResponseSchema.parse((await tableView(a.token)).json());
+    expect(view.table?.station).toBe(2);
+  });
+  it("400s unknown_station for a station the floor does not declare", async () => {
+    const locationId = await seedLocation();
+    const a = await register(); await placePlayer(a.playerId, locationId, 1_000_000n);
+    const res = await sit(a.token, "blackjack", 4);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "unknown_station" });
+  });
+  it("a sit without a station takes the lowest free one, and NULL once all four are live", async () => {
+    const locationId = await seedLocation();
+    const stations: (number | null)[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
+      // Every sitter opens a NEW table: fill each one first so the selection cannot re-use it.
+      const res = CasinoSitResponseSchema.parse((await sit(p.token, "blackjack", i < 4 ? i : undefined)).json());
+      stations.push(res.station ?? null);
+    }
+    expect(stations.slice(0, 4)).toEqual([0, 1, 2, 3]);
+    // The fifth sitter joined station 0's table (first table with a free seat), so:
+    expect(stations[4]).toBe(0);
+  });
+  it("a fresh table with no station given lands on the lowest free station, and off-floor when none is free", async () => {
+    const locationId = await seedLocation();
+    for (const st of [0, 1, 3]) {
+      const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
+      await sit(p.token, "blackjack", st);
+    }
+    // Fill those three tables so a plain sit must open a new one.
+    for (const st of [0, 1, 3]) for (let k = 0; k < 4; k += 1) {
+      const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
+      expect((await sit(p.token, "blackjack", st)).statusCode).toBe(200);
+    }
+    const p = await register(); await placePlayer(p.playerId, locationId, 1_000_000n);
+    expect(CasinoSitResponseSchema.parse((await sit(p.token)).json()).station).toBe(2);
+    for (let k = 0; k < 4; k += 1) { const q = await register(); await placePlayer(q.playerId, locationId, 1_000_000n); await sit(q.token, "blackjack", 2); }
+    const last = await register(); await placePlayer(last.playerId, locationId, 1_000_000n);
+    expect(CasinoSitResponseSchema.parse((await sit(last.token)).json()).station).toBeNull();
+    const lobbyBody = CasinoLobbyResponseSchema.parse((await lobby(last.token)).json());
+    expect(lobbyBody.tableGames.find((g) => g.gameId === "blackjack")?.tables.map((t) => t.station).sort()).toEqual([0, 1, 2, 3, null].sort());
   });
 });
