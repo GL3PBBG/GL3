@@ -1,4 +1,4 @@
-import { HookKindSchema, PoolSchema } from "@gl3/shared";
+import { HookKindSchema, InteriorDeclSchema, PoolSchema, type InteriorDecl } from "@gl3/shared";
 import { z } from "zod";
 import type { AttributePoolDecl } from "./attributes.js";
 import { PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
@@ -170,6 +170,12 @@ export interface WorldHookDecl {
   signageSlot?: string | undefined;
   /** Template zone this hook prefers (spec 2026-09-20 §3); ignored by the default street layout. */
   zone?: string | undefined;
+  /**
+   * A building the player can ENTER (spec 2026-09-20 casino-interior §3): an
+   * interior room with its own bounds, spawn and interaction points. `page`
+   * still opens on interact for web and older clients. Buildings only.
+   */
+  interior?: InteriorDecl | undefined;
 }
 
 /** A declaration once the loader has stamped the owning plugin on it — what `ctx.worldHooks` serves. */
@@ -191,6 +197,7 @@ const WorldHookDeclSchema = z
     order: z.number().int(),
     signageSlot: z.string().regex(PLUGIN_ID_PATTERN).optional(),
     zone: z.string().regex(/^[a-z][a-z0-9-]*$/, "zone must be a lowercase tag").max(24).optional(),
+    interior: InteriorDeclSchema.optional(),
   })
   .strict();
 

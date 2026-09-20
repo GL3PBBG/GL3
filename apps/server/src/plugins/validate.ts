@@ -1,6 +1,7 @@
 import type { PluginManifest, ViewNode } from "@gl3/plugin-sdk";
 import { collectAssetSlots, containsAssetBinder } from "./asset-slots.js";
 import { collectPropertyTypes } from "./property-types.js";
+import { validateInterior } from "../world/interior.js";
 
 /** Core owns these; a plugin claiming one is a hard boot failure (spec: Routes). */
 export const RESERVED_BASE_PATHS = [
@@ -314,6 +315,16 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
         }
         if (hook.signageSlot !== undefined) {
           fail(`plugin "${manifest.id}" world hook "${hook.id}" is a prop and cannot carry a signageSlot`);
+        }
+      }
+      if (hook.interior !== undefined) {
+        // A door is a building (spec 2026-09-20 casino-interior §3): an npc or
+        // a prop has no inside to stand in.
+        if (hook.kind !== "building") {
+          fail(`plugin "${manifest.id}" world hook "${hook.id}" is a ${hook.kind} and cannot carry an interior`);
+        }
+        for (const problem of validateInterior(hook.interior)) {
+          fail(`plugin "${manifest.id}" world hook "${hook.id}" interior: ${problem}`);
         }
       }
     }

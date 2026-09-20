@@ -66,6 +66,7 @@ export {
   type WorldHook,
   SINGLETON_ENTITY_ID,
 } from "./manifest.js";
+export type { InteriorDecl, InteriorPoint, InteriorBinding, SpaceRef } from "@gl3/shared";
 export { route, type PluginRoute, type RouteDef, type RouteResult, type RouteTransport } from "./route.js";
 export { hasPermission } from "./authz.js";
 export {

@@ -294,6 +294,7 @@ export default defineWorkspace([
         "test/world-layout.test.ts",
         "test/world-template-validate.test.ts",
         "test/world-assign.test.ts",
+        "test/world-interior-pure.test.ts",
         "test/legal-render.test.ts",
       ],
     },

@@ -364,3 +364,21 @@ describe("prop world hooks", () => {
     expect(() => validatePlugins([p])).toThrow(/prop .* cannot carry a signageSlot/);
   });
 });
+
+describe("interior world hooks (spec 2026-09-20 casino-interior §3)", () => {
+  const floor = { sceneKey: "floor", bounds: { minX: -12, minY: -9, maxX: 12, maxY: 9 }, spawn: { x: 0, y: -7.5, facing: 0 }, points: [] };
+  const withHook = (hook: Record<string, unknown>) => definePlugin({
+    id: "t", version: "1.0.0", basePaths: ["/api/t"],
+    pages: [{ id: "t.index", path: "/t", view: { kind: "list", items: [] } }],
+    worldHooks: [hook as never],
+  });
+  it("accepts an interior on a building", () => {
+    expect(() => validatePlugins([withHook({ id: "door", kind: "building", label: "Door", page: "t.index", model: "casino", order: 1, interior: floor })])).not.toThrow();
+  });
+  it("refuses an interior on an npc", () => {
+    expect(() => validatePlugins([withHook({ id: "guy", kind: "npc", label: "Guy", page: "t.index", model: "npc-coat", order: 1, interior: floor })])).toThrow(/npc and cannot carry an interior/);
+  });
+  it("names the plugin, hook and rule for a bad floor", () => {
+    expect(() => validatePlugins([withHook({ id: "door", kind: "building", label: "Door", page: "t.index", model: "casino", order: 1, interior: { ...floor, spawn: { x: 99, y: 0, facing: 0 } } })])).toThrow(/plugin "t" world hook "door" interior: spawn lies outside bounds/);
+  });
+});
