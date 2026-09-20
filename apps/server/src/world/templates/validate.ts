@@ -1,7 +1,7 @@
 import type { Road, SceneTemplate, Slot } from "@gl3/shared";
 import { overlaps, slotRect, type Rect } from "./types.js";
 
-/** A road's band as a rectangle: segments are axis-aligned in every shipped template. */
+/** A road's band as a rectangle. Callers only ever pass an axis-aligned road — `validateTemplate` checks that below and excludes any road that fails it from the band checks. */
 function roadRect(road: Road, extra: number): Rect {
   const half = road.halfWidth + extra;
   return {
@@ -37,13 +37,24 @@ export function validateTemplate(t: SceneTemplate): string[] {
   for (let i = 0; i < all.length; i += 1) for (let j = i + 1; j < all.length; j += 1) {
     if (overlaps(slotRect(all[i]!), slotRect(all[j]!))) out.push(`slots "${all[i]!.id}" and "${all[j]!.id}" overlap`);
   }
+  // A diagonal road's band is otherwise under-constrained (`roadRect` assumes
+  // axis-alignment), which would let a diagonal road under-cover the npc
+  // "stands on a pavement" rule below — so a diagonal road is reported here
+  // and excluded from every band check that follows, rather than fed into them.
+  const alignedRoads = t.roads.filter((road) => {
+    if (road.from.x !== road.to.x && road.from.y !== road.to.y) {
+      out.push(`road "${road.from.x},${road.from.y}→${road.to.x},${road.to.y}" is not axis-aligned`);
+      return false;
+    }
+    return true;
+  });
   for (const s of all) {
     const r = slotRect(s);
     if (s.accepts === "building") {
-      if (t.roads.some((road) => overlaps(r, roadRect(road, road.pavement)))) out.push(`slot "${s.id}" intersects a road or pavement`);
+      if (alignedRoads.some((road) => overlaps(r, roadRect(road, road.pavement)))) out.push(`slot "${s.id}" intersects a road or pavement`);
     } else if (s.accepts === "prop") {
-      if (t.roads.some((road) => overlaps(r, roadRect(road, 0)))) out.push(`slot "${s.id}" intersects a road`);
-    } else if (!t.roads.some((road) => contains(roadRect(road, road.pavement), s.position))) {
+      if (alignedRoads.some((road) => overlaps(r, roadRect(road, 0)))) out.push(`slot "${s.id}" intersects a road`);
+    } else if (!alignedRoads.some((road) => contains(roadRect(road, road.pavement), s.position))) {
       out.push(`npc slot "${s.id}" does not stand on a pavement`);
     }
   }

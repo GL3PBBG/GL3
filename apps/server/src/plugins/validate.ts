@@ -25,7 +25,7 @@ export const RESERVED_BASE_PATHS = [
 /** Core module keys `moduleKeysOf` (admin/routes.ts) grants over. A plugin id
  *  equal to one of these makes an unrelated plugin's grant satisfy a core
  *  permission check, because grants are stored as bare, un-namespaced strings. */
-const RESERVED_MODULE_KEYS = ["roles", "rounds", "*"] as const;
+const RESERVED_MODULE_KEYS = ["roles", "rounds", "world", "*"] as const;
 
 function fail(message: string): never {
   throw new Error(`plugin validation failed — ${message}`);

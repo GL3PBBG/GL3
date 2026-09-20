@@ -98,7 +98,9 @@ describe("core world admin", () => {
     expect((await put(admin.token, ny, "default")).statusCode).toBe(200);
     expect(RoomDescriptorSchema.parse((await get(`/api/world/scene/${ny}`, admin.token)).json()).sceneKey).toBe("default");
 
-    expect((await put(admin.token, ny, "nope")).json()).toEqual({ error: "invalid_scene_key" });
+    const badKey = await put(admin.token, ny, "nope");
+    expect(badKey.statusCode).toBe(400);
+    expect(badKey.json()).toEqual({ error: "invalid_scene_key" });
     expect((await put(admin.token, "00000000-0000-0000-0000-000000000000", "default")).json()).toEqual({ error: "unknown_location" });
     expect((await put(plain.token, ny, "default")).statusCode).toBe(403);
     expect((await get("/api/admin/world/scenes", plain.token)).statusCode).toBe(403);

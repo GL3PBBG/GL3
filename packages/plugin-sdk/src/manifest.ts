@@ -1,4 +1,4 @@
-import { PoolSchema } from "@gl3/shared";
+import { HookKindSchema, PoolSchema } from "@gl3/shared";
 import { z } from "zod";
 import type { AttributePoolDecl } from "./attributes.js";
 import { PluginEventDeclSchema, type PluginEventDecl } from "./events.js";
@@ -180,7 +180,7 @@ export interface WorldHook extends WorldHookDecl {
 const WorldHookDeclSchema = z
   .object({
     id: z.string().regex(PLUGIN_ID_PATTERN, "world hook id must be lowercase kebab-case"),
-    kind: z.enum(["building", "npc", "prop"]),
+    kind: HookKindSchema,
     label: z.string().min(1).max(24),
     page: z.string().min(1),
     model: z.string().min(1),

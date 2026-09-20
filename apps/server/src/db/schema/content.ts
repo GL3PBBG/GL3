@@ -70,7 +70,8 @@ export const locations = pgTable("locations", {
 /**
  * Scene descriptor per town for the presence layer (spec 2026-09-17 §1.4).
  * No row → defaults (`DEFAULT_SCENE_*` in @gl3/shared). Read by
- * `world/scene.ts` only; there is no writer yet (admin editing is §8).
+ * `world/scene.ts`; written by `world/admin-routes.ts`'s
+ * `PUT /api/admin/world/scene` (a single-row upsert of `scene_key` only).
  */
 export const locationScenes = pgTable("location_scenes", {
   locationId: uuid("location_id").primaryKey().references(() => locations.id, { onDelete: "cascade" }),

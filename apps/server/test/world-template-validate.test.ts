@@ -40,4 +40,26 @@ describe("validateTemplate", () => {
   it("names a spawn inside a slot", () => {
     expect(validateTemplate({ ...base, spawn: { x: -30, y: -15, facing: 0 } }).some((m) => m.includes("spawn"))).toBe(true);
   });
+
+  it("names a prop bay on the carriageway, an npc off the pavement, a facility that is not a building, and a yard outside bounds", () => {
+    const onRoad = { id: "bay-x", accepts: "prop" as const, zone: "parking", position: { x: 46, y: 50 }, facing: -Math.PI / 2, max: { w: 4, d: 2 } };
+    const offPavement = { id: "npc-x", accepts: "npc" as const, zone: "main", position: { x: -60, y: 60 }, facing: 0, max: { w: 1, d: 1 } };
+    const msgs = validateTemplate({ ...base, slots: [...base.slots, onRoad, offPavement] });
+    expect(msgs.some((m) => m.includes("bay-x") && m.includes("road"))).toBe(true);
+    expect(msgs.some((m) => m.includes("npc-x") && m.includes("pavement"))).toBe(true);
+
+    const badFacility = { ...base.facilities.jail, accepts: "npc" as const };
+    expect(validateTemplate({ ...base, facilities: { ...base.facilities, jail: badFacility } })
+      .some((m) => m.includes("jail") && m.includes("accept building"))).toBe(true);
+
+    const farYard = { ...base.facilities.hospital, yard: { x: -130, y: -15 } };
+    expect(validateTemplate({ ...base, facilities: { ...base.facilities, hospital: farYard } })
+      .some((m) => m.includes("hospital") && m.includes("yard"))).toBe(true);
+  });
+
+  it("names a diagonal road as not axis-aligned", () => {
+    const diagonal = { from: { x: -10, y: -10 }, to: { x: 10, y: 10 }, halfWidth: 7.5, pavement: 3 };
+    const msgs = validateTemplate({ ...base, roads: [...base.roads, diagonal] });
+    expect(msgs.some((m) => m.includes("axis-aligned"))).toBe(true);
+  });
 });

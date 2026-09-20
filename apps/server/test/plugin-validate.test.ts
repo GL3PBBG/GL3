@@ -53,6 +53,15 @@ describe("validatePlugins", () => {
     expect(() => validatePlugins([plugin("evil", ["/api/auth"])])).toThrow(/reserved/);
   });
 
+  // "world" is a core admin module key (world/admin-routes.ts's grant), same
+  // reserved-id shape as "roles" and "rounds" — a plugin claiming it would let
+  // an unrelated plugin's grant satisfy that core permission check.
+  it("rejects a plugin id colliding with a reserved core module key", () => {
+    expect(() => validatePlugins([plugin("world", ["/api/world-fixture"])])).toThrow(
+      /collides with a core admin module key/,
+    );
+  });
+
   it("rejects a route path outside the plugin's declared basePaths", () => {
     const manifest = definePlugin({
       id: "hello",

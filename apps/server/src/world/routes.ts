@@ -13,9 +13,9 @@ const TemplateParamsSchema = z.object({ sceneKey: z.string().min(1).max(64) });
 /**
  * REST face of the scene descriptor (spec 2026-09-17 §1.4) for a client that
  * wants geometry before its socket is up, or wants to preload a destination
- * while a travel request is in flight. Neither route says who is PRESENT —
- * that is socket-only, so an underground town's residents stay concealed
- * by construction rather than by a filter here.
+ * while a travel request is in flight. None of these routes says who is
+ * PRESENT — that is socket-only, so an underground town's residents stay
+ * concealed by construction rather than by a filter here.
  */
 export function registerWorldRoutes(
   app: FastifyInstance, db: Db, scenes: SceneService,
