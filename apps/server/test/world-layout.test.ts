@@ -1,7 +1,7 @@
 import type { WorldHook } from "@gl3/plugin-sdk";
 import { DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN } from "@gl3/shared";
 import { describe, expect, it } from "vitest";
-import { LAYOUT, placeCoreHooks, placeHooks, type PlacedGeometry } from "../src/world/layout.js";
+import { envelopeBounds, LAYOUT, placeCoreHooks, placeHooks, type PlacedGeometry } from "../src/world/layout.js";
 
 const hook = (pluginId: string, id: string, kind: "building" | "npc" | "prop", order: number, footprint?: { w: number; d: number }): WorldHook => ({
   pluginId, id, kind, order, label: id, page: `${pluginId}.index`, model: kind === "npc" ? "npc-coat" : id,
@@ -140,5 +140,68 @@ describe("placeCoreHooks", () => {
     const jailRect = rect(a[0]!);
     const otherRect = rect(north);
     expect(overlaps(jailRect, otherRect)).toBe(false);
+  });
+});
+
+describe("envelopeBounds", () => {
+  it("returns the input bounds unchanged when the layout fits", () => {
+    const placed = placeHooks(poc, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
+    const core = placeCoreHooks(placed, DEFAULT_SCENE_BOUNDS);
+    // The four-building PoC street fits comfortably inside the default
+    // bounds with room to spare, so nothing widens.
+    expect(envelopeBounds(DEFAULT_SCENE_BOUNDS, placed, core)).toEqual(DEFAULT_SCENE_BOUNDS);
+  });
+
+  it("widens maxX to the easternmost building edge or the jail yard's east edge, whichever is larger, plus margin", () => {
+    const eight: WorldHook[] = [];
+    for (let i = 0; i < 8; i++) eight.push(hook("p", `b${i}`, "building", i, { w: 12, d: 9 }));
+    const placed = placeHooks(eight, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
+    const core = placeCoreHooks(placed, DEFAULT_SCENE_BOUNDS);
+    const served = envelopeBounds(DEFAULT_SCENE_BOUNDS, placed, core);
+
+    const easternmostBuildingEdge = Math.max(...placed.map((p) => p.position.x + p.footprint.w / 2));
+    const jailYardEastEdge = core[0]!.yard.x + 3; // jail is core[0] (placeCoreHooks order: jail, hospital)
+    const expectedMaxX = Math.max(easternmostBuildingEdge, jailYardEastEdge) + LAYOUT.margin;
+
+    expect(served.maxX).toBe(expectedMaxX);
+    expect(served.minX).toBe(DEFAULT_SCENE_BOUNDS.minX);
+    expect(served.minY).toBe(DEFAULT_SCENE_BOUNDS.minY);
+    expect(served.maxY).toBe(DEFAULT_SCENE_BOUNDS.maxY);
+    // Sanity: the layout really did overflow the default street, or this
+    // test would pass with `envelopeBounds` deleted entirely.
+    expect(expectedMaxX).toBeGreaterThan(DEFAULT_SCENE_BOUNDS.maxX);
+  });
+
+  it("widens minX for a building placed west of the input bounds", () => {
+    const west: PlacedGeometry = {
+      hook: hook("p", "w", "building", 1, { w: 12, d: 9 }),
+      footprint: { w: 12, d: 9 },
+      position: { x: DEFAULT_SCENE_BOUNDS.minX - 50, y: 15 },
+      facing: Math.PI,
+    };
+    const served = envelopeBounds(DEFAULT_SCENE_BOUNDS, [west], []);
+    expect(served.minX).toBe(west.position.x - west.footprint.w / 2 - LAYOUT.margin);
+    expect(served.maxX).toBe(DEFAULT_SCENE_BOUNDS.maxX);
+    expect(served.minY).toBe(DEFAULT_SCENE_BOUNDS.minY);
+    expect(served.maxY).toBe(DEFAULT_SCENE_BOUNDS.maxY);
+  });
+
+  it("never shrinks: bounds already wider than the layout come back identical", () => {
+    const placed = placeHooks(poc, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
+    const core = placeCoreHooks(placed, DEFAULT_SCENE_BOUNDS);
+    const wide = { minX: -1000, minY: -1000, maxX: 1000, maxY: 1000 };
+    expect(envelopeBounds(wide, placed, core)).toEqual(wide);
+  });
+
+  it("never touches y, even when a hand-built geometry sits far off the street's y range", () => {
+    const offY: PlacedGeometry = {
+      hook: hook("p", "far", "building", 1, { w: 12, d: 9 }),
+      footprint: { w: 12, d: 9 },
+      position: { x: 0, y: 30 },
+      facing: Math.PI,
+    };
+    const served = envelopeBounds(DEFAULT_SCENE_BOUNDS, [offY], []);
+    expect(served.minY).toBe(DEFAULT_SCENE_BOUNDS.minY);
+    expect(served.maxY).toBe(DEFAULT_SCENE_BOUNDS.maxY);
   });
 });

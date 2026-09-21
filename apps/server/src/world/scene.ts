@@ -12,7 +12,7 @@ import type { Db } from "../db/client.js";
 import { locations, locationScenes } from "../db/schema/index.js";
 import { assignHooks } from "./assign.js";
 import { exitSpotFor, interiorDescriptor } from "./interior.js";
-import { placeCoreHooks, placeHooks, type PlacedCore, type PlacedGeometry } from "./layout.js";
+import { envelopeBounds, placeCoreHooks, placeHooks, type PlacedCore, type PlacedGeometry } from "./layout.js";
 import { SCENE_TEMPLATES } from "./templates/index.js";
 
 /** The answer to one interior lookup: the room, or why there is none. */
@@ -51,44 +51,39 @@ export interface SceneServiceDeps {
  * a different `(scope, slot)` pair that `resolveAssets` cannot batch anyway.
  */
 export function createSceneService(deps: SceneServiceDeps): SceneService {
-  /** Plugin geometry and the core placement derived from it share one cache entry. */
-  interface Layout { placed: PlacedGeometry[]; core: PlacedCore[] }
+  /** Plugin geometry, the core placement derived from it, and the SERVED bounds — a client walks the whole street, never the row's raw claim. */
+  interface Layout { placed: PlacedGeometry[]; core: PlacedCore[]; bounds: SceneBounds }
   const layouts = new Map<string, Layout>();
-  const layoutFor = (sceneKey: string, bounds: SceneBounds, spawn: SceneSpawn): Layout => {
-    const key = JSON.stringify([sceneKey, bounds, spawn]);
+  const layoutFor = (sceneKey: string, rowBounds: SceneBounds, spawn: SceneSpawn): Layout => {
+    const key = JSON.stringify([sceneKey, rowBounds, spawn]);
     let layout = layouts.get(key);
     if (layout === undefined) {
       const template = SCENE_TEMPLATES.get(sceneKey);
       if (template !== undefined) {
         const { placed, core, dropped } = assignHooks(template, deps.hooks, deps.coreHooks);
-        // Once per distinct layout, like the overflow warning below: a dropped
-        // hook is a missing door, and a missing door is an operator's problem
-        // to see, not a player's page to 500.
+        // Once per distinct layout, like the widened-bounds notice below: a
+        // dropped hook is a missing door, and a missing door is an
+        // operator's problem to see, not a player's page to 500.
         for (const d of dropped) {
           console.error(
             { template: template.key, pluginId: d.hook.pluginId, hookId: d.hook.id, kind: d.hook.kind, zone: d.hook.zone ?? null, reason: d.reason },
             "world: hook dropped — no free slot",
           );
         }
-        layout = { placed, core };
+        // Templates are validated to contain every slot they place (spec
+        // 2026-09-20 §2), so the authored bounds are already the served ones.
+        layout = { placed, core, bounds: template.bounds };
       } else {
-        const placed = placeHooks(deps.hooks, bounds, spawn);
-        const core = deps.coreHooks ? placeCoreHooks(placed, bounds) : [];
-        // Overflow is served as computed, exactly as plugin-hook overflow is
-        // (spec §1) — but it is worth saying once per distinct layout, which
-        // is what this memo makes "once" mean. The test is the yard's east
-        // EDGE, not its centre: the yard spans `x + 6 … x + 12` around a
-        // centre of `x + 9`, so it has already run off the street three
-        // metres before its centre does.
-        for (const g of core) {
-          if (g.yard.x + 3 > bounds.maxX) {
-            console.warn(
-              { hookId: g.hook.id, x: g.position.x, yardEastX: g.yard.x + 3, maxX: bounds.maxX },
-              "world: core hook overflows the street",
-            );
-          }
+        const placed = placeHooks(deps.hooks, rowBounds, spawn);
+        const core = deps.coreHooks ? placeCoreHooks(placed, rowBounds) : [];
+        const bounds = envelopeBounds(rowBounds, placed, core);
+        // Once per distinct layout: a widened street is an operator-visible
+        // fact, not a player-visible one — there is no invisible wall to
+        // report any more, only a street that grew to fit what stands on it.
+        if (bounds.minX !== rowBounds.minX || bounds.maxX !== rowBounds.maxX) {
+          console.info({ sceneKey, from: rowBounds, to: bounds }, "world: street bounds widened to fit the layout");
         }
-        layout = { placed, core };
+        layout = { placed, core, bounds };
       }
       layouts.set(key, layout);
     }
@@ -118,9 +113,12 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
     // that parses the snapshot and refuses to render. A template's own
     // bounds/spawn win over the row (spec §3) — they are the authored
     // contract the client is built to, not an operator-editable field.
-    const bounds = template?.bounds ?? (row ? SceneBoundsSchema.parse(row.bounds) : DEFAULT_SCENE_BOUNDS);
+    const rowBounds = template?.bounds ?? (row ? SceneBoundsSchema.parse(row.bounds) : DEFAULT_SCENE_BOUNDS);
     const spawn = template?.spawn ?? (row ? SceneSpawnSchema.parse(row.spawn) : DEFAULT_SCENE_SPAWN);
-    const { placed, core } = layoutFor(sceneKey, bounds, spawn);
+    // Placement is keyed on the ROW bounds — no town's building positions
+    // move — but everything downstream serves the layout's own `bounds`,
+    // widened to contain what was actually placed on it (2026-09-21).
+    const { placed, core, bounds } = layoutFor(sceneKey, rowBounds, spawn);
     return { town, sceneKey, bounds, spawn, placed, core };
   };
 

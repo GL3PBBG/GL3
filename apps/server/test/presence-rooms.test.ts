@@ -206,30 +206,34 @@ describe("presence.move", () => {
   });
 
   it("clamps an out-of-bounds position to the room bounds", async () => {
-    // A 4x4 room, so the BOUNDS are demonstrably what bind this move. The
-    // default room is 80x40, where the speed clamp alone already holds a
-    // far-away target inside the bounds and the assertion would pass with
-    // the bounds clamp deleted. Here the clamped corner is 2.83 m from
-    // spawn while the wait below buys ~7 m of travel, so the speed clamp
-    // cannot reach — the exact landing position is the bounds and nothing
-    // else.
+    // A room tight only along Y, so the Y BOUND is demonstrably what binds
+    // this move — X is wide (±40, same as the default street) because a
+    // `default`-shaped row bounds is now widened along X to fit the
+    // layout (2026-09-21 street-bounds-envelope), which would make an X
+    // assertion here prove the wrong thing. The default room is 80x40,
+    // where the speed clamp alone already holds a far-away target inside
+    // the bounds and the assertion would pass with the bounds clamp
+    // deleted; the 1.2 s wait below buys ~7 m of travel, well past the 4 m
+    // (±2) the Y clamp needs to bind — so the speed clamp cannot reach and
+    // the exact landing Y is the bounds and nothing else.
     await db.insert(locationScenes).values({
       locationId: chicago, sceneKey: "tight",
-      bounds: { minX: -2, minY: -2, maxX: 2, maxY: 2 },
+      bounds: { minX: -40, minY: -2, maxX: 40, maxY: 2 },
       spawn: { x: 0, y: 0, facing: 0 },
     });
     const a = await joined(chicago);
     await frameOfKind(a.socket, "presence.snapshot");
     const b = await joined(chicago);
-    await frameOfKind(b.socket, "presence.snapshot");
+    const bYou = (await frameOfKind(b.socket, "presence.snapshot")).you;
+    // The static spot before `b` ever moves — within a few metres of spawn,
+    // well inside the wide X bounds, so X is never in question here.
+    expect(Math.abs(bYou.x)).toBeLessThanOrEqual(8);
     await liveAnnounce(a.socket, b.playerId);
-    // Past the 50 ms dt floor, so the speed clamp has slack to spare. The
-    // static spot is clamped into these bounds too, so the whole diagonal
-    // (2.83 m at most) is well inside the ~7 m this wait buys.
+    // Past the 50 ms dt floor, so the speed clamp has slack to spare.
     await new Promise((r) => setTimeout(r, 1200));
-    move(b.socket, 1, 100, -100);
+    move(b.socket, 1, bYou.x, -100);
     const tick = await movedTick(a.socket);
-    expect(tick.moved[0]!.x).toBe(2);
+    expect(tick.moved[0]!.x).toBe(bYou.x);
     expect(tick.moved[0]!.y).toBe(-2);
   });
 

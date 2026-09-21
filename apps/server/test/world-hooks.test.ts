@@ -62,7 +62,15 @@ describe("GET /api/world/scene", () => {
     expect(res.statusCode).toBe(200);
     const room = RoomDescriptorSchema.parse(res.json());
     expect(room).toMatchObject({ locationId: chicago, locationName: "Chicago", combatMode: "open", sceneKey: "default" });
-    expect(room.bounds).toEqual(DEFAULT_SCENE_BOUNDS);
+    // Served bounds contain the layout (2026-09-21): y is never widened, x
+    // never shrinks, and x widens at least as far as the layout demands.
+    expect(room.bounds.minY).toBe(DEFAULT_SCENE_BOUNDS.minY);
+    expect(room.bounds.maxY).toBe(DEFAULT_SCENE_BOUNDS.maxY);
+    expect(room.bounds.minX).toBeLessThanOrEqual(DEFAULT_SCENE_BOUNDS.minX);
+    const buildingEdges = room.hooks.filter((h) => h.kind === "building").map((h) => h.position.x + h.footprint.w / 2);
+    expect(room.bounds.maxX).toBeGreaterThanOrEqual(Math.max(...buildingEdges) + 4);
+    const coreJail = room.hooks.find((h) => h.id === "core.jail")!;
+    expect(room.bounds.maxX).toBeGreaterThanOrEqual(coreJail.yard!.x + 3 + 4);
     expect(room.spawn).toEqual(DEFAULT_SCENE_SPAWN);
 
     const hall = room.hooks.find((h) => h.id === "worldfix.hall");
@@ -142,6 +150,11 @@ describe("GET /api/world/scene", () => {
     // Placement starts from THIS room's bounds, not the defaults.
     const first = room.hooks.find((h) => h.kind === "building")!;
     expect(first.position.x).toBe(-10 + 4 + first.footprint.w / 2);
+    // Served bounds contain this row's own layout — never the defaults —
+    // and y is this row's own, untouched by widening.
+    expect(room.bounds.maxX).toBeGreaterThanOrEqual(30);
+    expect(room.bounds.minY).toBe(-10);
+    expect(room.bounds.maxY).toBe(10);
   });
 
   it("serves any town by id, 404s an unknown one, and 401s without auth", async () => {
@@ -203,9 +216,13 @@ describe("PoC hooks on the gl3 profile", () => {
     // The sixth building (theft.garage, order 55) lands on the street's north
     // side — inside bounds on its own — but that is the lot core.jail (also
     // north-pinned) would otherwise sit in, so jail slides east past it and
-    // overflows the default street by design (corner-district spec §6); the
-    // template scene is where the garage actually fits.
-    expect(byId.get("core.jail")!.position.x + 6).toBeGreaterThan(room.bounds.maxX);
+    // overflows the DEFAULT street (corner-district spec §6). The served
+    // bounds grow to fit it (2026-09-21) — the street grows, there is no
+    // invisible wall — so the overflow is checked against the raw default,
+    // not against `room.bounds`, which has already widened past it.
+    const coreJail = byId.get("core.jail")!;
+    expect(coreJail.position.x + 6).toBeGreaterThan(DEFAULT_SCENE_BOUNDS.maxX);
+    expect(room.bounds.maxX).toBeGreaterThanOrEqual(coreJail.yard!.x + 3 + 4);
 
     // Nobody stands inside a building: the spawn lot is clear.
     for (const h of room.hooks.filter((h) => h.kind === "building")) {

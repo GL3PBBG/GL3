@@ -82,6 +82,30 @@ export function placeHooks(hooks: readonly WorldHook[], bounds: SceneBounds, spa
   return out;
 }
 
+/**
+ * The street's walkable extent once the layout is known (2026-09-21): the
+ * row's or default bounds, widened ALONG X so every placed building and every
+ * core yard is inside with `LAYOUT.margin` to spare. Never shrinks a bound and
+ * never touches y: the layout's y extents are fixed by `buildingLine + d/2`
+ * (±15 for 12×9) and the default ±20 already holds them, while a row's y
+ * bounds are the operator's own. Pure, so every client agrees.
+ */
+export function envelopeBounds(bounds: SceneBounds, placed: readonly PlacedGeometry[], core: readonly PlacedCore[]): SceneBounds {
+  const x0s: number[] = [];
+  const x1s: number[] = [];
+  for (const g of placed) {
+    x0s.push(g.position.x - g.footprint.w / 2);
+    x1s.push(g.position.x + g.footprint.w / 2);
+  }
+  for (const g of core) {
+    x0s.push(g.position.x - g.footprint.w / 2, g.yard.x - 3);
+    x1s.push(g.position.x + g.footprint.w / 2, g.yard.x + 3);
+  }
+  const minX = x0s.length === 0 ? bounds.minX : Math.min(bounds.minX, Math.min(...x0s) - LAYOUT.margin);
+  const maxX = x1s.length === 0 ? bounds.maxX : Math.max(bounds.maxX, Math.max(...x1s) + LAYOUT.margin);
+  return { minX, minY: bounds.minY, maxX, maxY: bounds.maxY };
+}
+
 export interface PlacedCore extends PlacedGeometry {
   yard: { x: number; y: number };
 }
