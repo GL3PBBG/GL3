@@ -194,6 +194,13 @@ export interface PluginTx {
     clear(playerId: string, key: string): Promise<boolean>;
   };
   /**
+   * Whether a town holds a venue: a `p_properties_properties` row for
+   * `(locationId, venue)` regardless of owner (spec 2026-09-21 town-venues
+   * §2). A plain SELECT, no lock. Always false on a boot without the
+   * `properties` plugin.
+   */
+  readonly venues: { has(locationId: string, venue: string): Promise<boolean> };
+  /**
    * The MCCodes-parity attributes on core's `player_stats` row.
    *
    * CONTRACT: the caller already holds that row through `tx.locks.player`.
@@ -300,6 +307,13 @@ export interface PluginCtx {
     get(id: string): PropertyTypeDecl | null;
     list(): readonly PropertyTypeDecl[];
   };
+  /**
+   * Whether a town holds a venue: a `p_properties_properties` row for
+   * `(locationId, venue)` regardless of owner (spec 2026-09-21 town-venues
+   * §2). A plain SELECT, no lock. Always false on a boot without the
+   * `properties` plugin.
+   */
+  readonly venues: { has(locationId: string, venue: string): Promise<boolean> };
   /**
    * Every attribute pool declared by any installed plugin, from the loader's
    * registry — the same read-only manifest-data shape as `propertyTypes`, and

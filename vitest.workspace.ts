@@ -547,6 +547,7 @@ export default defineWorkspace([
         "test/travel-fare-filter.test.ts",
         "test/travel-lock-order.test.ts",
         "test/travel.test.ts",
+        "test/venues-ctx.test.ts",
         "test/world-hooks.test.ts",
         "test/world-template.test.ts",
         "test/world-interior.test.ts",

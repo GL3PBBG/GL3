@@ -176,6 +176,14 @@ export interface WorldHookDecl {
    * still opens on interact for web and older clients. Buildings only.
    */
   interior?: InteriorDecl | undefined;
+  /**
+   * A property type (any plugin's `providesProperties` id) that must have a
+   * row in a town for this hook to exist there (spec 2026-09-21 town-venues
+   * §2). Absent: the hook is in every town. Checked at boot against the
+   * loaded property registry; cross-plugin references are the norm (the
+   * casino building's venue is blackjack's property, as in V2).
+   */
+  venue?: string | undefined;
 }
 
 /** A declaration once the loader has stamped the owning plugin on it — what `ctx.worldHooks` serves. */
@@ -198,6 +206,7 @@ const WorldHookDeclSchema = z
     signageSlot: z.string().regex(PLUGIN_ID_PATTERN).optional(),
     zone: z.string().regex(/^[a-z][a-z0-9-]*$/, "zone must be a lowercase tag").max(24).optional(),
     interior: InteriorDeclSchema.optional(),
+    venue: z.string().regex(PLUGIN_ID_PATTERN, "venue must be a property type id").optional(),
   })
   .strict();
 

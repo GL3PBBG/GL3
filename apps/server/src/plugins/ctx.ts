@@ -11,7 +11,7 @@ import {
   runFilterChain,
   settlePool,
 } from "@gl3/plugin-sdk";
-import { GameEventSchema, type GameEvent, type LeaderboardKind, type ProgressionModel } from "@gl3/shared";
+import { GameEventSchema, IdSchema, type GameEvent, type LeaderboardKind, type ProgressionModel } from "@gl3/shared";
 import type { Queue } from "bullmq";
 import { and, eq, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
@@ -312,6 +312,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
               return deleted.length > 0;
             },
           },
+          venues: { has: (locationId, venue) => venueExists(tx, options.installedPluginIds, locationId, venue) },
           // See PluginTx's `attributes` doc comment (packages/plugin-sdk/src/ctx.ts):
           // the caller already holds the player row via `tx.locks.player`, so
           // nothing here takes a lock of its own. Written as explicit
@@ -663,6 +664,7 @@ export function createPluginCtx(deps: PluginCtxDeps, options: PluginCtxOptions):
       get: (id) => options.propertyTypes.get(id) ?? null,
       list: () => [...options.propertyTypes.values()],
     },
+    venues: { has: (locationId, venue) => venueExists(deps.db, options.installedPluginIds, locationId, venue) },
     attributePools: {
       get: (pool) => options.attributePools.get(pool) ?? null,
       list: () => [...options.attributePools.values()],
@@ -707,6 +709,21 @@ async function freshStats(tx: Tx, playerId: string): Promise<{ exp: bigint; cash
 /** Narrows the SDK's `string` to core's `GangPermission` without a cast. */
 function isGangPermission(value: string): value is GangPermission {
   return GANG_PERMISSIONS.some((permission) => permission === value);
+}
+
+/**
+ * Spec 2026-09-21 town-venues §2: the row IS the venue. Raw SQL by table
+ * name — core never imports a plugin's schema — and false without the
+ * `properties` plugin installed or on a malformed `locationId` (never a
+ * 500 from a bad id reaching Postgres).
+ */
+async function venueExists(exec: Db | Tx, installed: ReadonlySet<string>, locationId: string, venue: string): Promise<boolean> {
+  if (!installed.has("properties")) return false;
+  if (!IdSchema.safeParse(locationId).success) return false;
+  const rows = await exec.execute(
+    sql`select 1 from p_properties_properties where location_id = ${locationId} and plugin_id = ${venue} limit 1`,
+  );
+  return [...rows].length > 0;
 }
 
 /**
