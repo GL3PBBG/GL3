@@ -17,8 +17,12 @@ import { bootTestServer } from "./helpers/server.js";
  * replaces buy itself, the last route still id-in-path): it now takes
  * {pluginId, locationId} in the body and charges whatever the consumer
  * plugin's `providesProperties` declares (bullets: $1,000,000 — money
- * bigints are whole dollars) rather than a price stored on the row. The row is
- * created lazily on first purchase, as V2 did.
+ * bigints are whole dollars) rather than a price stored on the row.
+ *
+ * Since the town-venues cluster (spec 2026-09-21 §4) the row is NOT created
+ * lazily: a venue exists only where a row already does, so buy takes over an
+ * existing unowned (state-run) row and 404s `no_venue` where there is none.
+ * Every case below that needs a venue seeds the row first.
  *
  * lever/transfer/drop/reset are V2's `propertyManagement` methods: set the
  * local price/limit the property's consumer reads, hand the property to
@@ -145,21 +149,38 @@ describe("properties routes", () => {
     expect(res.json<{ error: string }>().error).toBe("wrong_location");
   });
 
-  // Fix 2 of the final review pass: the row is created lazily on first
-  // purchase (buyRoute's own doc comment), but listRoute used to select
-  // `from(propertiesTable)` and return only rows that already exist — so a
-  // franchise nobody had bought yet had no list entry and no Buy button,
-  // unreachable from the UI on a fresh install. Placed here, before the
-  // first buy below, specifically so no real property row exists yet: this
-  // is the "table ships empty" case the synthesis exists for.
-  it("synthesizes a buyable row for every declared type at the caller's own location only", async () => {
+  // The every-town synthesis is gone (spec 2026-09-21 town-venues §4): a
+  // venue exists only where a property row does, so a town with no row has
+  // an empty board rather than one fabricated Buy button per declared type.
+  // Placed here, before any row is created, so this is the "table ships
+  // empty" case the synthesis used to fill.
+  it("lists nothing in a town with no property row", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ rows: unknown[] }>().rows).toEqual([]);
+  });
+
+  it("refuses a buy in a town with no property row", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/properties/buy", headers: playerHeaders,
+      payload: { pluginId: "bullets", locationId },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toBe("no_venue");
+  });
+
+  // The state-run row (owner null) an admin provisions or first-boot seeding
+  // creates: listed, unowned, priced from the declaration — the shape the
+  // synthesis used to fake.
+  it("lists a state-run row as unowned once the venue exists", async () => {
+    await db.insert(propertiesTable).values({
+      id: uuidv7(), locationId, pluginId: "bullets", ownerPlayerId: null, cost: 0n, profit: 0n,
+    });
+
     const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
     expect(res.statusCode).toBe(200);
     const rows = res.json<{ rows: { pluginId: string; locationId: string; ownerName: string; price: string }[] }>().rows;
 
-    // bullets is the only declared type in this boot, and three locations were
-    // seeded in beforeAll — but the list is the current town's board, so only
-    // the (bullets, here) pair is synthesized, not one per location.
     const bulletsRows = rows.filter((r) => r.pluginId === "bullets");
     expect(bulletsRows.map((r) => r.locationId)).toEqual([locationId]);
     for (const row of bulletsRows) {
@@ -168,9 +189,8 @@ describe("properties routes", () => {
     }
   });
 
-  // The bug this replaced: listRoute selected every row in the table and
-  // synthesized one per (type × EVERY location), so the page was a world
-  // board. Red against the pre-fix handler, which returned all three towns.
+  // The bug this replaced: listRoute selected every row in the table, so the
+  // page was a world board rather than the town's own.
   it("lists no row for a location the caller is not in", async () => {
     const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
     expect(res.statusCode).toBe(200);
@@ -179,7 +199,7 @@ describe("properties routes", () => {
     expect(rows.every((r) => r.locationId === locationId)).toBe(true);
   });
 
-  it("creates the row on first purchase and charges the declared price", async () => {
+  it("takes over the state-run row and charges the declared price", async () => {
     const res = await app.inject({
       method: "POST", url: "/api/properties/buy", headers: playerHeaders,
       payload: { pluginId: "bullets", locationId },
@@ -190,12 +210,10 @@ describe("properties routes", () => {
     expect(await cashOf(playerId)).toBe(startingCash - 1_000_000n);
   });
 
-  // The assertion that actually matters: once a real row exists for a
-  // (location, type) pair, the synthesis in listRoute must not ALSO emit a
-  // synthetic row alongside it — this fails if the `covered` dedupe key
-  // (`${locationId}:${pluginId}`) does not match the real row's own
-  // location/plugin, e.g. from a typo or a stale key shape.
-  it("lists the now-owned property exactly once, not duplicated by the synthesis", async () => {
+  // One row per (location, type) pair, now carrying the buyer's name — the
+  // unique index is what guarantees the count, and the join is what has to
+  // resolve the owner.
+  it("lists the now-owned property exactly once", async () => {
     const res = await app.inject({ method: "GET", url: "/api/properties", headers: playerHeaders });
     expect(res.statusCode).toBe(200);
     const rows = res.json<{ rows: { pluginId: string; locationId: string; ownerName: string }[] }>().rows;
@@ -214,7 +232,11 @@ describe("properties routes", () => {
   });
 
   it("refuses a buy the player cannot afford", async () => {
-    // broke player, fresh location
+    // broke player, fresh location — which now needs its own state-run row,
+    // or the refusal would be `no_venue` and prove nothing about the wallet.
+    await db.insert(propertiesTable).values({
+      id: uuidv7(), locationId: freshLocationId, pluginId: "bullets", ownerPlayerId: null, cost: 0n, profit: 0n,
+    });
     const res = await app.inject({
       method: "POST", url: "/api/properties/buy", headers: brokeHeaders,
       payload: { pluginId: "bullets", locationId: freshLocationId },

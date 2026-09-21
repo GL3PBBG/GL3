@@ -55,6 +55,9 @@ const ADMIN_ROUTES: { method: "GET" | "POST"; url: string }[] = [
   { method: "POST", url: "/api/admin/properties" },
   { method: "POST", url: "/api/admin/properties/update" },
   { method: "POST", url: "/api/admin/properties/settings" },
+  { method: "GET", url: "/api/admin/properties/venues" },
+  { method: "POST", url: "/api/admin/properties/venues" },
+  { method: "POST", url: "/api/admin/properties/venues/remove" },
 ];
 
 describe("properties admin", () => {
@@ -323,6 +326,138 @@ describe("properties admin", () => {
     walk(propertiesAdminPage.view);
     expect(idKeys.filter((k) => /^id$|Id$/.test(k))).toEqual([]);
     expect(valueKeys).toContain("id");
+  });
+});
+
+/**
+ * Venue provisioning (spec 2026-09-21 town-venues §4). A venue EXISTS in a
+ * town iff a `p_properties_properties` row exists for (location, type):
+ * owner null is state-run, owner set is player-owned, no row is no venue.
+ * These two routes are how an admin creates and removes one; neither takes
+ * a lock (the insert takes FOR KEY SHARE on `locations` through the
+ * existing FK and acquires nothing after it, so it adds no lock edge).
+ */
+describe("properties admin: venues", () => {
+  const venuesOf = async () => db.select().from(propertiesPlugin);
+
+  it("provisions a state-run venue", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+
+    const rows = await venuesOf();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ locationId, pluginId: SECOND_TYPE, ownerPlayerId: null, cost: 0n, profit: 0n });
+  });
+
+  it("409s a second provision of the same venue", async () => {
+    const first = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const again = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(again.statusCode).toBe(409);
+    expect(again.json<{ error: string }>().error).toBe("venue_exists");
+    expect(await venuesOf()).toHaveLength(1);
+  });
+
+  it("404s a provision of an undeclared type or an unknown town", async () => {
+    const badType = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: "not-a-plugin" },
+    });
+    expect(badType.statusCode).toBe(404);
+    expect(badType.json<{ error: string }>().error).toBe("unknown_property_type");
+
+    const badTown = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId: uuidv7(), pluginId: SECOND_TYPE },
+    });
+    expect(badTown.statusCode).toBe(404);
+    expect(badTown.json<{ error: string }>().error).toBe("unknown_location");
+
+    expect(await venuesOf()).toEqual([]);
+  });
+
+  it("removes a state-run venue", async () => {
+    await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues/remove", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(res.statusCode, res.body).toBe(204);
+    expect(await venuesOf()).toEqual([]);
+  });
+
+  it("409s removing a venue a player owns", async () => {
+    const create = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(create.statusCode).toBe(201);
+    const owner = await registerVerifiedPlayer({ app, redis }, { username: "VenueOwner", remoteAddress: "10.99.3.1" });
+    await db.update(propertiesPlugin).set({ ownerPlayerId: owner.playerId })
+      .where(eq(propertiesPlugin.locationId, locationId));
+
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues/remove", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: string }>().error).toBe("venue_owned");
+    expect(await venuesOf()).toHaveLength(1);
+  });
+
+  it("404s removing a venue that does not exist", async () => {
+    const res = await app.inject({
+      method: "POST", url: "/api/admin/properties/venues/remove", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toBe("no_venue");
+  });
+
+  it("lists venues as town / type / owner, with no uuid in a displayed cell", async () => {
+    await app.inject({
+      method: "POST", url: "/api/admin/properties/venues", headers: auth(),
+      payload: { locationId, pluginId: SECOND_TYPE },
+    });
+    const owned = uuidv7();
+    const owner = await registerVerifiedPlayer({ app, redis }, { username: "Deed", remoteAddress: "10.99.4.1" });
+    await db.insert(propertiesPlugin).values({
+      id: owned, locationId, pluginId: "bullets", ownerPlayerId: owner.playerId, cost: 0n, profit: 0n,
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/admin/properties/venues", headers: auth() });
+    expect(res.statusCode, res.body).toBe(200);
+    const rows = res.json<{ rows: { id: string; locationName: string; typeName: string; owner: string }[] }>().rows;
+    expect(rows).toHaveLength(2);
+
+    const state = rows.find((r) => r.owner === "state");
+    expect(state).toBeDefined();
+    expect(state!.locationName).toBe("Testville");
+    expect(state!.typeName).not.toBe("");
+    expect(rows.find((r) => r.owner === owner.username)).toBeDefined();
+
+    // The composite `${locationId}:${pluginId}` id is a valueKey only — the
+    // three DISPLAYED columns must carry no uuid, the admin-ids-hidden rule.
+    const UUIDISH = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    for (const row of rows) {
+      for (const cell of [row.locationName, row.typeName, row.owner]) {
+        expect(UUIDISH.test(cell), cell).toBe(false);
+      }
+    }
   });
 });
 

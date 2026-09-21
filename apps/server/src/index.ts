@@ -2,7 +2,7 @@ import type { PluginManifest } from "@gl3/plugin-sdk";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, seedMissWillCost, seedRanks, seedTempleExchanges, seedUnarmedMelee } from "./db/seed.js";
+import { bootSeedsFor, seedCrimes, seedFamilyContent, seedItems, seedLocations, seedMissWillCost, seedRanks, seedTempleExchanges, seedUnarmedMelee, seedVenueRows } from "./db/seed.js";
 import { DEFAULT_LEADERBOARD_PREFIX, rebuildLeaderboards } from "./game/leaderboard/service.js";
 import { ensureCurrentRound } from "./game/rounds/service.js";
 import { startSentenceSweeper } from "./game/sweep/sweeper.js";
@@ -12,6 +12,7 @@ import { buildAvailablePlugins } from "./plugins/available.js";
 import { CORE_PLUGINS, bundledPlugins } from "./plugins/core-plugins.js";
 import { loadDynamicPlugins, type DynamicPlugin } from "./plugins/dynamic.js";
 import { collectExpRouters } from "./plugins/exp-routers.js";
+import { collectPropertyTypes } from "./plugins/property-types.js";
 import { INSTALLED_PLUGINS } from "./plugins/installed-plugins.js";
 import { createStorageDriver } from "./assets/factory.js";
 import { sweepOrphanedCoreBindings, sweepUnreferencedAssets } from "./assets/sweep.js";
@@ -136,6 +137,10 @@ const loadedPlugins = await loadPlugins(
 // The second seed pass: family plugin tables exist only now, after
 // loadPlugins ran the plugin migrations (see bootSeedsFor's first pass).
 if (seeds.family) await seedFamilyContent(db, manifests.map((m) => m.id));
+// Same pass, same reason: `p_properties_properties` is a plugin table. One
+// state-run row per (town × declared property type), on an empty table only —
+// a migrated game's own rows are the truth and are never added to.
+if (seeds.venues) await seedVenueRows(db, [...collectPropertyTypes(manifests).keys()]);
 
 // Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
 // fallback (see the comment at that seam in app.ts): production keeps its

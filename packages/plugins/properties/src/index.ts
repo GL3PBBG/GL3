@@ -75,7 +75,14 @@ const listRoute = route({
         if (url !== null) typeArt.set(decl.id, url);
       }
 
-      const realRows = rows.map((row) => {
+      // Real rows ONLY (spec 2026-09-21 town-venues §4). This used to
+      // synthesize one unowned row per (declared type × this town) so a
+      // franchise nobody had bought yet still had a Buy button — which made
+      // every town have every venue, a GL3 deviation from V2 that this
+      // cluster removes. A venue now exists exactly where its row does:
+      // first-boot seeding creates them for a fresh game, the admin Venues
+      // panel provisions and removes them, and a V2 import brings its own.
+      const listRows = rows.map((row) => {
         const decl = ctx.propertyTypes.get(row.pluginId);
         const isOwner = row.ownerPlayerId === player.id;
         return {
@@ -96,42 +103,7 @@ const listRoute = route({
         };
       });
 
-      // The row is created lazily on first purchase (see `buyRoute`), so a
-      // franchise nobody has bought yet has no real row here and would
-      // otherwise have no list entry and no Buy button — unreachable from
-      // the UI. Synthesize one unowned row per (declared type × location)
-      // pair the query above did not already return, so every buyable
-      // franchise is listed even before its first sale.
-      const covered = new Set(rows.map((row) => `${row.locationId}:${row.pluginId}`));
-      const hereRows = await tx.db
-        .select({ id: locations.id, name: locations.name })
-        .from(locations)
-        .where(eq(locations.id, here));
-      const syntheticRows: (typeof realRows)[number][] = [];
-      for (const decl of ctx.propertyTypes.list()) {
-        for (const loc of hereRows) {
-          if (covered.has(`${loc.id}:${decl.id}`)) continue;
-          syntheticRows.push({
-            // Composite, not a uuid — deliberately: nothing may treat this as
-            // a real property row id. The page uses `row.id` only as a React
-            // key, and buy posts `{ pluginId, locationId }` separately, so
-            // this never reaches the server as an id.
-            id: `${loc.id}:${decl.id}`,
-            locationId: loc.id,
-            locationName: loc.name,
-            pluginId: decl.id,
-            typeName: decl.name,
-            price: decl.price.toString(),
-            leverLabel: decl.leverLabel,
-            ownerName: "—",
-            lever: "",
-            profit: "",
-            imageUrl: typeArt.get(decl.id) ?? "",
-          });
-        }
-      }
-
-      return { status: 200, body: { rows: [...realRows, ...syntheticRows] } };
+      return { status: 200, body: { rows: listRows } };
     });
   },
 });
@@ -151,10 +123,11 @@ const BuyBodySchema = z.object({
  * consumer's `providesProperties` declaration, so a new franchise needs no new
  * buy route.
  *
- * The row is created lazily on first purchase, as V2 does — the table ships
- * empty. V2's insert races (two concurrent first-buys make two rows, since its
- * only key is PR_id); here the location lock is taken first, so the two
- * serialise and the second sees the row the first inserted.
+ * The row is NOT created here (spec 2026-09-21 town-venues §4): a venue
+ * exists only where a row already does, so buy takes over an existing
+ * unowned (state-run, `owner_player_id IS NULL` — V2's `PR_user = 0`) row
+ * and 404s `no_venue` where there is none. Rows come from first-boot
+ * seeding, the admin Venues panel, or a V2 import.
  */
 const buyRoute = route({
   method: "POST",
@@ -190,7 +163,11 @@ const buyRoute = route({
           eq(propertiesTable.pluginId, body.pluginId),
         ))
         .for("update");
-      if (existing !== undefined && existing.ownerPlayerId !== null) {
+      // No row is no venue: this town does not have one of these to sell.
+      // Checked here, after the affordability check, so the refusal ordering
+      // every existing case relies on is untouched.
+      if (existing === undefined) throw new PluginError("no_venue", 404);
+      if (existing.ownerPlayerId !== null) {
         // Including when the caller already owns it — buying your own is the
         // same error, as in the shipped route.
         throw new PluginError("already_owned", 409);
@@ -203,23 +180,12 @@ const buyRoute = route({
         reason: "properties.buy",
       });
 
-      let propertyId: string;
-      if (existing === undefined) {
-        propertyId = uuidv7();
-        await tx.db.insert(propertiesTable).values({
-          id: propertyId,
-          locationId: body.locationId,
-          pluginId: body.pluginId,
-          ownerPlayerId: player.id,
-        });
-      } else {
-        propertyId = existing.id;
-        // cost = 0: a new owner inherits no lever, matching V2's transfer().
-        await tx.db
-          .update(propertiesTable)
-          .set({ ownerPlayerId: player.id, cost: 0n })
-          .where(eq(propertiesTable.id, propertyId));
-      }
+      const propertyId = existing.id;
+      // cost = 0: a new owner inherits no lever, matching V2's transfer().
+      await tx.db
+        .update(propertiesTable)
+        .set({ ownerPlayerId: player.id, cost: 0n })
+        .where(eq(propertiesTable.id, propertyId));
 
       const [loc] = await tx.db
         .select({ name: locations.name })
@@ -754,6 +720,144 @@ const adminUpdateRoute = route({
   },
 });
 
+/**
+ * Venue administration (spec 2026-09-21 town-venues §4).
+ *
+ * A venue — the casino, the bullet factory — EXISTS in a town iff a row
+ * exists for `(location_id, plugin_id)`: owner null is state-run, owner set
+ * is player-owned, no row is no venue at all (the world's street layout asks
+ * exactly this question through `ctx.venues.has`). These three routes are how
+ * an admin turns one on and off; the existing create/update/delete trio above
+ * stays the row EDITOR (lever, type, deletion by id) and is unchanged.
+ *
+ * Neither write takes a lock. The insert takes `FOR KEY SHARE` on
+ * `locations` through the existing `location_id` FK and acquires nothing
+ * afterwards (rule 6) — one lock, so it cannot be half of a deadlock cycle
+ * with buy's or `loadOwnedRow`'s locations-then-player order. The remove
+ * takes one `FOR UPDATE` on the row it is about to delete, the same shape
+ * `adminDeleteRoute` already has.
+ */
+const VenueBodySchema = z
+  .object({
+    locationId: z.string().uuid(),
+    pluginId: z.string().min(1).max(80),
+  })
+  .strict();
+
+/**
+ * Every venue row, as a TableRowsResponse: the Venues panel's table, and the
+ * one place an admin can see which towns have what.
+ *
+ * `id` is the composite `${locationId}:${pluginId}` rather than the row's
+ * uuid — the two forms below address a venue by that PAIR, not by row id, so
+ * the composite is what a select's `valueKey` would carry. It is never a
+ * displayed column: the table shows the town, the type and the owner, and a
+ * uuid in a cell is refused outright by `admin-ids-hidden.test.ts`.
+ */
+const adminVenuesListRoute = route({
+  method: "GET",
+  path: "/api/admin/properties/venues",
+  auth: "admin",
+  handler: async (ctx) => {
+    return ctx.transaction(async (tx) => {
+      const found = await tx.db
+        .select({
+          locationId: propertiesTable.locationId,
+          pluginId: propertiesTable.pluginId,
+          ownerPlayerId: propertiesTable.ownerPlayerId,
+          locationName: locations.name,
+          ownerName: players.username,
+        })
+        .from(propertiesTable)
+        .leftJoin(locations, eq(locations.id, propertiesTable.locationId))
+        .leftJoin(players, eq(players.id, propertiesTable.ownerPlayerId));
+
+      const rows = found.map((row) => ({
+        id: `${row.locationId}:${row.pluginId}`,
+        locationName: row.locationName ?? "",
+        // The declared human name, falling back to the raw id for a type
+        // whose plugin is not installed on this boot — the row is still real
+        // and still an existing venue, so hiding it would be a lie.
+        typeName: ctx.propertyTypes.get(row.pluginId)?.name ?? row.pluginId,
+        owner: row.ownerPlayerId === null ? "state" : (row.ownerName ?? ""),
+      }));
+      return { status: 200, body: { rows } };
+    });
+  },
+});
+
+/** Provision a state-run venue: the row exists, nobody owns it, and any
+ *  player standing in that town can buy it at the declared price. */
+const adminVenueCreateRoute = route({
+  method: "POST",
+  path: "/api/admin/properties/venues",
+  auth: "admin",
+  body: VenueBodySchema,
+  handler: async (ctx, { body }) => {
+    if (ctx.propertyTypes.get(body.pluginId) === null) {
+      throw new PluginError("unknown_property_type", 404);
+    }
+    const id = uuidv7();
+    const [town] = await ctx.transaction((tx) =>
+      tx.db.select({ id: locations.id }).from(locations).where(eq(locations.id, body.locationId)));
+    if (town === undefined) throw new PluginError("unknown_location", 404);
+
+    try {
+      await ctx.transaction(async (tx) => {
+        await tx.db.insert(propertiesTable).values({
+          id, locationId: body.locationId, pluginId: body.pluginId, ownerPlayerId: null, cost: 0n, profit: 0n,
+        });
+      });
+    } catch (err: unknown) {
+      // unique(location_id, plugin_id): the town already has this venue.
+      // Caught from the INSERT rather than pre-read, so two admins racing the
+      // same provision produce one row and one clean 409.
+      //
+      // OUTSIDE ctx.transaction, exactly as adminCreateRoute does it, and
+      // that placement is the whole fix: a statement error aborts the
+      // Postgres transaction, so catching 23505 INSIDE the callback and
+      // returning normally only makes the COMMIT fail — the first cut did
+      // that and answered 500 where this test demands 409.
+      if (pgErrorCode(err) === "23505") throw new PluginError("venue_exists", 409);
+      throw err;
+    }
+    return { status: 201, body: { id } };
+  },
+});
+
+/**
+ * Remove a venue: the town no longer has one, its door disappears from the
+ * street, and new play/sit/entry refuses. Refused while a player owns it —
+ * an owned deed is an asset they paid for, so it is disowned first through
+ * the owner's own drop or the admin editor above (`property_owned`'s
+ * reasoning, restated for the pair-addressed route).
+ */
+const adminVenueRemoveRoute = route({
+  method: "POST",
+  path: "/api/admin/properties/venues/remove",
+  auth: "admin",
+  body: VenueBodySchema,
+  handler: async (ctx, { body }) => {
+    const outcome = await ctx.transaction(async (tx): Promise<"ok" | "no_venue" | "venue_owned"> => {
+      const [row] = await tx.db
+        .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
+        .from(propertiesTable)
+        .where(and(
+          eq(propertiesTable.locationId, body.locationId),
+          eq(propertiesTable.pluginId, body.pluginId),
+        ))
+        .for("update");
+      if (row === undefined) return "no_venue";
+      if (row.ownerPlayerId !== null) return "venue_owned";
+      await tx.db.delete(propertiesTable).where(eq(propertiesTable.id, row.id));
+      return "ok";
+    });
+    if (outcome === "no_venue") throw new PluginError("no_venue", 404);
+    if (outcome === "venue_owned") throw new PluginError("venue_owned", 409);
+    return { status: 204 };
+  },
+});
+
 const adminDeleteRoute = route({
   method: "DELETE",
   path: "/api/admin/properties/:id",
@@ -871,6 +975,7 @@ export default definePlugin({
   routes: [
     listRoute, buyRoute, leverRoute, transferRoute, dropRoute, resetRoute,
     adminListRoute, adminLocationsRoute, adminTypesRoute, adminCreateRoute, adminUpdateRoute, adminDeleteRoute,
+    adminVenuesListRoute, adminVenueCreateRoute, adminVenueRemoveRoute,
     adminSettingsListRoute, adminSettingsWriteRoute,
   ],
   events: [boughtEvent, droppedEvent, transferredEvent],

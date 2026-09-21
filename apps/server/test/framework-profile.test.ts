@@ -81,19 +81,28 @@ describe("bootSeedsFor", () => {
     expect(v2).toEqual({
       crimes: true, ranks: true, locations: true, items: true,
       family: false, templeExchanges: false, unarmedMelee: false, missWillCost: false,
+      venues: true,
     });
 
     const framework = bootSeedsFor(bundledPlugins("framework", []).map((m) => m.id), "framework");
     expect(framework).toEqual({
       crimes: false, ranks: true, locations: false, items: true,
       family: false, templeExchanges: false, unarmedMelee: false, missWillCost: false,
+      venues: false,
     });
 
     const gl3 = bootSeedsFor(bundledPlugins("gl3", []).map((m) => m.id), "gl3");
     expect(gl3).toEqual({
       crimes: true, ranks: true, locations: true, items: true,
       family: true, templeExchanges: true, unarmedMelee: true, missWillCost: true,
+      venues: true,
     });
+
+    // The two profiles that keep a fresh game looking like it did before the
+    // town-venues cluster seed one state-run row per (town × declared type);
+    // mccodes has no property economy to fill, so it seeds none.
+    const mccodes = bootSeedsFor(bundledPlugins("mccodes", []).map((m) => m.id), "mccodes");
+    expect(mccodes.venues).toBe(false);
   });
 
   it("a framework boot plus crimes re-arms the crimes seed; travel alone re-arms locations", () => {

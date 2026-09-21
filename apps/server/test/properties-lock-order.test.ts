@@ -13,6 +13,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * The location↔player lock order, proven for `properties` against
@@ -204,12 +205,14 @@ async function register(): Promise<{ token: string; playerId: string; username: 
 const auth = (token: string): { authorization: string } => ({ authorization: `Bearer ${token}` });
 
 /** Finds the (possibly not-yet-created) bullets-franchise property row at `locId`. */
-async function propertyIdAt(locId: string): Promise<string | undefined> {
+/** Null for a state-run (unowned) venue, which is how a refused buy leaves
+ *  the row it did not take over. `undefined` would mean no venue at all. */
+async function ownerOfPropertyAt(locId: string): Promise<string | null | undefined> {
   const [row] = await db
-    .select({ id: propertiesPlugin.id })
+    .select({ ownerPlayerId: propertiesPlugin.ownerPlayerId })
     .from(propertiesPlugin)
     .where(and(eq(propertiesPlugin.locationId, locId), eq(propertiesPlugin.pluginId, "bullets")));
-  return row?.id;
+  return row?.ownerPlayerId;
 }
 
 beforeAll(async () => {
@@ -238,8 +241,12 @@ beforeAll(async () => {
     { id: cId, name: "Cashburg", travelCost: 0n, travelCooldownSeconds: 1, bulletStock: 1_000_000, bulletCost: 1n },
   ]);
 
-  // No property rows pre-seeded — buy creates one lazily on first purchase,
-  // at whichever of L/C a request names.
+  // A state-run bullets row at BOTH towns. Buy no longer creates a row
+  // lazily (spec 2026-09-21 town-venues §4): a venue exists only where its
+  // row does, so without these every buy below would 404 `no_venue` and the
+  // lock race under test would never be entered. Owner null, so the first
+  // buyer takes it over exactly as before.
+  await seedVenues(db, [lId, cId], ["bullets"]);
 
   tokens = [];
   playerIds = [];
@@ -339,8 +346,12 @@ describe("properties lock ordering", () => {
       expect(JSON.parse(buyRes.body)).toMatchObject({ error: "wrong_location" });
 
       // No side effect: the buy's PluginError aborts its transaction before
-      // any write to propertiesTable, so no row exists at L.
-      expect(await propertyIdAt(lId)).toBeUndefined();
+      // any write to propertiesTable. The state-run row seeded at L is still
+      // there and still unowned — before the town-venues cluster the buy
+      // would have CREATED the row, so the assertion was that none existed;
+      // now the row is the venue, and what must not have happened is the
+      // takeover.
+      expect(await ownerOfPropertyAt(lId)).toBeNull();
 
       const [moved] = await db
         .select({ locationId: playerStats.locationId })
@@ -395,6 +406,10 @@ describe("properties lock ordering", () => {
       .update(playerStats)
       .set({ cash: STARTING_CASH })
       .where(inArray(playerStats.playerId, [pa.playerId, pb.playerId]));
+
+    // A state-run bullets venue at each, or the two buys below 404 — the row
+    // is the venue now, and nothing creates one lazily.
+    await seedVenues(db, [locA, locB], ["bullets"]);
 
     // Two DIFFERENT locations, one property each — this isolates the test to
     // the player-lock cycle only; the two transfers below never contend for

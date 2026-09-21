@@ -19,6 +19,7 @@ type SeedProfile = "gl3" | "v2" | "mccodes" | "framework";
 export function bootSeedsFor(loadedPluginIds: Iterable<string>, profile: SeedProfile): {
   crimes: boolean; ranks: true; locations: boolean; items: boolean;
   family: boolean; templeExchanges: boolean; unarmedMelee: boolean; missWillCost: boolean;
+  venues: boolean;
 } {
   const ids = loadedPluginIds instanceof Set ? loadedPluginIds : new Set(loadedPluginIds);
   return {
@@ -36,6 +37,12 @@ export function bootSeedsFor(loadedPluginIds: Iterable<string>, profile: SeedPro
     // MCCodes' (attack.php charges energy, never will) nor V2's (no pools).
     // Inert anyway wherever no plugin declares the pool.
     missWillCost: profile === "gl3" && ids.has("combat"),
+    // Town venues (spec 2026-09-21 §4): profile-gated, NOT plugin-gated, so
+    // the flag's shape stays a pure function of the profile the way the
+    // three above are. `properties` is bundled into both gl3 and v2, and
+    // `seedVenueRows` is called with the declared property types — an empty
+    // list on a boot without them makes it a no-op anyway.
+    venues: profile === "gl3" || profile === "v2",
   };
 }
 
@@ -205,4 +212,42 @@ export async function seedItems(db: Db): Promise<void> {
     },
     { id: uuidv7(), name: "First Aid Kit", itemType: "consumable", effects: { heal: 25 } },
   ]);
+}
+
+/**
+ * First-boot venue seeding (spec 2026-09-21 town-venues §4). Since that
+ * cluster a venue — a casino, a bullet factory — exists in a town only where
+ * a `p_properties_properties` row exists for `(location_id, plugin_id)`, so
+ * without this a fresh native game would have no venues anywhere. One
+ * state-run row (owner null) per (town × declared property type) is exactly
+ * what the every-town synthesis used to fabricate at read time, so a fresh
+ * gl3/v2 game keeps showing every venue everywhere, exactly as before this
+ * cluster; admins remove what a town should not have.
+ *
+ * Runs ONCE, on an EMPTY table: a game migrated from V2 carries the real
+ * answer about which towns have what, and that answer is never overwritten
+ * or added to. `last_claimed_at`'s migration bug is the precedent — a
+ * "harmless" backfill over migrated rows is the one to be careful with.
+ *
+ * Raw SQL by table name, no drizzle model: core never imports a plugin's
+ * schema (`venueExists` in `plugins/ctx.ts` is the same idiom). It therefore
+ * belongs to the SECOND seed pass, after `loadPlugins` has run the plugin
+ * migrations that create the table — like `seedFamilyContent`.
+ */
+export async function seedVenueRows(db: Db, typeIds: readonly string[]): Promise<void> {
+  if (typeIds.length === 0) return;
+
+  const existing = await db.execute(sql`select 1 from p_properties_properties limit 1`);
+  if ([...existing].length > 0) return;
+
+  const towns = await db.select({ id: locations.id }).from(locations);
+  if (towns.length === 0) return;
+
+  const values = towns.flatMap((town) =>
+    typeIds.map((typeId) => sql`(${uuidv7()}, ${town.id}, ${typeId}, null, 0, 0)`),
+  );
+  await db.execute(sql`
+    insert into p_properties_properties (id, location_id, plugin_id, owner_player_id, cost, profit)
+    values ${sql.join(values, sql`, `)}
+  `);
 }

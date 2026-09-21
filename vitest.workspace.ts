@@ -342,6 +342,7 @@ export default defineWorkspace([
         "test/asset-sweep.test.ts",
         "test/player-attributes-schema.test.ts",
         "test/rank-level-sync.test.ts",
+        "test/seed-venues.test.ts",
       ],
       globalSetup,
       setupFiles: [isolatedDb],

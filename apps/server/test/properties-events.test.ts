@@ -10,6 +10,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * Event envelopes for `bought`, `dropped` and `transferred` — `sold`/`income`
@@ -47,6 +48,10 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  // The state-run bullets venue at the same time: buy no longer creates a
+  // row lazily (spec 2026-09-21 town-venues §4), so a town with no row is a
+  // town with nothing to buy and every `bought` below would be a 404.
+  await seedVenues(db, [id], ["bullets"]);
   return id;
 }
 
