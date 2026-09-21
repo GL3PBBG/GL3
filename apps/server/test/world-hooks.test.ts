@@ -188,7 +188,7 @@ describe("PoC hooks on the gl3 profile", () => {
     expect(byId.get("travel.station")).toMatchObject({ kind: "building", model: "station", href: "/plugins/travel.index", footprint: { w: 12, d: 9 } });
     expect(byId.get("crimes.corner")).toMatchObject({ kind: "npc", model: "npc-coat", href: "/plugins/crimes.index" });
     expect(byId.get("bank.bank")).toMatchObject({ kind: "building", model: "bank", href: "/plugins/bank.index", footprint: { w: 12, d: 9 } });
-    expect(byId.get("casino.casino")).toMatchObject({ kind: "building", model: "casino", href: "/plugins/casino.index", footprint: { w: 12, d: 9 }, interior: { sceneKey: "casino-floor-v1" } });
+    expect(byId.get("casino.casino")).toMatchObject({ kind: "building", model: "casino", href: "/plugins/casino.index", footprint: { w: 12, d: 9 }, interior: { sceneKey: "casino-floor-v2" } });
     expect(byId.get("inventory.shop")).toMatchObject({ kind: "building", model: "shop", href: "/plugins/inventory.shop", footprint: { w: 6, d: 6 } });
     // Order along the street is the declared order: station (10), corner (20), bank (30), casino (40), shop (50).
     expect(room.hooks.map((h) => h.id).filter((id) => byId.has(id)).slice(0, 5))

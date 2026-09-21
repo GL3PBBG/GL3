@@ -161,7 +161,7 @@ it("street → shared casino interior → one playable blackjack table → stree
   enter(a.socket); const aIn = await frameOfKind(a.socket, "presence.snapshot");
   enter(b.socket); const bIn = await frameOfKind(b.socket, "presence.snapshot");
   expect(aIn.room.space?.kind).toBe("interior"); expect(bIn.players.map((p) => p.playerId)).toEqual([a.playerId]);
-  const station0 = aIn.room.points!.find((p) => p.binding?.station === 0)!;
+  const station0 = aIn.room.points!.find((p) => p.binding?.gameId === "blackjack" && p.binding.station === 0)!;
 
   // 2. Both sit at station 0 and stand at its seats (positions are cosmetic; the client moves itself).
   const sa = CasinoSitResponseSchema.parse((await sit(a.token, "blackjack", 0)).json());

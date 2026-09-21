@@ -8,10 +8,13 @@ import { readTableMaxSeats } from "./settings.js";
 /**
  * The live binding behind the floor's points (spec 2026-09-20 casino-interior
  * §5.3): one row per declared station, with the table standing there right
- * now, if any. Read-only and lock-free, `readLobby`'s idiom — a client on the
- * floor polls this on entry and every 15 s; the `table` tick reaches seats
- * only. Names ride only in an open town: an underground town's residents are
- * unidentifiable from here exactly as from `/api/online`.
+ * now, if any. Rows come in the floor's own DECLARATION order (blackjack,
+ * then hold'em, then slots 0..7) — never re-sorted by station number, which
+ * would interleave games that each start their own stations at 0. Read-only
+ * and lock-free, `readLobby`'s idiom — a client on the floor polls this on
+ * entry and every 15 s; the `table` tick reaches seats only. Names ride only
+ * in an open town: an underground town's residents are unidentifiable from
+ * here exactly as from `/api/online`.
  */
 export const floorRoute = route({
   method: "GET",
@@ -43,7 +46,6 @@ export const floorRoute = route({
 
       const stations = CASINO_FLOOR.points
         .filter((p) => p.binding !== undefined)
-        .sort((a, b) => a.binding!.station - b.binding!.station)
         .map((p) => {
           const { gameId, station } = p.binding!;
           // Gated on the game being REGISTERED (spec §5.3): with blackjack

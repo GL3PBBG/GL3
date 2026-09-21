@@ -119,9 +119,9 @@ describe("presence.enter / presence.exit (spec 2026-09-20 casino-interior §4.3)
     await frameOfKind(a.socket, "presence.snapshot");
     enter(a.socket);
     const snap = await frameOfKind(a.socket, "presence.snapshot");
-    expect(snap.room.sceneKey).toBe("casino-floor-v1");
+    expect(snap.room.sceneKey).toBe("casino-floor-v2");
     expect(snap.room.space).toMatchObject({ kind: "interior", locationId: chicago, hookId: "casino.casino" });
-    expect(snap.room.points?.length).toBe(4);
+    expect(snap.room.points?.length).toBe(10);
     expect(snap.you).toMatchObject({ x: snap.room.spawn.x, y: snap.room.spawn.y, facing: snap.room.spawn.facing });
     expect(snap.players.map((p) => p.playerId)).toEqual([inside.playerId]);
     const street = await tickWhere(watcher.socket, (t) => t.left.includes(a.playerId));
