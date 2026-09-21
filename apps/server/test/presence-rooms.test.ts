@@ -233,6 +233,14 @@ describe("presence.move", () => {
     await new Promise((r) => setTimeout(r, 1200));
     move(b.socket, 1, bYou.x, -100);
     const tick = await movedTick(a.socket);
+    // The x assertion is a stability check, not a clamp proof: dx = 0 here
+    // (the move sends bYou.x unchanged), so it can never demonstrate the X
+    // bound binding — it only confirms X held still while Y moved. The
+    // clamp proof lives entirely in the y assertion below. X cannot be made
+    // to carry it in this room either: on any hooked default town the
+    // served bounds' maxX is widened past the default street's layout
+    // (2026-09-21 street-bounds-envelope), which pushes it well beyond the
+    // speed clamp's reach in the time this test waits.
     expect(tick.moved[0]!.x).toBe(bYou.x);
     expect(tick.moved[0]!.y).toBe(-2);
   });

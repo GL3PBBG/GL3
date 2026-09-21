@@ -108,11 +108,18 @@ destination while a travel request is in flight) — is the room descriptor:
   to spare — a town with enough buildings to run past the ±40 default gets
   a wider street rather than an invisible wall short of its last building.
   `minY`/`maxY` are never widened. A client must treat the served `bounds`
-  as authoritative for clamping and never assume the ±40 default.
+  as authoritative for clamping and never assume the ±40 default. The served
+  bounds are authoritative for GEOMETRY SIZING too, not just clamping: on a
+  gl3 default town the served street can run to about `x = 86`, well past
+  the `default` scene asset's own ±40 build, and a client that sizes its
+  ground plane from the asset's defaults instead of the served `bounds`
+  leaves roughly 46 m of walkable void past the visible ground.
 - `hooks[]` — every building and NPC, placed by the server so all clients
   agree. Layout is deterministic: one street along `x` at `y = 0`, road
   `|y| ≤ 7.5`, pavement to `|y| = 10.5`, buildings beyond it alternating north
-  and south from `minX + 4` with a 4 m gap, NPCs on the pavement in front of
+  and south from the row's `minX + 4` with a 4 m gap (positions are served
+  explicitly; do not re-derive them from the served `minX`), NPCs on the
+  pavement in front of
   the building placed before them; the spawn lot `[spawn.x − 8, spawn.x + 10]`
   on the spawn's side is kept clear. A building north of the street faces it
   with `facing = π`, south with `0`.

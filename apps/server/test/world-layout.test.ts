@@ -147,8 +147,12 @@ describe("envelopeBounds", () => {
   it("returns the input bounds unchanged when the layout fits", () => {
     const placed = placeHooks(poc, DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN);
     const core = placeCoreHooks(placed, DEFAULT_SCENE_BOUNDS);
-    // The four-building PoC street fits comfortably inside the default
-    // bounds with room to spare, so nothing widens.
+    // This is a boundary case, not a comfortable fit: the north side has no
+    // building overlapping jail's initial slot, so jail lands at
+    // x = 40 - 16 = 24, yard centre 33, yard east edge 36, plus margin 4 =
+    // 40 - exactly DEFAULT_SCENE_BOUNDS.maxX - and Math.max(40, 40) returns
+    // it unchanged. A future change to placeCoreHooks' offsets should flip
+    // this red for a stated reason, not pass by accident.
     expect(envelopeBounds(DEFAULT_SCENE_BOUNDS, placed, core)).toEqual(DEFAULT_SCENE_BOUNDS);
   });
 
@@ -159,9 +163,14 @@ describe("envelopeBounds", () => {
     const core = placeCoreHooks(placed, DEFAULT_SCENE_BOUNDS);
     const served = envelopeBounds(DEFAULT_SCENE_BOUNDS, placed, core);
 
+    // Max over BOTH core yards, not just jail's: the implementation maxes
+    // over every core hook's yard edge, and this fixture only agrees with a
+    // jail-only expectation because the even building count happens to push
+    // jail east of hospital. Using both keeps the expectation correct under
+    // an odd-count fixture too.
     const easternmostBuildingEdge = Math.max(...placed.map((p) => p.position.x + p.footprint.w / 2));
-    const jailYardEastEdge = core[0]!.yard.x + 3; // jail is core[0] (placeCoreHooks order: jail, hospital)
-    const expectedMaxX = Math.max(easternmostBuildingEdge, jailYardEastEdge) + LAYOUT.margin;
+    const coreYardEastEdge = Math.max(...core.map((c) => c.yard.x + 3));
+    const expectedMaxX = Math.max(easternmostBuildingEdge, coreYardEastEdge) + LAYOUT.margin;
 
     expect(served.maxX).toBe(expectedMaxX);
     expect(served.minX).toBe(DEFAULT_SCENE_BOUNDS.minX);

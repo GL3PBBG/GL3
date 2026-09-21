@@ -89,6 +89,13 @@ export function placeHooks(hooks: readonly WorldHook[], bounds: SceneBounds, spa
  * never touches y: the layout's y extents are fixed by `buildingLine + d/2`
  * (±15 for 12×9) and the default ±20 already holds them, while a row's y
  * bounds are the operator's own. Pure, so every client agrees.
+ *
+ * Leaving y alone is a DELIBERATE non-goal, not a claim that y can never wall
+ * a building: a `location_scenes` row whose `|minY|`/`|maxY|` is under 15
+ * (the "beach" fixture in `world-hooks.test.ts`, `minY: -10, maxY: 10`, is
+ * one) walls its own 12×9 buildings off. An operator who sets y bounds gets
+ * exactly what they set — this function widens X only, and only the default
+ * ±20 is guaranteed to hold every layout the street can produce.
  */
 export function envelopeBounds(bounds: SceneBounds, placed: readonly PlacedGeometry[], core: readonly PlacedCore[]): SceneBounds {
   const x0s: number[] = [];
