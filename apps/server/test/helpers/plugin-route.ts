@@ -28,6 +28,15 @@ export interface CallPluginRouteOptions {
   settings?: Record<string, string>;
   /** Supply one to assert on stored bytes; otherwise a private temp root is made. */
   assetDriver?: StorageDriver;
+  /**
+   * Defaults to `new Set([manifest.id])`. `tx.venues.has` (spec 2026-09-21
+   * town-venues §2) answers false whenever `"properties"` is not in this
+   * set, regardless of any row seeded in the DB — a route under test that
+   * gates on a venue (e.g. casino's `play`/`table/sit`/`machine/open`) needs
+   * `"properties"` named here too, the same way a real boot always has it
+   * installed.
+   */
+  installedPluginIds?: ReadonlySet<string>;
 }
 
 /**
@@ -83,7 +92,7 @@ export async function callPluginRoute(
     // energy) must see the same shape here as in production.
     attributePools: collectAttributePools([manifest]),
     expRouter: collectExpRouters([manifest]),
-    installedPluginIds: new Set([manifest.id]),
+    installedPluginIds: opts.installedPluginIds ?? new Set([manifest.id]),
     assetSlots: collectAssetSlots([manifest]),
   });
 

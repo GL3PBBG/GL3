@@ -85,9 +85,14 @@ const cashOf = async (id: string): Promise<bigint> => {
 };
 
 function play(manifest: PluginManifest, playerId: string) {
+  // `play` gates on the "blackjack" venue (spec 2026-09-21 town-venues §2,
+  // `tx.venues.has`), which answers false unless "properties" is in the
+  // installed set — named explicitly since `callPluginRoute` otherwise
+  // defaults to just the one manifest ("casino") it is given.
   return callPluginRoute(manifest, "POST", "/api/casino/play", {
     db, redis, leaderboardPrefix, playerId,
     body: { gameId: "casino", wager: WAGER.toString() },
+    installedPluginIds: new Set(["casino", "properties"]),
   });
 }
 

@@ -94,6 +94,11 @@ const open = route({ method: "POST", path: "/api/casino/machine/open", accessInJ
     return ctx.transaction(async tx => {
       const [stats] = await tx.db.select().from(playerStats).where(eq(playerStats.playerId, pid));
       if (!stats?.locationId) throw new PluginError("no_location", 409);
+      // Spec 2026-09-21 town-venues §5: a NEW hand needs the town's casino;
+      // an existing one settles regardless (a row can be removed mid-hand).
+      // Checked on the unlocked pre-read, `wrong_location`'s idiom, so a
+      // refusal takes no lock.
+      if (!(await tx.venues.has(stats.locationId, "blackjack"))) throw new PluginError("no_venue", 409);
       await tx.locks.location(stats.locationId);
       const house = await resolveHouse(tx, game.id, stats.locationId, readMaxBet(ctx.settings));
       await tx.locks.player(ownerIds(pid, house));

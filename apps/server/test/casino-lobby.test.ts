@@ -374,11 +374,18 @@ describe("GET /api/casino", () => {
     const punter = await register();
     const locationId = await seedLocation();
     await placePlayer(punter.playerId, locationId, 1_000_000n);
+    // `callPluginRoute`'s installed set is the one manifest it is given by
+    // default ("casino"), and `play` now gates on the "blackjack" venue
+    // through `tx.venues.has`, which answers false unless "properties" is
+    // installed too (spec 2026-09-21 town-venues §2) — regardless of the row
+    // `seedLocation` already seeded. Named explicitly here, the way a real
+    // boot always has `properties` installed.
     const call = (settings: Record<string, string>) => callPluginRoute(
       manifest, "POST", "/api/casino/play",
       {
         db, redis, leaderboardPrefix: "casino-lobby-test", playerId: punter.playerId,
         body: { gameId: "casino", wager: "100000" }, settings,
+        installedPluginIds: new Set(["casino", "properties"]),
       },
     );
 

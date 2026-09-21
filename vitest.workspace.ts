@@ -411,6 +411,7 @@ export default defineWorkspace([
         "test/casino-rogue-game.test.ts",
         "test/casino-rogue-table.test.ts",
         "test/casino-tables.test.ts",
+        "test/casino-venue.test.ts",
         "test/casino-table-money.test.ts",
         "test/casino-table-clock.test.ts",
         "test/casino-table-lock-order.test.ts",

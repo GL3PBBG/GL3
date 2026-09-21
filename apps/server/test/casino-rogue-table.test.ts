@@ -106,8 +106,13 @@ async function backdate(tableId: string, secondsAgo: number): Promise<void> {
 }
 
 function sit(manifest: PluginManifest, playerId: string) {
+  // `sit` gates on the "blackjack" venue (spec 2026-09-21 town-venues §2,
+  // `tx.venues.has`), which answers false unless "properties" is in the
+  // installed set — named explicitly since `callPluginRoute` otherwise
+  // defaults to just the one manifest ("casino") it is given.
   return callPluginRoute(manifest, "POST", "/api/casino/table/sit", {
     db, redis, leaderboardPrefix, playerId, body: { gameId: "casino" },
+    installedPluginIds: new Set(["casino", "properties"]),
   });
 }
 

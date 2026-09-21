@@ -47,6 +47,7 @@
  "casino:no_session": "The caller has no casino session at all (or the row is gone)",
  "casino:no_such_game": "That game id is not in the registry (game plugin not installed or not registered)",
  "casino:no_such_table": "The table chosen for sit is gone (deleted after settling empty) — a retry opens a fresh one",
+ "casino:no_venue": "The town has no casino (no blackjack property row), so a new hand, seat or machine wallet cannot be opened; existing ones still settle, leave and cash out",
  "casino:not_seated": "The caller has no seat — never sat, or their seat/table was idle-swept, settled away, or deleted",
  "casino:not_your_turn": "It is another seat's turn to act",
  "casino:session_closed": "The caller's most recent session is already settled — nothing open to act on",

@@ -506,6 +506,12 @@ const playRoute = route({
       const locationId = statsPre?.locationId;
       if (locationId === null || locationId === undefined) throw new PluginError("no_location", 409);
 
+      // Spec 2026-09-21 town-venues §5: a NEW hand needs the town's casino;
+      // an existing one settles regardless (a row can be removed mid-hand).
+      // Checked on the unlocked pre-read, `wrong_location`'s idiom, so a
+      // refusal takes no lock.
+      if (!(await tx.venues.has(locationId, "blackjack"))) throw new PluginError("no_venue", 409);
+
       // RULE 6: location first, then BOTH players in ONE call below. Locking
       // the player first and letting payOwner take the owner second is an
       // ABBA cycle — properties/src/api.ts:51-58 documents the hazard, and
@@ -982,5 +988,5 @@ export default definePlugin({
   // kind, so the building draws as a plain box until the kit lands. No
   // signageSlot: casino owns no asset slot (blackjack owns the table art, and a
   // hook may only name its OWN plugin's singleton slots).
-  worldHooks: [{ id: "casino", kind: "building", label: "Casino", page: "casino.index", model: "casino", footprint: { w: 12, d: 9 }, order: 40, interior: CASINO_FLOOR }],
+  worldHooks: [{ id: "casino", kind: "building", label: "Casino", page: "casino.index", model: "casino", footprint: { w: 12, d: 9 }, order: 40, interior: CASINO_FLOOR, venue: "blackjack" }],
 });

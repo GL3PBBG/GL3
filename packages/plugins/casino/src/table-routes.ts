@@ -67,6 +67,11 @@ const sitRoute = route({
       if (await seatOf(tx, player.id) !== null) throw new PluginError("already_seated", 409);
 
       const locationId = await locationOf(tx, player.id);
+      // Spec 2026-09-21 town-venues §5: a NEW hand needs the town's casino;
+      // an existing one settles regardless (a row can be removed mid-hand).
+      // Checked on the unlocked pre-read, `wrong_location`'s idiom, so a
+      // refusal takes no lock.
+      if (!(await tx.venues.has(locationId, "blackjack"))) throw new PluginError("no_venue", 409);
       await tx.locks.location(locationId);
 
       // Candidate table BEFORE the player lock? No — lockTable needs the seat

@@ -3,6 +3,7 @@ import { DEFAULT_SCENE_BOUNDS, DEFAULT_SCENE_SPAWN, RoomDescriptorSchema } from 
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
+import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FilesystemDriver } from "../src/assets/fs-driver.js";
 import { bindAsset, resolveSingletonAsset, storeAsset } from "../src/assets/service.js";
@@ -230,6 +231,29 @@ describe("PoC hooks on the gl3 profile", () => {
       const inside = Math.abs(room.spawn.x - h.position.x) < h.footprint.w / 2 && Math.abs(room.spawn.y - h.position.y) < h.footprint.d / 2;
       expect(inside, h.id).toBe(false);
     }
+  });
+
+  it("has no casino door in a town with no blackjack venue row, while travel.station still exists (spec 2026-09-21 town-venues §5)", async () => {
+    await seedLocations(db);
+    // The top-level `beforeEach` seeds a venue for every EXISTING location —
+    // this one is inserted after that runs, so it starts with none.
+    const locationId = uuidv7();
+    await db.insert(locations).values({
+      id: locationId,
+      name: `no-casino-${locationId.slice(-8)}`,
+      travelCost: 0n,
+      travelCooldownSeconds: 60,
+      bulletStock: 0,
+      bulletCost: 1n,
+    });
+    const { token, playerId } = await registerVerifiedPlayer({ app: gl3App, redis: gl3Redis });
+    await db.update(playerStats).set({ locationId }).where(eq(playerStats.playerId, playerId));
+    const res = await gl3App.inject({ method: "GET", url: "/api/world/scene", headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(200);
+    const room = RoomDescriptorSchema.parse(res.json());
+    const ids = room.hooks.map((h) => h.id);
+    expect(ids).not.toContain("casino.casino");
+    expect(ids).toContain("travel.station");
   });
 
   it("puts theft's garage in the vehicle zone and its cars in the bays on a template town, and only the garage on a default one", async () => {
