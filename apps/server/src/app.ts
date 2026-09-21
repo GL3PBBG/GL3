@@ -215,7 +215,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // authored template is a build defect, so this throws at boot rather than
   // letting the first request to hit it 500.
   assertTemplatesValid();
-  registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks, coreHooks: config.profile !== "framework" }), requireAuth);
+  registerWorldRoutes(app, deps.db, createSceneService({ db: deps.db, assetDriver, hooks: loaded.worldHooks, coreHooks: config.profile !== "framework", hasProperties: loaded.manifests.some((m) => m.id === "properties") }), requireAuth);
   registerAdminRoutes(app, deps.db, deps.redis, loaded.manifests, loadedSettings);
   // After the plugins are loaded: the bind route validates a slot against the
   // registry those manifests produce, so registering earlier would give it an

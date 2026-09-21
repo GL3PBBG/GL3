@@ -14,6 +14,7 @@ import { assignHooks } from "./assign.js";
 import { exitSpotFor, interiorDescriptor } from "./interior.js";
 import { envelopeBounds, placeCoreHooks, placeHooks, type PlacedCore, type PlacedGeometry } from "./layout.js";
 import { SCENE_TEMPLATES } from "./templates/index.js";
+import { eligibleHooks, venueKeys, venuesAt } from "./venues.js";
 
 /** The answer to one interior lookup: the room, or why there is none. */
 export type InteriorLookup =
@@ -38,12 +39,22 @@ export interface SceneServiceDeps {
    * registers neither route nor page, so its scenes carry no core hooks.
    */
   coreHooks: boolean;
+  /**
+   * Whether the `properties` plugin is loaded (spec 2026-09-21 town-venues
+   * §3.1). Required rather than defaulted, the `coreHooks` discipline: a new
+   * call site cannot inherit the wrong answer. False means no town holds any
+   * venue — the table does not exist on such a boot, and a hook naming one is
+   * already refused at boot there.
+   */
+  hasProperties: boolean;
 }
 
 /**
- * Builds `RoomDescriptor`s (spec 2026-09-17 §1.4). Geometry is a boot-static
- * function of `(bounds, spawn)` and is memoised per distinct pair for the
- * process lifetime — hooks cannot change without a reboot. Signage is
+ * Builds `RoomDescriptor`s (spec 2026-09-17 §1.4). Geometry is a function of
+ * `(sceneKey, bounds, spawn, eligible hooks)` and is memoised per distinct
+ * combination for the process lifetime — the hook SET is boot-static, but
+ * which of them a town is eligible for is not (spec 2026-09-21 §3.2), so two
+ * towns sharing a template but not a venue get separate entries. Signage is
  * resolved per request because an admin can bind an image at any time.
  *
  * Signage is resolved per hook, not batched (spec §B.10): N is the number
@@ -51,16 +62,21 @@ export interface SceneServiceDeps {
  * a different `(scope, slot)` pair that `resolveAssets` cannot batch anyway.
  */
 export function createSceneService(deps: SceneServiceDeps): SceneService {
+  /** Boot-static: the hook set cannot change without a reboot, only which town is eligible for it. */
+  const keys = venueKeys(deps.hooks);
   /** Plugin geometry, the core placement derived from it, and the SERVED bounds — a client walks the whole street, never the row's raw claim. */
   interface Layout { placed: PlacedGeometry[]; core: PlacedCore[]; bounds: SceneBounds }
   const layouts = new Map<string, Layout>();
-  const layoutFor = (sceneKey: string, rowBounds: SceneBounds, spawn: SceneSpawn): Layout => {
-    const key = JSON.stringify([sceneKey, rowBounds, spawn]);
+  const layoutFor = (sceneKey: string, rowBounds: SceneBounds, spawn: SceneSpawn, hooks: readonly WorldHook[]): Layout => {
+    // The eligible hook ids are part of the key, not just the scene: a town
+    // without the casino's venue must not be served the layout built for a
+    // town that has it (spec 2026-09-21 §3.2).
+    const key = JSON.stringify([sceneKey, rowBounds, spawn, hooks.map((h) => `${h.pluginId}.${h.id}`)]);
     let layout = layouts.get(key);
     if (layout === undefined) {
       const template = SCENE_TEMPLATES.get(sceneKey);
       if (template !== undefined) {
-        const { placed, core, dropped } = assignHooks(template, deps.hooks, deps.coreHooks);
+        const { placed, core, dropped } = assignHooks(template, hooks, deps.coreHooks);
         // Once per distinct layout, like the widened-bounds notice below: a
         // dropped hook is a missing door, and a missing door is an
         // operator's problem to see, not a player's page to 500.
@@ -74,7 +90,7 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
         // 2026-09-20 §2), so the authored bounds are already the served ones.
         layout = { placed, core, bounds: template.bounds };
       } else {
-        const placed = placeHooks(deps.hooks, rowBounds, spawn);
+        const placed = placeHooks(hooks, rowBounds, spawn);
         const core = deps.coreHooks ? placeCoreHooks(placed, rowBounds) : [];
         const bounds = envelopeBounds(rowBounds, placed, core);
         // Once per distinct layout: a widened street is an operator-visible
@@ -115,10 +131,17 @@ export function createSceneService(deps: SceneServiceDeps): SceneService {
     // contract the client is built to, not an operator-editable field.
     const rowBounds = template?.bounds ?? (row ? SceneBoundsSchema.parse(row.bounds) : DEFAULT_SCENE_BOUNDS);
     const spawn = template?.spawn ?? (row ? SceneSpawnSchema.parse(row.spawn) : DEFAULT_SCENE_SPAWN);
+    // A hook gated on a venue stands only where that town holds the property
+    // row (spec 2026-09-21 §3.2). Filtered BEFORE placement, so the street a
+    // town without the venue is served has no gap where the door would be —
+    // and `forInterior` below reads the same `placed`, so an ineligible door
+    // is `unknown_hook` for lookup and for `presence.enter` alike.
+    const present = await venuesAt(deps.db, locationId, keys, deps.hasProperties);
+    const hooks = eligibleHooks(deps.hooks, present);
     // Placement is keyed on the ROW bounds — no town's building positions
     // move — but everything downstream serves the layout's own `bounds`,
     // widened to contain what was actually placed on it (2026-09-21).
-    const { placed, core, bounds } = layoutFor(sceneKey, rowBounds, spawn);
+    const { placed, core, bounds } = layoutFor(sceneKey, rowBounds, spawn, hooks);
     return { town, sceneKey, bounds, spawn, placed, core };
   };
 

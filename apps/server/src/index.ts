@@ -147,6 +147,7 @@ await attachGateway(app.server, {
   db, redis, subscriber: createSubscriber(config.redisUrl), corsOrigins: config.corsOrigins,
   worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
   coreHooks: config.profile !== "framework",
+  hasProperties: loadedPlugins.manifests.some((m) => m.id === "properties"),
 });
 
 // Deliberately here and NOT in buildApp, for the sentence sweeper's and the

@@ -22,6 +22,8 @@ export interface GatewayDeps {
   clientIpHeader: string | null;
   /** `config.profile !== "framework"` — whether presence scenes carry the core jail/hospital hooks (spec 2026-09-18 §1). */
   coreHooks: boolean;
+  /** Whether the `properties` plugin is loaded — no plugin, no venues, so no venue-gated door (spec 2026-09-21 town-venues §3.1). */
+  hasProperties: boolean;
 }
 export interface GatewayHandle { close(): Promise<void>; connectionCount(): number }
 
@@ -40,7 +42,7 @@ export async function attachGateway(server: Server, deps: GatewayDeps): Promise<
 
   const rooms = createRooms({
     db: deps.db, redis: deps.redis, send,
-    scenes: createSceneService({ db: deps.db, assetDriver: deps.assetDriver, hooks: deps.worldHooks, coreHooks: deps.coreHooks }),
+    scenes: createSceneService({ db: deps.db, assetDriver: deps.assetDriver, hooks: deps.worldHooks, coreHooks: deps.coreHooks, hasProperties: deps.hasProperties }),
     // The gateway owns the socket map; presence borrows a read of it to
     // auto-join a player whose location only arrives with their first travel.
     socketsOf: (playerId) => sockets.get(playerId) ?? [],

@@ -127,6 +127,7 @@ export async function bootTestServer(
     db, redis, subscriber: gatewaySubscriber, corsOrigins: config.corsOrigins,
     worldHooks: loadedPlugins.worldHooks, assetDriver, clientIpHeader: config.clientIpHeader,
     coreHooks: config.profile !== "framework",
+    hasProperties: loadedPlugins.manifests.some((m) => m.id === "properties"),
   });
 
   return {
