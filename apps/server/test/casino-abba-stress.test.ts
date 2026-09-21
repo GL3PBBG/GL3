@@ -11,6 +11,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
+import { seedVenues } from "./helpers/venues.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -51,6 +52,7 @@ async function seedLocation(): Promise<string> {
     id, name: `city-${id.slice(-8)}`, travelCost: 0n, travelCooldownSeconds: 60,
     bulletStock: 0, bulletCost: 1n,
   });
+  await seedVenues(db, [id]);
   return id;
 }
 

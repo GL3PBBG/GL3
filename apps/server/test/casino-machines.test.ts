@@ -11,6 +11,7 @@ import { locations, playerStats, settings, transactions } from "../src/db/schema
 import { applyBalanceChange } from "../src/economy/ledger.js";
 import { casinoMachines } from "../../../packages/plugins/casino/src/schema.js";
 import { propertiesPlugin as properties } from "./helpers/plugin-tables.js";
+import { seedVenues } from "./helpers/venues.js";
 import { CasinoMachineResponseSchema, type CasinoMachine } from "@gl3/shared";
 
 const { db, sql: connection } = testDb();
@@ -48,6 +49,7 @@ async function person(locationId: string) {
 async function setup(owned = false) {
   const locationId = uuidv7();
   await db.insert(locations).values({ id: locationId, name: `Machine ${locationId}` });
+  await seedVenues(db, [locationId]);
   const user = await person(locationId);
   const owner = owned ? await person(locationId) : null;
   if (owner) await db.insert(properties).values({ id: uuidv7(), locationId, pluginId: "faro", ownerPlayerId: owner.playerId, cost: 1000n, profit: 0n });

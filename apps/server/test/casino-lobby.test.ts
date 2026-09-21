@@ -15,6 +15,7 @@ import { FARO, faroPlugin } from "./helpers/faro.js";
 import { casinoSessions, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
+import { seedVenues } from "./helpers/venues.js";
 import { bootTestServer } from "./helpers/server.js";
 
 /**
@@ -63,6 +64,7 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [id]);
   return id;
 }
 

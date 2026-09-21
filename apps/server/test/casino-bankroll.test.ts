@@ -11,6 +11,7 @@ import { locations, playerStats, settings } from "../src/db/schema/index.js";
 import { applyBalanceChange } from "../src/economy/ledger.js";
 import { casinoSeats, casinoTables } from "../../../packages/plugins/casino/src/schema.js";
 import { propertiesPlugin as properties } from "./helpers/plugin-tables.js";
+import { seedVenues } from "./helpers/venues.js";
 import { CasinoTableResponseSchema } from "@gl3/shared";
 
 const { db, sql: connection } = testDb();
@@ -39,6 +40,7 @@ let count = 0;
 async function setup() {
   const locationId = uuidv7();
   await db.insert(locations).values({ id: locationId, name: `Bankroll ${locationId}` });
+  await seedVenues(db, [locationId]);
   const users = [];
   for (let i = 0; i < 3; i++) {
     const user = await registerVerifiedPlayer(server, { remoteAddress: `10.132.0.${++count}` });

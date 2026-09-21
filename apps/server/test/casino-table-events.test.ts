@@ -12,6 +12,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 import { awaitOwnEvent } from "./helpers/events.js";
 
 /**
@@ -66,16 +67,26 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [id]);
   return id;
 }
 
-/** `cost` is the owner's lever; a solvent house so no bet is refused. */
+/**
+ * `cost` is the owner's lever; a solvent house so no bet is refused.
+ * `seedLocation` already seeds a state-run blackjack row (town-venues §0),
+ * so this CLAIMS it (owner + lever) rather than inserting a second row —
+ * the unique `(location_id, plugin_id)` index would otherwise refuse it.
+ */
 async function seedHouse(locationId: string, ownerId: string): Promise<string> {
   const id = uuidv7();
-  await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost: 200_000n, profit: 0n,
-  });
-  return id;
+  const [row] = await db.insert(propertiesTable)
+    .values({ id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost: 200_000n, profit: 0n })
+    .onConflictDoUpdate({
+      target: [propertiesTable.locationId, propertiesTable.pluginId],
+      set: { ownerPlayerId: ownerId, cost: 200_000n, profit: 0n },
+    })
+    .returning({ id: propertiesTable.id });
+  return row!.id;
 }
 
 async function placePlayer(playerId: string, locationId: string, cash: bigint): Promise<void> {

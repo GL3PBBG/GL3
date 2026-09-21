@@ -12,6 +12,7 @@ import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSeats, casinoTables } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * `casino-rogue-game.test.ts`'s table twin — the same spec §11 risk-1 trust
@@ -75,6 +76,7 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [locationId]);
   return locationId;
 }
 

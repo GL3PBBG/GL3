@@ -12,6 +12,7 @@ import { makePng } from "./helpers/assets.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 const { db, sql: conn } = testDb();
 
@@ -36,7 +37,7 @@ beforeAll(async () => {
   // v2 set is smaller, so the fixture's hooks are easy to find among them.
   ({ app, close: closeServer, redis, assetDriver } = await bootTestServer({ plugins: [fixture], profile: "v2" }));
 });
-beforeEach(async () => { await resetDb(db); await seedLocations(db); });
+beforeEach(async () => { await resetDb(db); await seedLocations(db); await seedVenues(db); });
 afterAll(async () => { await closeServer(); await conn.end(); });
 
 const townId = async (name: string): Promise<string> => {

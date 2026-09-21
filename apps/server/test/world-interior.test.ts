@@ -9,6 +9,7 @@ import { seedLocations } from "../src/db/seed.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 const { db, sql: conn } = testDb();
 const stub = { kind: "list" as const, items: [] };
@@ -28,7 +29,7 @@ const fixture = definePlugin({
 
 let app: FastifyInstance; let redis: Redis; let closeServer: () => Promise<void>;
 beforeAll(async () => { ({ app, close: closeServer, redis } = await bootTestServer({ plugins: [fixture] })); });
-beforeEach(async () => { await resetDb(db); await seedLocations(db); });
+beforeEach(async () => { await resetDb(db); await seedLocations(db); await seedVenues(db); });
 afterAll(async () => { await closeServer(); await conn.end(); });
 
 const townId = async (name: string) => (await db.select({ id: locations.id }).from(locations).where(eq(locations.name, name)))[0]!.id;

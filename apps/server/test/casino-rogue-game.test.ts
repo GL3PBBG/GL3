@@ -12,6 +12,7 @@ import { createRedis } from "../src/redis.js";
 import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSessions } from "./helpers/plugin-tables.js";
 import { callPluginRoute } from "./helpers/plugin-route.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * The trust boundary spec §11 risk 1 claims, tested against a game that abuses
@@ -71,6 +72,7 @@ async function seedPlayer(cash: bigint): Promise<{ playerId: string; locationId:
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [locationId]);
   const playerId = uuidv7();
   await db.insert(players).values({ id: playerId, username: `rogue-${playerId.slice(-8)}` });
   await db.insert(playerStats).values({ playerId, cash, locationId });

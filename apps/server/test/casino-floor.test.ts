@@ -14,6 +14,7 @@ import { casinoTables } from "./helpers/plugin-tables.js";
 import { pgErrorConstraint, rejectionOf } from "./helpers/pg-error.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * The casino floor's geometry (spec 2026-09-21 casino-floor-v2) and the
@@ -47,6 +48,7 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [id]);
   return id;
 }
 

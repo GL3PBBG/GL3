@@ -13,6 +13,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { casinoTables } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 import { frameOfKind, mintTicket, nextFrame, openSocket, sendFrame } from "./helpers/ws.js";
 
 /**
@@ -45,6 +46,7 @@ beforeEach(async () => {
   for (const s of opened.splice(0)) s.close();
   await resetDb(db);
   await seedLocations(db);
+  await seedVenues(db);
   const rows = await db.select({ id: locations.id, name: locations.name }).from(locations);
   chicago = rows.find((r) => r.name === "Chicago")!.id;
 });

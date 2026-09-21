@@ -11,6 +11,7 @@ import { resetDb, testDb } from "./helpers/db.js";
 import { casinoSeats, casinoTables, propertiesPlugin as propertiesTable } from "./helpers/plugin-tables.js";
 import { registerVerifiedPlayer } from "./helpers/register.js";
 import { bootTestServer } from "./helpers/server.js";
+import { seedVenues } from "./helpers/venues.js";
 
 /**
  * The TABLE cluster's lock order under concurrency — rule 6's regression for
@@ -97,16 +98,26 @@ async function seedLocation(): Promise<string> {
     bulletStock: 0,
     bulletCost: 1n,
   });
+  await seedVenues(db, [id]);
   return id;
 }
 
-/** `casino-tables.test.ts`'s `seedHouse`: `cost` is the owner's lever. */
+/**
+ * `casino-tables.test.ts`'s `seedHouse`: `cost` is the owner's lever.
+ * `seedLocation` already seeds a state-run blackjack row (town-venues §0),
+ * so this CLAIMS it (owner + lever) rather than inserting a second row —
+ * the unique `(location_id, plugin_id)` index would otherwise refuse it.
+ */
 async function seedHouse(locationId: string, ownerId: string, cost: bigint): Promise<string> {
   const id = uuidv7();
-  await db.insert(propertiesTable).values({
-    id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost, profit: 0n,
-  });
-  return id;
+  const [row] = await db.insert(propertiesTable)
+    .values({ id, locationId, pluginId: "blackjack", ownerPlayerId: ownerId, cost, profit: 0n })
+    .onConflictDoUpdate({
+      target: [propertiesTable.locationId, propertiesTable.pluginId],
+      set: { ownerPlayerId: ownerId, cost, profit: 0n },
+    })
+    .returning({ id: propertiesTable.id });
+  return row!.id;
 }
 
 async function placePlayer(playerId: string, locationId: string, cash: bigint): Promise<void> {
