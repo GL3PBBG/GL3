@@ -349,6 +349,29 @@ export function validatePlugins(manifests: readonly PluginManifest[]): void {
 
   const declaredPropertyTypes = new Set(manifests.flatMap((m) => m.providesProperties.map((d) => d.id)));
 
+  // A world hook's venue names a property type (spec 2026-09-21 town-venues
+  // §2/§3.1): the door is meaningless without both the properties plugin in
+  // this boot AND some plugin declaring that type through providesProperties.
+  // Checked here, after the full boot set and declaredPropertyTypes are both
+  // known, the same posture as the requires check and the propertyPanel check
+  // below.
+  const hasProperties = manifests.some((m) => m.id === "properties");
+  for (const manifest of manifests) {
+    for (const hook of manifest.worldHooks) {
+      if (hook.venue === undefined) continue;
+      if (!hasProperties) {
+        fail(
+          `plugin "${manifest.id}" world hook "${hook.id}" names venue "${hook.venue}" but the properties plugin is not loaded`,
+        );
+      }
+      if (!declaredPropertyTypes.has(hook.venue)) {
+        fail(
+          `plugin "${manifest.id}" world hook "${hook.id}" names venue "${hook.venue}", which no loaded plugin provides`,
+        );
+      }
+    }
+  }
+
   // Containment runs second: every basePath is known by now, so a route or an
   // action under a *later* basePath of the same plugin is not reported as a
   // violation.

@@ -382,3 +382,22 @@ describe("interior world hooks (spec 2026-09-20 casino-interior §3)", () => {
     expect(() => validatePlugins([withHook({ id: "door", kind: "building", label: "Door", page: "t.index", model: "casino", order: 1, interior: { ...floor, spawn: { x: 99, y: 0, facing: 0 } } })])).toThrow(/plugin "t" world hook "door" interior: spawn lies outside bounds/);
   });
 });
+
+describe("world hook venues (spec 2026-09-21 town-venues §2)", () => {
+  const base = { id: "t", version: "1.0.0", apiVersion: 1 as const, basePaths: ["/api/t"], pages: [{ id: "t.index", path: "/t", view: { kind: "list" as const, items: [] } }] };
+  const properties = definePlugin({ id: "properties", version: "1.0.0", basePaths: ["/api/properties"], tables: { properties: "p_properties_properties" } });
+  const declarer = definePlugin({ id: "blackjack", version: "1.0.0", basePaths: ["/api/blackjack"], providesProperties: [{ id: "blackjack", name: "Casino", price: 1n, leverLabel: "x" }] });
+  const hook = (venue?: string) => definePlugin({ ...base, worldHooks: [{ id: "door", kind: "building", label: "Door", page: "t.index", model: "casino", order: 1, ...(venue ? { venue } : {}) }] });
+  it("accepts a venue declared by another plugin", () => {
+    expect(() => validatePlugins([properties, declarer, hook("blackjack")])).not.toThrow();
+  });
+  it("refuses a venue no loaded plugin declares", () => {
+    expect(() => validatePlugins([properties, hook("blackjack")])).toThrow(/world hook "door" names venue "blackjack", which no loaded plugin provides/);
+  });
+  it("refuses a venue when the properties plugin is not in the boot", () => {
+    expect(() => validatePlugins([declarer, hook("blackjack")])).toThrow(/world hook "door" names venue "blackjack" but the properties plugin is not loaded/);
+  });
+  it("a hook without a venue needs neither", () => {
+    expect(() => validatePlugins([hook()])).not.toThrow();
+  });
+});
