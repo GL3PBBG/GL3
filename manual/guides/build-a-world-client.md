@@ -124,6 +124,22 @@ destination while a travel request is in flight) — is the room descriptor:
   on the spawn's side is kept clear. A building north of the street faces it
   with `facing = π`, south with `0`.
 
+**Venues.** A door whose plugin declared a `venue` appears only in towns that
+hold that venue — the casino's is the `blackjack` property, so a town with no
+blackjack row has no casino door. The served `hooks[]` is the truth: never
+infer a building's existence from the installed-plugin list, from occupancy,
+or from who owns the property — a state-run venue and a player-owned one are
+both just present. Where a venue is absent, `GET /api/world/interior/:hookId`
+and `presence.enter` both answer `unknown_hook`, the same refusal as an id
+that was never declared at all. An admin turning a venue on or off shows up
+in the descriptor served on the next join, travel-in, or reconnect; a player
+already standing inside a removed venue keeps that room until they leave —
+nobody is evicted mid-visit. On a town running an authored template, adding
+or removing a venue can shift where that town's OTHER buildings land, since
+slot assignment runs over whichever hooks are eligible that time; positions
+are always served, never derived, so re-fetch the scene rather than caching
+a layout across an admin change.
+
 Each `PlacedHook` carries `id` (`"<pluginId>.<hookId>"`), `kind`
 (`building` | `npc`), `label` (≤ 24 chars, for the sign), `model` (an asset-kit
 key — `garage`, `bank`, `station`, `newsstand`, `npc-suit`, `npc-coat`, … —
@@ -241,10 +257,16 @@ worldHooks: [{
   order: 10,                // layout order along the street
   signageSlot: "sign",      // optional: one of this plugin's singleton providesAssets
   interior: { sceneKey, bounds, spawn, points },  // optional: makes the door enterable — see Interiors
+  venue: "blackjack",       // optional: a property type; the hook exists only where the town holds that venue
 }]
 ```
 
 Boot validation refuses a duplicate id, a page that is not the plugin's own
-player page (never another plugin's, never an admin section), and a signage
-slot that is not one of its own singleton slots. Hooks appear in every town;
-per-town hooks, admin placement and a player-chosen avatar are not built yet.
+player page (never another plugin's, never an admin section), a signage
+slot that is not one of its own singleton slots, and a `venue` that does not
+name a property type some loaded plugin actually declares — which also means
+a `venue` cannot be used at all in a boot that does not load the properties
+plugin. A hook with no `venue` still appears in every town, as before; one
+with a `venue` appears only where that town holds the matching property row
+(see Venues, above). Admin placement and a player-chosen avatar are not
+built yet.
