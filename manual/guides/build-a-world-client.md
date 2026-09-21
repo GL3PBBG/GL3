@@ -102,7 +102,13 @@ destination while a travel request is in flight) — is the room descriptor:
 - `bounds` (`minX/minY/maxX/maxY`, default ±40 × ±20) and `spawn`
   (`x/y/facing`, default `(0, −15, 0)`). `x` is east, `y` north, metres, origin
   at the scene centre; Godot maps `y → −z`. `facing` is a yaw in radians, `0`
-  facing north, positive counter-clockwise from above.
+  facing north, positive counter-clockwise from above. On a `default` (non-
+  template) town, the served `bounds.minX`/`maxX` are widened, never
+  shrunk, to contain every placed building and core yard with a 4 m margin
+  to spare — a town with enough buildings to run past the ±40 default gets
+  a wider street rather than an invisible wall short of its last building.
+  `minY`/`maxY` are never widened. A client must treat the served `bounds`
+  as authoritative for clamping and never assume the ±40 default.
 - `hooks[]` — every building and NPC, placed by the server so all clients
   agree. Layout is deterministic: one street along `x` at `y = 0`, road
   `|y| ≤ 7.5`, pavement to `|y| = 10.5`, buildings beyond it alternating north
