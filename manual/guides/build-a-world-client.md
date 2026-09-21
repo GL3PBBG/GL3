@@ -169,21 +169,38 @@ block waiting on an answer to one. `presence.tick` carries
 conceals its interiors exactly as its street. Travel always lands on the destination
 street.
 
-### The casino floor (`casino-floor-v1`)
+### The casino floor (`casino-floor-v2`)
 
 Bounds `{ minX: -12, minY: -9, maxX: 12, maxY: 9 }`, entrance spawn `(0, −7.5, facing 0)`,
-exit 3 m in front of the door on the street. Four `table` points, model
-`blackjack-table`, dealer facing π (south), centres `(−6, 3)`, `(6, 3)`, `(−6, −3)`,
-`(6, −3)`, each bound to `{ gameId: "blackjack", station: 0..3 }` with five `seats`
-on the south arc (offsets `(−1.8, −0.9)`, `(−1.0, −1.7)`, `(0, −2)`, `(1, −1.7)`,
-`(1.8, −0.9)`, each facing the centre). Seat index = seat number at the table.
+exit 3 m in front of the door on the street. One `table` point per real-money table
+game plus eight `machine` points for slots:
+
+- **Blackjack**, model `blackjack-table`, centre `(−6, 1)`, dealer facing π (south),
+  bound to `{ gameId: "blackjack", station: 0 }`.
+- **Texas Hold'em**, model `holdem-table`, centre `(6, 1)`, dealer facing π (south),
+  bound to `{ gameId: "holdem", station: 0 }`.
+
+Both tables carry the same five `seats` on the south arc (offsets `(−1.8, −0.9)`,
+`(−1.0, −1.7)`, `(0, −2)`, `(1, −1.7)`, `(1.8, −0.9)` from their own centre, each
+facing it). Seat index = seat number at the table.
+
+- **Slots**, eight `machine` points along the north wall, model `slot-machine`,
+  `y = 7.5`, `x = −10.5 … 10.5` in 3 m steps, facing π (south), bound to
+  `{ gameId: "slots", station: 0..7 }`. Each has exactly one `seats` entry — the
+  stand spot 1.5 m south of the machine, `(x, 6)`, facing north — because a slots
+  session is per player: a machine never fills, and the count is only how many
+  the scene draws.
+
+Both `holdem` and `slots` are `@gl3-plugins/*` packages not installed in this repo,
+so their floor rows carry `available: false` until an operator installs them; the
+geometry and stations are real either way.
 
 Playing is the existing casino contract, unchanged:
 
 | Need | Route |
 |---|---|
-| Who is at which table right now | `GET /api/casino/floor` → one row per station: `tableId`, `phase`, `seatsFilled`, `seats[{ seat, playerId, username }]` (names only in open towns). Poll on entry and every 15 s. |
-| Sit at the table you walked up to | `POST /api/casino/table/sit { gameId: "blackjack", station }` → `{ tableId, seat, station }`; 400 `unknown_station`, 409 `table_full` / `already_seated` |
+| Who is at which table right now | `GET /api/casino/floor` → one row per declared station, in DECLARATION order (blackjack, then hold'em, then slots 0..7 — never re-sorted by station number, since each game starts its own stations at 0): `gameId`, `station`, `available`, `tableId`, `phase`, `seatsFilled`, `seats[{ seat, playerId, username }]` (names only in open towns; `available` is false when the game's plugin is not installed, and its row's table fields are null/zero/empty). Poll on entry and every 15 s. |
+| Sit at the table you walked up to | `POST /api/casino/table/sit { gameId, station }` → `{ tableId, seat, station }`; 400 `unknown_station`, 409 `table_full` / `already_seated` |
 | Your hand, turn, legal moves | `GET /api/casino/table` → `{ table: { station, mySeat, phase, turnSeat, deadlineAt, view, moves, seats } }`; `view` is scoped to the viewer (the dealer's hole card is hidden while any seat acts) |
 | Bet / act | `POST /api/casino/table/bet { wager }`, `POST /api/casino/table/act { action: "hit" \| "stand" \| "double" }` |
 | Resume after a reconnect | `GET /api/casino/table` — the hand never depended on your socket |
