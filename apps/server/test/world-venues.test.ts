@@ -106,13 +106,17 @@ describe("per-town venue eligibility (spec 2026-09-21 town-venues §3)", () => {
     const b = await playerAt(miami);
     const sc = await sceneFor(a.token);
     const sm = await sceneFor(b.token);
-    expect(sc.hooks.map((x) => x.id)).toContain("vfix.hall");
-    expect(sm.hooks.map((x) => x.id)).not.toContain("vfix.hall");
     expect(sm.hooks.map((x) => x.id)).toContain("travel.station");     // venue-less hooks stay
     expect(sm.hooks.slice(-2).map((x) => x.id)).toEqual(["core.jail", "core.hospital"]); // facilities untouched
     // Two towns, one template, two layouts: the memo key carries the
-    // eligible hook ids, so Miami cannot be served Chicago's street.
-    expect(sc.hooks.length).toBe(sm.hooks.length + 1);
+    // eligible hook ids, so Miami cannot be served Chicago's street. Both
+    // venue-gated doors on this boot — the fixture's and the casino's, whose
+    // venue is blackjack's property — stand in Chicago and in Chicago only.
+    for (const door of ["vfix.hall", "casino.casino"]) {
+      expect(sc.hooks.map((x) => x.id)).toContain(door);
+      expect(sm.hooks.map((x) => x.id)).not.toContain(door);
+    }
+    expect(sc.hooks.length).toBe(sm.hooks.length + 2);
 
     expect((await get("/api/world/interior/vfix.hall", a.token)).statusCode).toBe(200);
     expect((await get("/api/world/interior/vfix.hall", b.token)).statusCode).toBe(404);
