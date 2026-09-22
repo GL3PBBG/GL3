@@ -103,6 +103,40 @@ against the file's own Postgres and Redis. With `PLUGIN_PACKAGES` empty (the
 default), the installer skips all registry access. `GL3_NPM_TOKEN` is needed
 only when you select premium packages.
 
+## Upgrading to town venues
+
+Since the town-venues change, a venue — a casino, a bullet factory — exists in
+a town only where a `p_properties_properties` row exists for that
+`(town, property type)` pair. Doors, `buy`, and casino play all read that row,
+so which towns have what is now data an admin owns rather than something the
+server assumes.
+
+What that means depends on where your game came from.
+
+- **A game migrated from V2.** Nothing to do. V2's own rows are the truth
+  about which towns have what, and the server never adds to them.
+- **A brand-new game.** Nothing to do. The first boot against an empty
+  properties table seeds one state-run row per town per declared type, so
+  every town has every venue, exactly as it looked before this change.
+- **A native game that was already running.** Its table is not empty, so the
+  seeding stays out of the way — and the towns that never had a row now have
+  no door either. The boot logs one warning naming how many
+  `(town × type)` pairs are missing and an example, then leaves the database
+  alone.
+
+Close that gap either way:
+
+- provision the towns you want in **Admin → Properties → Venues**, one row at
+  a time, which is the right move if only some towns should have a casino; or
+- boot the server ONCE with `SEED_VENUES=fill`, which inserts exactly the
+  missing pairs as state-run rows and touches nothing that already exists,
+  owned rows included. Remove the variable afterwards; it is a backfill, not
+  a setting.
+
+`SEED_VENUES` accepts the single value `fill` and nothing else — `true` or `1`
+fails at boot rather than guessing, because the wrong guess would write rows
+into a migrated game.
+
 ## Troubleshooting
 
 - **Migrate init container never finishes.** It has no loop; "still running"
@@ -124,3 +158,9 @@ only when you select premium packages.
 - **Empty game after import.** The seeds only fire on an empty database; if
   `apps/migrate` reported success but the game looks empty, the server is
   pointed at a different database than the import target.
+- **A town has no casino, shop or factory door.** That town holds no property
+  row for the type behind the door. See *Upgrading to town venues* above:
+  provision it in the admin panel, or boot once with `SEED_VENUES=fill`.
+- **Boot fails naming a world hook's `venue`.** A door names a property type
+  no loaded plugin declares. The casino hub is the case that bites: its door
+  names blackjack's property, so `casino` cannot load without `blackjack`.

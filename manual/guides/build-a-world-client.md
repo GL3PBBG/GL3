@@ -131,7 +131,10 @@ infer a building's existence from the installed-plugin list, from occupancy,
 or from who owns the property — a state-run venue and a player-owned one are
 both just present. Where a venue is absent, `GET /api/world/interior/:hookId`
 and `presence.enter` both answer `unknown_hook`, the same refusal as an id
-that was never declared at all. An admin turning a venue on or off shows up
+that was never declared at all. One consequence for operators: the casino hub
+can no longer boot without `blackjack` installed, because its door names
+blackjack's property type and a manifest `requires` between them would be a
+cycle — blackjack is the game casino hosts. An admin turning a venue on or off shows up
 in the descriptor served on the next join, travel-in, or reconnect; a player
 already standing inside a removed venue keeps that room until they leave —
 nobody is evicted mid-visit. On a town running an authored template, adding
@@ -147,7 +150,8 @@ unknown keys fall back by `kind`), `footprint {w, d}` (buildings are 3 m-grid,
 12×9 or 6×6), `position` (footprint centre), `facing`, `href`
 (`/plugins/<pageId>`) and `signageUrl` (an image bound by an admin, or `null`).
 The bundled plugins declare five doors on the default street — `travel.station`,
-`crimes.corner` (an npc), `bank.bank`, `casino.casino` and `inventory.shop` (6×6) —
+`crimes.corner` (an npc), `bank.bank`, `casino.casino` (only where the town holds
+the blackjack venue) and `inventory.shop` (6×6) —
 and a template town may add more. The last two hooks are always core's `core.jail` and `core.hospital`, pinned
 at the east end of the street with an extra `yard {x, y}` — the confinement
 spot for a sentenced player.

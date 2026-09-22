@@ -233,21 +233,62 @@ export async function seedItems(db: Db): Promise<void> {
  * schema (`venueExists` in `plugins/ctx.ts` is the same idiom). It therefore
  * belongs to the SECOND seed pass, after `loadPlugins` has run the plugin
  * migrations that create the table — like `seedFamilyContent`.
+ *
+ * `mode` is the upgrade seam. `"first-boot"` is the rule above verbatim, plus
+ * ONE warning naming how many (town × type) pairs have no row, for the
+ * already-running native game this cluster leaves with fewer venues than it
+ * had. `"fill"` (SEED_VENUES=fill) inserts exactly those missing pairs as
+ * state-run rows on an empty OR a populated table, touching no row that
+ * exists — including an owned one.
  */
-export async function seedVenueRows(db: Db, typeIds: readonly string[]): Promise<void> {
+export type VenueSeedMode = "first-boot" | "fill";
+
+export async function seedVenueRows(
+  db: Db, typeIds: readonly string[], mode: VenueSeedMode = "first-boot",
+): Promise<void> {
   if (typeIds.length === 0) return;
 
-  const existing = await db.execute(sql`select 1 from p_properties_properties limit 1`);
-  if ([...existing].length > 0) return;
-
-  const towns = await db.select({ id: locations.id }).from(locations);
+  const towns = await db.select({ id: locations.id, name: locations.name }).from(locations);
   if (towns.length === 0) return;
 
-  const values = towns.flatMap((town) =>
-    typeIds.map((typeId) => sql`(${uuidv7()}, ${town.id}, ${typeId}, null, 0, 0)`),
-  );
-  await db.execute(sql`
+  const existing = await db.execute(sql`select location_id, plugin_id from p_properties_properties`);
+  const held = new Set([...existing].map((row) => `${String(row.location_id)}\u0000${String(row.plugin_id)}`));
+
+  const missing = towns.flatMap((town) => typeIds
+    .filter((typeId) => !held.has(`${town.id}\u0000${typeId}`))
+    .map((typeId) => ({ town, typeId })));
+
+  if (mode === "first-boot" && held.size > 0) {
+    // The migrated-game rule: a non-empty table is somebody's real answer and
+    // is never added to silently. But an already-running NATIVE game reaching
+    // this cluster is in exactly the same state and wants the opposite, so say
+    // so once rather than leaving its operator to notice missing doors.
+    if (missing.length > 0) {
+      const first = missing[0]!;
+      console.warn(
+        { missing: missing.length, example: `${first.town.name}/${first.typeId}` },
+        "venues: some towns have no row for a declared property type — provision them in Admin → Properties → Venues, or boot once with SEED_VENUES=fill",
+      );
+    }
+    return;
+  }
+
+  if (missing.length === 0) return;
+
+  const values = missing.map(({ town, typeId }) => sql`(${uuidv7()}, ${town.id}, ${typeId}, null, 0, 0)`);
+  // `on conflict do nothing` over the (location_id, plugin_id) unique index:
+  // two replicas booting against the same empty database race here, and the
+  // loser must boot rather than crash on a duplicate key. It also makes the
+  // fill pass safe against a row appearing between the read above and this
+  // insert.
+  const inserted = await db.execute(sql`
     insert into p_properties_properties (id, location_id, plugin_id, owner_player_id, cost, profit)
     values ${sql.join(values, sql`, `)}
+    on conflict (location_id, plugin_id) do nothing
+    returning id
   `);
+
+  if (mode === "fill") {
+    console.info({ inserted: [...inserted].length }, "venues: filled missing town × type rows");
+  }
 }

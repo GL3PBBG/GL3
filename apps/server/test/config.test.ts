@@ -68,4 +68,19 @@ describe("loadConfig", () => {
   it("accepts PUSH_ENABLED with no access token — that is a valid configuration", () => {
     expect(() => loadConfig({ ...valid, PUSH_ENABLED: "true" })).not.toThrow();
   });
+
+  it("leaves SEED_VENUES unset by default and reads the one backfill value", () => {
+    expect(loadConfig(valid).seedVenues).toBeUndefined();
+    expect(loadConfig({ ...valid, SEED_VENUES: "fill" }).seedVenues).toBe("fill");
+    // Blank means unset: an env file copied from .env.example delivers "" and
+    // must boot, not refuse.
+    expect(loadConfig({ ...valid, SEED_VENUES: "" }).seedVenues).toBeUndefined();
+  });
+
+  it("rejects any other SEED_VENUES rather than guessing", () => {
+    // A truthy-looking value must not write rows into a migrated game, so an
+    // enum of exactly one member — PUSH_ENABLED's reasoning.
+    expect(() => loadConfig({ ...valid, SEED_VENUES: "true" })).toThrow();
+    expect(() => loadConfig({ ...valid, SEED_VENUES: "1" })).toThrow();
+  });
 });

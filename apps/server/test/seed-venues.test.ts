@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import propertiesPlugin from "@gl3/plugin-properties";
-import { locations } from "../src/db/schema/index.js";
+import { locations, players } from "../src/db/schema/index.js";
 import { seedVenueRows } from "../src/db/seed.js";
 import { runPluginMigrations } from "../src/plugins/migrate.js";
 import { resetDb, testDb } from "./helpers/db.js";
@@ -108,5 +108,101 @@ describe("seedVenueRows", () => {
     await seedTown("Alpha");
     await seedVenueRows(db, []);
     expect(await venueRows()).toEqual([]);
+  });
+});
+
+/**
+ * The upgrade seam. An already-running NATIVE game reaching this cluster is
+ * indistinguishable from a migrated one — both have a non-empty table — and
+ * the two want opposite things, so first-boot mode says what is missing and
+ * `fill` closes it on demand. Nothing about the migrated-game rule changes:
+ * `fill` is an explicit env var for one boot, and it still writes only rows
+ * that are absent.
+ */
+describe("seedVenueRows upgrade modes", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("warns naming the gap on a non-empty table and inserts nothing", async () => {
+    const a = await seedTown("Alpha");
+    await seedTown("Beta");
+    await db.execute(sql`
+      insert into p_properties_properties (id, location_id, plugin_id, owner_player_id, cost, profit)
+      values (${uuidv7()}, ${a}, 'blackjack', null, 0, 0)
+    `);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await seedVenueRows(db, ["blackjack", "bullets"]);
+
+    // Alpha/bullets, Beta/blackjack, Beta/bullets.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatchObject({ missing: 3 });
+    expect(String(warn.mock.calls[0]![1])).toContain("SEED_VENUES=fill");
+    expect(await venueRows()).toHaveLength(1);
+  });
+
+  it("stays silent on a non-empty table with every pair already present", async () => {
+    const a = await seedTown("Alpha");
+    await db.execute(sql`
+      insert into p_properties_properties (id, location_id, plugin_id, owner_player_id, cost, profit)
+      values (${uuidv7()}, ${a}, 'blackjack', null, 0, 0)
+    `);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await seedVenueRows(db, ["blackjack"]);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("fills exactly the missing pairs, leaving an owned row untouched", async () => {
+    const a = await seedTown("Alpha");
+    const b = await seedTown("Beta");
+    const ownerId = uuidv7();
+    await db.insert(players).values({ id: ownerId, username: `owner-${ownerId.slice(0, 8)}` });
+    // Alpha's casino is OWNED and priced: the fill must not reset either.
+    await db.execute(sql`
+      insert into p_properties_properties (id, location_id, plugin_id, owner_player_id, cost, profit)
+      values (${uuidv7()}, ${a}, 'blackjack', ${ownerId}, 250, 900)
+    `);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await seedVenueRows(db, ["blackjack", "bullets"], "fill");
+
+    const rows = await venueRows();
+    expect(rows).toHaveLength(4);
+    const alphaCasino = rows.find((r) => r.locationId === a && r.pluginId === "blackjack")!;
+    expect(alphaCasino).toMatchObject({ owner: ownerId, cost: "250" });
+    for (const row of rows.filter((r) => r !== alphaCasino)) {
+      expect(row.owner).toBeNull();
+      expect(row.cost).toBe("0");
+    }
+    expect(new Set(rows.map((r) => `${r.locationId}/${r.pluginId}`))).toEqual(new Set([
+      `${a}/blackjack`, `${a}/bullets`, `${b}/blackjack`, `${b}/bullets`,
+    ]));
+  });
+
+  it("is a no-op when fill finds nothing missing", async () => {
+    const a = await seedTown("Alpha");
+    await seedVenueRows(db, ["blackjack"]);
+    const before = await venueRows();
+
+    await seedVenueRows(db, ["blackjack"], "fill");
+
+    expect(await venueRows()).toEqual(before);
+    expect(before[0]).toMatchObject({ locationId: a, pluginId: "blackjack" });
+  });
+
+  it("fills a whole empty table the way a first boot would", async () => {
+    const a = await seedTown("Alpha");
+    const b = await seedTown("Beta");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await seedVenueRows(db, ["blackjack", "bullets"], "fill");
+
+    const rows = await venueRows();
+    expect(rows).toHaveLength(4);
+    expect(new Set(rows.map((r) => `${r.locationId}/${r.pluginId}`))).toEqual(new Set([
+      `${a}/blackjack`, `${a}/bullets`, `${b}/blackjack`, `${b}/bullets`,
+    ]));
+    for (const row of rows) expect(row.owner).toBeNull();
   });
 });

@@ -113,6 +113,23 @@ const EnvSchema = z.object({
    * rate limit. The header is omitted entirely when unset. Blank means unset.
    */
   EXPO_ACCESS_TOKEN: z.string().optional(),
+
+  /**
+   * One-shot venue backfill. Unset (the normal case) seeds town venues only
+   * on a first boot against an empty `p_properties_properties`, and warns
+   * where an already-running game is missing rows. `fill` inserts exactly
+   * those missing (town x type) rows as state-run venues and touches nothing
+   * that exists.
+   *
+   * An enum with one member rather than a free string or a coerced boolean,
+   * for PUSH_ENABLED's reason: a typo must fail at boot, never quietly pick
+   * a side — here, never quietly write rows into a migrated game.
+   *
+   * Blank is unset, not a typo: `.env.example` is copied with its values
+   * emptied and dotenv delivers `""` for `SEED_VENUES=`, which must boot
+   * normally rather than refuse. `"true"` and every other value still fail.
+   */
+  SEED_VENUES: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["fill"]).optional()),
 }).superRefine((env, ctx) => {
   // Selecting `s3` with a field missing must fail HERE, at boot, rather than on
   // the first upload an admin attempts — which would be days later, in
@@ -173,6 +190,9 @@ export interface Config {
   pluginDir: string | null;
   sweepIntervalMs: number;
   outboxIntervalMs: number;
+  /** `"fill"` backfills missing town venue rows on this boot; undefined is
+   *  the normal first-boot-only seeding. */
+  seedVenues: "fill" | undefined;
   assets: AssetConfig;
   mail: MailConfig;
   push: PushConfig;
@@ -218,6 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       from: parsed.EMAIL_FROM,
       appBaseUrl: parsed.APP_BASE_URL.replace(/\/+$/, ""),
     },
+    seedVenues: parsed.SEED_VENUES,
     push: {
       enabled: parsed.PUSH_ENABLED === "true" || parsed.PUSH_ENABLED === "1",
       expoAccessToken: parsed.EXPO_ACCESS_TOKEN?.trim() ? parsed.EXPO_ACCESS_TOKEN.trim() : null,

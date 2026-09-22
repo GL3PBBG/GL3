@@ -139,8 +139,12 @@ const loadedPlugins = await loadPlugins(
 if (seeds.family) await seedFamilyContent(db, manifests.map((m) => m.id));
 // Same pass, same reason: `p_properties_properties` is a plugin table. One
 // state-run row per (town × declared property type), on an empty table only —
-// a migrated game's own rows are the truth and are never added to.
-if (seeds.venues) await seedVenueRows(db, [...collectPropertyTypes(manifests).keys()]);
+// a migrated game's own rows are the truth and are never added to. An
+// operator upgrading an already-running native game gets a warning naming the
+// gap, and closes it by booting once with SEED_VENUES=fill.
+if (seeds.venues) {
+  await seedVenueRows(db, [...collectPropertyTypes(manifests).keys()], config.seedVenues ?? "first-boot");
+}
 
 // Passed explicitly rather than relying on buildApp's own CORE_PLUGINS
 // fallback (see the comment at that seam in app.ts): production keeps its

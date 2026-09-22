@@ -153,7 +153,6 @@ const buyRoute = route({
         .where(eq(playerStats.playerId, player.id));
       if (stats === undefined) throw new PluginError("no_location", 409);
       if (stats.locationId !== body.locationId) throw new PluginError("wrong_location", 409);
-      if (stats.cash < decl.price) throw new PluginError("insufficient_funds", 409);
 
       const [existing] = await tx.db
         .select({ id: propertiesTable.id, ownerPlayerId: propertiesTable.ownerPlayerId })
@@ -163,15 +162,19 @@ const buyRoute = route({
           eq(propertiesTable.pluginId, body.pluginId),
         ))
         .for("update");
-      // No row is no venue: this town does not have one of these to sell.
-      // Checked here, after the affordability check, so the refusal ordering
-      // every existing case relies on is untouched.
+      // Venue-first refusal order: no_venue -> already_owned -> insufficient_funds.
+      // Existence and availability are facts about the TOWN and do not depend
+      // on the caller's wallet, so a broke player standing in a town with no
+      // casino is told there is no casino, not that they cannot afford one.
+      // The affordability check therefore comes last, once there is something
+      // real to be unable to afford.
       if (existing === undefined) throw new PluginError("no_venue", 404);
       if (existing.ownerPlayerId !== null) {
         // Including when the caller already owns it — buying your own is the
         // same error, as in the shipped route.
         throw new PluginError("already_owned", 409);
       }
+      if (stats.cash < decl.price) throw new PluginError("insufficient_funds", 409);
 
       await tx.economy.applyBalanceChange({
         playerId: player.id,
@@ -798,12 +801,18 @@ const adminVenueCreateRoute = route({
       throw new PluginError("unknown_property_type", 404);
     }
     const id = uuidv7();
-    const [town] = await ctx.transaction((tx) =>
-      tx.db.select({ id: locations.id }).from(locations).where(eq(locations.id, body.locationId)));
-    if (town === undefined) throw new PluginError("unknown_location", 404);
 
     try {
       await ctx.transaction(async (tx) => {
+        // The town lookup shares the insert's transaction: two statements in
+        // one snapshot, so a town deleted between them cannot leave this
+        // route inserting against a location that is gone. No `tx.locks.*` —
+        // the FK does the work, and taking a location lock here would put an
+        // admin route on the lock graph for nothing.
+        const [town] = await tx.db
+          .select({ id: locations.id }).from(locations).where(eq(locations.id, body.locationId));
+        if (town === undefined) throw new PluginError("unknown_location", 404);
+
         await tx.db.insert(propertiesTable).values({
           id, locationId: body.locationId, pluginId: body.pluginId, ownerPlayerId: null, cost: 0n, profit: 0n,
         });
